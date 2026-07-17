@@ -88,7 +88,13 @@ pub enum BinaryOperator {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LiteralKind {
     Integer,
-    Double,
+    /// `whole_number` marks a literal like `1` or `2.0` whose value is a
+    /// finite whole number — R programmers write `seq_len(10)`, not
+    /// `seq_len(10L)`, so such a literal counts as an integer at a parameter
+    /// position (the literal-as-integer courtesy).
+    Double {
+        whole_number: bool,
+    },
     Complex,
     String(String),
     Logical(bool),
@@ -514,7 +520,12 @@ fn literal_kind(node: &SyntaxNode) -> LiteralKind {
     };
     match token.kind() {
         SyntaxKind::INTEGER => LiteralKind::Integer,
-        SyntaxKind::DOUBLE => LiteralKind::Double,
+        SyntaxKind::DOUBLE => LiteralKind::Double {
+            whole_number: token
+                .text()
+                .parse::<f64>()
+                .is_ok_and(|value| value.fract() == 0.0 && value.is_finite()),
+        },
         SyntaxKind::COMPLEX => LiteralKind::Complex,
         SyntaxKind::STRING | SyntaxKind::RAW_STRING => {
             LiteralKind::String(string_value(token.text()))

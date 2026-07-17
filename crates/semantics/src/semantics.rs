@@ -402,11 +402,25 @@ impl<'db> check::GlobalEnv<'db> for SalsaGlobals<'db> {
         {
             return Some(global_scheme(self.db, *item));
         }
-        // Until overload-set probing lands, a stub name resolves to its last
-        // candidate: the corpus orders candidates specific-first, so the last
-        // one is the most general fallback.
+        // Reading an overloaded stub name as a plain value (not a call)
+        // resolves to its last candidate: the corpus orders candidates
+        // specific-first, so the last one is the most general.
         let library = stubs::stubs(self.db)?;
         library.schemes.get(name)?.last().cloned()
+    }
+
+    fn overloads(&self, name: &str) -> Option<Vec<types::TypeScheme<'db>>> {
+        // A package definition wins over the stub set, disabling per-call
+        // overload selection for that name.
+        if self
+            .definitions
+            .as_ref()
+            .is_some_and(|winners| winners.contains_key(name))
+        {
+            return None;
+        }
+        let candidates = stubs::stubs(self.db)?.schemes.get(name)?;
+        (candidates.len() > 1).then(|| candidates.clone())
     }
 }
 

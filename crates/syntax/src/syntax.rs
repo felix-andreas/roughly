@@ -30,7 +30,11 @@ impl rowan::Language for RLanguage {
     type Kind = SyntaxKind;
 
     fn kind_from_raw(raw: rowan::SyntaxKind) -> SyntaxKind {
-        assert!(raw.0 <= SyntaxKind::ERROR as u16, "invalid syntax kind {}", raw.0);
+        assert!(
+            raw.0 <= SyntaxKind::ERROR as u16,
+            "invalid syntax kind {}",
+            raw.0
+        );
         // Sound: `SyntaxKind` is `repr(u16)` with dense discriminants `0..=ERROR`,
         // and the bound was just checked.
         unsafe { std::mem::transmute::<u16, SyntaxKind>(raw.0) }
@@ -55,7 +59,10 @@ pub struct SyntaxError {
 
 impl SyntaxError {
     pub fn new(message: impl Into<String>, range: TextRange) -> SyntaxError {
-        SyntaxError { message: message.into(), range }
+        SyntaxError {
+            message: message.into(),
+            range,
+        }
     }
 }
 
@@ -75,7 +82,10 @@ impl Parse {
         // error lists compare structurally regardless of which pipeline —
         // lexer vs parser, from-scratch vs splice-reparse — produced them.
         errors.sort_by_key(|error| (error.range.start(), error.range.end()));
-        Parse { green, errors: Arc::new(errors) }
+        Parse {
+            green,
+            errors: Arc::new(errors),
+        }
     }
 
     pub fn green(&self) -> &rowan::GreenNode {
@@ -127,7 +137,11 @@ pub fn reparse(old: &Parse, new_text: &str, deleted: TextRange, inserted: TextSi
 
 fn dump_node(out: &mut String, node: &SyntaxNode, depth: usize) {
     let indent = "  ".repeat(depth);
-    out.push_str(&format!("{indent}{:?}@{:?}\n", node.kind(), node.text_range()));
+    out.push_str(&format!(
+        "{indent}{:?}@{:?}\n",
+        node.kind(),
+        node.text_range()
+    ));
     for child in node.children_with_tokens() {
         match child {
             rowan::NodeOrToken::Node(child) => dump_node(out, &child, depth + 1),

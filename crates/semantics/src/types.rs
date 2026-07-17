@@ -189,6 +189,76 @@ pub fn union_of<'db>(db: &'db dyn Db, members: impl IntoIterator<Item = Ty<'db>>
     }
 }
 
+/// Replace every inference variable in an (already-resolved) type with
+/// `Unknown`, for values that must survive a later table rollback: a stored
+/// variable id would dangle once the rollback reclaims (and later reuses) the
+/// id.
+pub fn erase_vars<'db>(db: &'db dyn Db, ty: Ty<'db>) -> Ty<'db> {
+    match ty.kind(db).clone() {
+        TyKind::Var(_) => unknown(db),
+        TyKind::Vector(inner) => Ty::new(db, TyKind::Vector(erase_vars(db, inner))),
+        TyKind::NamedVector(inner) => Ty::new(db, TyKind::NamedVector(erase_vars(db, inner))),
+        TyKind::List(inner) => Ty::new(db, TyKind::List(erase_vars(db, inner))),
+        TyKind::NamedList(inner) => Ty::new(db, TyKind::NamedList(erase_vars(db, inner))),
+        TyKind::Tuple(items) => Ty::new(
+            db,
+            TyKind::Tuple(items.iter().map(|&item| erase_vars(db, item)).collect()),
+        ),
+        TyKind::Record(fields) => Ty::new(
+            db,
+            TyKind::Record(
+                fields
+                    .iter()
+                    .map(|field| {
+                        let mut field = field.clone();
+                        field.ty = erase_vars(db, field.ty);
+                        field
+                    })
+                    .collect(),
+            ),
+        ),
+        TyKind::Function(function) => Ty::new(
+            db,
+            TyKind::Function(FunctionType {
+                positional: function
+                    .positional
+                    .iter()
+                    .map(|&ty| erase_vars(db, ty))
+                    .collect(),
+                named: function
+                    .named
+                    .iter()
+                    .map(|field| {
+                        let mut field = field.clone();
+                        field.ty = erase_vars(db, field.ty);
+                        field
+                    })
+                    .collect(),
+                variadic: function.variadic.as_ref().map(|rest| {
+                    let mut rest = rest.clone();
+                    rest.element = erase_vars(db, rest.element);
+                    rest
+                }),
+                ret: erase_vars(db, function.ret),
+            }),
+        ),
+        TyKind::Union(members) => {
+            union_of(db, members.iter().map(|&member| erase_vars(db, member)))
+        }
+        TyKind::Named(name, arguments) => Ty::new(
+            db,
+            TyKind::Named(
+                name,
+                arguments
+                    .iter()
+                    .map(|&argument| erase_vars(db, argument))
+                    .collect(),
+            ),
+        ),
+        _ => ty,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

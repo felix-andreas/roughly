@@ -84,8 +84,9 @@ fn corpus_acceptance() {
         let parse = syntax::parse(&text);
         let ours_error = !parse.errors().is_empty();
         // A `None` tree means tree-sitter could not parse at all — treat as error.
-        let ts_error =
-            parser.parse(text.as_str(), None).is_none_or(|tree| tree.root_node().has_error());
+        let ts_error = parser
+            .parse(text.as_str(), None)
+            .is_none_or(|tree| tree.root_node().has_error());
 
         match (ours_error, ts_error) {
             (false, false) => both_clean += 1,
@@ -98,7 +99,10 @@ fn corpus_acceptance() {
         }
     }
 
-    eprintln!("corpus_acceptance: {} .R files ({lossy} lossy)", files.len());
+    eprintln!(
+        "corpus_acceptance: {} .R files ({lossy} lossy)",
+        files.len()
+    );
     eprintln!("  both-clean:      {both_clean}");
     eprintln!("  both-error:      {both_error}");
     eprintln!(
@@ -131,7 +135,9 @@ fn corpus_acceptance() {
     let unexplained: Vec<_> = ours_only
         .iter()
         .filter(|(path, _)| {
-            !allowlist.iter().any(|entry| path.to_string_lossy().ends_with(entry.as_str()))
+            !allowlist
+                .iter()
+                .any(|entry| path.to_string_lossy().ends_with(entry.as_str()))
         })
         .collect();
     assert!(
@@ -176,7 +182,9 @@ fn corpus_parse_speed() {
     let ours = ours_start.elapsed();
 
     let mut parser = tree_sitter::Parser::new();
-    parser.set_language(&tree_sitter_r::LANGUAGE.into()).expect("grammar loads");
+    parser
+        .set_language(&tree_sitter_r::LANGUAGE.into())
+        .expect("grammar loads");
     let ts_start = std::time::Instant::now();
     for source in &sources {
         let tree = parser.parse(source, None);
@@ -230,7 +238,10 @@ fn corpus_incremental_speed() {
             }
         }
     }
-    sources.push((format!("largest real file ({} LoC)", largest.lines().count()), largest));
+    sources.push((
+        format!("largest real file ({} LoC)", largest.lines().count()),
+        largest,
+    ));
     let mut synthetic = String::new();
     for path in files.iter().take(200) {
         if synthetic.lines().count() > 20_000 {
@@ -241,7 +252,10 @@ fn corpus_incremental_speed() {
             synthetic.push('\n');
         }
     }
-    sources.push((format!("synthetic ({} LoC)", synthetic.lines().count()), synthetic));
+    sources.push((
+        format!("synthetic ({} LoC)", synthetic.lines().count()),
+        synthetic,
+    ));
 
     const EDITS: usize = 100;
     for (label, source) in &sources {
@@ -288,7 +302,9 @@ fn corpus_incremental_speed() {
 
         // Tree-sitter: incremental reparse with the previous tree + InputEdit.
         let mut parser = tree_sitter::Parser::new();
-        parser.set_language(&tree_sitter_r::LANGUAGE.into()).expect("grammar loads");
+        parser
+            .set_language(&tree_sitter_r::LANGUAGE.into())
+            .expect("grammar loads");
         let mut text = source.clone();
         let mut tree = parser.parse(&text, None).expect("initial parse");
         let point = |text: &str, offset: usize| {
@@ -346,7 +362,9 @@ fn corpus_dir() -> Option<PathBuf> {
         let path = PathBuf::from(dir);
         return path.is_dir().then_some(path);
     }
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").join("corpus");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("corpus");
     path.is_dir().then_some(path)
 }
 

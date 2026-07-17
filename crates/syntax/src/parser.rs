@@ -84,7 +84,11 @@ impl Parser<'_> {
 
     /// The next significant token at or after `pos`, looking through trivia.
     /// `across_newlines` controls whether newlines are looked through.
-    fn peek_significant(&self, mut pos: usize, across_newlines: bool) -> Option<(SyntaxKind, usize)> {
+    fn peek_significant(
+        &self,
+        mut pos: usize,
+        across_newlines: bool,
+    ) -> Option<(SyntaxKind, usize)> {
         loop {
             let token = self.tokens.get(pos)?;
             match token.kind {
@@ -109,13 +113,23 @@ impl Parser<'_> {
                 pos += 1;
             }
             // Stitch when the next line (past one newline and indentation) is `#:` again.
-            let Some(token) = self.tokens.get(pos) else { return pos };
+            let Some(token) = self.tokens.get(pos) else {
+                return pos;
+            };
             debug_assert_eq!(token.kind, SyntaxKind::NEWLINE);
             let mut lookahead = pos + 1;
-            while self.tokens.get(lookahead).is_some_and(|t| t.kind == SyntaxKind::WHITESPACE) {
+            while self
+                .tokens
+                .get(lookahead)
+                .is_some_and(|t| t.kind == SyntaxKind::WHITESPACE)
+            {
                 lookahead += 1;
             }
-            if self.tokens.get(lookahead).is_some_and(|t| t.kind == SyntaxKind::ANNOTATION_MARKER) {
+            if self
+                .tokens
+                .get(lookahead)
+                .is_some_and(|t| t.kind == SyntaxKind::ANNOTATION_MARKER)
+            {
                 pos = lookahead + 1;
             } else {
                 return pos;
@@ -261,7 +275,9 @@ impl Parser<'_> {
     /// True when the token at `pos` starts exactly where the previous one ended
     /// (no interleaving trivia) — used to join multi-token directive names.
     fn adjacent(&self, pos: usize) -> bool {
-        pos > 0 && pos < self.tokens.len() && self.offsets[pos] == self.offsets[pos - 1] + usize::from(self.tokens[pos - 1].len)
+        pos > 0
+            && pos < self.tokens.len()
+            && self.offsets[pos] == self.offsets[pos - 1] + usize::from(self.tokens[pos - 1].len)
     }
 
     fn ann_directive(&mut self, end: usize) {
@@ -309,7 +325,9 @@ impl Parser<'_> {
             "param" => {
                 self.ann_trivia(end);
                 match self.current() {
-                    Some(SyntaxKind::IDENT | SyntaxKind::DOTS) if self.pos < end => self.wrap_name(),
+                    Some(SyntaxKind::IDENT | SyntaxKind::DOTS) if self.pos < end => {
+                        self.wrap_name()
+                    }
                     Some(SyntaxKind::L_BRACKET) if self.pos < end => {
                         // Optional parameter: `[name]`.
                         self.bump();
@@ -411,7 +429,9 @@ impl Parser<'_> {
             self.bump();
             self.ann_trivia(end);
             if self.at(SyntaxKind::R_BRACE) || self.pos >= end {
-                self.error_here(format!("expected a type inside `{{...}}` of `@{directive}`"));
+                self.error_here(format!(
+                    "expected a type inside `{{...}}` of `@{directive}`"
+                ));
             } else {
                 self.ann_type(end, true);
             }
@@ -419,7 +439,10 @@ impl Parser<'_> {
             if self.at(SyntaxKind::R_BRACE) && self.pos < end {
                 self.bump();
             } else {
-                self.error_at(open_range, format!("unclosed `{{` in `@{directive}`; expected a matching `}}`"));
+                self.error_at(
+                    open_range,
+                    format!("unclosed `{{` in `@{directive}`; expected a matching `}}`"),
+                );
             }
         } else {
             self.error_here(format!("expected `{{TYPE}}` after `@{directive}`"));
@@ -542,36 +565,37 @@ impl Parser<'_> {
                 if self.at(SyntaxKind::R_PAREN) && self.pos < end {
                     self.bump();
                 } else {
-                    self.error_at(open_range, "unclosed `(` in this type; expected a matching `)`");
+                    self.error_at(
+                        open_range,
+                        "unclosed `(` in this type; expected a matching `)`",
+                    );
                 }
                 self.finish();
             }
-            Some(SyntaxKind::IDENT | SyntaxKind::NULL_KW) => {
-                match self.token_str(self.pos) {
-                    "list" if self.ann_next_significant(end) == Some(SyntaxKind::L_BRACKET) => {
-                        self.ann_list_brackets(end);
-                    }
-                    "list" if self.ann_next_significant(end) == Some(SyntaxKind::L_BRACE) => {
-                        self.ann_list_braces(end);
-                    }
-                    "fn" if self.ann_next_significant(end) == Some(SyntaxKind::L_PAREN) => {
-                        self.ann_function_type(end);
-                    }
-                    _ => {
-                        if self.ann_next_significant(end) == Some(SyntaxKind::LESS) {
-                            self.start(SyntaxKind::TYPE_APPLY);
-                            self.wrap_name();
-                            self.ann_trivia(end);
-                            self.ann_type_arg_list(end);
-                            self.finish();
-                        } else {
-                            self.start(SyntaxKind::TYPE_REF);
-                            self.bump();
-                            self.finish();
-                        }
+            Some(SyntaxKind::IDENT | SyntaxKind::NULL_KW) => match self.token_str(self.pos) {
+                "list" if self.ann_next_significant(end) == Some(SyntaxKind::L_BRACKET) => {
+                    self.ann_list_brackets(end);
+                }
+                "list" if self.ann_next_significant(end) == Some(SyntaxKind::L_BRACE) => {
+                    self.ann_list_braces(end);
+                }
+                "fn" if self.ann_next_significant(end) == Some(SyntaxKind::L_PAREN) => {
+                    self.ann_function_type(end);
+                }
+                _ => {
+                    if self.ann_next_significant(end) == Some(SyntaxKind::LESS) {
+                        self.start(SyntaxKind::TYPE_APPLY);
+                        self.wrap_name();
+                        self.ann_trivia(end);
+                        self.ann_type_arg_list(end);
+                        self.finish();
+                    } else {
+                        self.start(SyntaxKind::TYPE_REF);
+                        self.bump();
+                        self.finish();
                     }
                 }
-            }
+            },
             _ => {
                 let description = self.describe_current();
                 self.error_here(format!("expected a type, found {description}"));
@@ -590,7 +614,10 @@ impl Parser<'_> {
                 Some((SyntaxKind::R_BRACKET, _)) => true,
                 Some((SyntaxKind::IDENT, ident_pos)) => {
                     self.token_str(ident_pos) == "named"
-                        && matches!(self.peek_significant(ident_pos + 1, true), Some((SyntaxKind::R_BRACKET, _)))
+                        && matches!(
+                            self.peek_significant(ident_pos + 1, true),
+                            Some((SyntaxKind::R_BRACKET, _))
+                        )
                 }
                 _ => false,
             };
@@ -674,7 +701,10 @@ impl Parser<'_> {
         if self.at(SyntaxKind::R_BRACKET) && self.pos < end {
             self.bump();
         } else {
-            self.error_at(open_range, "unclosed `[` in this list type; expected a matching `]`");
+            self.error_at(
+                open_range,
+                "unclosed `[` in this list type; expected a matching `]`",
+            );
         }
         self.finish();
     }
@@ -696,7 +726,10 @@ impl Parser<'_> {
                 break;
             }
             if self.pos >= end {
-                self.error_at(open_range, "unclosed `{` in this list type; expected a matching `}`");
+                self.error_at(
+                    open_range,
+                    "unclosed `{` in this list type; expected a matching `}`",
+                );
                 break;
             }
             let named_field = matches!(self.current(), Some(SyntaxKind::IDENT))
@@ -727,7 +760,14 @@ impl Parser<'_> {
                 break;
             }
         }
-        self.start_at(checkpoint, if is_record { SyntaxKind::TYPE_RECORD } else { SyntaxKind::TYPE_TUPLE });
+        self.start_at(
+            checkpoint,
+            if is_record {
+                SyntaxKind::TYPE_RECORD
+            } else {
+                SyntaxKind::TYPE_TUPLE
+            },
+        );
         self.finish();
     }
 
@@ -747,7 +787,10 @@ impl Parser<'_> {
                 break;
             }
             if self.pos >= end {
-                self.error_at(open_range, "unclosed `(` in this function type; expected a matching `)`");
+                self.error_at(
+                    open_range,
+                    "unclosed `(` in this function type; expected a matching `)`",
+                );
                 break;
             }
             self.ann_function_parameter(end);
@@ -782,7 +825,10 @@ impl Parser<'_> {
             // Rest parameter: `...`, `...name`, `...: TYPE`, `...name: TYPE`.
             Some(SyntaxKind::DOTS) => {
                 self.bump();
-                if matches!(self.current(), Some(SyntaxKind::IDENT)) && self.adjacent(self.pos) && self.pos < end {
+                if matches!(self.current(), Some(SyntaxKind::IDENT))
+                    && self.adjacent(self.pos)
+                    && self.pos < end
+                {
                     self.wrap_name();
                 }
                 self.ann_trivia(end);
@@ -903,7 +949,10 @@ impl Parser<'_> {
 
     fn recover_to_statement_boundary(&mut self, terminator: Option<SyntaxKind>) {
         while let Some(kind) = self.current() {
-            if kind == SyntaxKind::NEWLINE || kind == SyntaxKind::SEMICOLON || Some(kind) == terminator {
+            if kind == SyntaxKind::NEWLINE
+                || kind == SyntaxKind::SEMICOLON
+                || Some(kind) == terminator
+            {
                 return;
             }
             self.bump();
@@ -973,7 +1022,9 @@ impl Parser<'_> {
                     self.finish();
                 }
                 _ => {
-                    let Some((left_bp, right_bp)) = infix_binding_power(kind) else { break };
+                    let Some((left_bp, right_bp)) = infix_binding_power(kind) else {
+                        break;
+                    };
                     if left_bp < min_bp {
                         break;
                     }
@@ -983,7 +1034,10 @@ impl Parser<'_> {
                     self.bump();
                     self.eat_trivia(true);
                     if !self.expression(right_bp) {
-                        self.error_at(operator_range, format!("expected an expression after {operator}"));
+                        self.error_at(
+                            operator_range,
+                            format!("expected an expression after {operator}"),
+                        );
                     }
                     self.finish();
                 }
@@ -1010,7 +1064,9 @@ impl Parser<'_> {
     /// Prefix operators and primary expressions. Quiet on failure: consumes and
     /// emits nothing, returns false.
     fn primary(&mut self) -> bool {
-        let Some(kind) = self.current() else { return false };
+        let Some(kind) = self.current() else {
+            return false;
+        };
         match kind {
             SyntaxKind::IDENT | SyntaxKind::DOTS | SyntaxKind::DOTDOTI | SyntaxKind::UNDERSCORE => {
                 self.wrap_name()
@@ -1042,7 +1098,9 @@ impl Parser<'_> {
                 self.eat_trivia(true);
                 if !self.expression(0) {
                     let description = self.describe_current();
-                    self.error_here(format!("expected an expression inside `(`, found {description}"));
+                    self.error_here(format!(
+                        "expected an expression inside `(`, found {description}"
+                    ));
                 }
                 self.eat_trivia(true);
                 self.end_group();
@@ -1102,7 +1160,10 @@ impl Parser<'_> {
         self.bump();
         self.eat_trivia(true);
         if !self.expression(right_bp) {
-            self.error_at(operator_range, format!("expected an expression after {operator}"));
+            self.error_at(
+                operator_range,
+                format!("expected an expression after {operator}"),
+            );
         }
         self.finish();
     }
@@ -1115,7 +1176,9 @@ impl Parser<'_> {
         self.eat_trivia(true);
         if !self.expression(0) {
             let description = self.describe_current();
-            self.error_here(format!("expected a branch after the `if` condition, found {description}"));
+            self.error_here(format!(
+                "expected a branch after the `if` condition, found {description}"
+            ));
         }
         // `else` may follow a newline only inside a group or brace context.
         let across = self.else_allowed_across_newline();
@@ -1126,7 +1189,9 @@ impl Parser<'_> {
             self.eat_trivia(true);
             if !self.expression(0) {
                 let description = self.describe_current();
-                self.error_here(format!("expected an expression after `else`, found {description}"));
+                self.error_here(format!(
+                    "expected an expression after `else`, found {description}"
+                ));
             }
         }
         self.finish();
@@ -1145,26 +1210,35 @@ impl Parser<'_> {
                 self.wrap_name();
             } else {
                 let description = self.describe_current();
-                self.error_here(format!("expected a loop variable after `for (`, found {description}"));
+                self.error_here(format!(
+                    "expected a loop variable after `for (`, found {description}"
+                ));
             }
             self.eat_trivia(true);
             if self.at(SyntaxKind::IN_KW) {
                 self.bump();
             } else {
                 let description = self.describe_current();
-                self.error_here(format!("expected `in` in the `for` head, found {description}"));
+                self.error_here(format!(
+                    "expected `in` in the `for` head, found {description}"
+                ));
             }
             self.eat_trivia(true);
             if !self.expression(0) {
                 let description = self.describe_current();
-                self.error_here(format!("expected a sequence expression in the `for` head, found {description}"));
+                self.error_here(format!(
+                    "expected a sequence expression in the `for` head, found {description}"
+                ));
             }
             self.eat_trivia(true);
             self.end_group();
             if self.at(SyntaxKind::R_PAREN) {
                 self.bump();
             } else {
-                self.error_at(open_range, "unclosed `(` in the `for` head; expected a matching `)`");
+                self.error_at(
+                    open_range,
+                    "unclosed `(` in the `for` head; expected a matching `)`",
+                );
             }
         } else {
             let description = self.describe_current();
@@ -1193,7 +1267,9 @@ impl Parser<'_> {
     fn condition_parens(&mut self, construct: &str) {
         if !self.at(SyntaxKind::L_PAREN) {
             let description = self.describe_current();
-            self.error_here(format!("expected `(` after `{construct}`, found {description}"));
+            self.error_here(format!(
+                "expected `(` after `{construct}`, found {description}"
+            ));
             return;
         }
         let open_range = self.token_range(self.pos);
@@ -1202,7 +1278,9 @@ impl Parser<'_> {
         self.eat_trivia(true);
         if !self.expression(0) {
             let description = self.describe_current();
-            self.error_here(format!("expected a condition inside `{construct} (…)`, found {description}"));
+            self.error_here(format!(
+                "expected a condition inside `{construct} (…)`, found {description}"
+            ));
         }
         self.eat_trivia(true);
         self.end_group();
@@ -1224,7 +1302,9 @@ impl Parser<'_> {
             self.parameter_list();
         } else {
             let description = self.describe_current();
-            self.error_here(format!("expected `(` to open the parameter list, found {description}"));
+            self.error_here(format!(
+                "expected `(` to open the parameter list, found {description}"
+            ));
         }
         self.eat_trivia(true);
         if !self.expression(0) {
@@ -1289,7 +1369,10 @@ impl Parser<'_> {
         if self.at(SyntaxKind::R_PAREN) {
             self.bump();
         } else {
-            self.error_at(open_range, "unclosed `(`; expected `)` to close the parameter list");
+            self.error_at(
+                open_range,
+                "unclosed `(`; expected `)` to close the parameter list",
+            );
         }
         self.finish();
     }
@@ -1350,7 +1433,11 @@ impl Parser<'_> {
         } else {
             self.error_at(
                 open_range,
-                format!("unclosed {}; expected {} to close it", open.display(), closer.display()),
+                format!(
+                    "unclosed {}; expected {} to close it",
+                    open.display(),
+                    closer.display()
+                ),
             );
         }
         self.finish();
@@ -1428,7 +1515,10 @@ impl Parser<'_> {
             match kind {
                 SyntaxKind::COMMA if depth == 0 => return,
                 kind if kind == closer && depth == 0 => return,
-                SyntaxKind::L_PAREN | SyntaxKind::L_BRACKET | SyntaxKind::L_BRACKET2 | SyntaxKind::L_BRACE => {
+                SyntaxKind::L_PAREN
+                | SyntaxKind::L_BRACKET
+                | SyntaxKind::L_BRACKET2
+                | SyntaxKind::L_BRACE => {
                     depth += 1;
                     self.bump();
                 }

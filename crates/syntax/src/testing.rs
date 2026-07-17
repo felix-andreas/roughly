@@ -80,8 +80,11 @@ pub fn run_fixture_suite(suite_dir: &Path, render: &dyn Fn(&str) -> String) {
             let mut new_text = file.text.clone();
             for (span, rendered) in blessed_edits.into_iter().rev() {
                 let at_eof = span.end == new_text.len();
-                let replacement =
-                    if at_eof { format!("{rendered}\n") } else { format!("{rendered}\n\n") };
+                let replacement = if at_eof {
+                    format!("{rendered}\n")
+                } else {
+                    format!("{rendered}\n\n")
+                };
                 new_text.replace_range(span, &replacement);
             }
             std::fs::write(&file.path, new_text)
@@ -105,7 +108,10 @@ fn collect_fixture_files(dir: &Path, out: &mut Vec<PathBuf>) {
         let path = entry.path();
         if path.is_dir() {
             collect_fixture_files(&path, out);
-        } else if path.extension().is_some_and(|extension| extension == "test") {
+        } else if path
+            .extension()
+            .is_some_and(|extension| extension == "test")
+        {
             out.push(path);
         }
     }
@@ -128,10 +134,16 @@ fn parse_fixture_file(path: &Path, text: String) -> FixtureFile {
                      text: &str| {
         if let Some(case_name) = case.take() {
             let group_name = group.clone().unwrap_or_else(|| {
-                panic!("{}: case `{case_name}` appears before any `#====` group", path.display())
+                panic!(
+                    "{}: case `{case_name}` appears before any `#====` group",
+                    path.display()
+                )
             });
             let start = expected_start.take().unwrap_or_else(|| {
-                panic!("{}: case `{case_name}` has no `#++++` expectation", path.display())
+                panic!(
+                    "{}: case `{case_name}` has no `#++++` expectation",
+                    path.display()
+                )
             });
             let source = source_lines.join("\n").trim_end().to_owned();
             source_lines.clear();
@@ -150,10 +162,24 @@ fn parse_fixture_file(path: &Path, text: String) -> FixtureFile {
         offset += line.len();
         let trimmed = line.trim_end_matches(['\n', '\r']);
         if let Some(name) = trimmed.strip_prefix("#====") {
-            flush(&group, &mut case, &mut source_lines, &mut expected_start, expected_end, &text);
+            flush(
+                &group,
+                &mut case,
+                &mut source_lines,
+                &mut expected_start,
+                expected_end,
+                &text,
+            );
             group = Some(name.trim().to_owned());
         } else if let Some(name) = trimmed.strip_prefix("#----") {
-            flush(&group, &mut case, &mut source_lines, &mut expected_start, expected_end, &text);
+            flush(
+                &group,
+                &mut case,
+                &mut source_lines,
+                &mut expected_start,
+                expected_end,
+                &text,
+            );
             case = Some(name.trim().to_owned());
         } else if trimmed.starts_with("#++++") {
             expected_start = Some(offset);
@@ -165,15 +191,29 @@ fn parse_fixture_file(path: &Path, text: String) -> FixtureFile {
         }
         let _ = line_start;
     }
-    flush(&group, &mut case, &mut source_lines, &mut expected_start, expected_end, &text);
+    flush(
+        &group,
+        &mut case,
+        &mut source_lines,
+        &mut expected_start,
+        expected_end,
+        &text,
+    );
 
-    FixtureFile { path: path.to_owned(), text, cases }
+    FixtureFile {
+        path: path.to_owned(),
+        text,
+        cases,
+    }
 }
 
 /// Trailing-whitespace-insensitive comparison form.
 fn normalize(text: &str) -> String {
-    let mut normalized =
-        text.lines().map(|line| line.trim_end()).collect::<Vec<_>>().join("\n");
+    let mut normalized = text
+        .lines()
+        .map(|line| line.trim_end())
+        .collect::<Vec<_>>()
+        .join("\n");
     while normalized.ends_with('\n') {
         normalized.pop();
     }

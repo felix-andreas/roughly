@@ -13,7 +13,7 @@
 //! an undo log, so a failed probe leaves no trace.
 
 use crate::Db;
-use crate::types::{Constraint, FunctionType, InferenceVar, Ty, TyKind, union_of};
+use crate::types::{Atomic, Constraint, FunctionType, InferenceVar, Ty, TyKind, union_of};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Entry<'db> {
@@ -486,6 +486,303 @@ impl<'db> InferenceTable<'db> {
         }
         Err(UnifyError::Mismatch(a, b))
     }
+
+    /// The directional argument-compatibility relation — the coercions that
+    /// apply where a value flows into an expected type (parameter positions,
+    /// checked annotations) but never inside unification: scalar-to-vector,
+    /// integer-to-double widening, names dropping into unnamed containers,
+    /// union membership, and contravariant function parameters.
+    ///
+    /// Runs as a probe: a `true` verdict keeps the variable bindings it made
+    /// (binding against the two `Var` arms is how a generic parameter like
+    /// `T[]` infers `T` from a call), while `false` reverses every mutation,
+    /// so the predicate is pure on failure and its result order-independent.
+    pub fn compatible(&mut self, db: &'db dyn Db, actual: Ty<'db>, expected: Ty<'db>) -> bool {
+        self.compatible_probe(db, actual, expected, 0)
+    }
+
+    fn compatible_probe(
+        &mut self,
+        db: &'db dyn Db,
+        actual: Ty<'db>,
+        expected: Ty<'db>,
+        depth: usize,
+    ) -> bool {
+        // A resource guard, not a verdict: interned types are finite (the
+        // occurs check refuses cycles), so this bound is unreachable for any
+        // real program and refusing is safer than recursing on.
+        const DEPTH_LIMIT: usize = 128;
+        let snapshot = self.snapshot();
+        let verdict = depth < DEPTH_LIMIT && self.compatible_inner(db, actual, expected, depth);
+        if !verdict {
+            self.rollback(snapshot);
+        }
+        verdict
+    }
+
+    fn compatible_inner(
+        &mut self,
+        db: &'db dyn Db,
+        actual: Ty<'db>,
+        expected: Ty<'db>,
+        depth: usize,
+    ) -> bool {
+        let actual = self.resolve(db, actual);
+        let expected = self.resolve(db, expected);
+        if matches!(actual.kind(db), TyKind::Any) || matches!(expected.kind(db), TyKind::Any) {
+            return true;
+        }
+        if actual == expected {
+            return true;
+        }
+        if matches!(actual.kind(db), TyKind::Var(_)) || matches!(expected.kind(db), TyKind::Var(_))
+        {
+            return self.unify(db, actual, expected).is_ok();
+        }
+        match (actual.kind(db).clone(), expected.kind(db).clone()) {
+            // A union value must be accepted in every shape it can take, so
+            // each actual member checks against the expected type. This arm
+            // comes first so union-vs-union reduces to "every actual member
+            // fits somewhere in the expected union".
+            (TyKind::Union(members), _) => members
+                .iter()
+                .all(|&member| self.compatible_probe(db, member, expected, depth + 1)),
+            // A value fits an expected union when it fits any member; concrete
+            // members are tried before unbound-variable members so a value
+            // that already fits a concrete member — `NULL` fitting the `NULL`
+            // in an instantiated `T | NULL` — matches it and binds nothing,
+            // rather than greedily pinning `T` and robbing a later argument of
+            // the chance to determine it.
+            (_, TyKind::Union(members)) => {
+                let (variables, concrete): (Vec<Ty<'db>>, Vec<Ty<'db>>) =
+                    members.iter().partition(|&&member| {
+                        matches!(self.shallow_resolve(db, member).kind(db), TyKind::Var(_))
+                    });
+                concrete
+                    .into_iter()
+                    .chain(variables)
+                    .any(|member| self.compatible_probe(db, actual, member, depth + 1))
+            }
+            // Nominal arguments check invariantly (both directions): without a
+            // representation definition the variance is unknown, and demanding
+            // an exact match over-rejects rather than admitting an unsound
+            // widening. (Equal opaque nominals already matched above.)
+            (
+                TyKind::Named(actual_name, actual_arguments),
+                TyKind::Named(expected_name, expected_arguments),
+            ) if actual_name == expected_name
+                && actual_arguments.len() == expected_arguments.len() =>
+            {
+                actual_arguments.iter().zip(expected_arguments.iter()).all(
+                    |(&actual_argument, &expected_argument)| {
+                        self.compatible_probe(db, actual_argument, expected_argument, depth + 1)
+                            && self.compatible_probe(
+                                db,
+                                expected_argument,
+                                actual_argument,
+                                depth + 1,
+                            )
+                    },
+                )
+            }
+            // A scalar coerces into a vector position; a named vector drops
+            // its names into a plain vector position. Element recursion lands
+            // on the scalar arm below for concrete elements (so integer
+            // widening applies inside vectors too) and on the variable arms
+            // above for a generic element (`T[]`), which is how a call like
+            // `sort(c(1L))` binds `T := integer`.
+            (TyKind::Scalar(_), TyKind::Vector(element)) => {
+                self.compatible_probe(db, actual, element, depth + 1)
+            }
+            (TyKind::NamedVector(actual_element), TyKind::Vector(expected_element)) => {
+                self.compatible_probe(db, actual_element, expected_element, depth + 1)
+            }
+            // `integer` widens to `double` in compatibility (a directional
+            // check only — unification never widens): R freely promotes
+            // integers in numeric contexts, and without this every numeric
+            // parameter in the stub corpus would have to be `Any`.
+            (TyKind::Scalar(actual_atomic), TyKind::Scalar(expected_atomic)) => {
+                actual_atomic == Atomic::Integer && expected_atomic == Atomic::Double
+            }
+            (TyKind::Vector(actual_element), TyKind::Vector(expected_element))
+            | (TyKind::NamedVector(actual_element), TyKind::NamedVector(expected_element)) => {
+                self.compatible_probe(db, actual_element, expected_element, depth + 1)
+            }
+            (TyKind::Tuple(actual_items), TyKind::Tuple(expected_items))
+                if actual_items.len() == expected_items.len() =>
+            {
+                actual_items.iter().zip(expected_items.iter()).all(
+                    |(&actual_item, &expected_item)| {
+                        self.compatible_probe(db, actual_item, expected_item, depth + 1)
+                    },
+                )
+            }
+            (TyKind::Record(actual_fields), TyKind::Record(expected_fields))
+                if actual_fields.len() == expected_fields.len() =>
+            {
+                expected_fields.iter().all(|expected_field| {
+                    actual_fields
+                        .iter()
+                        .find(|field| field.name == expected_field.name)
+                        .is_some_and(|actual_field| {
+                            self.compatible_probe(db, actual_field.ty, expected_field.ty, depth + 1)
+                        })
+                })
+            }
+            (TyKind::Tuple(items), TyKind::List(element)) => items
+                .iter()
+                .all(|&item| self.compatible_probe(db, item, element, depth + 1)),
+            (TyKind::Record(fields), TyKind::List(element))
+            | (TyKind::Record(fields), TyKind::NamedList(element)) => fields
+                .iter()
+                .all(|field| self.compatible_probe(db, field.ty, element, depth + 1)),
+            (TyKind::NamedList(actual_element), TyKind::List(expected_element))
+            | (TyKind::NamedList(actual_element), TyKind::NamedList(expected_element))
+            | (TyKind::List(actual_element), TyKind::List(expected_element)) => {
+                self.compatible_probe(db, actual_element, expected_element, depth + 1)
+            }
+            (TyKind::Function(actual_function), TyKind::Function(expected_function)) => {
+                self.function_compatible(db, &actual_function, &expected_function, depth)
+            }
+            _ => false,
+        }
+    }
+
+    fn function_compatible(
+        &mut self,
+        db: &'db dyn Db,
+        actual: &FunctionType<'db>,
+        expected: &FunctionType<'db>,
+        depth: usize,
+    ) -> bool {
+        if actual.positional.len() + actual.named.len()
+            != expected.positional.len() + expected.named.len()
+        {
+            return false;
+        }
+        // Variadic compatibility is conservative: a variadic function is
+        // compatible only with another variadic (their rest elements are
+        // contravariant, like ordinary parameters), and the rest parameters
+        // must sit at the same formal position — the position decides which
+        // parameters callers may fill positionally. This over-rejects some
+        // safe pairings but never admits an unsound one.
+        match (&actual.variadic, &expected.variadic) {
+            (Some(actual_variadic), Some(expected_variadic)) => {
+                if actual_variadic.preceding_named != expected_variadic.preceding_named {
+                    return false;
+                }
+                if !self.compatible_probe(
+                    db,
+                    expected_variadic.element,
+                    actual_variadic.element,
+                    depth + 1,
+                ) {
+                    return false;
+                }
+            }
+            (None, None) => {}
+            _ => return false,
+        }
+        // Parameters pair by NAME where both sides name them (R matches call
+        // arguments against formal names regardless of order); unnamed
+        // parameters consume the remaining slots left to right. A named
+        // expected parameter with no same-named actual falls back to
+        // positional pairing.
+        let mut actual_parameters: Vec<(Option<crate::types::Name<'db>>, Ty<'db>, bool)> = actual
+            .positional
+            .iter()
+            .map(|&ty| (None, ty, false))
+            .collect();
+        actual_parameters.extend(
+            actual
+                .named
+                .iter()
+                .map(|field| (Some(field.name), field.ty, field.optional)),
+        );
+        let mut paired: Vec<Option<(Ty<'db>, bool)>> = vec![None; actual_parameters.len()];
+        let mut overflow = Vec::new();
+        for field in &expected.named {
+            match actual_parameters
+                .iter()
+                .position(|(name, ..)| *name == Some(field.name))
+            {
+                Some(index) if paired[index].is_none() => {
+                    paired[index] = Some((field.ty, field.optional));
+                }
+                _ => overflow.push((field.ty, field.optional)),
+            }
+        }
+        let mut positional_expected = expected
+            .positional
+            .iter()
+            .map(|&ty| (ty, false))
+            .chain(overflow);
+        for slot in paired.iter_mut() {
+            if slot.is_none() {
+                *slot = positional_expected.next();
+            }
+        }
+        for ((_, actual_parameter, actual_optional), slot) in
+            actual_parameters.into_iter().zip(paired)
+        {
+            let Some((expected_parameter, expected_optional)) = slot else {
+                return false;
+            };
+            // An expected-optional parameter promises callers they may omit
+            // it, so the actual function must default it.
+            if expected_optional && !actual_optional {
+                return false;
+            }
+            // Parameters are contravariant: a function used where `expected`
+            // is wanted must accept every argument that interface may pass.
+            if !self.compatible_probe(db, expected_parameter, actual_parameter, depth + 1) {
+                return false;
+            }
+        }
+        // Return types stay covariant.
+        self.compatible_probe(db, actual.ret, expected.ret, depth + 1)
+    }
+
+    /// Whether the resolved form of `ty` still contains an unbound inference
+    /// variable anywhere in its structure.
+    pub fn contains_unbound_var(&self, db: &'db dyn Db, ty: Ty<'db>) -> bool {
+        let shallow = self.shallow_resolve(db, ty);
+        match shallow.kind(db) {
+            TyKind::Var(_) => true,
+            TyKind::Vector(inner)
+            | TyKind::NamedVector(inner)
+            | TyKind::List(inner)
+            | TyKind::NamedList(inner) => self.contains_unbound_var(db, *inner),
+            TyKind::Tuple(items) => items
+                .iter()
+                .any(|&item| self.contains_unbound_var(db, item)),
+            TyKind::Record(fields) => fields
+                .iter()
+                .any(|field| self.contains_unbound_var(db, field.ty)),
+            TyKind::Function(function) => {
+                function
+                    .positional
+                    .iter()
+                    .any(|&ty| self.contains_unbound_var(db, ty))
+                    || function
+                        .named
+                        .iter()
+                        .any(|field| self.contains_unbound_var(db, field.ty))
+                    || function
+                        .variadic
+                        .as_ref()
+                        .is_some_and(|rest| self.contains_unbound_var(db, rest.element))
+                    || self.contains_unbound_var(db, function.ret)
+            }
+            TyKind::Union(members) => members
+                .iter()
+                .any(|&member| self.contains_unbound_var(db, member)),
+            TyKind::Named(_, arguments) => arguments
+                .iter()
+                .any(|&argument| self.contains_unbound_var(db, argument)),
+            _ => false,
+        }
+    }
 }
 
 /// `T | NULL` (exactly two members, one NULL) yields `T`.
@@ -621,5 +918,81 @@ mod tests {
         let c = union_of(&db, [int, null]);
         let d = union_of(&db, [chr, null]);
         assert!(table.unify(&db, c, d).is_err());
+    }
+
+    #[test]
+    fn compatibility_widens_and_coerces_directionally() {
+        let db = RootDatabase::default();
+        let mut table = InferenceTable::default();
+        let int = scalar(&db, Atomic::Integer);
+        let dbl = scalar(&db, Atomic::Double);
+        let chr = scalar(&db, Atomic::Character);
+        // Directional widening: integer fits double, never the reverse.
+        assert!(table.compatible(&db, int, dbl));
+        assert!(!table.compatible(&db, dbl, int));
+        // A scalar coerces into a vector position, with widening inside.
+        let dbl_vec = Ty::new(&db, TyKind::Vector(dbl));
+        assert!(table.compatible(&db, int, dbl_vec));
+        assert!(!table.compatible(&db, chr, dbl_vec));
+        // Unification never widens.
+        assert!(table.unify(&db, int, dbl).is_err());
+    }
+
+    #[test]
+    fn compatibility_binds_generic_elements_and_prefers_concrete_members() {
+        let db = RootDatabase::default();
+        let mut table = InferenceTable::default();
+        let int = scalar(&db, Atomic::Integer);
+        let null = crate::types::null(&db);
+        // `sort(c(1L))`-shape: a scalar into `T[]` binds `T := integer`.
+        let element = table.fresh_ty(&db, Constraint::Unconstrained);
+        let generic_vector = Ty::new(&db, TyKind::Vector(element));
+        assert!(table.compatible(&db, int, generic_vector));
+        assert_eq!(table.resolve(&db, element), int);
+        // `NULL` into an instantiated `T | NULL` must match the concrete
+        // `NULL` member and bind nothing, leaving `T` for a later argument.
+        let t = table.fresh_ty(&db, Constraint::Unconstrained);
+        let nullable = union_of(&db, [t, null]);
+        assert!(table.compatible(&db, null, nullable));
+        assert!(matches!(table.resolve(&db, t).kind(&db), TyKind::Var(_)));
+    }
+
+    #[test]
+    fn compatibility_fails_pure_and_pairs_function_formals_by_name() {
+        let db = RootDatabase::default();
+        let mut table = InferenceTable::default();
+        let int = scalar(&db, Atomic::Integer);
+        let chr = scalar(&db, Atomic::Character);
+        // A failing check must leak no bindings.
+        let var = table.fresh_ty(&db, Constraint::Unconstrained);
+        let tuple_with_var = Ty::new(&db, TyKind::Tuple(vec![var, chr]));
+        let tuple_expected = Ty::new(&db, TyKind::Tuple(vec![int, int]));
+        assert!(!table.compatible(&db, tuple_with_var, tuple_expected));
+        assert!(matches!(table.resolve(&db, var).kind(&db), TyKind::Var(_)));
+        // A lambda carrying named formals fits a positional interface: the
+        // unnamed expected parameter pairs positionally (contravariant).
+        let named_lambda = Ty::new(
+            &db,
+            TyKind::Function(FunctionType {
+                positional: Vec::new(),
+                named: vec![crate::types::RecordField {
+                    name: crate::types::Name::new(&db, "x".to_owned()),
+                    ty: int,
+                    optional: false,
+                }],
+                variadic: None,
+                ret: int,
+            }),
+        );
+        let positional_interface = Ty::new(
+            &db,
+            TyKind::Function(FunctionType {
+                positional: vec![int],
+                named: Vec::new(),
+                variadic: None,
+                ret: scalar(&db, Atomic::Double),
+            }),
+        );
+        assert!(table.compatible(&db, named_lambda, positional_interface));
     }
 }

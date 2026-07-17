@@ -42,7 +42,9 @@ pub enum TypeErrorKind<'db> {
     NotAFunction {
         found: Ty<'db>,
     },
-    TooManyArguments {
+    /// The call's argument count cannot fill the function's formals (too many
+    /// positionals, or a required formal left unfilled).
+    ArityMismatch {
         expected: usize,
         found: usize,
     },
@@ -52,6 +54,18 @@ pub enum TypeErrorKind<'db> {
     /// An annotation declares a parameter the definition has no formal for.
     AnnotationParameterMismatch {
         name: String,
+    },
+    /// A constraint (numeric, atomic) rejected the value.
+    ConstraintViolation {
+        constraint: Constraint,
+        found: Ty<'db>,
+    },
+    /// No candidate of an overloaded stub name accepted the arguments; carries
+    /// the first candidate's failure for a concrete lead.
+    NoMatchingOverload {
+        name: String,
+        candidates: usize,
+        first: Option<Box<TypeError<'db>>>,
     },
     InfiniteType,
 }
@@ -67,10 +81,18 @@ pub struct ItemCheck<'db> {
     pub scheme: Option<TypeScheme<'db>>,
 }
 
-/// Resolver for names that are not item-local: package globals (and, in a
-/// later slice, the stdlib stub corpus).
+/// Resolver for names that are not item-local: package globals and the stdlib
+/// stub corpus.
 pub trait GlobalEnv<'db> {
     fn scheme(&self, name: &str) -> Option<TypeScheme<'db>>;
+
+    /// The full ordered overload-candidate set of a name, `None` when the name
+    /// has at most one candidate or a package/local definition wins over the
+    /// stub set.
+    fn overloads(&self, name: &str) -> Option<Vec<TypeScheme<'db>>> {
+        let _ = name;
+        None
+    }
 }
 
 pub fn check_item<'db>(db: &'db dyn Db, module: &Module, naming: &ItemNaming) -> ItemCheck<'db> {
@@ -95,6 +117,7 @@ pub fn check_item_with_annotation<'db>(
         rigid_constraints: FxHashMap::default(),
         recorded: FxHashMap::default(),
         errors: Vec::new(),
+        overload_probe_depth: 0,
     };
     let mut scheme = None;
     if let Some(root) = module.root {
@@ -235,6 +258,22 @@ struct Checker<'db, 'a> {
     rigid_constraints: FxHashMap<Name<'db>, Constraint>,
     recorded: FxHashMap<ExprId, Ty<'db>>,
     errors: Vec<TypeError<'db>>,
+    /// Non-zero while a strict overload-selection round probes a candidate:
+    /// the literal-as-integer courtesy is off, so it cannot decide which
+    /// candidate wins (exact matches outrank conversions).
+    overload_probe_depth: u32,
+}
+
+/// One call argument, inferred exactly once before any signature matching, so
+/// an overload probe can re-match without re-running expression inference.
+struct CallArgument<'db> {
+    name: Option<String>,
+    /// `None` is a positional hole (`f(, x)`).
+    ty: Option<Ty<'db>>,
+    range: TextRange,
+    /// The argument is a whole-number double literal (`1`, `2.0`) — eligible
+    /// for the literal-as-integer courtesy.
+    whole_double: bool,
 }
 
 impl<'db> Checker<'db, '_> {
@@ -264,10 +303,12 @@ impl<'db> Checker<'db, '_> {
                 found: self.table.resolve(self.db, found),
             },
             UnifyError::Occurs(..) => TypeErrorKind::InfiniteType,
-            UnifyError::ConstraintRejected(_, found) => TypeErrorKind::Mismatch {
-                expected: self.fresh(Constraint::Numeric),
-                found: self.table.resolve(self.db, found),
-            },
+            UnifyError::ConstraintRejected(constraint, found) => {
+                TypeErrorKind::ConstraintViolation {
+                    constraint,
+                    found: self.table.resolve(self.db, found),
+                }
+            }
         };
         self.errors.push(TypeError { range, kind });
     }
@@ -298,8 +339,8 @@ impl<'db> Checker<'db, '_> {
                 self.infer_binary(range, *operator, lhs_ty, rhs_ty)
             }
             ExpressionKind::Call { callee, arguments } => {
-                let callee_ty = self.infer(*callee);
-                self.infer_call(range, callee_ty, arguments)
+                let arguments = arguments.clone();
+                self.infer_call_expression(range, *callee, &arguments)
             }
             // Indexing and field access type as Unknown until the container
             // rules land (tuple/record projection, vector element rules).
@@ -319,14 +360,32 @@ impl<'db> Checker<'db, '_> {
                 self.unknown()
             }
             ExpressionKind::Namespace { .. } => self.unknown(),
+            // R parameters are always matchable by name and by position, so
+            // inferred function types carry every formal as a named parameter
+            // (optional when it defaults); a `...` formal becomes a rest
+            // parameter with element `Any` at its formal position. Defaults
+            // are inferred but do not pin an unannotated parameter's type —
+            // that comes from the parameter's uses.
             ExpressionKind::Function { parameters, body } => {
                 let parameters = parameters.clone();
                 self.table.level += 1;
                 let mark = self.environment.mark();
-                let mut positional = Vec::new();
+                let mut named = Vec::new();
+                let mut variadic = None;
                 for parameter in &parameters {
+                    if parameter.name == "..." {
+                        variadic = Some(crate::types::RestParameter {
+                            element: crate::types::any(self.db),
+                            preceding_named: named.len(),
+                        });
+                        continue;
+                    }
                     let parameter_ty = self.fresh(Constraint::Unconstrained);
-                    positional.push(parameter_ty);
+                    named.push(crate::types::RecordField {
+                        name: Name::new(self.db, parameter.name.clone()),
+                        ty: parameter_ty,
+                        optional: parameter.default.is_some(),
+                    });
                     if let Some(slot) = self
                         .naming
                         .bindings
@@ -337,8 +396,7 @@ impl<'db> Checker<'db, '_> {
                         self.environment.set(slot, EnvEntry::Mono(parameter_ty));
                     }
                     if let Some(default) = parameter.default {
-                        let default_ty = self.infer(default);
-                        self.unify_or_report(range, positional[positional.len() - 1], default_ty);
+                        self.infer(default);
                     }
                 }
                 let return_ty = self.infer(*body);
@@ -347,9 +405,9 @@ impl<'db> Checker<'db, '_> {
                 Ty::new(
                     self.db,
                     TyKind::Function(FunctionType {
-                        positional,
-                        named: Vec::new(),
-                        variadic: None,
+                        positional: Vec::new(),
+                        named,
+                        variadic,
                         ret: return_ty,
                     }),
                 )
@@ -410,7 +468,7 @@ impl<'db> Checker<'db, '_> {
     fn literal_ty(&mut self, literal: &LiteralKind) -> Ty<'db> {
         match literal {
             LiteralKind::Integer => scalar(self.db, Atomic::Integer),
-            LiteralKind::Double => scalar(self.db, Atomic::Double),
+            LiteralKind::Double { .. } => scalar(self.db, Atomic::Double),
             LiteralKind::Complex => scalar(self.db, Atomic::Complex),
             LiteralKind::String(_) => scalar(self.db, Atomic::Character),
             LiteralKind::Logical(_) => scalar(self.db, Atomic::Logical),
@@ -554,6 +612,7 @@ impl<'db> Checker<'db, '_> {
                 });
                 None
             };
+            let declared = declared_ty.is_some();
             let parameter_ty = declared_ty.unwrap_or_else(|| self.fresh(Constraint::Unconstrained));
             if let Some(slot) = self
                 .naming
@@ -566,7 +625,20 @@ impl<'db> Checker<'db, '_> {
             }
             if let Some(default) = parameter.default {
                 let default_ty = self.infer(default);
-                self.unify_or_report(parameter.range, parameter_ty, default_ty);
+                // A `NULL` default is R's "no value" sentinel for optional
+                // parameters, always allowed regardless of the declared type;
+                // any other default must fit the declared type. An undeclared
+                // formal's type comes from its uses, not its default.
+                let resolved_default = self.table.resolve(self.db, default_ty);
+                if declared && !matches!(resolved_default.kind(self.db), TyKind::Null) {
+                    let whole_double = self.is_whole_double(default);
+                    let default_range = self.module.expression(default).range;
+                    if let Err(error) =
+                        self.check_argument(parameter_ty, default_ty, default_range, whole_double)
+                    {
+                        self.errors.push(error);
+                    }
+                }
             }
         }
         // Declared named parameters the definition never declares.
@@ -663,8 +735,139 @@ impl<'db> Checker<'db, '_> {
         }
     }
 
-    fn infer_call(&mut self, range: TextRange, callee: Ty<'db>, arguments: &[Argument]) -> Ty<'db> {
-        let arguments: Vec<(Option<String>, Option<Ty<'db>>, TextRange)> = arguments
+    /// The call entry point: an overloaded stub callee resolves per call site
+    /// (each candidate probed in declaration order); everything else infers
+    /// the callee and dispatches on its type.
+    fn infer_call_expression(
+        &mut self,
+        range: TextRange,
+        callee: ExprId,
+        arguments: &[Argument],
+    ) -> Ty<'db> {
+        if let Some(ty) = self.try_overloaded_call(range, callee, arguments) {
+            return ty;
+        }
+        let callee_ty = self.infer(callee);
+        let call_arguments = self.infer_call_arguments(range, arguments);
+        self.dispatch_call(range, callee_ty, &call_arguments)
+    }
+
+    /// Ordered overload probing: the first candidate whose signature accepts
+    /// the arguments wins and its return is the call's type. Only a plain
+    /// name resolves through an overload set, and a local binding shadowing
+    /// the name disables it (the local wins, as everywhere). `None` means
+    /// "not an overloaded call" — fall through to normal dispatch.
+    fn try_overloaded_call(
+        &mut self,
+        range: TextRange,
+        callee: ExprId,
+        arguments: &[Argument],
+    ) -> Option<Ty<'db>> {
+        let ExpressionKind::NameRef(name) = &self.module.expression(callee).kind else {
+            return None;
+        };
+        let name = name.clone();
+        if self.naming.resolutions.contains_key(&callee) {
+            return None;
+        }
+        let schemes = self.globals?.overloads(&name)?;
+        if schemes.len() < 2 {
+            return None;
+        }
+
+        // Arguments are inferred exactly once, before any probe: expression
+        // inference writes state the probe snapshot does not reverse (the
+        // environment, recorded expression types), so running it inside a
+        // probe would leak bindings that reference rolled-back variable ids.
+        let call_arguments = self.infer_call_arguments(range, arguments);
+
+        // Selection needs concrete argument types. Probing against an
+        // argument whose type still contains a free inference variable would
+        // let the first candidate bind it — committing a wrapper function's
+        // parameter (`function(x) sum(x)`) to the first candidate's parameter
+        // type and rejecting calls R accepts. Such a call skips selection and
+        // uses the final declaration, by corpus convention the most general.
+        let has_unresolved_argument = call_arguments.iter().any(|argument| {
+            argument
+                .ty
+                .is_some_and(|ty| self.table.contains_unbound_var(self.db, ty))
+        });
+        let probed: Vec<TypeScheme<'db>> = if has_unresolved_argument {
+            vec![schemes.last().cloned()?]
+        } else {
+            schemes
+        };
+
+        // Selection runs strict first, then (only if nothing matched and a
+        // whole-number double literal is present) once more with the
+        // literal-as-integer courtesy: `1` is genuinely a double at runtime,
+        // so letting it match an integer candidate in the strict round would
+        // pick a signature whose return misstates what R computes
+        // (`sum(1, 2)` is a double). The courtesy round keeps a name whose
+        // only fitting candidate wants `integer` callable as `foo(1)`.
+        let rounds: &[bool] = if call_arguments.iter().any(|argument| argument.whole_double) {
+            &[false, true]
+        } else {
+            &[false]
+        };
+
+        let mut first_error: Option<TypeError<'db>> = None;
+        for &courtesy in rounds {
+            for scheme in &probed {
+                let snapshot = self.table.snapshot();
+                let instantiated = self.instantiate(scheme);
+                let resolved = self.table.shallow_resolve(self.db, instantiated);
+                let TyKind::Function(function) = resolved.kind(self.db).clone() else {
+                    self.table.rollback(snapshot);
+                    continue;
+                };
+                if !courtesy {
+                    self.overload_probe_depth += 1;
+                }
+                let outcome = self.match_arguments(range, &function, &call_arguments);
+                if !courtesy {
+                    self.overload_probe_depth -= 1;
+                }
+                match outcome {
+                    Ok(()) => {
+                        self.recorded.insert(callee, resolved);
+                        return Some(function.ret);
+                    }
+                    Err(error) => {
+                        self.table.rollback(snapshot);
+                        if first_error.is_none() {
+                            first_error = Some(error);
+                        }
+                    }
+                }
+            }
+        }
+
+        // The unresolved-argument fallback probes a single candidate; failing
+        // it is an ordinary call mismatch, so the underlying error reads
+        // better than a one-candidate overload report.
+        let error = match (probed.len(), first_error) {
+            (1, Some(error)) => error,
+            (candidates, first) => TypeError {
+                range,
+                kind: TypeErrorKind::NoMatchingOverload {
+                    name,
+                    candidates,
+                    first: first.map(Box::new),
+                },
+            },
+        };
+        self.errors.push(error);
+        self.recorded.insert(callee, self.unknown());
+        Some(self.unknown())
+    }
+
+    fn infer_call_arguments(
+        &mut self,
+        range: TextRange,
+        arguments: &[Argument],
+    ) -> Vec<CallArgument<'db>> {
+        arguments
             .iter()
             .map(|argument| {
                 let ty = argument.value.map(|value| self.infer(value));
@@ -672,15 +875,39 @@ impl<'db> Checker<'db, '_> {
                     .value
                     .map(|value| self.module.expression(value).range)
                     .unwrap_or(range);
-                (argument.name.clone(), ty, argument_range)
+                let whole_double = argument
+                    .value
+                    .is_some_and(|value| self.is_whole_double(value));
+                CallArgument {
+                    name: argument.name.clone(),
+                    ty,
+                    range: argument_range,
+                    whole_double,
+                }
             })
-            .collect();
+            .collect()
+    }
 
+    fn is_whole_double(&self, value: ExprId) -> bool {
+        matches!(
+            self.module.expression(value).kind,
+            ExpressionKind::Literal(LiteralKind::Double { whole_number: true })
+        )
+    }
+
+    fn dispatch_call(
+        &mut self,
+        range: TextRange,
+        callee: Ty<'db>,
+        arguments: &[CallArgument<'db>],
+    ) -> Ty<'db> {
         let resolved = self.table.shallow_resolve(self.db, callee);
         match resolved.kind(self.db) {
             TyKind::Function(function) => {
                 let function = function.clone();
-                self.match_arguments(range, &function, &arguments);
+                if let Err(error) = self.match_arguments(range, &function, arguments) {
+                    self.errors.push(error);
+                }
                 function.ret
             }
             TyKind::Any | TyKind::Unknown => self.unknown(),
@@ -690,8 +917,8 @@ impl<'db> Checker<'db, '_> {
                 let ret = self.fresh(Constraint::Unconstrained);
                 let positional: Vec<Ty<'db>> = arguments
                     .iter()
-                    .filter(|(name, _, _)| name.is_none())
-                    .map(|(_, ty, _)| ty.unwrap_or_else(|| self.unknown()))
+                    .filter(|argument| argument.name.is_none())
+                    .map(|argument| argument.ty.unwrap_or_else(|| self.unknown()))
                     .collect();
                 let expected = Ty::new(
                     self.db,
@@ -699,12 +926,15 @@ impl<'db> Checker<'db, '_> {
                         positional,
                         named: arguments
                             .iter()
-                            .filter_map(|(name, ty, _)| {
-                                name.as_ref().map(|name| crate::types::RecordField {
-                                    name: Name::new(self.db, name.clone()),
-                                    ty: ty.unwrap_or_else(|| self.unknown()),
-                                    optional: false,
-                                })
+                            .filter_map(|argument| {
+                                argument
+                                    .name
+                                    .as_ref()
+                                    .map(|name| crate::types::RecordField {
+                                        name: Name::new(self.db, name.clone()),
+                                        ty: argument.ty.unwrap_or_else(|| self.unknown()),
+                                        optional: false,
+                                    })
                             })
                             .collect(),
                         variadic: None,
@@ -713,6 +943,44 @@ impl<'db> Checker<'db, '_> {
                 );
                 self.unify_or_report(range, expected, resolved);
                 ret
+            }
+            // A call through a union of functions — the dispatch-table idiom,
+            // `handlers[[name]](...)` — must be valid for every member, since
+            // the value could be any of them. Each member's signature is
+            // probed against the arguments in an isolated snapshot and the
+            // call's type is the union of the member returns; returns are
+            // variable-erased because the probe bindings that produced them
+            // roll back.
+            TyKind::Union(members)
+                if members.iter().all(|&member| {
+                    matches!(
+                        self.table.shallow_resolve(self.db, member).kind(self.db),
+                        TyKind::Function(_)
+                    )
+                }) =>
+            {
+                let members = members.clone();
+                let mut returns = Vec::with_capacity(members.len());
+                for member in members {
+                    let member = self.table.shallow_resolve(self.db, member);
+                    let TyKind::Function(function) = member.kind(self.db).clone() else {
+                        continue;
+                    };
+                    let snapshot = self.table.snapshot();
+                    match self.match_arguments(range, &function, arguments) {
+                        Ok(()) => {
+                            let member_return = self.table.resolve(self.db, function.ret);
+                            self.table.rollback(snapshot);
+                            returns.push(crate::types::erase_vars(self.db, member_return));
+                        }
+                        Err(error) => {
+                            self.table.rollback(snapshot);
+                            self.errors.push(error);
+                            return self.unknown();
+                        }
+                    }
+                }
+                union_of(self.db, returns)
             }
             _ => {
                 self.errors.push(TypeError {
@@ -726,79 +994,208 @@ impl<'db> Checker<'db, '_> {
         }
     }
 
-    /// Name-aware call matching: named arguments consume their formal; the
-    /// rest fill positionally; a variadic absorbs the overflow.
+    /// R's argument matcher over already-inferred argument types: named
+    /// arguments consume their same-named formal; positionals fill the fixed
+    /// positional parameters, then the named formals declared before the rest
+    /// parameter (all of them when the function is not variadic), then the
+    /// rest parameter absorbs the overflow. The first failing argument aborts
+    /// the match, so an overload probe can run this inside a snapshot.
     fn match_arguments(
         &mut self,
         range: TextRange,
         function: &FunctionType<'db>,
-        arguments: &[(Option<String>, Option<Ty<'db>>, TextRange)],
-    ) {
-        let mut positional_index = 0usize;
-        let mut named_consumed: Vec<bool> = vec![false; function.named.len()];
-        for (name, ty, argument_range) in arguments {
-            match name {
+        arguments: &[CallArgument<'db>],
+    ) -> Result<(), TypeError<'db>> {
+        let total = function.positional.len() + function.named.len();
+        let required = function.positional.len()
+            + function
+                .named
+                .iter()
+                .filter(|field| !field.optional)
+                .count();
+        let variadic_element = function.variadic.as_ref().map(|rest| rest.element);
+        // Named parameters declared before the rest parameter fill
+        // positionally, exactly as R fills formals before `...`. Removals
+        // keep declaration order, so the pre-rest parameters are always the
+        // front segment of the remaining list and this count tracks them.
+        let mut pre_rest_remaining = match &function.variadic {
+            Some(rest) => rest.preceding_named,
+            None => function.named.len(),
+        };
+        let mut remaining_named = function.named.clone();
+        let mut next_positional = 0usize;
+
+        for argument in arguments {
+            match &argument.name {
                 Some(name) => {
-                    let formal = function
-                        .named
+                    let position = remaining_named
                         .iter()
                         .position(|field| field.name.text(self.db) == name.as_str());
-                    match formal {
+                    match position {
                         Some(index) => {
-                            named_consumed[index] = true;
-                            if let Some(ty) = ty {
-                                let expected = function.named[index].ty;
-                                self.unify_or_report(*argument_range, expected, *ty);
+                            let field = remaining_named.remove(index);
+                            if index < pre_rest_remaining {
+                                pre_rest_remaining -= 1;
+                            }
+                            if let Some(ty) = argument.ty {
+                                self.check_argument(
+                                    field.ty,
+                                    ty,
+                                    argument.range,
+                                    argument.whole_double,
+                                )?;
                             }
                         }
                         None => {
-                            if function.variadic.is_none() {
-                                self.errors.push(TypeError {
-                                    range: *argument_range,
-                                    kind: TypeErrorKind::UnknownArgument { name: name.clone() },
-                                });
-                            } else if let (Some(rest), Some(ty)) = (&function.variadic, ty) {
-                                self.unify_or_report(*argument_range, rest.element, *ty);
+                            // A named argument matching no declared parameter
+                            // is absorbed by the rest parameter (R collects
+                            // unmatched keywords into `...`); a name that
+                            // *duplicates* an already-given declared parameter
+                            // stays an error, as does an unmatched name on a
+                            // non-variadic function.
+                            let duplicates_declared = function
+                                .named
+                                .iter()
+                                .any(|field| field.name.text(self.db) == name.as_str());
+                            match (variadic_element, duplicates_declared) {
+                                (Some(element), false) => {
+                                    if let Some(ty) = argument.ty {
+                                        self.check_argument(
+                                            element,
+                                            ty,
+                                            argument.range,
+                                            argument.whole_double,
+                                        )?;
+                                    }
+                                }
+                                _ => {
+                                    return Err(TypeError {
+                                        range: argument.range,
+                                        kind: TypeErrorKind::UnknownArgument { name: name.clone() },
+                                    });
+                                }
                             }
                         }
                     }
                 }
                 None => {
-                    if positional_index < function.positional.len() {
-                        let expected = function.positional[positional_index];
-                        positional_index += 1;
-                        if let Some(ty) = ty {
-                            self.unify_or_report(*argument_range, expected, *ty);
+                    if next_positional < function.positional.len() {
+                        let expected = function.positional[next_positional];
+                        next_positional += 1;
+                        if let Some(ty) = argument.ty {
+                            self.check_argument(
+                                expected,
+                                ty,
+                                argument.range,
+                                argument.whole_double,
+                            )?;
                         }
-                    } else if let (Some(rest), Some(ty)) = (&function.variadic, ty) {
-                        self.unify_or_report(*argument_range, rest.element, *ty);
+                    } else if pre_rest_remaining > 0 {
+                        let field = remaining_named.remove(0);
+                        pre_rest_remaining -= 1;
+                        if let Some(ty) = argument.ty {
+                            self.check_argument(
+                                field.ty,
+                                ty,
+                                argument.range,
+                                argument.whole_double,
+                            )?;
+                        }
+                    } else if let Some(element) = variadic_element {
+                        if let Some(ty) = argument.ty {
+                            self.check_argument(
+                                element,
+                                ty,
+                                argument.range,
+                                argument.whole_double,
+                            )?;
+                        }
                     } else {
-                        // Unconsumed named formals absorb leftover positionals
-                        // (R fills unmatched formals in order).
-                        let next_named = named_consumed.iter().position(|consumed| !consumed);
-                        match next_named {
-                            Some(index) => {
-                                named_consumed[index] = true;
-                                if let Some(ty) = ty {
-                                    let expected = function.named[index].ty;
-                                    self.unify_or_report(*argument_range, expected, *ty);
-                                }
-                            }
-                            None => {
-                                self.errors.push(TypeError {
-                                    range,
-                                    kind: TypeErrorKind::TooManyArguments {
-                                        expected: function.positional.len() + function.named.len(),
-                                        found: arguments.len(),
-                                    },
-                                });
-                                return;
-                            }
-                        }
+                        return Err(TypeError {
+                            range,
+                            kind: TypeErrorKind::ArityMismatch {
+                                expected: total,
+                                found: arguments.len(),
+                            },
+                        });
                     }
                 }
             }
         }
+
+        if next_positional != function.positional.len()
+            || remaining_named.iter().any(|field| !field.optional)
+        {
+            return Err(TypeError {
+                range,
+                kind: TypeErrorKind::ArityMismatch {
+                    expected: required,
+                    found: arguments.len(),
+                },
+            });
+        }
+        Ok(())
+    }
+
+    /// One argument against one parameter type: compatibility, not
+    /// unification, so parameter-position coercions (scalar-to-vector, `T`
+    /// into `T | NULL`, integer widening) apply. An `Unknown` argument is
+    /// accepted to avoid cascading a second error after the cause was already
+    /// diagnosed where the value became `Unknown`.
+    fn check_argument(
+        &mut self,
+        expected: Ty<'db>,
+        found: Ty<'db>,
+        range: TextRange,
+        whole_double: bool,
+    ) -> Result<(), TypeError<'db>> {
+        let resolved_found = self.table.resolve(self.db, found);
+        if matches!(resolved_found.kind(self.db), TyKind::Unknown) {
+            return Ok(());
+        }
+        if self.table.compatible(self.db, resolved_found, expected) {
+            return Ok(());
+        }
+        // R programmers write `seq_len(10)`, not `seq_len(10L)`: a
+        // whole-number double literal counts as an integer at a parameter
+        // position. The retry goes through full compatibility, so
+        // integer-expecting unions and vector parameters admit the literal
+        // too. Off during a strict overload probe — the courtesy must not
+        // decide which candidate wins.
+        if self.overload_probe_depth == 0
+            && matches!(resolved_found.kind(self.db), TyKind::Scalar(Atomic::Double))
+            && whole_double
+            && self
+                .table
+                .compatible(self.db, scalar(self.db, Atomic::Integer), expected)
+        {
+            return Ok(());
+        }
+        // A numeric-constrained parameter rejected the argument because it is
+        // not numeric; report that directly rather than rendering the bare
+        // inference variable as the expected type.
+        let resolved_expected = self.table.resolve(self.db, expected);
+        if let TyKind::Var(var) = resolved_expected.kind(self.db)
+            && let Entry::Unbound {
+                constraint: Constraint::Numeric,
+                ..
+            } = self.table.entry(*var)
+        {
+            return Err(TypeError {
+                range,
+                kind: TypeErrorKind::ConstraintViolation {
+                    constraint: Constraint::Numeric,
+                    found: resolved_found,
+                },
+            });
+        }
+        Err(TypeError {
+            range,
+            kind: TypeErrorKind::Mismatch {
+                expected: resolved_expected,
+                found: resolved_found,
+            },
+        })
     }
 
     /// Branch-merge join: unify when possible (keeps the chooser idiom linking
@@ -1094,8 +1491,10 @@ mod tests {
         let TyKind::Function(function) = scheme.body.kind(&db) else {
             panic!("expected a function scheme");
         };
-        assert_eq!(function.positional.len(), 1);
-        assert_eq!(function.positional[0], function.ret);
+        // Formals carry their names (R matches by name and position).
+        assert_eq!(function.named.len(), 1);
+        assert_eq!(function.named[0].name.text(&db), "x");
+        assert_eq!(function.named[0].ty, function.ret);
     }
 
     #[test]
@@ -1106,11 +1505,14 @@ mod tests {
             "g <- function() {\n  f <- function(x) x + 1\n  f(\"txt\")\n}",
         );
         assert!(
-            check
-                .errors
-                .iter()
-                .any(|error| matches!(error.kind, TypeErrorKind::Mismatch { .. })),
-            "expected a mismatch, got {:?}",
+            check.errors.iter().any(|error| matches!(
+                error.kind,
+                TypeErrorKind::ConstraintViolation {
+                    constraint: Constraint::Numeric,
+                    ..
+                }
+            )),
+            "expected a numeric-constraint violation, got {:?}",
             check.errors
         );
     }
@@ -1160,6 +1562,55 @@ mod tests {
             "expected unknown-argument, got {:?}",
             check.errors
         );
+    }
+
+    #[test]
+    fn arity_mismatch_reports_both_directions() {
+        let db = RootDatabase::default();
+        let surplus = check_source(&db, "g <- function() {\n  f <- function(x) x\n  f(1, 2)\n}");
+        assert!(
+            surplus
+                .errors
+                .iter()
+                .any(|error| matches!(error.kind, TypeErrorKind::ArityMismatch { .. })),
+            "expected a surplus-argument arity error, got {:?}",
+            surplus.errors
+        );
+        let missing = check_source(&db, "g <- function() {\n  f <- function(x) x\n  f()\n}");
+        assert!(
+            missing
+                .errors
+                .iter()
+                .any(|error| matches!(error.kind, TypeErrorKind::ArityMismatch { .. })),
+            "expected a missing-argument arity error, got {:?}",
+            missing.errors
+        );
+        // A defaulted formal may stay unfilled.
+        let defaulted = check_source(&db, "g <- function() {\n  f <- function(x = 1) x\n  f()\n}");
+        assert!(defaulted.errors.is_empty(), "{:?}", defaulted.errors);
+    }
+
+    #[test]
+    fn union_of_functions_calls_every_member() {
+        let db = RootDatabase::default();
+        // The dispatch-table idiom: the value could be either function, so
+        // the call must be valid for both and types as the union of returns.
+        let check = check_source(
+            &db,
+            "f <- function(flag) {\n  h <- if (flag) function(x) 1L else function(x) \"a\"\n  h(2L)\n}",
+        );
+        assert!(check.errors.is_empty(), "{:?}", check.errors);
+        let scheme = check.scheme.expect("scheme");
+        let TyKind::Function(function) = scheme.body.kind(&db) else {
+            panic!()
+        };
+        let TyKind::Union(members) = function.ret.kind(&db) else {
+            panic!(
+                "expected integer | character, got {:?}",
+                function.ret.kind(&db)
+            );
+        };
+        assert_eq!(members.len(), 2);
     }
 
     #[test]

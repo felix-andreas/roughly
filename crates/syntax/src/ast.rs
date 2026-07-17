@@ -51,7 +51,9 @@ ast_node!(Annotation, ANNOTATION);
 impl SourceFile {
     /// The top-level expressions, in order (error regions excluded).
     pub fn statements(&self) -> impl Iterator<Item = SyntaxNode> + '_ {
-        self.0.children().filter(|node| is_expression_kind(node.kind()))
+        self.0
+            .children()
+            .filter(|node| is_expression_kind(node.kind()))
     }
 }
 
@@ -64,14 +66,19 @@ impl Name {
     pub fn text(&self) -> Option<String> {
         let token = self.token()?;
         let text = token.text();
-        let stripped = text.strip_prefix('`').and_then(|t| t.strip_suffix('`')).unwrap_or(text);
+        let stripped = text
+            .strip_prefix('`')
+            .and_then(|t| t.strip_suffix('`'))
+            .unwrap_or(text);
         Some(stripped.to_owned())
     }
 }
 
 impl BinaryExpr {
     pub fn lhs(&self) -> Option<SyntaxNode> {
-        self.0.children().find(|node| is_expression_kind(node.kind()))
+        self.0
+            .children()
+            .find(|node| is_expression_kind(node.kind()))
     }
 
     pub fn operator(&self) -> Option<SyntaxToken> {
@@ -82,7 +89,10 @@ impl BinaryExpr {
     }
 
     pub fn rhs(&self) -> Option<SyntaxNode> {
-        self.0.children().filter(|node| is_expression_kind(node.kind())).nth(1)
+        self.0
+            .children()
+            .filter(|node| is_expression_kind(node.kind()))
+            .nth(1)
     }
 }
 
@@ -92,7 +102,10 @@ impl FunctionDef {
     }
 
     pub fn body(&self) -> Option<SyntaxNode> {
-        self.0.children().filter(|node| is_expression_kind(node.kind())).last()
+        self.0
+            .children()
+            .filter(|node| is_expression_kind(node.kind()))
+            .last()
     }
 }
 

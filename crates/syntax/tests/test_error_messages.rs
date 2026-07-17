@@ -19,7 +19,12 @@ fn render_errors(source: &str) -> String {
     }
 
     let line_starts: Vec<usize> = std::iter::once(0)
-        .chain(source.char_indices().filter(|&(_, c)| c == '\n').map(|(at, _)| at + 1))
+        .chain(
+            source
+                .char_indices()
+                .filter(|&(_, c)| c == '\n')
+                .map(|(at, _)| at + 1),
+        )
         .collect();
     let line_of = |offset: usize| line_starts.partition_point(|&start| start <= offset) - 1;
 

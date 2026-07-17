@@ -77,29 +77,116 @@ const SEEDS: &[&str] = &[
 ];
 
 const ALPHABET: &[&str] = &[
-    "x", "value", "f", "(", ")", "{", "}", "[", "]", "[[", ",", ";", "\n", " ", "<-", "=", "+",
-    "-", "*", "/", "^", "if", "else", "for", "while", "function", "\\", "1", "2.5", "1L", "2i",
-    "\"s\"", "'c'", "%in%", "%%", "|>", "|", "&&", "~", "?", "$", "@", "::", ":", "`n`", "...",
-    "..1", "#:", "# comment", "NULL", "TRUE", "NA", "Inf", "r\"(x)\"", "->", "->>", "<<-", "!",
-    "==", "<=", ">", "_", "0x1F", "1e5", ".5", "next", "break", "repeat", "in", "**", ":=",
-    "@type", "@param", "fn", "list[", "list{", "named", "<T>", "NULL =", "\r\n",
+    "x",
+    "value",
+    "f",
+    "(",
+    ")",
+    "{",
+    "}",
+    "[",
+    "]",
+    "[[",
+    ",",
+    ";",
+    "\n",
+    " ",
+    "<-",
+    "=",
+    "+",
+    "-",
+    "*",
+    "/",
+    "^",
+    "if",
+    "else",
+    "for",
+    "while",
+    "function",
+    "\\",
+    "1",
+    "2.5",
+    "1L",
+    "2i",
+    "\"s\"",
+    "'c'",
+    "%in%",
+    "%%",
+    "|>",
+    "|",
+    "&&",
+    "~",
+    "?",
+    "$",
+    "@",
+    "::",
+    ":",
+    "`n`",
+    "...",
+    "..1",
+    "#:",
+    "# comment",
+    "NULL",
+    "TRUE",
+    "NA",
+    "Inf",
+    "r\"(x)\"",
+    "->",
+    "->>",
+    "<<-",
+    "!",
+    "==",
+    "<=",
+    ">",
+    "_",
+    "0x1F",
+    "1e5",
+    ".5",
+    "next",
+    "break",
+    "repeat",
+    "in",
+    "**",
+    ":=",
+    "@type",
+    "@param",
+    "fn",
+    "list[",
+    "list{",
+    "named",
+    "<T>",
+    "NULL =",
+    "\r\n",
 ];
 
 fn iterations() -> usize {
-    std::env::var("FUZZ_ITERS").ok().and_then(|value| value.parse().ok()).unwrap_or(1500)
+    std::env::var("FUZZ_ITERS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(1500)
 }
 
 /// The full invariant battery for one input.
 fn check_invariants(input: &str) {
     let parse = syntax::parse(input);
     let reprinted = parse.text();
-    assert_eq!(reprinted, input, "lossless round-trip violated for input {input:?}");
+    assert_eq!(
+        reprinted, input,
+        "lossless round-trip violated for input {input:?}"
+    );
 
     let (tokens, _errors) = syntax::lex(input);
     let total: u32 = tokens.iter().map(|token| u32::from(token.len)).sum();
-    assert_eq!(total as usize, input.len(), "token cover violated for input {input:?}");
+    assert_eq!(
+        total as usize,
+        input.len(),
+        "token cover violated for input {input:?}"
+    );
     for token in &tokens {
-        assert!(u32::from(token.len) > 0, "zero-length token for input {input:?}");
+        assert!(
+            u32::from(token.len) > 0,
+            "zero-length token for input {input:?}"
+        );
     }
 
     check_geometry(&parse.syntax_node(), input);
@@ -107,8 +194,16 @@ fn check_invariants(input: &str) {
     // Determinism: a second parse yields a structurally equal tree and the
     // same errors.
     let again = syntax::parse(input);
-    assert_eq!(parse.green(), again.green(), "non-deterministic parse for input {input:?}");
-    assert_eq!(parse.errors(), again.errors(), "non-deterministic errors for input {input:?}");
+    assert_eq!(
+        parse.green(),
+        again.green(),
+        "non-deterministic parse for input {input:?}"
+    );
+    assert_eq!(
+        parse.errors(),
+        again.errors(),
+        "non-deterministic errors for input {input:?}"
+    );
 }
 
 /// Every node's children (nodes and tokens) must tile its range exactly.
@@ -129,7 +224,12 @@ fn check_geometry(node: &syntax::SyntaxNode, input: &str) {
         }
     }
     if node.children_with_tokens().next().is_some() {
-        assert_eq!(cursor, range.end(), "children do not cover {:?} for input {input:?}", node.kind());
+        assert_eq!(
+            cursor,
+            range.end(),
+            "children do not cover {:?} for input {input:?}",
+            node.kind()
+        );
     }
 }
 
@@ -420,7 +520,12 @@ fn deep_nesting_is_refused_not_fatal() {
     let deep = "(".repeat(2000) + "1" + &")".repeat(2000);
     let parse = syntax::parse(&deep);
     assert_eq!(parse.text(), deep);
-    assert!(parse.errors().iter().any(|error| error.message.contains("too deep")));
+    assert!(
+        parse
+            .errors()
+            .iter()
+            .any(|error| error.message.contains("too deep"))
+    );
 
     let deep_annotation = format!("#: {}integer{}", "(".repeat(2000), ")".repeat(2000));
     let parse = syntax::parse(&deep_annotation);
@@ -439,7 +544,9 @@ fn corpus_sample(count: usize) -> Option<Vec<String>> {
     let mut files = Vec::new();
     let mut stack = vec![root.join("r-base"), root.join("cran")];
     while let Some(dir) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {

@@ -99,8 +99,18 @@ fn item_offset(db: &dyn Db, item: Item<'_>) -> Option<syntax::TextSize> {
 }
 
 fn render_type_error(db: &dyn Db, range: TextRange, error: &TypeError<'_>) -> Diagnostic {
+    let message = render_type_error_message(db, error);
+    Diagnostic {
+        range,
+        severity: Severity::Error,
+        code: "type-mismatch",
+        message,
+    }
+}
+
+fn render_type_error_message(db: &dyn Db, error: &TypeError<'_>) -> String {
     let mut renderer = TypeRenderer::default();
-    let message = match &error.kind {
+    match &error.kind {
         TypeErrorKind::Mismatch { expected, found } => format!(
             "expected `{}`, found `{}`",
             renderer.render(db, *expected),
@@ -109,8 +119,8 @@ fn render_type_error(db: &dyn Db, range: TextRange, error: &TypeError<'_>) -> Di
         TypeErrorKind::NotAFunction { found } => {
             format!("this is not a function: `{}`", renderer.render(db, *found))
         }
-        TypeErrorKind::TooManyArguments { expected, found } => {
-            format!("too many arguments: this function takes {expected}, found {found}")
+        TypeErrorKind::ArityMismatch { expected, found } => {
+            format!("this call passes {found} argument(s), but the function accepts {expected}")
         }
         TypeErrorKind::UnknownArgument { name } => {
             format!("unknown argument `{name}`")
@@ -118,13 +128,37 @@ fn render_type_error(db: &dyn Db, range: TextRange, error: &TypeError<'_>) -> Di
         TypeErrorKind::AnnotationParameterMismatch { name } => {
             format!("the annotation and the definition disagree about parameter `{name}`")
         }
+        TypeErrorKind::ConstraintViolation { constraint, found } => {
+            let expected_description = match constraint {
+                Constraint::Unconstrained => "a value",
+                Constraint::Numeric => "a numeric value (`integer` or `double`)",
+                Constraint::AtomicElement => {
+                    "an atomic value (`logical`, `integer`, `double`, `complex`, `character`, or `raw`)"
+                }
+                Constraint::ScalarNumeric => "a scalar numeric value (`integer` or `double`)",
+            };
+            format!(
+                "expected {expected_description}, found `{}`",
+                renderer.render(db, *found)
+            )
+        }
+        TypeErrorKind::NoMatchingOverload {
+            name,
+            candidates,
+            first,
+        } => {
+            let mut message = format!(
+                "no overload of `{name}` matches these arguments — I tried all {candidates} declared signatures"
+            );
+            if let Some(first) = first {
+                message.push_str(&format!(
+                    "; the first candidate fails with: {}",
+                    render_type_error_message(db, first)
+                ));
+            }
+            message
+        }
         TypeErrorKind::InfiniteType => "this would create an infinite type".to_owned(),
-    };
-    Diagnostic {
-        range,
-        severity: Severity::Error,
-        code: "type-mismatch",
-        message,
     }
 }
 

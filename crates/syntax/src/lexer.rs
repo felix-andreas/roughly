@@ -20,7 +20,13 @@ pub struct Token {
 
 /// Lex the whole input. The returned tokens always cover `text` exactly.
 pub fn lex(text: &str) -> (Vec<Token>, Vec<SyntaxError>) {
-    let mut lexer = Lexer { text, pos: 0, tokens: Vec::new(), errors: Vec::new(), in_annotation: false };
+    let mut lexer = Lexer {
+        text,
+        pos: 0,
+        tokens: Vec::new(),
+        errors: Vec::new(),
+        in_annotation: false,
+    };
     lexer.run();
     (lexer.tokens, lexer.errors)
 }
@@ -54,7 +60,10 @@ impl Lexer<'_> {
     }
 
     fn error(&mut self, message: impl Into<String>, start: usize) {
-        let range = TextRange::new(TextSize::from(start as u32), TextSize::from(self.pos as u32));
+        let range = TextRange::new(
+            TextSize::from(start as u32),
+            TextSize::from(self.pos as u32),
+        );
         self.errors.push(SyntaxError::new(message, range));
     }
 
@@ -157,7 +166,11 @@ impl Lexer<'_> {
             '{' => L_BRACE,
             '}' => R_BRACE,
             '[' => {
-                if self.eat('[') { L_BRACKET2 } else { L_BRACKET }
+                if self.eat('[') {
+                    L_BRACKET2
+                } else {
+                    L_BRACKET
+                }
             }
             ']' => R_BRACKET,
             ',' => COMMA,
@@ -177,16 +190,32 @@ impl Lexer<'_> {
                 }
             }
             '>' => {
-                if self.eat('=') { GREATER_EQ } else { GREATER }
+                if self.eat('=') {
+                    GREATER_EQ
+                } else {
+                    GREATER
+                }
             }
             '=' => {
-                if self.eat('=') { EQ2 } else { EQ }
+                if self.eat('=') {
+                    EQ2
+                } else {
+                    EQ
+                }
             }
             '!' => {
-                if self.eat('=') { BANG_EQ } else { BANG }
+                if self.eat('=') {
+                    BANG_EQ
+                } else {
+                    BANG
+                }
             }
             '&' => {
-                if self.eat('&') { AMP2 } else { AMP }
+                if self.eat('&') {
+                    AMP2
+                } else {
+                    AMP
+                }
             }
             '|' => {
                 if self.eat('|') {
@@ -346,7 +375,10 @@ impl Lexer<'_> {
             }
             None => {
                 self.pos = self.text.len();
-                self.error(format!("unterminated raw string; expected `{closer}`"), start);
+                self.error(
+                    format!("unterminated raw string; expected `{closer}`"),
+                    start,
+                );
                 SyntaxKind::RAW_STRING
             }
         }
@@ -356,7 +388,10 @@ impl Lexer<'_> {
         loop {
             match self.bump() {
                 None => {
-                    self.error("unterminated backtick name; expected a closing `` ` ``", start);
+                    self.error(
+                        "unterminated backtick name; expected a closing `` ` ``",
+                        start,
+                    );
                     break;
                 }
                 Some('`') => break,

@@ -241,6 +241,150 @@ mod tests {
         assert!(!crate::package_scheme_exists(&db, "definitely_not_a_name"));
     }
 
+    fn first_item_check<'db>(db: &'db RootDatabase, source: &str) -> crate::check::ItemCheck<'db> {
+        let file = SourceFile::new(db, source.to_owned(), DocumentKind::Package);
+        ProjectFiles::new(db, vec![file]);
+        let item = crate::item_tree(db, file)[0];
+        crate::item_check(db, item).expect("item check")
+    }
+
+    fn scheme_return<'db>(
+        db: &'db RootDatabase,
+        check: &crate::check::ItemCheck<'db>,
+    ) -> crate::types::Ty<'db> {
+        let scheme = check.scheme.clone().expect("definition scheme");
+        let crate::types::TyKind::Function(function) = scheme.body.kind(db).clone() else {
+            panic!("expected a function scheme");
+        };
+        function.ret
+    }
+
+    #[test]
+    fn overload_selection_picks_the_specific_candidate() {
+        let db = RootDatabase::default();
+        install_shipped_stubs(&db);
+        let check = first_item_check(&db, "f <- function() cumsum(1L)\n");
+        assert!(check.errors.is_empty(), "{:?}", check.errors);
+        let ret = scheme_return(&db, &check);
+        let crate::types::TyKind::Vector(element) = ret.kind(&db) else {
+            panic!("expected integer[], got {:?}", ret.kind(&db));
+        };
+        assert!(matches!(
+            element.kind(&db),
+            crate::types::TyKind::Scalar(crate::types::Atomic::Integer)
+        ));
+    }
+
+    #[test]
+    fn strict_round_keeps_doubles_double() {
+        let db = RootDatabase::default();
+        install_shipped_stubs(&db);
+        // `sum(1, 2)` is a double at runtime: the strict round must refuse the
+        // integer candidate and land on the double one.
+        let check = first_item_check(&db, "f <- function() sum(1, 2)\n");
+        assert!(check.errors.is_empty(), "{:?}", check.errors);
+        assert!(matches!(
+            scheme_return(&db, &check).kind(&db),
+            crate::types::TyKind::Scalar(crate::types::Atomic::Double)
+        ));
+    }
+
+    #[test]
+    fn courtesy_round_admits_whole_double_literals() {
+        let db = RootDatabase::default();
+        StubSources::new(
+            &db,
+            vec![(
+                "test".to_owned(),
+                "f : fn(x: integer) -> integer\nf : fn(x: integer[]) -> integer[]\n".to_owned(),
+            )],
+        );
+        // No candidate takes a double, but `1` is a whole number: the
+        // courtesy round admits it and exact declaration order still decides.
+        let check = first_item_check(&db, "g <- function() f(1)\n");
+        assert!(check.errors.is_empty(), "{:?}", check.errors);
+        assert!(matches!(
+            scheme_return(&db, &check).kind(&db),
+            crate::types::TyKind::Scalar(crate::types::Atomic::Integer)
+        ));
+    }
+
+    #[test]
+    fn no_matching_overload_reports_with_first_failure() {
+        let db = RootDatabase::default();
+        StubSources::new(
+            &db,
+            vec![(
+                "test".to_owned(),
+                "f : fn(x: integer) -> integer\nf : fn(x: double) -> double\n".to_owned(),
+            )],
+        );
+        let check = first_item_check(&db, "g <- function() f(\"a\")\n");
+        assert!(
+            check.errors.iter().any(|error| matches!(
+                &error.kind,
+                crate::check::TypeErrorKind::NoMatchingOverload {
+                    name,
+                    candidates: 2,
+                    first: Some(_),
+                } if name == "f"
+            )),
+            "expected a no-matching-overload report, got {:?}",
+            check.errors
+        );
+    }
+
+    #[test]
+    fn unresolved_argument_falls_back_to_the_general_candidate() {
+        let db = RootDatabase::default();
+        install_shipped_stubs(&db);
+        // `x` is a free parameter: selection would let the first candidate
+        // greedily pin it, so the call must use the final (most general)
+        // declaration and leave `x` generic.
+        let check = first_item_check(&db, "f <- function(x) sum(x)\n");
+        assert!(check.errors.is_empty(), "{:?}", check.errors);
+        let scheme = check.scheme.clone().expect("scheme");
+        assert_eq!(
+            scheme.binders.len(),
+            1,
+            "the parameter must stay generic: {scheme:?}"
+        );
+        assert!(matches!(
+            scheme_return(&db, &check).kind(&db),
+            crate::types::TyKind::Any
+        ));
+    }
+
+    #[test]
+    fn courtesy_applies_outside_overload_sets_too() {
+        let db = RootDatabase::default();
+        StubSources::new(
+            &db,
+            vec![(
+                "test".to_owned(),
+                "g : fn(n: integer) -> integer[]\n".to_owned(),
+            )],
+        );
+        let ok = first_item_check(&db, "f <- function() g(3)\n");
+        assert!(ok.errors.is_empty(), "{:?}", ok.errors);
+        let db2 = RootDatabase::default();
+        StubSources::new(
+            &db2,
+            vec![(
+                "test".to_owned(),
+                "g : fn(n: integer) -> integer[]\n".to_owned(),
+            )],
+        );
+        let bad = first_item_check(&db2, "f <- function() g(2.5)\n");
+        assert!(
+            bad.errors
+                .iter()
+                .any(|error| matches!(error.kind, crate::check::TypeErrorKind::Mismatch { .. })),
+            "a fractional double must not pass as integer: {:?}",
+            bad.errors
+        );
+    }
+
     #[test]
     fn overloads_and_replacement_across_sources() {
         let db = RootDatabase::default();

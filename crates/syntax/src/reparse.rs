@@ -188,7 +188,10 @@ fn try_splice(
     for error in middle.errors() {
         errors.push(SyntaxError::new(
             error.message.clone(),
-            TextRange::new(error.range.start() + prefix_len, error.range.end() + prefix_len),
+            TextRange::new(
+                error.range.start() + prefix_len,
+                error.range.end() + prefix_len,
+            ),
         ));
     }
 
@@ -200,14 +203,16 @@ fn try_splice(
 /// region — consecutive `#:` lines stitch across newlines, so an anchor next
 /// to one is not a real statement boundary.
 fn anchor_ok(children: &[rowan::SyntaxElement<crate::RLanguage>], index: usize) -> bool {
-    let Some(child) = children.get(index) else { return false };
+    let Some(child) = children.get(index) else {
+        return false;
+    };
     if child.kind() != SyntaxKind::NEWLINE {
         return false;
     }
     let annotationish = |element: &rowan::SyntaxElement<crate::RLanguage>| match element {
-        NodeOrToken::Node(node) => {
-            node.descendants().any(|descendant| descendant.kind() == SyntaxKind::ANNOTATION)
-        }
+        NodeOrToken::Node(node) => node
+            .descendants()
+            .any(|descendant| descendant.kind() == SyntaxKind::ANNOTATION),
         NodeOrToken::Token(token) => token.kind() == SyntaxKind::ANNOTATION_MARKER,
     };
     let mut previous = index;
@@ -218,7 +223,10 @@ fn anchor_ok(children: &[rowan::SyntaxElement<crate::RLanguage>], index: usize) 
         return false;
     }
     let mut next = index + 1;
-    while children.get(next).is_some_and(|c| c.kind() == SyntaxKind::WHITESPACE) {
+    while children
+        .get(next)
+        .is_some_and(|c| c.kind() == SyntaxKind::WHITESPACE)
+    {
         next += 1;
     }
     if let Some(next) = children.get(next)
@@ -240,7 +248,9 @@ fn middle_touches_annotation(text: &str) -> bool {
     first.contains("#:") || last.contains("#:") || text.trim_start().starts_with("#:")
 }
 
-fn to_green(element: &rowan::SyntaxElement<crate::RLanguage>) -> NodeOrToken<GreenNode, rowan::GreenToken> {
+fn to_green(
+    element: &rowan::SyntaxElement<crate::RLanguage>,
+) -> NodeOrToken<GreenNode, rowan::GreenToken> {
     match element {
         NodeOrToken::Node(node) => NodeOrToken::Node(node.green().into()),
         NodeOrToken::Token(token) => NodeOrToken::Token(token.green().to_owned()),
