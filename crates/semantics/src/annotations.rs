@@ -81,7 +81,7 @@ pub fn lower_annotation<'db>(db: &'db dyn Db, node: &SyntaxNode) -> Annotation<'
                         let name = child
                             .children()
                             .find(|c| c.kind() == SyntaxKind::NAME)
-                            .and_then(|name| syntax::ast::Name::cast(name))
+                            .and_then(syntax::ast::Name::cast)
                             .and_then(|name| name.text());
                         let optional = child
                             .children_with_tokens()
