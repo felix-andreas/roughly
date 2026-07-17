@@ -7,6 +7,7 @@
 //! class-constructor calls and function bodies), never whole files, so an edit
 //! recomputes only the items whose derived values actually changed.
 
+pub mod check;
 pub mod hir;
 pub mod infer;
 pub mod naming;
