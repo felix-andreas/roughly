@@ -542,7 +542,6 @@ impl<'db> Checker<'db, '_> {
     ) {
         let mut positional_index = 0usize;
         let mut named_consumed: Vec<bool> = vec![false; function.named.len()];
-        let mut positional_count = 0usize;
         for (name, ty, argument_range) in arguments {
             match name {
                 Some(name) => {
@@ -571,7 +570,6 @@ impl<'db> Checker<'db, '_> {
                     }
                 }
                 None => {
-                    positional_count += 1;
                     if positional_index < function.positional.len() {
                         let expected = function.positional[positional_index];
                         positional_index += 1;
