@@ -202,6 +202,127 @@ fn corpus_parse_speed() {
     );
 }
 
+/// Incremental (per-keystroke) comparison: our full reparse per edit vs
+/// tree-sitter's true incremental reparse, over a typing simulation in large
+/// real files. Honest by construction — tree-sitter gets its old tree +
+/// InputEdit; we reparse from scratch (parse is a pure per-file query; sub-file
+/// incrementality lives one level down in per-item cutoffs). Run in release.
+#[test]
+#[ignore = "perf measurement; run explicitly in release"]
+fn corpus_incremental_speed() {
+    let Some(root) = corpus_dir() else {
+        eprintln!("corpus_incremental_speed: corpus not fetched; skipping");
+        return;
+    };
+    let mut files = Vec::new();
+    for base in ["r-base", "cran"] {
+        collect_r_files(&root.join(base), &mut files);
+    }
+    // The largest corpus file plus a synthetic ~20K-LoC concatenation
+    // (the pathological huge-file shape).
+    let mut sources: Vec<(String, String)> = Vec::new();
+    let mut largest = String::new();
+    for path in &files {
+        if let Ok(bytes) = std::fs::read(path) {
+            let text = String::from_utf8_lossy(&bytes).into_owned();
+            if text.len() > largest.len() {
+                largest = text;
+            }
+        }
+    }
+    sources.push((format!("largest real file ({} LoC)", largest.lines().count()), largest));
+    let mut synthetic = String::new();
+    for path in files.iter().take(200) {
+        if synthetic.lines().count() > 20_000 {
+            break;
+        }
+        if let Ok(bytes) = std::fs::read(path) {
+            synthetic.push_str(&String::from_utf8_lossy(&bytes));
+            synthetic.push('\n');
+        }
+    }
+    sources.push((format!("synthetic ({} LoC)", synthetic.lines().count()), synthetic));
+
+    const EDITS: usize = 100;
+    for (label, source) in &sources {
+        // Typing simulation: insert one character at a time in the middle of
+        // the file (a body position), then delete them again.
+        let middle = {
+            let mut at = source.len() / 2;
+            while at > 0 && !source.is_char_boundary(at) {
+                at -= 1;
+            }
+            at
+        };
+
+        // Ours: full reparse per edit.
+        let mut text = source.clone();
+        let ours_start = std::time::Instant::now();
+        for step in 0..EDITS {
+            text.insert(middle + step, 'x');
+            let parse = syntax::parse(&text);
+            std::hint::black_box(parse.green());
+        }
+        let ours = ours_start.elapsed() / EDITS as u32;
+
+        // Ours: statement-splice incremental reparse per edit.
+        let mut text = source.clone();
+        let mut previous = syntax::parse(&text);
+        let splice_start = std::time::Instant::now();
+        for step in 0..EDITS {
+            let at = middle + step;
+            text.insert(at, 'x');
+            let parse = syntax::reparse(
+                &previous,
+                &text,
+                rowan::TextRange::new(
+                    rowan::TextSize::from(at as u32),
+                    rowan::TextSize::from(at as u32),
+                ),
+                rowan::TextSize::from(1),
+            );
+            std::hint::black_box(parse.green());
+            previous = parse;
+        }
+        let splice = splice_start.elapsed() / EDITS as u32;
+
+        // Tree-sitter: incremental reparse with the previous tree + InputEdit.
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&tree_sitter_r::LANGUAGE.into()).expect("grammar loads");
+        let mut text = source.clone();
+        let mut tree = parser.parse(&text, None).expect("initial parse");
+        let point = |text: &str, offset: usize| {
+            let row = text[..offset].matches('\n').count();
+            let line_start = text[..offset].rfind('\n').map(|at| at + 1).unwrap_or(0);
+            tree_sitter::Point::new(row, offset - line_start)
+        };
+        let ts_start = std::time::Instant::now();
+        for step in 0..EDITS {
+            let at = middle + step;
+            text.insert(at, 'x');
+            tree.edit(&tree_sitter::InputEdit {
+                start_byte: at,
+                old_end_byte: at,
+                new_end_byte: at + 1,
+                start_position: point(&text, at),
+                old_end_position: point(&text, at),
+                new_end_position: point(&text, at + 1),
+            });
+            tree = parser.parse(&text, Some(&tree)).expect("incremental parse");
+            std::hint::black_box(&tree);
+        }
+        let ts = ts_start.elapsed() / EDITS as u32;
+
+        eprintln!("corpus_incremental_speed [{label}]:");
+        eprintln!("  ours (full reparse):        {ours:?}/edit");
+        eprintln!("  ours (statement splice):    {splice:?}/edit");
+        eprintln!("  tree-sitter (incremental):  {ts:?}/edit");
+        let full_ratio = ours.as_secs_f64() / ts.as_secs_f64().max(1e-9);
+        let splice_ratio = ts.as_secs_f64() / splice.as_secs_f64().max(1e-9);
+        eprintln!("  full/ts: {full_ratio:.1}x slower; ts/splice: {splice_ratio:.1}x faster");
+    }
+}
+
 /// Committed, adjudicated divergences (one corpus-relative path suffix per
 /// line; `#` comments). Currently empty — the measured baseline is zero.
 fn allowlisted_paths() -> Vec<String> {

@@ -4,11 +4,24 @@
 //! Invariants, checked on every input:
 //!   1. never panic (any panic fails the test);
 //!   2. lossless — the tree reprints byte-for-byte to the input;
-//!   3. the lexed token lengths cover the input exactly.
+//!   3. the lexed token lengths cover the input exactly, no zero-length tokens;
+//!   4. tree geometry — every node's children tile its range exactly (ranges
+//!      nest, are contiguous, and cover);
+//!   5. determinism — parsing the same input twice yields structurally equal
+//!      green trees.
 //!
-//! Inputs come from three generators: random bytes, token soup from an R-shaped
-//! alphabet, and mutations of seed snippets. `FUZZ_ITERS` scales the run
-//! (default 1500 per generator); runs are deterministic per seed.
+//! Generators: random bytes, token soup from an R-shaped alphabet, byte-level
+//! seed mutations, token-level structure-aware mutations (delete/duplicate/
+//! swap whole tokens of a real parse), corpus-seeded mutations (real R files
+//! from the fetched corpus, when present), and a sequential edit-stream fuzzer
+//! (one buffer, hundreds of random edits, invariants at every step — the
+//! foundation the future splice-reparse equivalence check plugs into).
+//!
+//! `FUZZ_ITERS` scales the per-generator budget (default 1500); runs are
+//! deterministic per seed. `fuzz_deep` multiplies everything for nightly/manual
+//! runs.
+
+use std::path::PathBuf;
 
 struct SplitMix64(u64);
 
@@ -53,6 +66,14 @@ const SEEDS: &[&str] = &[
     "-2^2 + (1)",
     "x <<- y ->> z",
     "d <- data$frame@slot::name",
+    "x <- 1\r\ny <- 2\r\n",
+    "x[[y[1]]]",
+    "names(x) <- c(\"a\")",
+    "if (a) 1 else if (b) 2 else 3",
+    "base**size",
+    "switch(t, NULL = , chr = 1)",
+    "#: <T: numeric> fn(x: T, [d]: integer, ...r: T) -> T[]\nround2 <- function(x, d = 0L, ...) x",
+    "{\n  if (a) 1\n  else 2\n}",
 ];
 
 const ALPHABET: &[&str] = &[
@@ -60,26 +81,55 @@ const ALPHABET: &[&str] = &[
     "-", "*", "/", "^", "if", "else", "for", "while", "function", "\\", "1", "2.5", "1L", "2i",
     "\"s\"", "'c'", "%in%", "%%", "|>", "|", "&&", "~", "?", "$", "@", "::", ":", "`n`", "...",
     "..1", "#:", "# comment", "NULL", "TRUE", "NA", "Inf", "r\"(x)\"", "->", "->>", "<<-", "!",
-    "==", "<=", ">", "_", "0x1F", "1e5", ".5", "next", "break", "repeat", "in",
+    "==", "<=", ">", "_", "0x1F", "1e5", ".5", "next", "break", "repeat", "in", "**", ":=",
+    "@type", "@param", "fn", "list[", "list{", "named", "<T>", "NULL =", "\r\n",
 ];
 
 fn iterations() -> usize {
     std::env::var("FUZZ_ITERS").ok().and_then(|value| value.parse().ok()).unwrap_or(1500)
 }
 
+/// The full invariant battery for one input.
 fn check_invariants(input: &str) {
     let parse = syntax::parse(input);
     let reprinted = parse.text();
-    assert_eq!(
-        reprinted, input,
-        "lossless round-trip violated for input {input:?}"
-    );
+    assert_eq!(reprinted, input, "lossless round-trip violated for input {input:?}");
 
     let (tokens, _errors) = syntax::lex(input);
     let total: u32 = tokens.iter().map(|token| u32::from(token.len)).sum();
     assert_eq!(total as usize, input.len(), "token cover violated for input {input:?}");
     for token in &tokens {
         assert!(u32::from(token.len) > 0, "zero-length token for input {input:?}");
+    }
+
+    check_geometry(&parse.syntax_node(), input);
+
+    // Determinism: a second parse yields a structurally equal tree and the
+    // same errors.
+    let again = syntax::parse(input);
+    assert_eq!(parse.green(), again.green(), "non-deterministic parse for input {input:?}");
+    assert_eq!(parse.errors(), again.errors(), "non-deterministic errors for input {input:?}");
+}
+
+/// Every node's children (nodes and tokens) must tile its range exactly.
+fn check_geometry(node: &syntax::SyntaxNode, input: &str) {
+    let range = node.text_range();
+    let mut cursor = range.start();
+    for child in node.children_with_tokens() {
+        let child_range = child.text_range();
+        assert_eq!(
+            child_range.start(),
+            cursor,
+            "child ranges not contiguous under {:?} for input {input:?}",
+            node.kind()
+        );
+        cursor = child_range.end();
+        if let rowan::NodeOrToken::Node(child) = child {
+            check_geometry(&child, input);
+        }
+    }
+    if node.children_with_tokens().next().is_some() {
+        assert_eq!(cursor, range.end(), "children do not cover {:?} for input {input:?}", node.kind());
     }
 }
 
@@ -92,36 +142,116 @@ fn seeds_hold_invariants() {
 
 #[test]
 fn fuzz_random_bytes() {
+    run_random_bytes(iterations());
+}
+
+#[test]
+fn fuzz_token_soup() {
+    run_token_soup(iterations());
+}
+
+#[test]
+fn fuzz_seed_mutations() {
+    run_seed_mutations(iterations());
+}
+
+#[test]
+fn fuzz_token_level_mutations() {
+    run_token_level_mutations(iterations());
+}
+
+#[test]
+fn fuzz_edit_stream() {
+    run_edit_stream(400);
+}
+
+/// Real corpus files (when fetched) as mutation seeds: byte and token-level
+/// mutations over genuine R sources exercise shapes no hand seed covers.
+#[test]
+fn fuzz_corpus_seeded() {
+    let Some(files) = corpus_sample(24) else {
+        eprintln!("fuzz_corpus_seeded: corpus not fetched; skipping");
+        return;
+    };
+    let mut rng = SplitMix64(0xC0_2B_05);
+    let budget = iterations() / 3;
+    for _ in 0..budget {
+        let source = &files[rng.below(files.len())];
+        let mut bytes = source.as_bytes().to_vec();
+        // A handful of byte edits, then a truncation half the time (simulates
+        // a file mid-edit).
+        for _ in 0..(1 + rng.below(6)) {
+            if bytes.is_empty() {
+                break;
+            }
+            match rng.below(3) {
+                0 => {
+                    let at = rng.below(bytes.len());
+                    bytes.remove(at);
+                }
+                1 => {
+                    let at = rng.below(bytes.len() + 1);
+                    bytes.insert(at, (rng.next() & 0x7F) as u8);
+                }
+                _ => {
+                    let at = rng.below(bytes.len());
+                    bytes[at] = (rng.next() & 0x7F) as u8;
+                }
+            }
+        }
+        if rng.below(2) == 0 && !bytes.is_empty() {
+            bytes.truncate(rng.below(bytes.len()));
+        }
+        let text = String::from_utf8_lossy(&bytes).into_owned();
+        check_invariants(&text);
+    }
+}
+
+/// The everything-at-once deep run for nightly/manual use:
+/// `FUZZ_ITERS=50000 cargo test -p syntax --release --test test_fuzz -- --ignored fuzz_deep`
+#[test]
+#[ignore = "deep fuzz; run explicitly with a large FUZZ_ITERS"]
+fn fuzz_deep() {
+    let budget = iterations().max(20_000);
+    run_random_bytes(budget);
+    run_token_soup(budget);
+    run_seed_mutations(budget);
+    run_token_level_mutations(budget);
+    run_edit_stream(budget / 20);
+}
+
+fn run_random_bytes(budget: usize) {
     let mut rng = SplitMix64(0xDEC0_DE01);
-    for _ in 0..iterations() {
-        let len = rng.below(120);
+    for _ in 0..budget {
+        let len = rng.below(160);
         let bytes: Vec<u8> = (0..len).map(|_| (rng.next() & 0xFF) as u8).collect();
         let text = String::from_utf8_lossy(&bytes).into_owned();
         check_invariants(&text);
     }
 }
 
-#[test]
-fn fuzz_token_soup() {
+fn run_token_soup(budget: usize) {
     let mut rng = SplitMix64(0x50_D4_11);
-    for _ in 0..iterations() {
-        let pieces = rng.below(40);
+    for _ in 0..budget {
+        let pieces = rng.below(48);
         let mut text = String::new();
         for _ in 0..pieces {
             text.push_str(ALPHABET[rng.below(ALPHABET.len())]);
+            if rng.below(3) == 0 {
+                text.push(' ');
+            }
         }
         check_invariants(&text);
     }
 }
 
-#[test]
-fn fuzz_seed_mutations() {
+fn run_seed_mutations(budget: usize) {
     let mut rng = SplitMix64(0x5EED_F00D);
-    for _ in 0..iterations() {
+    for _ in 0..budget {
         let seed = SEEDS[rng.below(SEEDS.len())];
         let mut text = seed.as_bytes().to_vec();
         for _ in 0..(1 + rng.below(4)) {
-            match rng.below(3) {
+            match rng.below(4) {
                 0 if !text.is_empty() => {
                     let at = rng.below(text.len());
                     text.remove(at);
@@ -130,16 +260,158 @@ fn fuzz_seed_mutations() {
                     let at = rng.below(text.len() + 1);
                     text.insert(at, (rng.next() & 0x7F) as u8);
                 }
-                _ if !text.is_empty() => {
+                2 if !text.is_empty() => {
                     let at = rng.below(text.len());
                     text[at] = (rng.next() & 0x7F) as u8;
                 }
-                _ => {}
+                // Cross-seed splice: paste a slice of another seed.
+                _ => {
+                    let donor = SEEDS[rng.below(SEEDS.len())].as_bytes();
+                    let from = rng.below(donor.len());
+                    let to = (from + rng.below(16)).min(donor.len());
+                    let at = rng.below(text.len() + 1);
+                    for (offset, &byte) in donor[from..to].iter().enumerate() {
+                        text.insert(at + offset, byte);
+                    }
+                }
             }
         }
         let text = String::from_utf8_lossy(&text).into_owned();
         check_invariants(&text);
     }
+}
+
+/// Structure-aware mutation: operate on whole lexed tokens of a real seed —
+/// delete, duplicate, or swap token spans, so inputs stay token-plausible and
+/// reach deep parser paths that byte noise rarely finds.
+fn run_token_level_mutations(budget: usize) {
+    let mut rng = SplitMix64(0x70C3_2015);
+    for _ in 0..budget {
+        let seed = SEEDS[rng.below(SEEDS.len())];
+        let (tokens, _) = syntax::lex(seed);
+        if tokens.is_empty() {
+            continue;
+        }
+        let mut spans: Vec<&str> = Vec::with_capacity(tokens.len());
+        let mut offset = 0usize;
+        for token in &tokens {
+            let len = u32::from(token.len) as usize;
+            spans.push(&seed[offset..offset + len]);
+            offset += len;
+        }
+        for _ in 0..(1 + rng.below(3)) {
+            match rng.below(3) {
+                0 if spans.len() > 1 => {
+                    let at = rng.below(spans.len());
+                    spans.remove(at);
+                }
+                1 => {
+                    let at = rng.below(spans.len());
+                    let duplicate = spans[at];
+                    spans.insert(at, duplicate);
+                }
+                _ if spans.len() > 1 => {
+                    let a = rng.below(spans.len());
+                    let b = rng.below(spans.len());
+                    spans.swap(a, b);
+                }
+                _ => {}
+            }
+        }
+        let text: String = spans.concat();
+        check_invariants(&text);
+    }
+}
+
+/// One buffer, a long stream of random edits; the invariant battery holds at
+/// every step, and the statement-splice incremental reparse must be byte- and
+/// structure-equal to the from-scratch parse after every edit (doctrine layer:
+/// statement-reparse equivalence).
+fn run_edit_stream(steps: usize) {
+    let mut rng = SplitMix64(0xED17_57EA);
+    let mut buffer = String::from("f <- function(x, y) {\n  total <- x + y\n  total * 2\n}\n");
+    let mut previous = syntax::parse(&buffer);
+    for _ in 0..steps {
+        let before_len = buffer.len();
+        let (deleted, inserted) = match rng.below(4) {
+            0 if !buffer.is_empty() => {
+                let at = floor_char_boundary(&buffer, rng.below(buffer.len()));
+                let end = ceil_char_boundary(&buffer, (at + 1 + rng.below(3)).min(buffer.len()));
+                buffer.replace_range(at..end, "");
+                (at..end, 0usize)
+            }
+            1 => {
+                let at = floor_char_boundary(&buffer, rng.below(buffer.len() + 1));
+                let piece = ALPHABET[rng.below(ALPHABET.len())];
+                buffer.insert_str(at, piece);
+                (at..at, piece.len())
+            }
+            2 => {
+                let at = floor_char_boundary(&buffer, rng.below(buffer.len() + 1));
+                let ch = (0x20 + (rng.next() % 0x5F) as u8) as char;
+                buffer.insert(at, ch);
+                (at..at, ch.len_utf8())
+            }
+            _ => {
+                let seed = SEEDS[rng.below(SEEDS.len())];
+                let at = floor_char_boundary(&buffer, rng.below(buffer.len() + 1));
+                buffer.insert_str(at, seed);
+                (at..at, seed.len())
+            }
+        };
+        let _ = before_len;
+        check_invariants(&buffer);
+
+        // Splice-reparse equivalence: identical green tree AND identical
+        // errors versus the from-scratch parse.
+        let deleted_range = rowan::TextRange::new(
+            rowan::TextSize::from(deleted.start as u32),
+            rowan::TextSize::from(deleted.end as u32),
+        );
+        let spliced = syntax::reparse(
+            &previous,
+            &buffer,
+            deleted_range,
+            rowan::TextSize::from(inserted as u32),
+        );
+        let scratch = syntax::parse(&buffer);
+        assert_eq!(
+            spliced.green(),
+            scratch.green(),
+            "splice != from-scratch tree: previous {:?}, deleted {deleted:?}, inserted {inserted}, now {buffer:?}",
+            previous.text(),
+        );
+        assert_eq!(
+            spliced.errors(),
+            scratch.errors(),
+            "splice errors != from-scratch errors after editing to {buffer:?}"
+        );
+        previous = scratch;
+
+        // Keep the buffer bounded so the stream stays fast; resync the
+        // baseline parse when truncating (an out-of-band "edit").
+        if buffer.len() > 4096 {
+            let cut = floor_char_boundary(&buffer, 2048);
+            buffer.truncate(cut);
+            previous = syntax::parse(&buffer);
+        }
+    }
+}
+
+fn floor_char_boundary(text: &str, mut at: usize) -> usize {
+    at = at.min(text.len());
+    while at > 0 && !text.is_char_boundary(at) {
+        at -= 1;
+    }
+    at
+}
+
+fn ceil_char_boundary(text: &str, mut at: usize) -> usize {
+    at = at.min(text.len());
+    while at < text.len() && !text.is_char_boundary(at) {
+        at += 1;
+    }
+    at
 }
 
 /// Deep nesting must be refused gracefully (diagnostic, no stack overflow).
@@ -149,4 +421,43 @@ fn deep_nesting_is_refused_not_fatal() {
     let parse = syntax::parse(&deep);
     assert_eq!(parse.text(), deep);
     assert!(parse.errors().iter().any(|error| error.message.contains("too deep")));
+
+    let deep_annotation = format!("#: {}integer{}", "(".repeat(2000), ")".repeat(2000));
+    let parse = syntax::parse(&deep_annotation);
+    assert_eq!(parse.text(), deep_annotation);
+}
+
+/// A bounded sample of real corpus files for corpus-seeded fuzzing.
+fn corpus_sample(count: usize) -> Option<Vec<String>> {
+    let root = {
+        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let candidate = std::env::var("ROUGHLY_CORPUS_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| manifest.join("../../corpus"));
+        candidate.is_dir().then_some(candidate)?
+    };
+    let mut files = Vec::new();
+    let mut stack = vec![root.join("r-base"), root.join("cran")];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().is_some_and(|extension| extension == "R") {
+                files.push(path);
+            }
+        }
+    }
+    files.sort();
+    // Deterministic spread across the corpus.
+    let step = (files.len() / count.max(1)).max(1);
+    let sample: Vec<String> = files
+        .iter()
+        .step_by(step)
+        .take(count)
+        .filter_map(|path| std::fs::read(path).ok())
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+        .collect();
+    (!sample.is_empty()).then_some(sample)
 }

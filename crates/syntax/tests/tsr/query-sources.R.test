@@ -1,0 +1,1754 @@
+#==== tsr_query_sources
+#---- highlight_constant
+NULL
+# ^ @constant.builtin
+Inf
+# ^ @constant.builtin
+-Inf
+# ^ @constant.builtin
+NaN
+# ^ @constant.builtin
+NA
+#^ @constant.builtin
+NA_real_
+# ^ @constant.builtin
+NA_integer_
+# ^ @constant.builtin
+NA_character_
+# ^ @constant.builtin
+NA_complex_
+# ^ @constant.builtin
+...
+# ^ @constant.builtin
+..1
+# ^ @constant.builtin
+
+TRUE
+# ^ @boolean
+FALSE
+# ^ @boolean
+#++++
+SOURCE_FILE@0..354
+  LITERAL@0..4
+    NULL_KW@0..4 "NULL"
+  NEWLINE@4..5 "\n"
+  COMMENT@5..26 "# ^ @constant.builtin"
+  NEWLINE@26..27 "\n"
+  LITERAL@27..30
+    INF_KW@27..30 "Inf"
+  NEWLINE@30..31 "\n"
+  COMMENT@31..52 "# ^ @constant.builtin"
+  NEWLINE@52..53 "\n"
+  UNARY_EXPR@53..57
+    MINUS@53..54 "-"
+    LITERAL@54..57
+      INF_KW@54..57 "Inf"
+  NEWLINE@57..58 "\n"
+  COMMENT@58..79 "# ^ @constant.builtin"
+  NEWLINE@79..80 "\n"
+  LITERAL@80..83
+    NAN_KW@80..83 "NaN"
+  NEWLINE@83..84 "\n"
+  COMMENT@84..105 "# ^ @constant.builtin"
+  NEWLINE@105..106 "\n"
+  LITERAL@106..108
+    NA_KW@106..108 "NA"
+  NEWLINE@108..109 "\n"
+  COMMENT@109..129 "#^ @constant.builtin"
+  NEWLINE@129..130 "\n"
+  LITERAL@130..138
+    NA_REAL_KW@130..138 "NA_real_"
+  NEWLINE@138..139 "\n"
+  COMMENT@139..160 "# ^ @constant.builtin"
+  NEWLINE@160..161 "\n"
+  LITERAL@161..172
+    NA_INTEGER_KW@161..172 "NA_integer_"
+  NEWLINE@172..173 "\n"
+  COMMENT@173..194 "# ^ @constant.builtin"
+  NEWLINE@194..195 "\n"
+  LITERAL@195..208
+    NA_CHARACTER_KW@195..208 "NA_character_"
+  NEWLINE@208..209 "\n"
+  COMMENT@209..230 "# ^ @constant.builtin"
+  NEWLINE@230..231 "\n"
+  LITERAL@231..242
+    NA_COMPLEX_KW@231..242 "NA_complex_"
+  NEWLINE@242..243 "\n"
+  COMMENT@243..264 "# ^ @constant.builtin"
+  NEWLINE@264..265 "\n"
+  NAME@265..268
+    DOTS@265..268 "..."
+  NEWLINE@268..269 "\n"
+  COMMENT@269..290 "# ^ @constant.builtin"
+  NEWLINE@290..291 "\n"
+  NAME@291..294
+    DOTDOTI@291..294 "..1"
+  NEWLINE@294..295 "\n"
+  COMMENT@295..316 "# ^ @constant.builtin"
+  NEWLINE@316..317 "\n"
+  NEWLINE@317..318 "\n"
+  LITERAL@318..322
+    TRUE_KW@318..322 "TRUE"
+  NEWLINE@322..323 "\n"
+  COMMENT@323..335 "# ^ @boolean"
+  NEWLINE@335..336 "\n"
+  LITERAL@336..341
+    FALSE_KW@336..341 "FALSE"
+  NEWLINE@341..342 "\n"
+  COMMENT@342..354 "# ^ @boolean"
+
+#---- highlight_control
+for (i in 1:5) {
+# ^ repeat
+#      ^ keyword
+  next
+  # ^ @keyword
+
+  break
+  # ^ @keyword
+}
+
+while (a > b) {
+# ^ repeat
+}
+
+repeat {
+# ^ repeat
+}
+
+if (a > b) {
+# <- conditional
+} else if (b > c) {
+# ^ conditional
+#      ^ conditional
+} else {
+# ^ conditional
+}
+
+function(return = 1) {
+         # ^ @variable.parameter
+}
+
+function() {
+  return()
+  # ^ @keyword
+}
+
+function() {
+  return
+  # ^ @variable
+}
+#++++
+SOURCE_FILE@0..402
+  FOR_EXPR@0..92
+    FOR_KW@0..3 "for"
+    WHITESPACE@3..4 " "
+    L_PAREN@4..5 "("
+    NAME@5..6
+      IDENT@5..6 "i"
+    WHITESPACE@6..7 " "
+    IN_KW@7..9 "in"
+    WHITESPACE@9..10 " "
+    BINARY_EXPR@10..13
+      LITERAL@10..11
+        DOUBLE@10..11 "1"
+      COLON@11..12 ":"
+      LITERAL@12..13
+        DOUBLE@12..13 "5"
+    R_PAREN@13..14 ")"
+    WHITESPACE@14..15 " "
+    BRACE_EXPR@15..92
+      L_BRACE@15..16 "{"
+      NEWLINE@16..17 "\n"
+      COMMENT@17..27 "# ^ repeat"
+      NEWLINE@27..28 "\n"
+      COMMENT@28..44 "#      ^ keyword"
+      NEWLINE@44..45 "\n"
+      WHITESPACE@45..47 "  "
+      NEXT_EXPR@47..51
+        NEXT_KW@47..51 "next"
+      NEWLINE@51..52 "\n"
+      WHITESPACE@52..54 "  "
+      COMMENT@54..66 "# ^ @keyword"
+      NEWLINE@66..67 "\n"
+      NEWLINE@67..68 "\n"
+      WHITESPACE@68..70 "  "
+      BREAK_EXPR@70..75
+        BREAK_KW@70..75 "break"
+      NEWLINE@75..76 "\n"
+      WHITESPACE@76..78 "  "
+      COMMENT@78..90 "# ^ @keyword"
+      NEWLINE@90..91 "\n"
+      R_BRACE@91..92 "}"
+  NEWLINE@92..93 "\n"
+  NEWLINE@93..94 "\n"
+  WHILE_EXPR@94..122
+    WHILE_KW@94..99 "while"
+    WHITESPACE@99..100 " "
+    L_PAREN@100..101 "("
+    BINARY_EXPR@101..106
+      NAME@101..102
+        IDENT@101..102 "a"
+      WHITESPACE@102..103 " "
+      GREATER@103..104 ">"
+      WHITESPACE@104..105 " "
+      NAME@105..106
+        IDENT@105..106 "b"
+    R_PAREN@106..107 ")"
+    WHITESPACE@107..108 " "
+    BRACE_EXPR@108..122
+      L_BRACE@108..109 "{"
+      NEWLINE@109..110 "\n"
+      COMMENT@110..120 "# ^ repeat"
+      NEWLINE@120..121 "\n"
+      R_BRACE@121..122 "}"
+  NEWLINE@122..123 "\n"
+  NEWLINE@123..124 "\n"
+  REPEAT_EXPR@124..145
+    REPEAT_KW@124..130 "repeat"
+    WHITESPACE@130..131 " "
+    BRACE_EXPR@131..145
+      L_BRACE@131..132 "{"
+      NEWLINE@132..133 "\n"
+      COMMENT@133..143 "# ^ repeat"
+      NEWLINE@143..144 "\n"
+      R_BRACE@144..145 "}"
+  NEWLINE@145..146 "\n"
+  NEWLINE@146..147 "\n"
+  IF_EXPR@147..260
+    IF_KW@147..149 "if"
+    WHITESPACE@149..150 " "
+    L_PAREN@150..151 "("
+    BINARY_EXPR@151..156
+      NAME@151..152
+        IDENT@151..152 "a"
+      WHITESPACE@152..153 " "
+      GREATER@153..154 ">"
+      WHITESPACE@154..155 " "
+      NAME@155..156
+        IDENT@155..156 "b"
+    R_PAREN@156..157 ")"
+    WHITESPACE@157..158 " "
+    BRACE_EXPR@158..178
+      L_BRACE@158..159 "{"
+      NEWLINE@159..160 "\n"
+      COMMENT@160..176 "# <- conditional"
+      NEWLINE@176..177 "\n"
+      R_BRACE@177..178 "}"
+    WHITESPACE@178..179 " "
+    ELSE_KW@179..183 "else"
+    WHITESPACE@183..184 " "
+    IF_EXPR@184..260
+      IF_KW@184..186 "if"
+      WHITESPACE@186..187 " "
+      L_PAREN@187..188 "("
+      BINARY_EXPR@188..193
+        NAME@188..189
+          IDENT@188..189 "b"
+        WHITESPACE@189..190 " "
+        GREATER@190..191 ">"
+        WHITESPACE@191..192 " "
+        NAME@192..193
+          IDENT@192..193 "c"
+      R_PAREN@193..194 ")"
+      WHITESPACE@194..195 " "
+      BRACE_EXPR@195..235
+        L_BRACE@195..196 "{"
+        NEWLINE@196..197 "\n"
+        COMMENT@197..212 "# ^ conditional"
+        NEWLINE@212..213 "\n"
+        COMMENT@213..233 "#      ^ conditional"
+        NEWLINE@233..234 "\n"
+        R_BRACE@234..235 "}"
+      WHITESPACE@235..236 " "
+      ELSE_KW@236..240 "else"
+      WHITESPACE@240..241 " "
+      BRACE_EXPR@241..260
+        L_BRACE@241..242 "{"
+        NEWLINE@242..243 "\n"
+        COMMENT@243..258 "# ^ conditional"
+        NEWLINE@258..259 "\n"
+        R_BRACE@259..260 "}"
+  NEWLINE@260..261 "\n"
+  NEWLINE@261..262 "\n"
+  FUNCTION_DEF@262..319
+    FUNCTION_KW@262..270 "function"
+    PARAMETER_LIST@270..282
+      L_PAREN@270..271 "("
+      PARAMETER@271..281
+        IDENT@271..277 "return"
+        WHITESPACE@277..278 " "
+        EQ@278..279 "="
+        WHITESPACE@279..280 " "
+        LITERAL@280..281
+          DOUBLE@280..281 "1"
+      R_PAREN@281..282 ")"
+    WHITESPACE@282..283 " "
+    BRACE_EXPR@283..319
+      L_BRACE@283..284 "{"
+      NEWLINE@284..285 "\n"
+      WHITESPACE@285..294 "         "
+      COMMENT@294..317 "# ^ @variable.parameter"
+      NEWLINE@317..318 "\n"
+      R_BRACE@318..319 "}"
+  NEWLINE@319..320 "\n"
+  NEWLINE@320..321 "\n"
+  FUNCTION_DEF@321..361
+    FUNCTION_KW@321..329 "function"
+    PARAMETER_LIST@329..331
+      L_PAREN@329..330 "("
+      R_PAREN@330..331 ")"
+    WHITESPACE@331..332 " "
+    BRACE_EXPR@332..361
+      L_BRACE@332..333 "{"
+      NEWLINE@333..334 "\n"
+      WHITESPACE@334..336 "  "
+      CALL_EXPR@336..344
+        NAME@336..342
+          IDENT@336..342 "return"
+        ARGUMENT_LIST@342..344
+          L_PAREN@342..343 "("
+          R_PAREN@343..344 ")"
+      NEWLINE@344..345 "\n"
+      WHITESPACE@345..347 "  "
+      COMMENT@347..359 "# ^ @keyword"
+      NEWLINE@359..360 "\n"
+      R_BRACE@360..361 "}"
+  NEWLINE@361..362 "\n"
+  NEWLINE@362..363 "\n"
+  FUNCTION_DEF@363..402
+    FUNCTION_KW@363..371 "function"
+    PARAMETER_LIST@371..373
+      L_PAREN@371..372 "("
+      R_PAREN@372..373 ")"
+    WHITESPACE@373..374 " "
+    BRACE_EXPR@374..402
+      L_BRACE@374..375 "{"
+      NEWLINE@375..376 "\n"
+      WHITESPACE@376..378 "  "
+      NAME@378..384
+        IDENT@378..384 "return"
+      NEWLINE@384..385 "\n"
+      WHITESPACE@385..387 "  "
+      COMMENT@387..400 "# ^ @variable"
+      NEWLINE@400..401 "\n"
+      R_BRACE@401..402 "}"
+
+#---- highlight_functions
+foo <- function() {}
+# ^ function
+#      ^ keyword.function
+
+foo = function(a, b = 2, d) {
+# ^ function
+#      ^ keyword.function
+#              ^ variable.parameter
+#                 ^ variable.parameter
+#                        ^ variable.parameter
+  a + x + d
+# ^ variable.parameter
+#     ^ variable
+#         ^ variable.parameter
+}
+
+# Note: We align the capture name of function declarations and function calls
+# so they can have the same highlight color
+foo(a, b, d = 2)
+# ^ function
+#   ^ variable
+#      ^ variable
+#         ^ variable.parameter
+
+\(x) x + y
+# <- operator
+# ^ variable.parameter
+#    ^ variable.parameter
+#        ^ variable
+#++++
+SOURCE_FILE@0..647
+  BINARY_EXPR@0..20
+    NAME@0..3
+      IDENT@0..3 "foo"
+    WHITESPACE@3..4 " "
+    LESS_MINUS@4..6 "<-"
+    WHITESPACE@6..7 " "
+    FUNCTION_DEF@7..20
+      FUNCTION_KW@7..15 "function"
+      PARAMETER_LIST@15..17
+        L_PAREN@15..16 "("
+        R_PAREN@16..17 ")"
+      WHITESPACE@17..18 " "
+      BRACE_EXPR@18..20
+        L_BRACE@18..19 "{"
+        R_BRACE@19..20 "}"
+  NEWLINE@20..21 "\n"
+  COMMENT@21..33 "# ^ function"
+  NEWLINE@33..34 "\n"
+  COMMENT@34..59 "#      ^ keyword.function"
+  NEWLINE@59..60 "\n"
+  NEWLINE@60..61 "\n"
+  BINARY_EXPR@61..335
+    NAME@61..64
+      IDENT@61..64 "foo"
+    WHITESPACE@64..65 " "
+    EQ@65..66 "="
+    WHITESPACE@66..67 " "
+    FUNCTION_DEF@67..335
+      FUNCTION_KW@67..75 "function"
+      PARAMETER_LIST@75..88
+        L_PAREN@75..76 "("
+        PARAMETER@76..77
+          IDENT@76..77 "a"
+        COMMA@77..78 ","
+        WHITESPACE@78..79 " "
+        PARAMETER@79..84
+          IDENT@79..80 "b"
+          WHITESPACE@80..81 " "
+          EQ@81..82 "="
+          WHITESPACE@82..83 " "
+          LITERAL@83..84
+            DOUBLE@83..84 "2"
+        COMMA@84..85 ","
+        WHITESPACE@85..86 " "
+        PARAMETER@86..87
+          IDENT@86..87 "d"
+        R_PAREN@87..88 ")"
+      WHITESPACE@88..89 " "
+      BRACE_EXPR@89..335
+        L_BRACE@89..90 "{"
+        NEWLINE@90..91 "\n"
+        COMMENT@91..103 "# ^ function"
+        NEWLINE@103..104 "\n"
+        COMMENT@104..129 "#      ^ keyword.function"
+        NEWLINE@129..130 "\n"
+        COMMENT@130..165 "#              ^ variable.parameter"
+        NEWLINE@165..166 "\n"
+        COMMENT@166..204 "#                 ^ variable.parameter"
+        NEWLINE@204..205 "\n"
+        COMMENT@205..250 "#                        ^ variable.parameter"
+        NEWLINE@250..251 "\n"
+        WHITESPACE@251..253 "  "
+        BINARY_EXPR@253..262
+          BINARY_EXPR@253..259
+            NAME@253..254
+              IDENT@253..254 "a"
+            WHITESPACE@254..255 " "
+            PLUS@255..256 "+"
+            WHITESPACE@256..257 " "
+            NAME@257..258
+              IDENT@257..258 "x"
+            WHITESPACE@258..259 " "
+          PLUS@259..260 "+"
+          WHITESPACE@260..261 " "
+          NAME@261..262
+            IDENT@261..262 "d"
+        NEWLINE@262..263 "\n"
+        COMMENT@263..285 "# ^ variable.parameter"
+        NEWLINE@285..286 "\n"
+        COMMENT@286..302 "#     ^ variable"
+        NEWLINE@302..303 "\n"
+        COMMENT@303..333 "#         ^ variable.parameter"
+        NEWLINE@333..334 "\n"
+        R_BRACE@334..335 "}"
+  NEWLINE@335..336 "\n"
+  NEWLINE@336..337 "\n"
+  COMMENT@337..414 "# Note: We align the capture name of function declarations and function calls"
+  NEWLINE@414..415 "\n"
+  COMMENT@415..458 "# so they can have the same highlight color"
+  NEWLINE@458..459 "\n"
+  CALL_EXPR@459..475
+    NAME@459..462
+      IDENT@459..462 "foo"
+    ARGUMENT_LIST@462..475
+      L_PAREN@462..463 "("
+      ARGUMENT@463..464
+        NAME@463..464
+          IDENT@463..464 "a"
+      COMMA@464..465 ","
+      WHITESPACE@465..466 " "
+      ARGUMENT@466..467
+        NAME@466..467
+          IDENT@466..467 "b"
+      COMMA@467..468 ","
+      WHITESPACE@468..469 " "
+      ARGUMENT@469..474
+        NAME@469..470
+          IDENT@469..470 "d"
+        WHITESPACE@470..471 " "
+        EQ@471..472 "="
+        WHITESPACE@472..473 " "
+        LITERAL@473..474
+          DOUBLE@473..474 "2"
+      R_PAREN@474..475 ")"
+  NEWLINE@475..476 "\n"
+  COMMENT@476..488 "# ^ function"
+  NEWLINE@488..489 "\n"
+  COMMENT@489..503 "#   ^ variable"
+  NEWLINE@503..504 "\n"
+  COMMENT@504..521 "#      ^ variable"
+  NEWLINE@521..522 "\n"
+  COMMENT@522..552 "#         ^ variable.parameter"
+  NEWLINE@552..553 "\n"
+  NEWLINE@553..554 "\n"
+  FUNCTION_DEF@554..564
+    BACKSLASH@554..555 "\\"
+    PARAMETER_LIST@555..558
+      L_PAREN@555..556 "("
+      PARAMETER@556..557
+        IDENT@556..557 "x"
+      R_PAREN@557..558 ")"
+    WHITESPACE@558..559 " "
+    BINARY_EXPR@559..564
+      NAME@559..560
+        IDENT@559..560 "x"
+      WHITESPACE@560..561 " "
+      PLUS@561..562 "+"
+      WHITESPACE@562..563 " "
+      NAME@563..564
+        IDENT@563..564 "y"
+  NEWLINE@564..565 "\n"
+  COMMENT@565..578 "# <- operator"
+  NEWLINE@578..579 "\n"
+  COMMENT@579..601 "# ^ variable.parameter"
+  NEWLINE@601..602 "\n"
+  COMMENT@602..627 "#    ^ variable.parameter"
+  NEWLINE@627..628 "\n"
+  COMMENT@628..647 "#        ^ variable"
+
+#---- highlight_literals
+"x"
+# ^ string
+
+"\n1 + 2\u123 and \U123"
+# ^ string.escape
+#        ^ string.escape
+#                  ^ string.escape
+
+1L
+# <- number
+
+1.5
+# ^ number
+
+1+3i
+# <- number
+# ^ number
+#++++
+SOURCE_FILE@0..179
+  LITERAL@0..3
+    STRING@0..3 "\"x\""
+  NEWLINE@3..4 "\n"
+  COMMENT@4..14 "# ^ string"
+  NEWLINE@14..15 "\n"
+  NEWLINE@15..16 "\n"
+  LITERAL@16..40
+    STRING@16..40 "\"\\n1 + 2\\u123 and \\U123\""
+  NEWLINE@40..41 "\n"
+  COMMENT@41..58 "# ^ string.escape"
+  NEWLINE@58..59 "\n"
+  COMMENT@59..83 "#        ^ string.escape"
+  NEWLINE@83..84 "\n"
+  COMMENT@84..118 "#                  ^ string.escape"
+  NEWLINE@118..119 "\n"
+  NEWLINE@119..120 "\n"
+  LITERAL@120..122
+    INTEGER@120..122 "1L"
+  NEWLINE@122..123 "\n"
+  COMMENT@123..134 "# <- number"
+  NEWLINE@134..135 "\n"
+  NEWLINE@135..136 "\n"
+  LITERAL@136..139
+    DOUBLE@136..139 "1.5"
+  NEWLINE@139..140 "\n"
+  COMMENT@140..150 "# ^ number"
+  NEWLINE@150..151 "\n"
+  NEWLINE@151..152 "\n"
+  BINARY_EXPR@152..156
+    LITERAL@152..153
+      DOUBLE@152..153 "1"
+    PLUS@153..154 "+"
+    LITERAL@154..156
+      COMPLEX@154..156 "3i"
+  NEWLINE@156..157 "\n"
+  COMMENT@157..168 "# <- number"
+  NEWLINE@168..169 "\n"
+  COMMENT@169..179 "# ^ number"
+
+#---- highlight_namespace
+pkg::fn()
+# ^ namespace
+#    ^ function
+
+pkg:::fn()
+# ^ namespace
+#     ^ function
+
+pkg::fn
+# ^ namespace
+#    ^ variable
+
+pkg:::fn
+# ^ namespace
+#     ^ variable
+#++++
+SOURCE_FILE@0..162
+  CALL_EXPR@0..9
+    NAMESPACE_EXPR@0..7
+      NAME@0..3
+        IDENT@0..3 "pkg"
+      COLON2@3..5 "::"
+      NAME@5..7
+        IDENT@5..7 "fn"
+    ARGUMENT_LIST@7..9
+      L_PAREN@7..8 "("
+      R_PAREN@8..9 ")"
+  NEWLINE@9..10 "\n"
+  COMMENT@10..23 "# ^ namespace"
+  NEWLINE@23..24 "\n"
+  COMMENT@24..39 "#    ^ function"
+  NEWLINE@39..40 "\n"
+  NEWLINE@40..41 "\n"
+  CALL_EXPR@41..51
+    NAMESPACE_EXPR@41..49
+      NAME@41..44
+        IDENT@41..44 "pkg"
+      COLON3@44..47 ":::"
+      NAME@47..49
+        IDENT@47..49 "fn"
+    ARGUMENT_LIST@49..51
+      L_PAREN@49..50 "("
+      R_PAREN@50..51 ")"
+  NEWLINE@51..52 "\n"
+  COMMENT@52..65 "# ^ namespace"
+  NEWLINE@65..66 "\n"
+  COMMENT@66..82 "#     ^ function"
+  NEWLINE@82..83 "\n"
+  NEWLINE@83..84 "\n"
+  NAMESPACE_EXPR@84..91
+    NAME@84..87
+      IDENT@84..87 "pkg"
+    COLON2@87..89 "::"
+    NAME@89..91
+      IDENT@89..91 "fn"
+  NEWLINE@91..92 "\n"
+  COMMENT@92..105 "# ^ namespace"
+  NEWLINE@105..106 "\n"
+  COMMENT@106..121 "#    ^ variable"
+  NEWLINE@121..122 "\n"
+  NEWLINE@122..123 "\n"
+  NAMESPACE_EXPR@123..131
+    NAME@123..126
+      IDENT@123..126 "pkg"
+    COLON3@126..129 ":::"
+    NAME@129..131
+      IDENT@129..131 "fn"
+  NEWLINE@131..132 "\n"
+  COMMENT@132..145 "# ^ namespace"
+  NEWLINE@145..146 "\n"
+  COMMENT@146..162 "#     ^ variable"
+
+#---- highlight_operators
+?foo
+# <- operator
+
+pkg?foo
+#  ^ operator
+
+x := 1
+#  ^ operator
+
+x = 1
+# ^ operator
+
+x <- 1
+# ^ operator
+
+x <<- 1
+# ^ operator
+
+1 -> x
+# ^ operator
+
+1 ->> x
+# ^ operator
+
+~ x
+# <- operator
+
+1 ~ x
+# ^ operator
+
+x |> foo()
+# ^ operator
+
+x || y
+# ^ operator
+
+x | y
+# ^ operator
+
+x && y
+# ^ operator
+
+x & y
+# ^ operator
+
+x < y
+# ^ operator
+
+x <= y
+# ^ operator
+
+x > y
+# ^ operator
+
+x >= y
+# ^ operator
+
+x == y
+# ^ operator
+
+x != y
+# ^ operator
+
+x + y
+# ^ operator
+
+x - y
+# ^ operator
+
+x * y
+# ^ operator
+
+x / y
+# ^ operator
+
+pkg::fn
+#  ^ operator
+
+pkg:::fn
+#  ^ operator
+
+x ** y
+#  ^ operator
+
+x ^ y
+# ^ operator
+
+x$y
+#^ operator
+
+x@y
+#^ operator
+
+x:y
+#^ operator
+
+\(x) x + 1
+# <- operator
+
+!x
+# <- operator
+#++++
+SOURCE_FILE@0..703
+  UNARY_EXPR@0..4
+    QUESTION@0..1 "?"
+    NAME@1..4
+      IDENT@1..4 "foo"
+  NEWLINE@4..5 "\n"
+  COMMENT@5..18 "# <- operator"
+  NEWLINE@18..19 "\n"
+  NEWLINE@19..20 "\n"
+  BINARY_EXPR@20..27
+    NAME@20..23
+      IDENT@20..23 "pkg"
+    QUESTION@23..24 "?"
+    NAME@24..27
+      IDENT@24..27 "foo"
+  NEWLINE@27..28 "\n"
+  COMMENT@28..41 "#  ^ operator"
+  NEWLINE@41..42 "\n"
+  NEWLINE@42..43 "\n"
+  BINARY_EXPR@43..49
+    NAME@43..44
+      IDENT@43..44 "x"
+    WHITESPACE@44..45 " "
+    COLON_EQ@45..47 ":="
+    WHITESPACE@47..48 " "
+    LITERAL@48..49
+      DOUBLE@48..49 "1"
+  NEWLINE@49..50 "\n"
+  COMMENT@50..63 "#  ^ operator"
+  NEWLINE@63..64 "\n"
+  NEWLINE@64..65 "\n"
+  BINARY_EXPR@65..70
+    NAME@65..66
+      IDENT@65..66 "x"
+    WHITESPACE@66..67 " "
+    EQ@67..68 "="
+    WHITESPACE@68..69 " "
+    LITERAL@69..70
+      DOUBLE@69..70 "1"
+  NEWLINE@70..71 "\n"
+  COMMENT@71..83 "# ^ operator"
+  NEWLINE@83..84 "\n"
+  NEWLINE@84..85 "\n"
+  BINARY_EXPR@85..91
+    NAME@85..86
+      IDENT@85..86 "x"
+    WHITESPACE@86..87 " "
+    LESS_MINUS@87..89 "<-"
+    WHITESPACE@89..90 " "
+    LITERAL@90..91
+      DOUBLE@90..91 "1"
+  NEWLINE@91..92 "\n"
+  COMMENT@92..104 "# ^ operator"
+  NEWLINE@104..105 "\n"
+  NEWLINE@105..106 "\n"
+  BINARY_EXPR@106..113
+    NAME@106..107
+      IDENT@106..107 "x"
+    WHITESPACE@107..108 " "
+    LESS2_MINUS@108..111 "<<-"
+    WHITESPACE@111..112 " "
+    LITERAL@112..113
+      DOUBLE@112..113 "1"
+  NEWLINE@113..114 "\n"
+  COMMENT@114..126 "# ^ operator"
+  NEWLINE@126..127 "\n"
+  NEWLINE@127..128 "\n"
+  BINARY_EXPR@128..134
+    LITERAL@128..129
+      DOUBLE@128..129 "1"
+    WHITESPACE@129..130 " "
+    MINUS_GREATER@130..132 "->"
+    WHITESPACE@132..133 " "
+    NAME@133..134
+      IDENT@133..134 "x"
+  NEWLINE@134..135 "\n"
+  COMMENT@135..147 "# ^ operator"
+  NEWLINE@147..148 "\n"
+  NEWLINE@148..149 "\n"
+  BINARY_EXPR@149..156
+    LITERAL@149..150
+      DOUBLE@149..150 "1"
+    WHITESPACE@150..151 " "
+    MINUS_GREATER2@151..154 "->>"
+    WHITESPACE@154..155 " "
+    NAME@155..156
+      IDENT@155..156 "x"
+  NEWLINE@156..157 "\n"
+  COMMENT@157..169 "# ^ operator"
+  NEWLINE@169..170 "\n"
+  NEWLINE@170..171 "\n"
+  UNARY_EXPR@171..174
+    TILDE@171..172 "~"
+    WHITESPACE@172..173 " "
+    NAME@173..174
+      IDENT@173..174 "x"
+  NEWLINE@174..175 "\n"
+  COMMENT@175..188 "# <- operator"
+  NEWLINE@188..189 "\n"
+  NEWLINE@189..190 "\n"
+  BINARY_EXPR@190..195
+    LITERAL@190..191
+      DOUBLE@190..191 "1"
+    WHITESPACE@191..192 " "
+    TILDE@192..193 "~"
+    WHITESPACE@193..194 " "
+    NAME@194..195
+      IDENT@194..195 "x"
+  NEWLINE@195..196 "\n"
+  COMMENT@196..208 "# ^ operator"
+  NEWLINE@208..209 "\n"
+  NEWLINE@209..210 "\n"
+  BINARY_EXPR@210..220
+    NAME@210..211
+      IDENT@210..211 "x"
+    WHITESPACE@211..212 " "
+    PIPE_GREATER@212..214 "|>"
+    WHITESPACE@214..215 " "
+    CALL_EXPR@215..220
+      NAME@215..218
+        IDENT@215..218 "foo"
+      ARGUMENT_LIST@218..220
+        L_PAREN@218..219 "("
+        R_PAREN@219..220 ")"
+  NEWLINE@220..221 "\n"
+  COMMENT@221..233 "# ^ operator"
+  NEWLINE@233..234 "\n"
+  NEWLINE@234..235 "\n"
+  BINARY_EXPR@235..241
+    NAME@235..236
+      IDENT@235..236 "x"
+    WHITESPACE@236..237 " "
+    PIPE2@237..239 "||"
+    WHITESPACE@239..240 " "
+    NAME@240..241
+      IDENT@240..241 "y"
+  NEWLINE@241..242 "\n"
+  COMMENT@242..254 "# ^ operator"
+  NEWLINE@254..255 "\n"
+  NEWLINE@255..256 "\n"
+  BINARY_EXPR@256..261
+    NAME@256..257
+      IDENT@256..257 "x"
+    WHITESPACE@257..258 " "
+    PIPE@258..259 "|"
+    WHITESPACE@259..260 " "
+    NAME@260..261
+      IDENT@260..261 "y"
+  NEWLINE@261..262 "\n"
+  COMMENT@262..274 "# ^ operator"
+  NEWLINE@274..275 "\n"
+  NEWLINE@275..276 "\n"
+  BINARY_EXPR@276..282
+    NAME@276..277
+      IDENT@276..277 "x"
+    WHITESPACE@277..278 " "
+    AMP2@278..280 "&&"
+    WHITESPACE@280..281 " "
+    NAME@281..282
+      IDENT@281..282 "y"
+  NEWLINE@282..283 "\n"
+  COMMENT@283..295 "# ^ operator"
+  NEWLINE@295..296 "\n"
+  NEWLINE@296..297 "\n"
+  BINARY_EXPR@297..302
+    NAME@297..298
+      IDENT@297..298 "x"
+    WHITESPACE@298..299 " "
+    AMP@299..300 "&"
+    WHITESPACE@300..301 " "
+    NAME@301..302
+      IDENT@301..302 "y"
+  NEWLINE@302..303 "\n"
+  COMMENT@303..315 "# ^ operator"
+  NEWLINE@315..316 "\n"
+  NEWLINE@316..317 "\n"
+  BINARY_EXPR@317..322
+    NAME@317..318
+      IDENT@317..318 "x"
+    WHITESPACE@318..319 " "
+    LESS@319..320 "<"
+    WHITESPACE@320..321 " "
+    NAME@321..322
+      IDENT@321..322 "y"
+  NEWLINE@322..323 "\n"
+  COMMENT@323..335 "# ^ operator"
+  NEWLINE@335..336 "\n"
+  NEWLINE@336..337 "\n"
+  BINARY_EXPR@337..343
+    NAME@337..338
+      IDENT@337..338 "x"
+    WHITESPACE@338..339 " "
+    LESS_EQ@339..341 "<="
+    WHITESPACE@341..342 " "
+    NAME@342..343
+      IDENT@342..343 "y"
+  NEWLINE@343..344 "\n"
+  COMMENT@344..356 "# ^ operator"
+  NEWLINE@356..357 "\n"
+  NEWLINE@357..358 "\n"
+  BINARY_EXPR@358..363
+    NAME@358..359
+      IDENT@358..359 "x"
+    WHITESPACE@359..360 " "
+    GREATER@360..361 ">"
+    WHITESPACE@361..362 " "
+    NAME@362..363
+      IDENT@362..363 "y"
+  NEWLINE@363..364 "\n"
+  COMMENT@364..376 "# ^ operator"
+  NEWLINE@376..377 "\n"
+  NEWLINE@377..378 "\n"
+  BINARY_EXPR@378..384
+    NAME@378..379
+      IDENT@378..379 "x"
+    WHITESPACE@379..380 " "
+    GREATER_EQ@380..382 ">="
+    WHITESPACE@382..383 " "
+    NAME@383..384
+      IDENT@383..384 "y"
+  NEWLINE@384..385 "\n"
+  COMMENT@385..397 "# ^ operator"
+  NEWLINE@397..398 "\n"
+  NEWLINE@398..399 "\n"
+  BINARY_EXPR@399..405
+    NAME@399..400
+      IDENT@399..400 "x"
+    WHITESPACE@400..401 " "
+    EQ2@401..403 "=="
+    WHITESPACE@403..404 " "
+    NAME@404..405
+      IDENT@404..405 "y"
+  NEWLINE@405..406 "\n"
+  COMMENT@406..418 "# ^ operator"
+  NEWLINE@418..419 "\n"
+  NEWLINE@419..420 "\n"
+  BINARY_EXPR@420..426
+    NAME@420..421
+      IDENT@420..421 "x"
+    WHITESPACE@421..422 " "
+    BANG_EQ@422..424 "!="
+    WHITESPACE@424..425 " "
+    NAME@425..426
+      IDENT@425..426 "y"
+  NEWLINE@426..427 "\n"
+  COMMENT@427..439 "# ^ operator"
+  NEWLINE@439..440 "\n"
+  NEWLINE@440..441 "\n"
+  BINARY_EXPR@441..446
+    NAME@441..442
+      IDENT@441..442 "x"
+    WHITESPACE@442..443 " "
+    PLUS@443..444 "+"
+    WHITESPACE@444..445 " "
+    NAME@445..446
+      IDENT@445..446 "y"
+  NEWLINE@446..447 "\n"
+  COMMENT@447..459 "# ^ operator"
+  NEWLINE@459..460 "\n"
+  NEWLINE@460..461 "\n"
+  BINARY_EXPR@461..466
+    NAME@461..462
+      IDENT@461..462 "x"
+    WHITESPACE@462..463 " "
+    MINUS@463..464 "-"
+    WHITESPACE@464..465 " "
+    NAME@465..466
+      IDENT@465..466 "y"
+  NEWLINE@466..467 "\n"
+  COMMENT@467..479 "# ^ operator"
+  NEWLINE@479..480 "\n"
+  NEWLINE@480..481 "\n"
+  BINARY_EXPR@481..486
+    NAME@481..482
+      IDENT@481..482 "x"
+    WHITESPACE@482..483 " "
+    STAR@483..484 "*"
+    WHITESPACE@484..485 " "
+    NAME@485..486
+      IDENT@485..486 "y"
+  NEWLINE@486..487 "\n"
+  COMMENT@487..499 "# ^ operator"
+  NEWLINE@499..500 "\n"
+  NEWLINE@500..501 "\n"
+  BINARY_EXPR@501..506
+    NAME@501..502
+      IDENT@501..502 "x"
+    WHITESPACE@502..503 " "
+    SLASH@503..504 "/"
+    WHITESPACE@504..505 " "
+    NAME@505..506
+      IDENT@505..506 "y"
+  NEWLINE@506..507 "\n"
+  COMMENT@507..519 "# ^ operator"
+  NEWLINE@519..520 "\n"
+  NEWLINE@520..521 "\n"
+  NAMESPACE_EXPR@521..528
+    NAME@521..524
+      IDENT@521..524 "pkg"
+    COLON2@524..526 "::"
+    NAME@526..528
+      IDENT@526..528 "fn"
+  NEWLINE@528..529 "\n"
+  COMMENT@529..542 "#  ^ operator"
+  NEWLINE@542..543 "\n"
+  NEWLINE@543..544 "\n"
+  NAMESPACE_EXPR@544..552
+    NAME@544..547
+      IDENT@544..547 "pkg"
+    COLON3@547..550 ":::"
+    NAME@550..552
+      IDENT@550..552 "fn"
+  NEWLINE@552..553 "\n"
+  COMMENT@553..566 "#  ^ operator"
+  NEWLINE@566..567 "\n"
+  NEWLINE@567..568 "\n"
+  BINARY_EXPR@568..574
+    NAME@568..569
+      IDENT@568..569 "x"
+    WHITESPACE@569..570 " "
+    CARET@570..572 "**"
+    WHITESPACE@572..573 " "
+    NAME@573..574
+      IDENT@573..574 "y"
+  NEWLINE@574..575 "\n"
+  COMMENT@575..588 "#  ^ operator"
+  NEWLINE@588..589 "\n"
+  NEWLINE@589..590 "\n"
+  BINARY_EXPR@590..595
+    NAME@590..591
+      IDENT@590..591 "x"
+    WHITESPACE@591..592 " "
+    CARET@592..593 "^"
+    WHITESPACE@593..594 " "
+    NAME@594..595
+      IDENT@594..595 "y"
+  NEWLINE@595..596 "\n"
+  COMMENT@596..608 "# ^ operator"
+  NEWLINE@608..609 "\n"
+  NEWLINE@609..610 "\n"
+  DOLLAR_EXPR@610..613
+    NAME@610..611
+      IDENT@610..611 "x"
+    DOLLAR@611..612 "$"
+    NAME@612..613
+      IDENT@612..613 "y"
+  NEWLINE@613..614 "\n"
+  COMMENT@614..625 "#^ operator"
+  NEWLINE@625..626 "\n"
+  NEWLINE@626..627 "\n"
+  AT_EXPR@627..630
+    NAME@627..628
+      IDENT@627..628 "x"
+    AT@628..629 "@"
+    NAME@629..630
+      IDENT@629..630 "y"
+  NEWLINE@630..631 "\n"
+  COMMENT@631..642 "#^ operator"
+  NEWLINE@642..643 "\n"
+  NEWLINE@643..644 "\n"
+  BINARY_EXPR@644..647
+    NAME@644..645
+      IDENT@644..645 "x"
+    COLON@645..646 ":"
+    NAME@646..647
+      IDENT@646..647 "y"
+  NEWLINE@647..648 "\n"
+  COMMENT@648..659 "#^ operator"
+  NEWLINE@659..660 "\n"
+  NEWLINE@660..661 "\n"
+  FUNCTION_DEF@661..671
+    BACKSLASH@661..662 "\\"
+    PARAMETER_LIST@662..665
+      L_PAREN@662..663 "("
+      PARAMETER@663..664
+        IDENT@663..664 "x"
+      R_PAREN@664..665 ")"
+    WHITESPACE@665..666 " "
+    BINARY_EXPR@666..671
+      NAME@666..667
+        IDENT@666..667 "x"
+      WHITESPACE@667..668 " "
+      PLUS@668..669 "+"
+      WHITESPACE@669..670 " "
+      LITERAL@670..671
+        DOUBLE@670..671 "1"
+  NEWLINE@671..672 "\n"
+  COMMENT@672..685 "# <- operator"
+  NEWLINE@685..686 "\n"
+  NEWLINE@686..687 "\n"
+  UNARY_EXPR@687..689
+    BANG@687..688 "!"
+    NAME@688..689
+      IDENT@688..689 "x"
+  NEWLINE@689..690 "\n"
+  COMMENT@690..703 "# <- operator"
+
+#---- highlight_punctuation
+{
+# <- punctuation.bracket
+  1 + 1
+}
+# <- punctuation.bracket
+
+(
+# <- punctuation.bracket
+    1 + 1
+)
+# <- punctuation.bracket
+
+a[b]
+#^ punctuation.bracket
+#  ^ punctuation.bracket
+
+# No good way to prove that `[[` is one token from what I can tell
+a[[b]]
+#^ punctuation.bracket
+# ^ punctuation.bracket
+#   ^ punctuation.bracket
+#    ^ punctuation.bracket
+
+fn()
+# ^ punctuation.bracket
+#  ^ punctuation.bracket
+
+fn(a, b)
+#   ^ punctuation.delimiter
+#++++
+SOURCE_FILE@0..448
+  BRACE_EXPR@0..36
+    L_BRACE@0..1 "{"
+    NEWLINE@1..2 "\n"
+    COMMENT@2..26 "# <- punctuation.bracket"
+    NEWLINE@26..27 "\n"
+    WHITESPACE@27..29 "  "
+    BINARY_EXPR@29..34
+      LITERAL@29..30
+        DOUBLE@29..30 "1"
+      WHITESPACE@30..31 " "
+      PLUS@31..32 "+"
+      WHITESPACE@32..33 " "
+      LITERAL@33..34
+        DOUBLE@33..34 "1"
+    NEWLINE@34..35 "\n"
+    R_BRACE@35..36 "}"
+  NEWLINE@36..37 "\n"
+  COMMENT@37..61 "# <- punctuation.bracket"
+  NEWLINE@61..62 "\n"
+  NEWLINE@62..63 "\n"
+  PAREN_EXPR@63..101
+    L_PAREN@63..64 "("
+    NEWLINE@64..65 "\n"
+    COMMENT@65..89 "# <- punctuation.bracket"
+    NEWLINE@89..90 "\n"
+    WHITESPACE@90..94 "    "
+    BINARY_EXPR@94..100
+      LITERAL@94..95
+        DOUBLE@94..95 "1"
+      WHITESPACE@95..96 " "
+      PLUS@96..97 "+"
+      WHITESPACE@97..98 " "
+      LITERAL@98..99
+        DOUBLE@98..99 "1"
+      NEWLINE@99..100 "\n"
+    R_PAREN@100..101 ")"
+  NEWLINE@101..102 "\n"
+  COMMENT@102..126 "# <- punctuation.bracket"
+  NEWLINE@126..127 "\n"
+  NEWLINE@127..128 "\n"
+  SUBSET_EXPR@128..132
+    NAME@128..129
+      IDENT@128..129 "a"
+    ARGUMENT_LIST@129..132
+      L_BRACKET@129..130 "["
+      ARGUMENT@130..131
+        NAME@130..131
+          IDENT@130..131 "b"
+      R_BRACKET@131..132 "]"
+  NEWLINE@132..133 "\n"
+  COMMENT@133..155 "#^ punctuation.bracket"
+  NEWLINE@155..156 "\n"
+  COMMENT@156..180 "#  ^ punctuation.bracket"
+  NEWLINE@180..181 "\n"
+  NEWLINE@181..182 "\n"
+  COMMENT@182..248 "# No good way to prove that `[[` is one token from what I can tell"
+  NEWLINE@248..249 "\n"
+  SUBSET2_EXPR@249..255
+    NAME@249..250
+      IDENT@249..250 "a"
+    ARGUMENT_LIST@250..255
+      L_BRACKET2@250..252 "[["
+      ARGUMENT@252..253
+        NAME@252..253
+          IDENT@252..253 "b"
+      R_BRACKET@253..254 "]"
+      R_BRACKET@254..255 "]"
+  NEWLINE@255..256 "\n"
+  COMMENT@256..278 "#^ punctuation.bracket"
+  NEWLINE@278..279 "\n"
+  COMMENT@279..302 "# ^ punctuation.bracket"
+  NEWLINE@302..303 "\n"
+  COMMENT@303..328 "#   ^ punctuation.bracket"
+  NEWLINE@328..329 "\n"
+  COMMENT@329..355 "#    ^ punctuation.bracket"
+  NEWLINE@355..356 "\n"
+  NEWLINE@356..357 "\n"
+  CALL_EXPR@357..361
+    NAME@357..359
+      IDENT@357..359 "fn"
+    ARGUMENT_LIST@359..361
+      L_PAREN@359..360 "("
+      R_PAREN@360..361 ")"
+  NEWLINE@361..362 "\n"
+  COMMENT@362..385 "# ^ punctuation.bracket"
+  NEWLINE@385..386 "\n"
+  COMMENT@386..410 "#  ^ punctuation.bracket"
+  NEWLINE@410..411 "\n"
+  NEWLINE@411..412 "\n"
+  CALL_EXPR@412..420
+    NAME@412..414
+      IDENT@412..414 "fn"
+    ARGUMENT_LIST@414..420
+      L_PAREN@414..415 "("
+      ARGUMENT@415..416
+        NAME@415..416
+          IDENT@415..416 "a"
+      COMMA@416..417 ","
+      WHITESPACE@417..418 " "
+      ARGUMENT@418..419
+        NAME@418..419
+          IDENT@418..419 "b"
+      R_PAREN@419..420 ")"
+  NEWLINE@420..421 "\n"
+  COMMENT@421..448 "#   ^ punctuation.delimiter"
+
+#---- highlight_variables
+x + y
+# <- variable
+#   ^ variable
+
+x <- 1
+# <- variable
+
+# Not a variable
+foo <- function() {}
+# <- function
+
+# Not a variable
+foo()
+# <- function
+#++++
+SOURCE_FILE@0..147
+  BINARY_EXPR@0..5
+    NAME@0..1
+      IDENT@0..1 "x"
+    WHITESPACE@1..2 " "
+    PLUS@2..3 "+"
+    WHITESPACE@3..4 " "
+    NAME@4..5
+      IDENT@4..5 "y"
+  NEWLINE@5..6 "\n"
+  COMMENT@6..19 "# <- variable"
+  NEWLINE@19..20 "\n"
+  COMMENT@20..34 "#   ^ variable"
+  NEWLINE@34..35 "\n"
+  NEWLINE@35..36 "\n"
+  BINARY_EXPR@36..42
+    NAME@36..37
+      IDENT@36..37 "x"
+    WHITESPACE@37..38 " "
+    LESS_MINUS@38..40 "<-"
+    WHITESPACE@40..41 " "
+    LITERAL@41..42
+      DOUBLE@41..42 "1"
+  NEWLINE@42..43 "\n"
+  COMMENT@43..56 "# <- variable"
+  NEWLINE@56..57 "\n"
+  NEWLINE@57..58 "\n"
+  COMMENT@58..74 "# Not a variable"
+  NEWLINE@74..75 "\n"
+  BINARY_EXPR@75..95
+    NAME@75..78
+      IDENT@75..78 "foo"
+    WHITESPACE@78..79 " "
+    LESS_MINUS@79..81 "<-"
+    WHITESPACE@81..82 " "
+    FUNCTION_DEF@82..95
+      FUNCTION_KW@82..90 "function"
+      PARAMETER_LIST@90..92
+        L_PAREN@90..91 "("
+        R_PAREN@91..92 ")"
+      WHITESPACE@92..93 " "
+      BRACE_EXPR@93..95
+        L_BRACE@93..94 "{"
+        R_BRACE@94..95 "}"
+  NEWLINE@95..96 "\n"
+  COMMENT@96..109 "# <- function"
+  NEWLINE@109..110 "\n"
+  NEWLINE@110..111 "\n"
+  COMMENT@111..127 "# Not a variable"
+  NEWLINE@127..128 "\n"
+  CALL_EXPR@128..133
+    NAME@128..131
+      IDENT@128..131 "foo"
+    ARGUMENT_LIST@131..133
+      L_PAREN@131..132 "("
+      R_PAREN@132..133 ")"
+  NEWLINE@133..134 "\n"
+  COMMENT@134..147 "# <- function"
+
+#---- tags_calls
+match(a, b)
+# ^ reference.call
+
+fn <- function() {
+  foo() 
+  # ^ reference.call
+
+  bar() + baz()
+  # ^ reference.call
+  #        ^ reference.call
+}
+
+pkg::exported(mtcars, x = 1)
+#      ^ reference.call
+
+pkg:::internal(mtcars, x = 1)
+#      ^ reference.call
+#++++
+SOURCE_FILE@0..257
+  CALL_EXPR@0..11
+    NAME@0..5
+      IDENT@0..5 "match"
+    ARGUMENT_LIST@5..11
+      L_PAREN@5..6 "("
+      ARGUMENT@6..7
+        NAME@6..7
+          IDENT@6..7 "a"
+      COMMA@7..8 ","
+      WHITESPACE@8..9 " "
+      ARGUMENT@9..10
+        NAME@9..10
+          IDENT@9..10 "b"
+      R_PAREN@10..11 ")"
+  NEWLINE@11..12 "\n"
+  COMMENT@12..30 "# ^ reference.call"
+  NEWLINE@30..31 "\n"
+  NEWLINE@31..32 "\n"
+  BINARY_EXPR@32..148
+    NAME@32..34
+      IDENT@32..34 "fn"
+    WHITESPACE@34..35 " "
+    LESS_MINUS@35..37 "<-"
+    WHITESPACE@37..38 " "
+    FUNCTION_DEF@38..148
+      FUNCTION_KW@38..46 "function"
+      PARAMETER_LIST@46..48
+        L_PAREN@46..47 "("
+        R_PAREN@47..48 ")"
+      WHITESPACE@48..49 " "
+      BRACE_EXPR@49..148
+        L_BRACE@49..50 "{"
+        NEWLINE@50..51 "\n"
+        WHITESPACE@51..53 "  "
+        CALL_EXPR@53..58
+          NAME@53..56
+            IDENT@53..56 "foo"
+          ARGUMENT_LIST@56..58
+            L_PAREN@56..57 "("
+            R_PAREN@57..58 ")"
+        WHITESPACE@58..59 " "
+        NEWLINE@59..60 "\n"
+        WHITESPACE@60..62 "  "
+        COMMENT@62..80 "# ^ reference.call"
+        NEWLINE@80..81 "\n"
+        NEWLINE@81..82 "\n"
+        WHITESPACE@82..84 "  "
+        BINARY_EXPR@84..97
+          CALL_EXPR@84..89
+            NAME@84..87
+              IDENT@84..87 "bar"
+            ARGUMENT_LIST@87..89
+              L_PAREN@87..88 "("
+              R_PAREN@88..89 ")"
+          WHITESPACE@89..90 " "
+          PLUS@90..91 "+"
+          WHITESPACE@91..92 " "
+          CALL_EXPR@92..97
+            NAME@92..95
+              IDENT@92..95 "baz"
+            ARGUMENT_LIST@95..97
+              L_PAREN@95..96 "("
+              R_PAREN@96..97 ")"
+        NEWLINE@97..98 "\n"
+        WHITESPACE@98..100 "  "
+        COMMENT@100..118 "# ^ reference.call"
+        NEWLINE@118..119 "\n"
+        WHITESPACE@119..121 "  "
+        COMMENT@121..146 "#        ^ reference.call"
+        NEWLINE@146..147 "\n"
+        R_BRACE@147..148 "}"
+  NEWLINE@148..149 "\n"
+  NEWLINE@149..150 "\n"
+  CALL_EXPR@150..178
+    NAMESPACE_EXPR@150..163
+      NAME@150..153
+        IDENT@150..153 "pkg"
+      COLON2@153..155 "::"
+      NAME@155..163
+        IDENT@155..163 "exported"
+    ARGUMENT_LIST@163..178
+      L_PAREN@163..164 "("
+      ARGUMENT@164..170
+        NAME@164..170
+          IDENT@164..170 "mtcars"
+      COMMA@170..171 ","
+      WHITESPACE@171..172 " "
+      ARGUMENT@172..177
+        NAME@172..173
+          IDENT@172..173 "x"
+        WHITESPACE@173..174 " "
+        EQ@174..175 "="
+        WHITESPACE@175..176 " "
+        LITERAL@176..177
+          DOUBLE@176..177 "1"
+      R_PAREN@177..178 ")"
+  NEWLINE@178..179 "\n"
+  COMMENT@179..202 "#      ^ reference.call"
+  NEWLINE@202..203 "\n"
+  NEWLINE@203..204 "\n"
+  CALL_EXPR@204..233
+    NAMESPACE_EXPR@204..218
+      NAME@204..207
+        IDENT@204..207 "pkg"
+      COLON3@207..210 ":::"
+      NAME@210..218
+        IDENT@210..218 "internal"
+    ARGUMENT_LIST@218..233
+      L_PAREN@218..219 "("
+      ARGUMENT@219..225
+        NAME@219..225
+          IDENT@219..225 "mtcars"
+      COMMA@225..226 ","
+      WHITESPACE@226..227 " "
+      ARGUMENT@227..232
+        NAME@227..228
+          IDENT@227..228 "x"
+        WHITESPACE@228..229 " "
+        EQ@229..230 "="
+        WHITESPACE@230..231 " "
+        LITERAL@231..232
+          DOUBLE@231..232 "1"
+      R_PAREN@232..233 ")"
+  NEWLINE@233..234 "\n"
+  COMMENT@234..257 "#      ^ reference.call"
+
+#---- tags_function_definitions
+fn <- function() {
+# <- definition.function
+}
+
+fn = function() {
+# <- definition.function
+}
+
+fn <- function(a, b) {
+# <- definition.function
+
+  bar <- function() {}
+  # ^ definition.function
+}
+
+"fn" <- function() {
+# <- definition.function
+}
+
+"fn" = function() {
+# <- definition.function
+}
+
+'fn' <- function() {
+# <- definition.function
+}
+
+'fn' = function() {
+# <- definition.function
+}
+
+`fn` <- function() {
+# <- definition.function
+}
+
+`fn` = function() {
+# <- definition.function
+}
+#++++
+SOURCE_FILE@0..483
+  BINARY_EXPR@0..45
+    NAME@0..2
+      IDENT@0..2 "fn"
+    WHITESPACE@2..3 " "
+    LESS_MINUS@3..5 "<-"
+    WHITESPACE@5..6 " "
+    FUNCTION_DEF@6..45
+      FUNCTION_KW@6..14 "function"
+      PARAMETER_LIST@14..16
+        L_PAREN@14..15 "("
+        R_PAREN@15..16 ")"
+      WHITESPACE@16..17 " "
+      BRACE_EXPR@17..45
+        L_BRACE@17..18 "{"
+        NEWLINE@18..19 "\n"
+        COMMENT@19..43 "# <- definition.function"
+        NEWLINE@43..44 "\n"
+        R_BRACE@44..45 "}"
+  NEWLINE@45..46 "\n"
+  NEWLINE@46..47 "\n"
+  BINARY_EXPR@47..91
+    NAME@47..49
+      IDENT@47..49 "fn"
+    WHITESPACE@49..50 " "
+    EQ@50..51 "="
+    WHITESPACE@51..52 " "
+    FUNCTION_DEF@52..91
+      FUNCTION_KW@52..60 "function"
+      PARAMETER_LIST@60..62
+        L_PAREN@60..61 "("
+        R_PAREN@61..62 ")"
+      WHITESPACE@62..63 " "
+      BRACE_EXPR@63..91
+        L_BRACE@63..64 "{"
+        NEWLINE@64..65 "\n"
+        COMMENT@65..89 "# <- definition.function"
+        NEWLINE@89..90 "\n"
+        R_BRACE@90..91 "}"
+  NEWLINE@91..92 "\n"
+  NEWLINE@92..93 "\n"
+  BINARY_EXPR@93..192
+    NAME@93..95
+      IDENT@93..95 "fn"
+    WHITESPACE@95..96 " "
+    LESS_MINUS@96..98 "<-"
+    WHITESPACE@98..99 " "
+    FUNCTION_DEF@99..192
+      FUNCTION_KW@99..107 "function"
+      PARAMETER_LIST@107..113
+        L_PAREN@107..108 "("
+        PARAMETER@108..109
+          IDENT@108..109 "a"
+        COMMA@109..110 ","
+        WHITESPACE@110..111 " "
+        PARAMETER@111..112
+          IDENT@111..112 "b"
+        R_PAREN@112..113 ")"
+      WHITESPACE@113..114 " "
+      BRACE_EXPR@114..192
+        L_BRACE@114..115 "{"
+        NEWLINE@115..116 "\n"
+        COMMENT@116..140 "# <- definition.function"
+        NEWLINE@140..141 "\n"
+        NEWLINE@141..142 "\n"
+        WHITESPACE@142..144 "  "
+        BINARY_EXPR@144..164
+          NAME@144..147
+            IDENT@144..147 "bar"
+          WHITESPACE@147..148 " "
+          LESS_MINUS@148..150 "<-"
+          WHITESPACE@150..151 " "
+          FUNCTION_DEF@151..164
+            FUNCTION_KW@151..159 "function"
+            PARAMETER_LIST@159..161
+              L_PAREN@159..160 "("
+              R_PAREN@160..161 ")"
+            WHITESPACE@161..162 " "
+            BRACE_EXPR@162..164
+              L_BRACE@162..163 "{"
+              R_BRACE@163..164 "}"
+        NEWLINE@164..165 "\n"
+        WHITESPACE@165..167 "  "
+        COMMENT@167..190 "# ^ definition.function"
+        NEWLINE@190..191 "\n"
+        R_BRACE@191..192 "}"
+  NEWLINE@192..193 "\n"
+  NEWLINE@193..194 "\n"
+  BINARY_EXPR@194..241
+    LITERAL@194..198
+      STRING@194..198 "\"fn\""
+    WHITESPACE@198..199 " "
+    LESS_MINUS@199..201 "<-"
+    WHITESPACE@201..202 " "
+    FUNCTION_DEF@202..241
+      FUNCTION_KW@202..210 "function"
+      PARAMETER_LIST@210..212
+        L_PAREN@210..211 "("
+        R_PAREN@211..212 ")"
+      WHITESPACE@212..213 " "
+      BRACE_EXPR@213..241
+        L_BRACE@213..214 "{"
+        NEWLINE@214..215 "\n"
+        COMMENT@215..239 "# <- definition.function"
+        NEWLINE@239..240 "\n"
+        R_BRACE@240..241 "}"
+  NEWLINE@241..242 "\n"
+  NEWLINE@242..243 "\n"
+  BINARY_EXPR@243..289
+    LITERAL@243..247
+      STRING@243..247 "\"fn\""
+    WHITESPACE@247..248 " "
+    EQ@248..249 "="
+    WHITESPACE@249..250 " "
+    FUNCTION_DEF@250..289
+      FUNCTION_KW@250..258 "function"
+      PARAMETER_LIST@258..260
+        L_PAREN@258..259 "("
+        R_PAREN@259..260 ")"
+      WHITESPACE@260..261 " "
+      BRACE_EXPR@261..289
+        L_BRACE@261..262 "{"
+        NEWLINE@262..263 "\n"
+        COMMENT@263..287 "# <- definition.function"
+        NEWLINE@287..288 "\n"
+        R_BRACE@288..289 "}"
+  NEWLINE@289..290 "\n"
+  NEWLINE@290..291 "\n"
+  BINARY_EXPR@291..338
+    LITERAL@291..295
+      STRING@291..295 "'fn'"
+    WHITESPACE@295..296 " "
+    LESS_MINUS@296..298 "<-"
+    WHITESPACE@298..299 " "
+    FUNCTION_DEF@299..338
+      FUNCTION_KW@299..307 "function"
+      PARAMETER_LIST@307..309
+        L_PAREN@307..308 "("
+        R_PAREN@308..309 ")"
+      WHITESPACE@309..310 " "
+      BRACE_EXPR@310..338
+        L_BRACE@310..311 "{"
+        NEWLINE@311..312 "\n"
+        COMMENT@312..336 "# <- definition.function"
+        NEWLINE@336..337 "\n"
+        R_BRACE@337..338 "}"
+  NEWLINE@338..339 "\n"
+  NEWLINE@339..340 "\n"
+  BINARY_EXPR@340..386
+    LITERAL@340..344
+      STRING@340..344 "'fn'"
+    WHITESPACE@344..345 " "
+    EQ@345..346 "="
+    WHITESPACE@346..347 " "
+    FUNCTION_DEF@347..386
+      FUNCTION_KW@347..355 "function"
+      PARAMETER_LIST@355..357
+        L_PAREN@355..356 "("
+        R_PAREN@356..357 ")"
+      WHITESPACE@357..358 " "
+      BRACE_EXPR@358..386
+        L_BRACE@358..359 "{"
+        NEWLINE@359..360 "\n"
+        COMMENT@360..384 "# <- definition.function"
+        NEWLINE@384..385 "\n"
+        R_BRACE@385..386 "}"
+  NEWLINE@386..387 "\n"
+  NEWLINE@387..388 "\n"
+  BINARY_EXPR@388..435
+    NAME@388..392
+      IDENT@388..392 "`fn`"
+    WHITESPACE@392..393 " "
+    LESS_MINUS@393..395 "<-"
+    WHITESPACE@395..396 " "
+    FUNCTION_DEF@396..435
+      FUNCTION_KW@396..404 "function"
+      PARAMETER_LIST@404..406
+        L_PAREN@404..405 "("
+        R_PAREN@405..406 ")"
+      WHITESPACE@406..407 " "
+      BRACE_EXPR@407..435
+        L_BRACE@407..408 "{"
+        NEWLINE@408..409 "\n"
+        COMMENT@409..433 "# <- definition.function"
+        NEWLINE@433..434 "\n"
+        R_BRACE@434..435 "}"
+  NEWLINE@435..436 "\n"
+  NEWLINE@436..437 "\n"
+  BINARY_EXPR@437..483
+    NAME@437..441
+      IDENT@437..441 "`fn`"
+    WHITESPACE@441..442 " "
+    EQ@442..443 "="
+    WHITESPACE@443..444 " "
+    FUNCTION_DEF@444..483
+      FUNCTION_KW@444..452 "function"
+      PARAMETER_LIST@452..454
+        L_PAREN@452..453 "("
+        R_PAREN@453..454 ")"
+      WHITESPACE@454..455 " "
+      BRACE_EXPR@455..483
+        L_BRACE@455..456 "{"
+        NEWLINE@456..457 "\n"
+        COMMENT@457..481 "# <- definition.function"
+        NEWLINE@481..482 "\n"
+        R_BRACE@482..483 "}"

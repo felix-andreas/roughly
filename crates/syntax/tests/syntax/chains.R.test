@@ -1,0 +1,484 @@
+#==== subset_disambiguation
+#---- double_bracket_containing_subset
+x[[y[1]]]
+#++++
+SOURCE_FILE@0..9
+  SUBSET2_EXPR@0..9
+    NAME@0..1
+      IDENT@0..1 "x"
+    ARGUMENT_LIST@1..9
+      L_BRACKET2@1..3 "[["
+      ARGUMENT@3..7
+        SUBSET_EXPR@3..7
+          NAME@3..4
+            IDENT@3..4 "y"
+          ARGUMENT_LIST@4..7
+            L_BRACKET@4..5 "["
+            ARGUMENT@5..6
+              LITERAL@5..6
+                DOUBLE@5..6 "1"
+            R_BRACKET@6..7 "]"
+      R_BRACKET@7..8 "]"
+      R_BRACKET@8..9 "]"
+
+#---- nested_double_brackets
+l[[1]][[2]]
+#++++
+SOURCE_FILE@0..11
+  SUBSET2_EXPR@0..11
+    SUBSET2_EXPR@0..6
+      NAME@0..1
+        IDENT@0..1 "l"
+      ARGUMENT_LIST@1..6
+        L_BRACKET2@1..3 "[["
+        ARGUMENT@3..4
+          LITERAL@3..4
+            DOUBLE@3..4 "1"
+        R_BRACKET@4..5 "]"
+        R_BRACKET@5..6 "]"
+    ARGUMENT_LIST@6..11
+      L_BRACKET2@6..8 "[["
+      ARGUMENT@8..9
+        LITERAL@8..9
+          DOUBLE@8..9 "2"
+      R_BRACKET@9..10 "]"
+      R_BRACKET@10..11 "]"
+
+#---- double_bracket_string_tag
+l[["name"]]
+#++++
+SOURCE_FILE@0..11
+  SUBSET2_EXPR@0..11
+    NAME@0..1
+      IDENT@0..1 "l"
+    ARGUMENT_LIST@1..11
+      L_BRACKET2@1..3 "[["
+      ARGUMENT@3..9
+        LITERAL@3..9
+          STRING@3..9 "\"name\""
+      R_BRACKET@9..10 "]"
+      R_BRACKET@10..11 "]"
+
+#---- double_bracket_extra_arg
+l[[i, exact = FALSE]]
+#++++
+SOURCE_FILE@0..21
+  SUBSET2_EXPR@0..21
+    NAME@0..1
+      IDENT@0..1 "l"
+    ARGUMENT_LIST@1..21
+      L_BRACKET2@1..3 "[["
+      ARGUMENT@3..4
+        NAME@3..4
+          IDENT@3..4 "i"
+      COMMA@4..5 ","
+      WHITESPACE@5..6 " "
+      ARGUMENT@6..19
+        NAME@6..11
+          IDENT@6..11 "exact"
+        WHITESPACE@11..12 " "
+        EQ@12..13 "="
+        WHITESPACE@13..14 " "
+        LITERAL@14..19
+          FALSE_KW@14..19 "FALSE"
+      R_BRACKET@19..20 "]"
+      R_BRACKET@20..21 "]"
+
+#---- mixed_chain
+a$b[[1]]$c(2)[3]
+#++++
+SOURCE_FILE@0..16
+  SUBSET_EXPR@0..16
+    CALL_EXPR@0..13
+      DOLLAR_EXPR@0..10
+        SUBSET2_EXPR@0..8
+          DOLLAR_EXPR@0..3
+            NAME@0..1
+              IDENT@0..1 "a"
+            DOLLAR@1..2 "$"
+            NAME@2..3
+              IDENT@2..3 "b"
+          ARGUMENT_LIST@3..8
+            L_BRACKET2@3..5 "[["
+            ARGUMENT@5..6
+              LITERAL@5..6
+                DOUBLE@5..6 "1"
+            R_BRACKET@6..7 "]"
+            R_BRACKET@7..8 "]"
+        DOLLAR@8..9 "$"
+        NAME@9..10
+          IDENT@9..10 "c"
+      ARGUMENT_LIST@10..13
+        L_PAREN@10..11 "("
+        ARGUMENT@11..12
+          LITERAL@11..12
+            DOUBLE@11..12 "2"
+        R_PAREN@12..13 ")"
+    ARGUMENT_LIST@13..16
+      L_BRACKET@13..14 "["
+      ARGUMENT@14..15
+        LITERAL@14..15
+          DOUBLE@14..15 "3"
+      R_BRACKET@15..16 "]"
+
+#---- namespace_call_field
+pkg::fn(x)$field
+#++++
+SOURCE_FILE@0..16
+  DOLLAR_EXPR@0..16
+    CALL_EXPR@0..10
+      NAMESPACE_EXPR@0..7
+        NAME@0..3
+          IDENT@0..3 "pkg"
+        COLON2@3..5 "::"
+        NAME@5..7
+          IDENT@5..7 "fn"
+      ARGUMENT_LIST@7..10
+        L_PAREN@7..8 "("
+        ARGUMENT@8..9
+          NAME@8..9
+            IDENT@8..9 "x"
+        R_PAREN@9..10 ")"
+    DOLLAR@10..11 "$"
+    NAME@11..16
+      IDENT@11..16 "field"
+
+#---- at_chain
+obj@slot@sub
+#++++
+SOURCE_FILE@0..12
+  AT_EXPR@0..12
+    AT_EXPR@0..8
+      NAME@0..3
+        IDENT@0..3 "obj"
+      AT@3..4 "@"
+      NAME@4..8
+        IDENT@4..8 "slot"
+    AT@8..9 "@"
+    NAME@9..12
+      IDENT@9..12 "sub"
+
+#==== call_forms
+#---- call_returning_function_called
+f()()
+#++++
+SOURCE_FILE@0..5
+  CALL_EXPR@0..5
+    CALL_EXPR@0..3
+      NAME@0..1
+        IDENT@0..1 "f"
+      ARGUMENT_LIST@1..3
+        L_PAREN@1..2 "("
+        R_PAREN@2..3 ")"
+    ARGUMENT_LIST@3..5
+      L_PAREN@3..4 "("
+      R_PAREN@4..5 ")"
+
+#---- iife
+(function(x) x)(1)
+#++++
+SOURCE_FILE@0..18
+  CALL_EXPR@0..18
+    PAREN_EXPR@0..15
+      L_PAREN@0..1 "("
+      FUNCTION_DEF@1..14
+        FUNCTION_KW@1..9 "function"
+        PARAMETER_LIST@9..12
+          L_PAREN@9..10 "("
+          PARAMETER@10..11
+            IDENT@10..11 "x"
+          R_PAREN@11..12 ")"
+        WHITESPACE@12..13 " "
+        NAME@13..14
+          IDENT@13..14 "x"
+      R_PAREN@14..15 ")"
+    ARGUMENT_LIST@15..18
+      L_PAREN@15..16 "("
+      ARGUMENT@16..17
+        LITERAL@16..17
+          DOUBLE@16..17 "1"
+      R_PAREN@17..18 ")"
+
+#---- subset_then_call
+l[[1]]()
+#++++
+SOURCE_FILE@0..8
+  CALL_EXPR@0..8
+    SUBSET2_EXPR@0..6
+      NAME@0..1
+        IDENT@0..1 "l"
+      ARGUMENT_LIST@1..6
+        L_BRACKET2@1..3 "[["
+        ARGUMENT@3..4
+          LITERAL@3..4
+            DOUBLE@3..4 "1"
+        R_BRACKET@4..5 "]"
+        R_BRACKET@5..6 "]"
+    ARGUMENT_LIST@6..8
+      L_PAREN@6..7 "("
+      R_PAREN@7..8 ")"
+
+#---- trailing_comma_empty_arg
+f(1,)
+#++++
+SOURCE_FILE@0..5
+  CALL_EXPR@0..5
+    NAME@0..1
+      IDENT@0..1 "f"
+    ARGUMENT_LIST@1..5
+      L_PAREN@1..2 "("
+      ARGUMENT@2..3
+        LITERAL@2..3
+          DOUBLE@2..3 "1"
+      COMMA@3..4 ","
+      R_PAREN@4..5 ")"
+
+#---- dots_twice
+f(..., ...)
+#++++
+SOURCE_FILE@0..11
+  CALL_EXPR@0..11
+    NAME@0..1
+      IDENT@0..1 "f"
+    ARGUMENT_LIST@1..11
+      L_PAREN@1..2 "("
+      ARGUMENT@2..5
+        NAME@2..5
+          DOTS@2..5 "..."
+      COMMA@5..6 ","
+      WHITESPACE@6..7 " "
+      ARGUMENT@7..10
+        NAME@7..10
+          DOTS@7..10 "..."
+      R_PAREN@10..11 ")"
+
+#---- assignment_as_argument
+f(x <- 1)
+#++++
+SOURCE_FILE@0..9
+  CALL_EXPR@0..9
+    NAME@0..1
+      IDENT@0..1 "f"
+    ARGUMENT_LIST@1..9
+      L_PAREN@1..2 "("
+      ARGUMENT@2..8
+        BINARY_EXPR@2..8
+          NAME@2..3
+            IDENT@2..3 "x"
+          WHITESPACE@3..4 " "
+          LESS_MINUS@4..6 "<-"
+          WHITESPACE@6..7 " "
+          LITERAL@7..8
+            DOUBLE@7..8 "1"
+      R_PAREN@8..9 ")"
+
+#---- call_on_literal
+NULL()
+#++++
+SOURCE_FILE@0..6
+  CALL_EXPR@0..6
+    LITERAL@0..4
+      NULL_KW@0..4 "NULL"
+    ARGUMENT_LIST@4..6
+      L_PAREN@4..5 "("
+      R_PAREN@5..6 ")"
+
+#---- if_as_argument
+f(if (a) 1)
+#++++
+SOURCE_FILE@0..11
+  CALL_EXPR@0..11
+    NAME@0..1
+      IDENT@0..1 "f"
+    ARGUMENT_LIST@1..11
+      L_PAREN@1..2 "("
+      ARGUMENT@2..10
+        IF_EXPR@2..10
+          IF_KW@2..4 "if"
+          WHITESPACE@4..5 " "
+          L_PAREN@5..6 "("
+          NAME@6..7
+            IDENT@6..7 "a"
+          R_PAREN@7..8 ")"
+          WHITESPACE@8..9 " "
+          LITERAL@9..10
+            DOUBLE@9..10 "1"
+      R_PAREN@10..11 ")"
+
+#---- comment_inside_call
+f(1, # explain
+  2)
+#++++
+SOURCE_FILE@0..19
+  CALL_EXPR@0..19
+    NAME@0..1
+      IDENT@0..1 "f"
+    ARGUMENT_LIST@1..19
+      L_PAREN@1..2 "("
+      ARGUMENT@2..3
+        LITERAL@2..3
+          DOUBLE@2..3 "1"
+      COMMA@3..4 ","
+      WHITESPACE@4..5 " "
+      COMMENT@5..14 "# explain"
+      NEWLINE@14..15 "\n"
+      WHITESPACE@15..17 "  "
+      ARGUMENT@17..18
+        LITERAL@17..18
+          DOUBLE@17..18 "2"
+      R_PAREN@18..19 ")"
+
+#==== replacement_forms
+#---- names_replacement
+names(x) <- c("a", "b")
+#++++
+SOURCE_FILE@0..23
+  BINARY_EXPR@0..23
+    CALL_EXPR@0..8
+      NAME@0..5
+        IDENT@0..5 "names"
+      ARGUMENT_LIST@5..8
+        L_PAREN@5..6 "("
+        ARGUMENT@6..7
+          NAME@6..7
+            IDENT@6..7 "x"
+        R_PAREN@7..8 ")"
+    WHITESPACE@8..9 " "
+    LESS_MINUS@9..11 "<-"
+    WHITESPACE@11..12 " "
+    CALL_EXPR@12..23
+      NAME@12..13
+        IDENT@12..13 "c"
+      ARGUMENT_LIST@13..23
+        L_PAREN@13..14 "("
+        ARGUMENT@14..17
+          LITERAL@14..17
+            STRING@14..17 "\"a\""
+        COMMA@17..18 ","
+        WHITESPACE@18..19 " "
+        ARGUMENT@19..22
+          LITERAL@19..22
+            STRING@19..22 "\"b\""
+        R_PAREN@22..23 ")"
+
+#---- attr_replacement
+attr(x, "role") <- "id"
+#++++
+SOURCE_FILE@0..23
+  BINARY_EXPR@0..23
+    CALL_EXPR@0..15
+      NAME@0..4
+        IDENT@0..4 "attr"
+      ARGUMENT_LIST@4..15
+        L_PAREN@4..5 "("
+        ARGUMENT@5..6
+          NAME@5..6
+            IDENT@5..6 "x"
+        COMMA@6..7 ","
+        WHITESPACE@7..8 " "
+        ARGUMENT@8..14
+          LITERAL@8..14
+            STRING@8..14 "\"role\""
+        R_PAREN@14..15 ")"
+    WHITESPACE@15..16 " "
+    LESS_MINUS@16..18 "<-"
+    WHITESPACE@18..19 " "
+    LITERAL@19..23
+      STRING@19..23 "\"id\""
+
+#---- field_replacement
+x$f <- 2
+#++++
+SOURCE_FILE@0..8
+  BINARY_EXPR@0..8
+    DOLLAR_EXPR@0..3
+      NAME@0..1
+        IDENT@0..1 "x"
+      DOLLAR@1..2 "$"
+      NAME@2..3
+        IDENT@2..3 "f"
+    WHITESPACE@3..4 " "
+    LESS_MINUS@4..6 "<-"
+    WHITESPACE@6..7 " "
+    LITERAL@7..8
+      DOUBLE@7..8 "2"
+
+#---- subset2_replacement
+x[[1]] <- 3
+#++++
+SOURCE_FILE@0..11
+  BINARY_EXPR@0..11
+    SUBSET2_EXPR@0..6
+      NAME@0..1
+        IDENT@0..1 "x"
+      ARGUMENT_LIST@1..6
+        L_BRACKET2@1..3 "[["
+        ARGUMENT@3..4
+          LITERAL@3..4
+            DOUBLE@3..4 "1"
+        R_BRACKET@4..5 "]"
+        R_BRACKET@5..6 "]"
+    WHITESPACE@6..7 " "
+    LESS_MINUS@7..9 "<-"
+    WHITESPACE@9..10 " "
+    LITERAL@10..11
+      DOUBLE@10..11 "3"
+
+#---- nested_replacement
+levels(f)[2] <- "b"
+#++++
+SOURCE_FILE@0..19
+  BINARY_EXPR@0..19
+    SUBSET_EXPR@0..12
+      CALL_EXPR@0..9
+        NAME@0..6
+          IDENT@0..6 "levels"
+        ARGUMENT_LIST@6..9
+          L_PAREN@6..7 "("
+          ARGUMENT@7..8
+            NAME@7..8
+              IDENT@7..8 "f"
+          R_PAREN@8..9 ")"
+      ARGUMENT_LIST@9..12
+        L_BRACKET@9..10 "["
+        ARGUMENT@10..11
+          LITERAL@10..11
+            DOUBLE@10..11 "2"
+        R_BRACKET@11..12 "]"
+    WHITESPACE@12..13 " "
+    LESS_MINUS@13..15 "<-"
+    WHITESPACE@15..16 " "
+    LITERAL@16..19
+      STRING@16..19 "\"b\""
+
+#---- dim_replacement
+dim(m) <- c(2, 2)
+#++++
+SOURCE_FILE@0..17
+  BINARY_EXPR@0..17
+    CALL_EXPR@0..6
+      NAME@0..3
+        IDENT@0..3 "dim"
+      ARGUMENT_LIST@3..6
+        L_PAREN@3..4 "("
+        ARGUMENT@4..5
+          NAME@4..5
+            IDENT@4..5 "m"
+        R_PAREN@5..6 ")"
+    WHITESPACE@6..7 " "
+    LESS_MINUS@7..9 "<-"
+    WHITESPACE@9..10 " "
+    CALL_EXPR@10..17
+      NAME@10..11
+        IDENT@10..11 "c"
+      ARGUMENT_LIST@11..17
+        L_PAREN@11..12 "("
+        ARGUMENT@12..13
+          LITERAL@12..13
+            DOUBLE@12..13 "2"
+        COMMA@13..14 ","
+        WHITESPACE@14..15 " "
+        ARGUMENT@15..16
+          LITERAL@15..16
+            DOUBLE@15..16 "2"
+        R_PAREN@16..17 ")"

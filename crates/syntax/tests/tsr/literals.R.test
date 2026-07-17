@@ -888,21 +888,21 @@ SOURCE_FILE@0..361
   ERROR@358..361
     INTEGER@358..361 ".1L"
 err: 184..186: missing digits after `0x`
-err: 193..195: missing digits after `0x`
-err: 235..237: missing digits after `0x`
-err: 248..250: missing digits after `0x`
-err: 338..340: missing digits after `0x`
-err: 349..351: missing digits after `0x`
 err: 184..186: expected a statement, found unrecognized text
 err: 191..192: unexpected identifier after this expression; expected a newline or `;`
+err: 193..195: missing digits after `0x`
 err: 193..195: expected a statement, found unrecognized text
 err: 201..203: unexpected number after this expression; expected a newline or `;`
+err: 235..237: missing digits after `0x`
 err: 235..237: expected a statement, found unrecognized text
 err: 244..247: unexpected identifier after this expression; expected a newline or `;`
+err: 248..250: missing digits after `0x`
 err: 248..250: expected a statement, found unrecognized text
 err: 258..260: unexpected number after this expression; expected a newline or `;`
+err: 338..340: missing digits after `0x`
 err: 338..340: expected a statement, found unrecognized text
 err: 346..348: unexpected identifier after this expression; expected a newline or `;`
+err: 349..351: missing digits after `0x`
 err: 349..351: expected a statement, found unrecognized text
 err: 358..361: unexpected integer literal after this expression; expected a newline or `;`
 

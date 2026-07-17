@@ -95,8 +95,8 @@ SOURCE_FILE@0..6
     IDENT@2..5 "abc"
     STRING@5..6 "\""
 err: 0..2: malformed raw string: expected `(`, `[`, or `{` after the quote
-err: 5..6: unterminated string; expected a closing quote
 err: 0..2: expected a statement, found unrecognized text
+err: 5..6: unterminated string; expected a closing quote
 
 #---- raw_unterminated
 r"(never

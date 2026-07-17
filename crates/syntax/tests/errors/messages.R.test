@@ -106,13 +106,13 @@ bad <- ((
 good2 <- 2
 #++++
 error: unclosed `(`; expected a matching `)`
- --> 2:9
-  | bad <- ((
-  |         ^
-error: unclosed `(`; expected a matching `)`
  --> 2:8
   | bad <- ((
   |        ^
+error: unclosed `(`; expected a matching `)`
+ --> 2:9
+  | bad <- ((
+  |         ^
 
 #==== valid_stays_clean
 #---- tricky_but_valid

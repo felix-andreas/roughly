@@ -450,8 +450,8 @@ SOURCE_FILE@0..75
     L_BRACE@73..74 "{"
     ERROR@74..75
       R_PAREN@74..75 ")"
-err: 74..75: expected a statement, found `)`
 err: 73..74: unclosed `{`; expected a matching `}`
+err: 74..75: expected a statement, found `)`
 
 #---- opening_parenthesis_closing_brace_ts_error
 (}
@@ -461,8 +461,8 @@ SOURCE_FILE@0..2
     L_PAREN@0..1 "("
   ERROR@1..2
     R_BRACE@1..2 "}"
-err: 1..2: expected an expression inside `(`, found `}`
 err: 0..1: unclosed `(`; expected a matching `)`
+err: 1..2: expected an expression inside `(`, found `}`
 err: 1..2: unexpected `}` after this expression; expected a newline or `;`
 
 #---- opening_parenthesis_closing_bracket_ts_error
@@ -473,8 +473,8 @@ SOURCE_FILE@0..2
     L_PAREN@0..1 "("
   ERROR@1..2
     R_BRACKET@1..2 "]"
-err: 1..2: expected an expression inside `(`, found `]`
 err: 0..1: unclosed `(`; expected a matching `)`
+err: 1..2: expected an expression inside `(`, found `]`
 err: 1..2: unexpected `]` after this expression; expected a newline or `;`
 
 #---- opening_bracket2_unmatched_closing_bracket_ts_error
@@ -511,8 +511,8 @@ SOURCE_FILE@0..7
               LITERAL@5..6
                 DOUBLE@5..6 "2"
             R_BRACKET@6..7 "]"
-err: 3..5: expected `]]` to close `[[`
 err: 1..2: unclosed `[`; expected `]` to close it
+err: 3..5: expected `]]` to close `[[`
 
 #---- opening_bracket2_and_bracket_matched_closing_bracket_ts_error
 x[[y[2]

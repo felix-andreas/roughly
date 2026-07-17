@@ -1,0 +1,415 @@
+#==== files
+#---- empty_file
+
+#++++
+SOURCE_FILE@0..0
+
+#---- comment_only
+# nothing here
+#++++
+SOURCE_FILE@0..14
+  COMMENT@0..14 "# nothing here"
+
+#---- semicolon_chain
+x <- 1; y <- 2; z
+#++++
+SOURCE_FILE@0..17
+  BINARY_EXPR@0..6
+    NAME@0..1
+      IDENT@0..1 "x"
+    WHITESPACE@1..2 " "
+    LESS_MINUS@2..4 "<-"
+    WHITESPACE@4..5 " "
+    LITERAL@5..6
+      DOUBLE@5..6 "1"
+  SEMICOLON@6..7 ";"
+  WHITESPACE@7..8 " "
+  BINARY_EXPR@8..14
+    NAME@8..9
+      IDENT@8..9 "y"
+    WHITESPACE@9..10 " "
+    LESS_MINUS@10..12 "<-"
+    WHITESPACE@12..13 " "
+    LITERAL@13..14
+      DOUBLE@13..14 "2"
+  SEMICOLON@14..15 ";"
+  WHITESPACE@15..16 " "
+  NAME@16..17
+    IDENT@16..17 "z"
+
+#==== control_edges
+#---- else_if_chain
+if (a) 1 else if (b) 2 else 3
+#++++
+SOURCE_FILE@0..29
+  IF_EXPR@0..29
+    IF_KW@0..2 "if"
+    WHITESPACE@2..3 " "
+    L_PAREN@3..4 "("
+    NAME@4..5
+      IDENT@4..5 "a"
+    R_PAREN@5..6 ")"
+    WHITESPACE@6..7 " "
+    LITERAL@7..8
+      DOUBLE@7..8 "1"
+    WHITESPACE@8..9 " "
+    ELSE_KW@9..13 "else"
+    WHITESPACE@13..14 " "
+    IF_EXPR@14..29
+      IF_KW@14..16 "if"
+      WHITESPACE@16..17 " "
+      L_PAREN@17..18 "("
+      NAME@18..19
+        IDENT@18..19 "b"
+      R_PAREN@19..20 ")"
+      WHITESPACE@20..21 " "
+      LITERAL@21..22
+        DOUBLE@21..22 "2"
+      WHITESPACE@22..23 " "
+      ELSE_KW@23..27 "else"
+      WHITESPACE@27..28 " "
+      LITERAL@28..29
+        DOUBLE@28..29 "3"
+
+#---- empty_braces_value
+x <- {}
+#++++
+SOURCE_FILE@0..7
+  BINARY_EXPR@0..7
+    NAME@0..1
+      IDENT@0..1 "x"
+    WHITESPACE@1..2 " "
+    LESS_MINUS@2..4 "<-"
+    WHITESPACE@4..5 " "
+    BRACE_EXPR@5..7
+      L_BRACE@5..6 "{"
+      R_BRACE@6..7 "}"
+
+#---- while_empty_braces
+while (TRUE) {}
+#++++
+SOURCE_FILE@0..15
+  WHILE_EXPR@0..15
+    WHILE_KW@0..5 "while"
+    WHITESPACE@5..6 " "
+    L_PAREN@6..7 "("
+    LITERAL@7..11
+      TRUE_KW@7..11 "TRUE"
+    R_PAREN@11..12 ")"
+    WHITESPACE@12..13 " "
+    BRACE_EXPR@13..15
+      L_BRACE@13..14 "{"
+      R_BRACE@14..15 "}"
+
+#---- repeat_break
+repeat break
+#++++
+SOURCE_FILE@0..12
+  REPEAT_EXPR@0..12
+    REPEAT_KW@0..6 "repeat"
+    WHITESPACE@6..7 " "
+    BREAK_EXPR@7..12
+      BREAK_KW@7..12 "break"
+
+#---- loop_with_guards
+for (i in xs) {
+  if (skip(i)) next
+  if (done(i)) break
+  use(i)
+}
+#++++
+SOURCE_FILE@0..67
+  FOR_EXPR@0..67
+    FOR_KW@0..3 "for"
+    WHITESPACE@3..4 " "
+    L_PAREN@4..5 "("
+    NAME@5..6
+      IDENT@5..6 "i"
+    WHITESPACE@6..7 " "
+    IN_KW@7..9 "in"
+    WHITESPACE@9..10 " "
+    NAME@10..12
+      IDENT@10..12 "xs"
+    R_PAREN@12..13 ")"
+    WHITESPACE@13..14 " "
+    BRACE_EXPR@14..67
+      L_BRACE@14..15 "{"
+      NEWLINE@15..16 "\n"
+      WHITESPACE@16..18 "  "
+      IF_EXPR@18..35
+        IF_KW@18..20 "if"
+        WHITESPACE@20..21 " "
+        L_PAREN@21..22 "("
+        CALL_EXPR@22..29
+          NAME@22..26
+            IDENT@22..26 "skip"
+          ARGUMENT_LIST@26..29
+            L_PAREN@26..27 "("
+            ARGUMENT@27..28
+              NAME@27..28
+                IDENT@27..28 "i"
+            R_PAREN@28..29 ")"
+        R_PAREN@29..30 ")"
+        WHITESPACE@30..31 " "
+        NEXT_EXPR@31..35
+          NEXT_KW@31..35 "next"
+      NEWLINE@35..36 "\n"
+      WHITESPACE@36..38 "  "
+      IF_EXPR@38..56
+        IF_KW@38..40 "if"
+        WHITESPACE@40..41 " "
+        L_PAREN@41..42 "("
+        CALL_EXPR@42..49
+          NAME@42..46
+            IDENT@42..46 "done"
+          ARGUMENT_LIST@46..49
+            L_PAREN@46..47 "("
+            ARGUMENT@47..48
+              NAME@47..48
+                IDENT@47..48 "i"
+            R_PAREN@48..49 ")"
+        R_PAREN@49..50 ")"
+        WHITESPACE@50..51 " "
+        BREAK_EXPR@51..56
+          BREAK_KW@51..56 "break"
+      NEWLINE@56..57 "\n"
+      WHITESPACE@57..59 "  "
+      CALL_EXPR@59..65
+        NAME@59..62
+          IDENT@59..62 "use"
+        ARGUMENT_LIST@62..65
+          L_PAREN@62..63 "("
+          ARGUMENT@63..64
+            NAME@63..64
+              IDENT@63..64 "i"
+          R_PAREN@64..65 ")"
+      NEWLINE@65..66 "\n"
+      R_BRACE@66..67 "}"
+
+#==== functions_edges
+#---- no_parameters
+f <- function() NULL
+#++++
+SOURCE_FILE@0..20
+  BINARY_EXPR@0..20
+    NAME@0..1
+      IDENT@0..1 "f"
+    WHITESPACE@1..2 " "
+    LESS_MINUS@2..4 "<-"
+    WHITESPACE@4..5 " "
+    FUNCTION_DEF@5..20
+      FUNCTION_KW@5..13 "function"
+      PARAMETER_LIST@13..15
+        L_PAREN@13..14 "("
+        R_PAREN@14..15 ")"
+      WHITESPACE@15..16 " "
+      LITERAL@16..20
+        NULL_KW@16..20 "NULL"
+
+#---- nested_closures
+make <- function(x) function(y) x + y
+#++++
+SOURCE_FILE@0..37
+  BINARY_EXPR@0..37
+    NAME@0..4
+      IDENT@0..4 "make"
+    WHITESPACE@4..5 " "
+    LESS_MINUS@5..7 "<-"
+    WHITESPACE@7..8 " "
+    FUNCTION_DEF@8..37
+      FUNCTION_KW@8..16 "function"
+      PARAMETER_LIST@16..19
+        L_PAREN@16..17 "("
+        PARAMETER@17..18
+          IDENT@17..18 "x"
+        R_PAREN@18..19 ")"
+      WHITESPACE@19..20 " "
+      FUNCTION_DEF@20..37
+        FUNCTION_KW@20..28 "function"
+        PARAMETER_LIST@28..31
+          L_PAREN@28..29 "("
+          PARAMETER@29..30
+            IDENT@29..30 "y"
+          R_PAREN@30..31 ")"
+        WHITESPACE@31..32 " "
+        BINARY_EXPR@32..37
+          NAME@32..33
+            IDENT@32..33 "x"
+          WHITESPACE@33..34 " "
+          PLUS@34..35 "+"
+          WHITESPACE@35..36 " "
+          NAME@36..37
+            IDENT@36..37 "y"
+
+#---- lambda_nested
+\(x) \(y) x + y
+#++++
+SOURCE_FILE@0..15
+  FUNCTION_DEF@0..15
+    BACKSLASH@0..1 "\\"
+    PARAMETER_LIST@1..4
+      L_PAREN@1..2 "("
+      PARAMETER@2..3
+        IDENT@2..3 "x"
+      R_PAREN@3..4 ")"
+    WHITESPACE@4..5 " "
+    FUNCTION_DEF@5..15
+      BACKSLASH@5..6 "\\"
+      PARAMETER_LIST@6..9
+        L_PAREN@6..7 "("
+        PARAMETER@7..8
+          IDENT@7..8 "y"
+        R_PAREN@8..9 ")"
+      WHITESPACE@9..10 " "
+      BINARY_EXPR@10..15
+        NAME@10..11
+          IDENT@10..11 "x"
+        WHITESPACE@11..12 " "
+        PLUS@12..13 "+"
+        WHITESPACE@13..14 " "
+        NAME@14..15
+          IDENT@14..15 "y"
+
+#---- backtick_spaced_name
+`my var` <- 1
+#++++
+SOURCE_FILE@0..13
+  BINARY_EXPR@0..13
+    NAME@0..8
+      IDENT@0..8 "`my var`"
+    WHITESPACE@8..9 " "
+    LESS_MINUS@9..11 "<-"
+    WHITESPACE@11..12 " "
+    LITERAL@12..13
+      DOUBLE@12..13 "1"
+
+#==== operators_edges
+#---- unary_chains
+--x
+#++++
+SOURCE_FILE@0..3
+  UNARY_EXPR@0..3
+    MINUS@0..1 "-"
+    UNARY_EXPR@1..3
+      MINUS@1..2 "-"
+      NAME@2..3
+        IDENT@2..3 "x"
+
+#---- not_minus
+-!x
+#++++
+SOURCE_FILE@0..3
+  UNARY_EXPR@0..3
+    MINUS@0..1 "-"
+    UNARY_EXPR@1..3
+      BANG@1..2 "!"
+      NAME@2..3
+        IDENT@2..3 "x"
+
+#---- help_on_string
+?"+"
+#++++
+SOURCE_FILE@0..4
+  UNARY_EXPR@0..4
+    QUESTION@0..1 "?"
+    LITERAL@1..4
+      STRING@1..4 "\"+\""
+
+#---- formula_grouped
+y ~ x | g
+#++++
+SOURCE_FILE@0..9
+  BINARY_EXPR@0..9
+    NAME@0..1
+      IDENT@0..1 "y"
+    WHITESPACE@1..2 " "
+    TILDE@2..3 "~"
+    WHITESPACE@3..4 " "
+    BINARY_EXPR@4..9
+      NAME@4..5
+        IDENT@4..5 "x"
+      WHITESPACE@5..6 " "
+      PIPE@6..7 "|"
+      WHITESPACE@7..8 " "
+      NAME@8..9
+        IDENT@8..9 "g"
+
+#---- dot_formula
+. ~ .
+#++++
+SOURCE_FILE@0..5
+  BINARY_EXPR@0..5
+    NAME@0..1
+      IDENT@0..1 "."
+    WHITESPACE@1..2 " "
+    TILDE@2..3 "~"
+    WHITESPACE@3..4 " "
+    NAME@4..5
+      IDENT@4..5 "."
+
+#---- pipe_multiline
+x |>
+  f() |>
+  g(1)
+#++++
+SOURCE_FILE@0..20
+  BINARY_EXPR@0..20
+    BINARY_EXPR@0..11
+      NAME@0..1
+        IDENT@0..1 "x"
+      WHITESPACE@1..2 " "
+      PIPE_GREATER@2..4 "|>"
+      NEWLINE@4..5 "\n"
+      WHITESPACE@5..7 "  "
+      CALL_EXPR@7..10
+        NAME@7..8
+          IDENT@7..8 "f"
+        ARGUMENT_LIST@8..10
+          L_PAREN@8..9 "("
+          R_PAREN@9..10 ")"
+      WHITESPACE@10..11 " "
+    PIPE_GREATER@11..13 "|>"
+    NEWLINE@13..14 "\n"
+    WHITESPACE@14..16 "  "
+    CALL_EXPR@16..20
+      NAME@16..17
+        IDENT@16..17 "g"
+      ARGUMENT_LIST@17..20
+        L_PAREN@17..18 "("
+        ARGUMENT@18..19
+          LITERAL@18..19
+            DOUBLE@18..19 "1"
+        R_PAREN@19..20 ")"
+
+#---- pipe_to_bare_name
+2 |> sum
+#++++
+SOURCE_FILE@0..8
+  BINARY_EXPR@0..8
+    LITERAL@0..1
+      DOUBLE@0..1 "2"
+    WHITESPACE@1..2 " "
+    PIPE_GREATER@2..4 "|>"
+    WHITESPACE@4..5 " "
+    NAME@5..8
+      IDENT@5..8 "sum"
+
+#==== accepted_divergences
+#---- eq_after_arrow
+a <- b = 1
+#++++
+SOURCE_FILE@0..10
+  BINARY_EXPR@0..10
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    LESS_MINUS@2..4 "<-"
+    WHITESPACE@4..5 " "
+    BINARY_EXPR@5..10
+      NAME@5..6
+        IDENT@5..6 "b"
+      WHITESPACE@6..7 " "
+      EQ@7..8 "="
+      WHITESPACE@8..9 " "
+      LITERAL@9..10
+        DOUBLE@9..10 "1"

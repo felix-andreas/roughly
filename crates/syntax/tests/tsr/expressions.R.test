@@ -2896,14 +2896,14 @@ SOURCE_FILE@0..243
     STRING@236..241 "\"..1\""
     R_PAREN@241..242 ")"
     R_PAREN@242..243 ")"
+err: 151..152: unclosed `(` in the `for` head; expected a matching `)`
 err: 152..155: expected a loop variable after `for (`, found `...`
 err: 152..155: expected `in` in the `for` head, found `...`
-err: 151..152: unclosed `(` in the `for` head; expected a matching `)`
 err: 156..158: expected a body for the `for` loop
 err: 156..158: unexpected `in` after this expression; expected a newline or `;`
+err: 213..214: unclosed `(` in the `for` head; expected a matching `)`
 err: 214..217: expected a loop variable after `for (`, found `..N`
 err: 214..217: expected `in` in the `for` head, found `..N`
-err: 213..214: unclosed `(` in the `for` head; expected a matching `)`
 err: 218..220: expected a body for the `for` loop
 err: 218..220: unexpected `in` after this expression; expected a newline or `;`
 

@@ -14,6 +14,7 @@ pub mod testing;
 
 mod lexer;
 mod parser;
+mod reparse;
 
 use std::sync::Arc;
 
@@ -69,7 +70,11 @@ pub struct Parse {
 }
 
 impl Parse {
-    pub fn new(green: rowan::GreenNode, errors: Vec<SyntaxError>) -> Parse {
+    pub fn new(green: rowan::GreenNode, mut errors: Vec<SyntaxError>) -> Parse {
+        // Canonical position order (stable: discovery order breaks ties), so
+        // error lists compare structurally regardless of which pipeline —
+        // lexer vs parser, from-scratch vs splice-reparse — produced them.
+        errors.sort_by_key(|error| (error.range.start(), error.range.end()));
         Parse { green, errors: Arc::new(errors) }
     }
 
@@ -109,6 +114,15 @@ impl Parse {
 /// Parse R source text into a lossless syntax tree.
 pub fn parse(text: &str) -> Parse {
     parser::parse(text)
+}
+
+/// Statement-splice incremental reparse: reuse `old`'s untouched top-level
+/// subtrees (shared by pointer) and reparse only the edited region. `deleted`
+/// is the replaced range in the OLD text, `inserted` the replacement's length
+/// in `new_text`. Falls back to a full parse whenever no clean statement
+/// anchor exists; the result is always equal to `parse(new_text)`.
+pub fn reparse(old: &Parse, new_text: &str, deleted: TextRange, inserted: TextSize) -> Parse {
+    reparse::reparse(old, new_text, deleted, inserted)
 }
 
 fn dump_node(out: &mut String, node: &SyntaxNode, depth: usize) {
