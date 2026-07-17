@@ -119,12 +119,102 @@ fn corpus_acceptance() {
         eprintln!("  {}", path.display());
     }
 
-    // No per-file gate yet: a later change tightens ours-only-error into an
-    // allowlist. Assert only that the suite ran over a real corpus.
     assert!(
         !files.is_empty(),
         "corpus present but no .R files found under r-base/ or cran/"
     );
+    // HARD GATE: zero acceptance divergence is the measured baseline over the
+    // full corpus. Rejecting a file tree-sitter accepts means a real grammar
+    // gap; a legitimate divergence (tree-sitter itself being wrong, R as
+    // referee) earns an entry in tests/acceptance-allowlist.txt instead.
+    let allowlist = allowlisted_paths();
+    let unexplained: Vec<_> = ours_only
+        .iter()
+        .filter(|(path, _)| {
+            !allowlist.iter().any(|entry| path.to_string_lossy().ends_with(entry.as_str()))
+        })
+        .collect();
+    assert!(
+        unexplained.is_empty(),
+        "{} unexplained acceptance divergence(s); fix the parser or adjudicate (R as referee) into tests/acceptance-allowlist.txt",
+        unexplained.len()
+    );
+}
+
+/// Phase 1 speed gate: ≥5× tree-sitter batch parse over the real corpus.
+/// Run in release (`cargo test -p syntax --release --test test_corpus -- --ignored --nocapture`):
+/// tree-sitter's C is compiled optimized even in debug profiles, so a debug
+/// run would compare unoptimized Rust against optimized C.
+#[test]
+#[ignore = "perf gate; run explicitly in release"]
+fn corpus_parse_speed() {
+    let Some(root) = corpus_dir() else {
+        eprintln!("corpus_parse_speed: corpus not fetched; skipping");
+        return;
+    };
+    let mut files = Vec::new();
+    for base in ["r-base", "cran"] {
+        collect_r_files(&root.join(base), &mut files);
+    }
+    let sources: Vec<String> = files
+        .iter()
+        .filter_map(|path| std::fs::read(path).ok())
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+        .collect();
+    let total_bytes: usize = sources.iter().map(String::len).sum();
+    let total_lines: usize = sources.iter().map(|s| s.lines().count()).sum();
+
+    // Warm both parsers once.
+    for source in sources.iter().take(50) {
+        let _ = syntax::parse(source);
+    }
+    let ours_start = std::time::Instant::now();
+    for source in &sources {
+        let parse = syntax::parse(source);
+        std::hint::black_box(parse.green());
+    }
+    let ours = ours_start.elapsed();
+
+    let mut parser = tree_sitter::Parser::new();
+    parser.set_language(&tree_sitter_r::LANGUAGE.into()).expect("grammar loads");
+    let ts_start = std::time::Instant::now();
+    for source in &sources {
+        let tree = parser.parse(source, None);
+        std::hint::black_box(&tree);
+    }
+    let ts = ts_start.elapsed();
+
+    let ratio = ts.as_secs_f64() / ours.as_secs_f64();
+    let ours_us_per_loc = ours.as_secs_f64() * 1e6 / total_lines as f64;
+    let ts_us_per_loc = ts.as_secs_f64() * 1e6 / total_lines as f64;
+    eprintln!(
+        "corpus_parse_speed: {} files, {:.1} MB, {} LoC",
+        sources.len(),
+        total_bytes as f64 / 1e6,
+        total_lines
+    );
+    eprintln!("  ours:        {ours:?}  ({ours_us_per_loc:.2} µs/LoC)");
+    eprintln!("  tree-sitter: {ts:?}  ({ts_us_per_loc:.2} µs/LoC)");
+    eprintln!("  ratio:       {ratio:.2}x");
+    assert!(
+        ratio >= 5.0,
+        "Phase 1 gate: expected ≥5× tree-sitter batch parse speed, measured {ratio:.2}x"
+    );
+}
+
+/// Committed, adjudicated divergences (one corpus-relative path suffix per
+/// line; `#` comments). Currently empty — the measured baseline is zero.
+fn allowlisted_paths() -> Vec<String> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/acceptance-allowlist.txt");
+    std::fs::read_to_string(path)
+        .map(|text| {
+            text.lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty() && !line.starts_with('#'))
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Resolve the corpus root: `ROUGHLY_CORPUS_DIR` if set, else `<workspace>/corpus`

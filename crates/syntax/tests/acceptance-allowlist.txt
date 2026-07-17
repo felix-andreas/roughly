@@ -1,0 +1,4 @@
+# Adjudicated acceptance divergences: corpus-relative path suffixes our parser
+# may reject even though tree-sitter accepts them, each with a justification
+# (R's own parser is the referee; tree-sitter is a baseline, not an oracle).
+# The measured baseline over R base 4.6.1 + 41 CRAN packages is ZERO entries.
