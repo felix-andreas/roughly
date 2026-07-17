@@ -1,0 +1,686 @@
+#==== binary_each
+#---- plus
+a + b
+#++++
+SOURCE_FILE@0..5
+  BINARY_EXPR@0..5
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    PLUS@2..3 "+"
+    WHITESPACE@3..4 " "
+    NAME@4..5
+      IDENT@4..5 "b"
+
+#---- minus
+a - b
+#++++
+SOURCE_FILE@0..5
+  BINARY_EXPR@0..5
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    MINUS@2..3 "-"
+    WHITESPACE@3..4 " "
+    NAME@4..5
+      IDENT@4..5 "b"
+
+#---- star
+a * b
+#++++
+SOURCE_FILE@0..5
+  BINARY_EXPR@0..5
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    STAR@2..3 "*"
+    WHITESPACE@3..4 " "
+    NAME@4..5
+      IDENT@4..5 "b"
+
+#---- slash
+a / b
+#++++
+SOURCE_FILE@0..5
+  BINARY_EXPR@0..5
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    SLASH@2..3 "/"
+    WHITESPACE@3..4 " "
+    NAME@4..5
+      IDENT@4..5 "b"
+
+#---- caret
+a ^ b
+#++++
+SOURCE_FILE@0..5
+  BINARY_EXPR@0..5
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    CARET@2..3 "^"
+    WHITESPACE@3..4 " "
+    NAME@4..5
+      IDENT@4..5 "b"
+
+#---- modulo
+a %% b
+#++++
+SOURCE_FILE@0..6
+  BINARY_EXPR@0..6
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    SPECIAL@2..4 "%%"
+    WHITESPACE@4..5 " "
+    NAME@5..6
+      IDENT@5..6 "b"
+
+#---- int_div
+a %/% b
+#++++
+SOURCE_FILE@0..7
+  BINARY_EXPR@0..7
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    SPECIAL@2..5 "%/%"
+    WHITESPACE@5..6 " "
+    NAME@6..7
+      IDENT@6..7 "b"
+
+#---- matmult
+a %*% b
+#++++
+SOURCE_FILE@0..7
+  BINARY_EXPR@0..7
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    SPECIAL@2..5 "%*%"
+    WHITESPACE@5..6 " "
+    NAME@6..7
+      IDENT@6..7 "b"
+
+#---- user_special
+a %between% b
+#++++
+SOURCE_FILE@0..13
+  BINARY_EXPR@0..13
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    SPECIAL@2..11 "%between%"
+    WHITESPACE@11..12 " "
+    NAME@12..13
+      IDENT@12..13 "b"
+
+#---- colon
+a : b
+#++++
+SOURCE_FILE@0..5
+  BINARY_EXPR@0..5
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    COLON@2..3 ":"
+    WHITESPACE@3..4 " "
+    NAME@4..5
+      IDENT@4..5 "b"
+
+#---- less
+a < b
+#++++
+SOURCE_FILE@0..5
+  BINARY_EXPR@0..5
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    LESS@2..3 "<"
+    WHITESPACE@3..4 " "
+    NAME@4..5
+      IDENT@4..5 "b"
+
+#---- greater
+a > b
+#++++
+SOURCE_FILE@0..5
+  BINARY_EXPR@0..5
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    GREATER@2..3 ">"
+    WHITESPACE@3..4 " "
+    NAME@4..5
+      IDENT@4..5 "b"
+
+#---- less_eq
+a <= b
+#++++
+SOURCE_FILE@0..6
+  BINARY_EXPR@0..6
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    LESS_EQ@2..4 "<="
+    WHITESPACE@4..5 " "
+    NAME@5..6
+      IDENT@5..6 "b"
+
+#---- greater_eq
+a >= b
+#++++
+SOURCE_FILE@0..6
+  BINARY_EXPR@0..6
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    GREATER_EQ@2..4 ">="
+    WHITESPACE@4..5 " "
+    NAME@5..6
+      IDENT@5..6 "b"
+
+#---- eq2
+a == b
+#++++
+SOURCE_FILE@0..6
+  BINARY_EXPR@0..6
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    EQ2@2..4 "=="
+    WHITESPACE@4..5 " "
+    NAME@5..6
+      IDENT@5..6 "b"
+
+#---- bang_eq
+a != b
+#++++
+SOURCE_FILE@0..6
+  BINARY_EXPR@0..6
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    BANG_EQ@2..4 "!="
+    WHITESPACE@4..5 " "
+    NAME@5..6
+      IDENT@5..6 "b"
+
+#---- amp
+a & b
+#++++
+SOURCE_FILE@0..5
+  BINARY_EXPR@0..5
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    AMP@2..3 "&"
+    WHITESPACE@3..4 " "
+    NAME@4..5
+      IDENT@4..5 "b"
+
+#---- amp2
+a && b
+#++++
+SOURCE_FILE@0..6
+  BINARY_EXPR@0..6
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    AMP2@2..4 "&&"
+    WHITESPACE@4..5 " "
+    NAME@5..6
+      IDENT@5..6 "b"
+
+#---- pipe_or
+a | b
+#++++
+SOURCE_FILE@0..5
+  BINARY_EXPR@0..5
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    PIPE@2..3 "|"
+    WHITESPACE@3..4 " "
+    NAME@4..5
+      IDENT@4..5 "b"
+
+#---- pipe2
+a || b
+#++++
+SOURCE_FILE@0..6
+  BINARY_EXPR@0..6
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    PIPE2@2..4 "||"
+    WHITESPACE@4..5 " "
+    NAME@5..6
+      IDENT@5..6 "b"
+
+#---- native_pipe
+a |> f()
+#++++
+SOURCE_FILE@0..8
+  BINARY_EXPR@0..8
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    PIPE_GREATER@2..4 "|>"
+    WHITESPACE@4..5 " "
+    CALL_EXPR@5..8
+      NAME@5..6
+        IDENT@5..6 "f"
+      ARGUMENT_LIST@6..8
+        L_PAREN@6..7 "("
+        R_PAREN@7..8 ")"
+
+#---- tilde_binary
+a ~ b
+#++++
+SOURCE_FILE@0..5
+  BINARY_EXPR@0..5
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    TILDE@2..3 "~"
+    WHITESPACE@3..4 " "
+    NAME@4..5
+      IDENT@4..5 "b"
+
+#---- left_assign
+a <- b
+#++++
+SOURCE_FILE@0..6
+  BINARY_EXPR@0..6
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    LESS_MINUS@2..4 "<-"
+    WHITESPACE@4..5 " "
+    NAME@5..6
+      IDENT@5..6 "b"
+
+#---- super_assign
+a <<- b
+#++++
+SOURCE_FILE@0..7
+  BINARY_EXPR@0..7
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    LESS2_MINUS@2..5 "<<-"
+    WHITESPACE@5..6 " "
+    NAME@6..7
+      IDENT@6..7 "b"
+
+#---- right_assign
+a -> b
+#++++
+SOURCE_FILE@0..6
+  BINARY_EXPR@0..6
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    MINUS_GREATER@2..4 "->"
+    WHITESPACE@4..5 " "
+    NAME@5..6
+      IDENT@5..6 "b"
+
+#---- super_right_assign
+a ->> b
+#++++
+SOURCE_FILE@0..7
+  BINARY_EXPR@0..7
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    MINUS_GREATER2@2..5 "->>"
+    WHITESPACE@5..6 " "
+    NAME@6..7
+      IDENT@6..7 "b"
+
+#---- eq_assign
+a = b
+#++++
+SOURCE_FILE@0..5
+  BINARY_EXPR@0..5
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    EQ@2..3 "="
+    WHITESPACE@3..4 " "
+    NAME@4..5
+      IDENT@4..5 "b"
+
+#---- colon_eq
+a := b
+#++++
+SOURCE_FILE@0..6
+  BINARY_EXPR@0..6
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    COLON_EQ@2..4 ":="
+    WHITESPACE@4..5 " "
+    NAME@5..6
+      IDENT@5..6 "b"
+
+#---- help_binary
+package ? topic
+#++++
+SOURCE_FILE@0..15
+  BINARY_EXPR@0..15
+    NAME@0..7
+      IDENT@0..7 "package"
+    WHITESPACE@7..8 " "
+    QUESTION@8..9 "?"
+    WHITESPACE@9..10 " "
+    NAME@10..15
+      IDENT@10..15 "topic"
+
+#==== precedence_pairs
+#---- caret_over_unary_minus
+-a^b
+#++++
+SOURCE_FILE@0..4
+  UNARY_EXPR@0..4
+    MINUS@0..1 "-"
+    BINARY_EXPR@1..4
+      NAME@1..2
+        IDENT@1..2 "a"
+      CARET@2..3 "^"
+      NAME@3..4
+        IDENT@3..4 "b"
+
+#---- unary_minus_over_star
+-a * b
+#++++
+SOURCE_FILE@0..6
+  BINARY_EXPR@0..6
+    UNARY_EXPR@0..3
+      MINUS@0..1 "-"
+      NAME@1..2
+        IDENT@1..2 "a"
+      WHITESPACE@2..3 " "
+    STAR@3..4 "*"
+    WHITESPACE@4..5 " "
+    NAME@5..6
+      IDENT@5..6 "b"
+
+#---- colon_over_add
+1:n + 1
+#++++
+SOURCE_FILE@0..7
+  BINARY_EXPR@0..7
+    BINARY_EXPR@0..4
+      LITERAL@0..1
+        DOUBLE@0..1 "1"
+      COLON@1..2 ":"
+      NAME@2..3
+        IDENT@2..3 "n"
+      WHITESPACE@3..4 " "
+    PLUS@4..5 "+"
+    WHITESPACE@5..6 " "
+    LITERAL@6..7
+      DOUBLE@6..7 "1"
+
+#---- special_over_add
+a + b %in% c
+#++++
+SOURCE_FILE@0..12
+  BINARY_EXPR@0..12
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    PLUS@2..3 "+"
+    WHITESPACE@3..4 " "
+    BINARY_EXPR@4..12
+      NAME@4..5
+        IDENT@4..5 "b"
+      WHITESPACE@5..6 " "
+      SPECIAL@6..10 "%in%"
+      WHITESPACE@10..11 " "
+      NAME@11..12
+        IDENT@11..12 "c"
+
+#---- compare_over_not
+!a == b
+#++++
+SOURCE_FILE@0..7
+  UNARY_EXPR@0..7
+    BANG@0..1 "!"
+    BINARY_EXPR@1..7
+      NAME@1..2
+        IDENT@1..2 "a"
+      WHITESPACE@2..3 " "
+      EQ2@3..5 "=="
+      WHITESPACE@5..6 " "
+      NAME@6..7
+        IDENT@6..7 "b"
+
+#---- and_over_or
+a || b && c
+#++++
+SOURCE_FILE@0..11
+  BINARY_EXPR@0..11
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    PIPE2@2..4 "||"
+    WHITESPACE@4..5 " "
+    BINARY_EXPR@5..11
+      NAME@5..6
+        IDENT@5..6 "b"
+      WHITESPACE@6..7 " "
+      AMP2@7..9 "&&"
+      WHITESPACE@9..10 " "
+      NAME@10..11
+        IDENT@10..11 "c"
+
+#---- tilde_under_or
+y ~ a || b
+#++++
+SOURCE_FILE@0..10
+  BINARY_EXPR@0..10
+    NAME@0..1
+      IDENT@0..1 "y"
+    WHITESPACE@1..2 " "
+    TILDE@2..3 "~"
+    WHITESPACE@3..4 " "
+    BINARY_EXPR@4..10
+      NAME@4..5
+        IDENT@4..5 "a"
+      WHITESPACE@5..6 " "
+      PIPE2@6..8 "||"
+      WHITESPACE@8..9 " "
+      NAME@9..10
+        IDENT@9..10 "b"
+
+#---- assign_under_tilde
+f <- y ~ x
+#++++
+SOURCE_FILE@0..10
+  BINARY_EXPR@0..10
+    NAME@0..1
+      IDENT@0..1 "f"
+    WHITESPACE@1..2 " "
+    LESS_MINUS@2..4 "<-"
+    WHITESPACE@4..5 " "
+    BINARY_EXPR@5..10
+      NAME@5..6
+        IDENT@5..6 "y"
+      WHITESPACE@6..7 " "
+      TILDE@7..8 "~"
+      WHITESPACE@8..9 " "
+      NAME@9..10
+        IDENT@9..10 "x"
+
+#---- caret_right_assoc
+2 ^ 3 ^ 4
+#++++
+SOURCE_FILE@0..9
+  BINARY_EXPR@0..9
+    LITERAL@0..1
+      DOUBLE@0..1 "2"
+    WHITESPACE@1..2 " "
+    CARET@2..3 "^"
+    WHITESPACE@3..4 " "
+    BINARY_EXPR@4..9
+      LITERAL@4..5
+        DOUBLE@4..5 "3"
+      WHITESPACE@5..6 " "
+      CARET@6..7 "^"
+      WHITESPACE@7..8 " "
+      LITERAL@8..9
+        DOUBLE@8..9 "4"
+
+#---- dollar_over_caret
+a$b ^ 2
+#++++
+SOURCE_FILE@0..7
+  BINARY_EXPR@0..7
+    DOLLAR_EXPR@0..3
+      NAME@0..1
+        IDENT@0..1 "a"
+      DOLLAR@1..2 "$"
+      NAME@2..3
+        IDENT@2..3 "b"
+    WHITESPACE@3..4 " "
+    CARET@4..5 "^"
+    WHITESPACE@5..6 " "
+    LITERAL@6..7
+      DOUBLE@6..7 "2"
+
+#---- namespace_over_dollar
+pkg::obj$field
+#++++
+SOURCE_FILE@0..14
+  DOLLAR_EXPR@0..14
+    NAMESPACE_EXPR@0..8
+      NAME@0..3
+        IDENT@0..3 "pkg"
+      COLON2@3..5 "::"
+      NAME@5..8
+        IDENT@5..8 "obj"
+    DOLLAR@8..9 "$"
+    NAME@9..14
+      IDENT@9..14 "field"
+
+#---- call_over_unary
+-f(x)
+#++++
+SOURCE_FILE@0..5
+  UNARY_EXPR@0..5
+    MINUS@0..1 "-"
+    CALL_EXPR@1..5
+      NAME@1..2
+        IDENT@1..2 "f"
+      ARGUMENT_LIST@2..5
+        L_PAREN@2..3 "("
+        ARGUMENT@3..4
+          NAME@3..4
+            IDENT@3..4 "x"
+        R_PAREN@4..5 ")"
+
+#---- subset_chain
+x[1][2][[3]]
+#++++
+SOURCE_FILE@0..12
+  SUBSET2_EXPR@0..12
+    SUBSET_EXPR@0..7
+      SUBSET_EXPR@0..4
+        NAME@0..1
+          IDENT@0..1 "x"
+        ARGUMENT_LIST@1..4
+          L_BRACKET@1..2 "["
+          ARGUMENT@2..3
+            LITERAL@2..3
+              DOUBLE@2..3 "1"
+          R_BRACKET@3..4 "]"
+      ARGUMENT_LIST@4..7
+        L_BRACKET@4..5 "["
+        ARGUMENT@5..6
+          LITERAL@5..6
+            DOUBLE@5..6 "2"
+        R_BRACKET@6..7 "]"
+    ARGUMENT_LIST@7..12
+      L_BRACKET2@7..9 "[["
+      ARGUMENT@9..10
+        LITERAL@9..10
+          DOUBLE@9..10 "3"
+      R_BRACKET@10..11 "]"
+      R_BRACKET@11..12 "]"
+
+#==== unary
+#---- double_bang
+!!x
+#++++
+SOURCE_FILE@0..3
+  UNARY_EXPR@0..3
+    BANG@0..1 "!"
+    UNARY_EXPR@1..3
+      BANG@1..2 "!"
+      NAME@2..3
+        IDENT@2..3 "x"
+
+#---- triple_bang
+!!!x
+#++++
+SOURCE_FILE@0..4
+  UNARY_EXPR@0..4
+    BANG@0..1 "!"
+    UNARY_EXPR@1..4
+      BANG@1..2 "!"
+      UNARY_EXPR@2..4
+        BANG@2..3 "!"
+        NAME@3..4
+          IDENT@3..4 "x"
+
+#---- unary_tilde
+~ x + 1
+#++++
+SOURCE_FILE@0..7
+  UNARY_EXPR@0..7
+    TILDE@0..1 "~"
+    WHITESPACE@1..2 " "
+    BINARY_EXPR@2..7
+      NAME@2..3
+        IDENT@2..3 "x"
+      WHITESPACE@3..4 " "
+      PLUS@4..5 "+"
+      WHITESPACE@5..6 " "
+      LITERAL@6..7
+        DOUBLE@6..7 "1"
+
+#---- unary_help
+?mean
+#++++
+SOURCE_FILE@0..5
+  UNARY_EXPR@0..5
+    QUESTION@0..1 "?"
+    NAME@1..5
+      IDENT@1..5 "mean"
+
+#---- double_question
+??mean
+#++++
+SOURCE_FILE@0..6
+  UNARY_EXPR@0..6
+    QUESTION@0..1 "?"
+    UNARY_EXPR@1..6
+      QUESTION@1..2 "?"
+      NAME@2..6
+        IDENT@2..6 "mean"
+
+#---- unary_plus_minus_mix
+-+x
+#++++
+SOURCE_FILE@0..3
+  UNARY_EXPR@0..3
+    MINUS@0..1 "-"
+    UNARY_EXPR@1..3
+      PLUS@1..2 "+"
+      NAME@2..3
+        IDENT@2..3 "x"

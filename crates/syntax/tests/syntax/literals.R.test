@@ -1,0 +1,298 @@
+#==== numbers
+#---- plain_integerish
+42
+#++++
+SOURCE_FILE@0..2
+  LITERAL@0..2
+    DOUBLE@0..2 "42"
+
+#---- integer_suffix
+42L
+#++++
+SOURCE_FILE@0..3
+  LITERAL@0..3
+    INTEGER@0..3 "42L"
+
+#---- leading_dot
+.5
+#++++
+SOURCE_FILE@0..2
+  LITERAL@0..2
+    DOUBLE@0..2 ".5"
+
+#---- trailing_dot
+1.
+#++++
+SOURCE_FILE@0..2
+  LITERAL@0..2
+    DOUBLE@0..2 "1."
+
+#---- exponent_forms
+c(1e5, 1e-5, 1.5e+3, 2E2)
+#++++
+SOURCE_FILE@0..25
+  CALL_EXPR@0..25
+    NAME@0..1
+      IDENT@0..1 "c"
+    ARGUMENT_LIST@1..25
+      L_PAREN@1..2 "("
+      ARGUMENT@2..5
+        LITERAL@2..5
+          DOUBLE@2..5 "1e5"
+      COMMA@5..6 ","
+      WHITESPACE@6..7 " "
+      ARGUMENT@7..11
+        LITERAL@7..11
+          DOUBLE@7..11 "1e-5"
+      COMMA@11..12 ","
+      WHITESPACE@12..13 " "
+      ARGUMENT@13..19
+        LITERAL@13..19
+          DOUBLE@13..19 "1.5e+3"
+      COMMA@19..20 ","
+      WHITESPACE@20..21 " "
+      ARGUMENT@21..24
+        LITERAL@21..24
+          DOUBLE@21..24 "2E2"
+      R_PAREN@24..25 ")"
+
+#---- exponent_not_taken
+1e
+#++++
+SOURCE_FILE@0..2
+  LITERAL@0..1
+    DOUBLE@0..1 "1"
+  ERROR@1..2
+    IDENT@1..2 "e"
+err: 1..2: unexpected identifier after this expression; expected a newline or `;`
+
+#---- hex_forms
+c(0x1F, 0xaL, 0X0)
+#++++
+SOURCE_FILE@0..18
+  CALL_EXPR@0..18
+    NAME@0..1
+      IDENT@0..1 "c"
+    ARGUMENT_LIST@1..18
+      L_PAREN@1..2 "("
+      ARGUMENT@2..6
+        LITERAL@2..6
+          DOUBLE@2..6 "0x1F"
+      COMMA@6..7 ","
+      WHITESPACE@7..8 " "
+      ARGUMENT@8..12
+        LITERAL@8..12
+          INTEGER@8..12 "0xaL"
+      COMMA@12..13 ","
+      WHITESPACE@13..14 " "
+      ARGUMENT@14..17
+        LITERAL@14..17
+          DOUBLE@14..17 "0X0"
+      R_PAREN@17..18 ")"
+
+#---- hex_float
+0x1p3
+#++++
+SOURCE_FILE@0..5
+  LITERAL@0..5
+    DOUBLE@0..5 "0x1p3"
+
+#---- hex_missing_digits
+0x
+#++++
+SOURCE_FILE@0..2
+  ERROR@0..2
+    ERROR_TOKEN@0..2 "0x"
+err: 0..2: missing digits after `0x`
+err: 0..2: expected a statement, found unrecognized text
+
+#---- complex_forms
+c(2i, 1.5i, 0x2i)
+#++++
+SOURCE_FILE@0..17
+  CALL_EXPR@0..17
+    NAME@0..1
+      IDENT@0..1 "c"
+    ARGUMENT_LIST@1..17
+      L_PAREN@1..2 "("
+      ARGUMENT@2..4
+        LITERAL@2..4
+          COMPLEX@2..4 "2i"
+      COMMA@4..5 ","
+      WHITESPACE@5..6 " "
+      ARGUMENT@6..10
+        LITERAL@6..10
+          COMPLEX@6..10 "1.5i"
+      COMMA@10..11 ","
+      WHITESPACE@11..12 " "
+      ARGUMENT@12..16
+        LITERAL@12..16
+          COMPLEX@12..16 "0x2i"
+      R_PAREN@16..17 ")"
+
+#---- integer_with_dot
+1.5L
+#++++
+SOURCE_FILE@0..4
+  LITERAL@0..4
+    INTEGER@0..4 "1.5L"
+
+#==== names
+#---- dotted_name
+data.frame
+#++++
+SOURCE_FILE@0..10
+  NAME@0..10
+    IDENT@0..10 "data.frame"
+
+#---- dot_dot_name
+..
+#++++
+SOURCE_FILE@0..2
+  NAME@0..2
+    IDENT@0..2 ".."
+
+#---- dots
+...
+#++++
+SOURCE_FILE@0..3
+  NAME@0..3
+    DOTS@0..3 "..."
+
+#---- dotdot_index
+..1
+#++++
+SOURCE_FILE@0..3
+  NAME@0..3
+    DOTDOTI@0..3 "..1"
+
+#---- underscore_placeholder
+x |> f(y = _)
+#++++
+SOURCE_FILE@0..13
+  BINARY_EXPR@0..13
+    NAME@0..1
+      IDENT@0..1 "x"
+    WHITESPACE@1..2 " "
+    PIPE_GREATER@2..4 "|>"
+    WHITESPACE@4..5 " "
+    CALL_EXPR@5..13
+      NAME@5..6
+        IDENT@5..6 "f"
+      ARGUMENT_LIST@6..13
+        L_PAREN@6..7 "("
+        ARGUMENT@7..12
+          NAME@7..8
+            IDENT@7..8 "y"
+          WHITESPACE@8..9 " "
+          EQ@9..10 "="
+          WHITESPACE@10..11 " "
+          NAME@11..12
+            UNDERSCORE@11..12 "_"
+        R_PAREN@12..13 ")"
+
+#---- backtick_name
+`if` <- 1
+#++++
+SOURCE_FILE@0..9
+  BINARY_EXPR@0..9
+    NAME@0..4
+      IDENT@0..4 "`if`"
+    WHITESPACE@4..5 " "
+    LESS_MINUS@5..7 "<-"
+    WHITESPACE@7..8 " "
+    LITERAL@8..9
+      DOUBLE@8..9 "1"
+
+#---- unicode_name
+Vielfältig <- 1
+#++++
+SOURCE_FILE@0..16
+  BINARY_EXPR@0..16
+    NAME@0..11
+      IDENT@0..11 "Vielfältig"
+    WHITESPACE@11..12 " "
+    LESS_MINUS@12..14 "<-"
+    WHITESPACE@14..15 " "
+    LITERAL@15..16
+      DOUBLE@15..16 "1"
+
+#==== constants
+#---- logical_constants
+c(TRUE, FALSE)
+#++++
+SOURCE_FILE@0..14
+  CALL_EXPR@0..14
+    NAME@0..1
+      IDENT@0..1 "c"
+    ARGUMENT_LIST@1..14
+      L_PAREN@1..2 "("
+      ARGUMENT@2..6
+        LITERAL@2..6
+          TRUE_KW@2..6 "TRUE"
+      COMMA@6..7 ","
+      WHITESPACE@7..8 " "
+      ARGUMENT@8..13
+        LITERAL@8..13
+          FALSE_KW@8..13 "FALSE"
+      R_PAREN@13..14 ")"
+
+#---- null_na
+c(NULL, NA, NA_integer_, NA_real_, NA_character_)
+#++++
+SOURCE_FILE@0..49
+  CALL_EXPR@0..49
+    NAME@0..1
+      IDENT@0..1 "c"
+    ARGUMENT_LIST@1..49
+      L_PAREN@1..2 "("
+      ARGUMENT@2..6
+        LITERAL@2..6
+          NULL_KW@2..6 "NULL"
+      COMMA@6..7 ","
+      WHITESPACE@7..8 " "
+      ARGUMENT@8..10
+        LITERAL@8..10
+          NA_KW@8..10 "NA"
+      COMMA@10..11 ","
+      WHITESPACE@11..12 " "
+      ARGUMENT@12..23
+        LITERAL@12..23
+          NA_INTEGER_KW@12..23 "NA_integer_"
+      COMMA@23..24 ","
+      WHITESPACE@24..25 " "
+      ARGUMENT@25..33
+        LITERAL@25..33
+          NA_REAL_KW@25..33 "NA_real_"
+      COMMA@33..34 ","
+      WHITESPACE@34..35 " "
+      ARGUMENT@35..48
+        LITERAL@35..48
+          NA_CHARACTER_KW@35..48 "NA_character_"
+      R_PAREN@48..49 ")"
+
+#---- inf_nan
+c(Inf, -Inf, NaN)
+#++++
+SOURCE_FILE@0..17
+  CALL_EXPR@0..17
+    NAME@0..1
+      IDENT@0..1 "c"
+    ARGUMENT_LIST@1..17
+      L_PAREN@1..2 "("
+      ARGUMENT@2..5
+        LITERAL@2..5
+          INF_KW@2..5 "Inf"
+      COMMA@5..6 ","
+      WHITESPACE@6..7 " "
+      ARGUMENT@7..11
+        UNARY_EXPR@7..11
+          MINUS@7..8 "-"
+          LITERAL@8..11
+            INF_KW@8..11 "Inf"
+      COMMA@11..12 ","
+      WHITESPACE@12..13 " "
+      ARGUMENT@13..16
+        LITERAL@13..16
+          NAN_KW@13..16 "NaN"
+      R_PAREN@16..17 ")"

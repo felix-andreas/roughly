@@ -1,0 +1,136 @@
+#==== quoting
+#---- double_quoted
+"hello"
+#++++
+SOURCE_FILE@0..7
+  LITERAL@0..7
+    STRING@0..7 "\"hello\""
+
+#---- single_quoted
+'hello'
+#++++
+SOURCE_FILE@0..7
+  LITERAL@0..7
+    STRING@0..7 "'hello'"
+
+#---- nested_quotes
+"it's"
+#++++
+SOURCE_FILE@0..6
+  LITERAL@0..6
+    STRING@0..6 "\"it's\""
+
+#---- escaped_quote
+"say \"hi\""
+#++++
+SOURCE_FILE@0..12
+  LITERAL@0..12
+    STRING@0..12 "\"say \\\"hi\\\"\""
+
+#---- escape_soup
+"\n\t\\\x41é\u{1F600}"
+#++++
+SOURCE_FILE@0..23
+  LITERAL@0..23
+    STRING@0..23 "\"\\n\\t\\\\\\x41é\\u{1F600}\""
+
+#---- multiline_string
+"line one
+line two"
+#++++
+SOURCE_FILE@0..19
+  LITERAL@0..19
+    STRING@0..19 "\"line one\nline two\""
+
+#---- unterminated
+"never ends
+#++++
+SOURCE_FILE@0..11
+  LITERAL@0..11
+    STRING@0..11 "\"never ends"
+err: 0..11: unterminated string; expected a closing quote
+
+#==== raw_strings
+#---- raw_paren
+r"(a \ b)"
+#++++
+SOURCE_FILE@0..10
+  LITERAL@0..10
+    RAW_STRING@0..10 "r\"(a \\ b)\""
+
+#---- raw_bracket
+R"[with (parens)]"
+#++++
+SOURCE_FILE@0..18
+  LITERAL@0..18
+    RAW_STRING@0..18 "R\"[with (parens)]\""
+
+#---- raw_brace
+r"{curly}"
+#++++
+SOURCE_FILE@0..10
+  LITERAL@0..10
+    RAW_STRING@0..10 "r\"{curly}\""
+
+#---- raw_dashes
+r"---(contains )" inside)---"
+#++++
+SOURCE_FILE@0..29
+  LITERAL@0..29
+    RAW_STRING@0..29 "r\"---(contains )\" inside)---\""
+
+#---- raw_single_quote
+r'(single)'
+#++++
+SOURCE_FILE@0..11
+  LITERAL@0..11
+    RAW_STRING@0..11 "r'(single)'"
+
+#---- raw_malformed
+r"abc"
+#++++
+SOURCE_FILE@0..6
+  ERROR@0..6
+    ERROR_TOKEN@0..2 "r\""
+    IDENT@2..5 "abc"
+    STRING@5..6 "\""
+err: 0..2: malformed raw string: expected `(`, `[`, or `{` after the quote
+err: 5..6: unterminated string; expected a closing quote
+err: 0..2: expected a statement, found unrecognized text
+
+#---- raw_unterminated
+r"(never
+#++++
+SOURCE_FILE@0..8
+  LITERAL@0..8
+    RAW_STRING@0..8 "r\"(never"
+err: 0..8: unterminated raw string; expected `)"`
+
+#==== comments
+#---- trailing_comment
+x <- 1 # a comment
+#++++
+SOURCE_FILE@0..18
+  BINARY_EXPR@0..18
+    NAME@0..1
+      IDENT@0..1 "x"
+    WHITESPACE@1..2 " "
+    LESS_MINUS@2..4 "<-"
+    WHITESPACE@4..5 " "
+    LITERAL@5..6
+      DOUBLE@5..6 "1"
+    WHITESPACE@6..7 " "
+    COMMENT@7..18 "# a comment"
+
+#---- comment_only_line
+# just a comment
+#++++
+SOURCE_FILE@0..16
+  COMMENT@0..16 "# just a comment"
+
+#---- hash_in_string
+"# not a comment"
+#++++
+SOURCE_FILE@0..17
+  LITERAL@0..17
+    STRING@0..17 "\"# not a comment\""

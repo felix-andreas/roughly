@@ -1,0 +1,676 @@
+#==== expressions
+
+#---- functions
+function() 1
+function() {}
+function(arg1, arg2) {
+  arg2
+}
+
+function(arg1, arg2 = 2) {}
+
+function(x,
+         y,
+         z = 3) {
+
+}
+
+function()
+
+
+  1
+
+function
+() 1 + 1
+
+function
+
+() 1 + 1
+
+function
+
+# this important comment
+
+() 1 + 1
+
+function() function() {}
+
+function(x = function() {}) {}
+
+# With no intermediate `{` scope
+function() for(i in 1:5) i
+#++++
+
+#---- functions_with_return_as_parameter_name
+# `return` is not a reserved word in R (it's not in `?Reserved`), so it is
+# allowed as a parameter name (#189).
+
+function(return) return
+function(return = 1) return
+#++++
+
+#---- function_dots_and_dot_dot_i
+# Dots as parameter without default
+function(...) { list(...) }
+
+# Dots as parameter with default
+function(... = 1) { get("...") }
+
+# `..i` as parameter without default
+function(..1) { get("..1") }
+
+# `..i` as parameter with default
+function(..1 = 1) { get("..1") }
+
+# Miscellaneous
+function(x, ...) f(...)
+function(x, ...) ..1 + ..2
+#++++
+
+#---- function_no_body_ts_error
+function(x, y)
+#++++
+
+#---- lambda_function
+a <- \(arg) arg
+b <- \(arg1, arg2) paste0(arg1, arg2)
+c <- \(fun, ...) fun(...)
+1:3 |> {\(x, y = 1) x + y}() |> {\(x) sum(x)}()
+{\(a = 1) a + 1}()
+\() 1 + 2
+\()
+
+  1 + 2
+
+# Not currently allowed by the parser, but we think it will be and is just an oversight.
+# `'\\'` would need to be included alongside `FUNCTION` here https://github.com/wch/r-source/blob/802121c877837926a6bc2a930b3da749b537258b/src/main/gram.y#L3898-L3901.
+\
+() 1 + 1
+#++++
+
+#---- relational
+a == b
+a > b
+a < b
+a >= b
+a <= b
+a != b
+
+a ==
+  b
+#++++
+
+#---- arithmetic_operator
+a + b
+a - b
+a * b
+a / b
+a ^ b
+a ** b
+
+a +
+  b
+
+a *
+  b
+#++++
+
+#---- not_an_arithmetic_operator
+a
+  + b
+#++++
+
+#---- unary_operators
+!a
++a
+-a
+foo(!a, +b)
+foo(-a, bar)
+
+!
+  a
+-  b
+#++++
+
+#---- operator_precedence
+2+a*2
+2+a+2
+!a + !b
+a <= 2 && 2 >= d
+a[1] <- foo || bar
+a && b(c) && d
+val <- foo %>% bar(1) %>% baz()
+#++++
+
+#---- specials
+x %% y
+x %/% y
+x %+% y
+x %>% y
+x %>% 2 %>% z
+x %some text% y
+x %//% y
+
+# Not specials, but hard to test errors `%\%`, `%%%`
+#++++
+
+#---- pipe
+x |> print()
+
+x |> foo() %>% bar() |> baz()
+
+x |> foo() |> bar() + baz()
+
+x |> {function(x) x}()
+#++++
+
+#---- pipe_placeholder
+foo |> bar(x, y = _)
+foo |> bar() |> baz(data = _)
+#++++
+
+#---- subset
+foo[]
+foo[,]
+foo[,,]
+foo[x,]
+foo[x,,]
+foo[,x]
+foo[,,x]
+foo[x,,y]
+foo[,,x,,y,,]
+
+foo[bar]
+foo[1, 2]
+foo[x=1,,y=3,4]
+#++++
+
+#---- subset2
+foo[[]]
+foo[[,]]
+foo[[,,]]
+foo[[x,]]
+foo[[x,,]]
+foo[[,x]]
+foo[[,,x]]
+foo[[x,,y]]
+foo[[,,x,,y,,]]
+
+foo[[x]]
+foo[[x, y]]
+foo[[1, 2]]
+foo[[x=1,,y=3,4]]
+#++++
+
+#---- subset_and_subset2_precedence
+a[[b[1]]]
+a[b[[1]]]
+#++++
+
+#---- if
+if (x)
+  log(y)
+
+if (a.b) {
+  log(c)
+  d
+}
+
+if (
+  x <
+  y
+) {
+  z
+}
+#++++
+
+#---- if_else
+if (x)
+  y else if (a)
+  b
+
+if (x)
+  y else if (a)
+  b else d
+
+if (a) {
+  c
+  d
+} else {
+  e
+}
+#++++
+
+#---- complex_if_expression
+# Invalid at top level due to newline before `else`, so not a real if statement
+if (TRUE) {
+  1
+}
+else {
+  2
+}
+
+# Invalid for same reason as above
+if (TRUE)
+  1
+else
+  2
+
+# Valid inside `{` only due to special `else` handling with newlines
+{
+  if (TRUE) {
+    1
+  }
+  else {
+    2
+  }
+}
+
+# Valid with comments in special newline territory
+{
+  if (TRUE) {
+    1
+  }
+  # hi there
+
+  # another one!
+
+  else {
+    2
+  }
+}
+
+# Valid. This test ensures we handle the newline after `1 + 1` correctly (#125).
+{
+  if (TRUE)
+
+    1 + 1
+}
+
+# Valid. Newlines are allowed between the `else` and the `alternative`, even at top level (#141).
+if (TRUE) {
+  1
+} else
+{
+  2
+}
+
+# Valid. Same as above but in `{ }` so it is valid no matter where the newlines are.
+{
+  if (TRUE) {
+    1
+  } else
+  {
+    2
+  }
+}
+
+# Valid. Newlines and comments are allowed between the `else` and the `alternative`, even at top level.
+if (TRUE) {
+  1
+} else
+
+# do this alternative
+{
+  2
+}
+
+# Valid. Newlines are allowed between the `else` and the `alternative`, even at top level.
+if (TRUE) 1 else
+  2
+#++++
+
+#---- identifiers_starting_with_else_that_are_not_the_else_keyword_200
+# ASCII letter
+{
+  if (TRUE) 1
+  elseidx <- 1
+}
+
+# ASCII number
+{
+  if (TRUE) 1
+  else1idx <- 1
+}
+
+# ASCII `_`
+{
+  if (TRUE) 1
+  else_idx <- 1
+}
+
+# ASCII `.`
+{
+  if (TRUE) 1
+  else.idx <- 1
+}
+
+# Non-ASCII, but considered `iswalnum()` in R with UTF-8 locale.
+# Not considered `iswalnum()` in our scanner with C locale, but
+# our overapproximation with `>= 128` allows this and aligns with R.
+{
+  if (TRUE) 1
+  elseμ <- 1
+}
+
+# Non-ASCII (U+00B7), rejected by R as syntax error since `iswalnum()` returns false.
+# Our overapproximation with `>= 128` allows this, but that's ok since the R
+# side behavior is a syntax error.
+{
+  if (TRUE) 1
+  else· <- 1
+}
+#++++
+
+#---- identifiers_starting_with_else_that_are_not_the_else_keyword_2_200
+# Correctly treats `else.x` as a single identifier, not as `else` followed by `.x`,
+# but should really be a syntax error. See https://github.com/r-lib/tree-sitter-r/issues/194.
+if (TRUE) {
+  1
+} else.x
+#++++
+
+#---- for
+for (x in y)
+  f
+
+for (x in 5:6) {
+  for (y in ys) {
+    z
+  }
+}
+
+for (x in y) for (y in z) x + y
+
+for (x in y
+
+) 1 + 1
+
+# `...` as the `variable`
+for (... in 1:2) print(get("..."))
+
+# `..i` as the `variable`
+for (..1 in 1:2) print(get("..1"))
+#++++
+
+#---- for_no_body_ts_error
+for (i in 1:5)
+#++++
+
+#---- while
+while(TRUE)
+  bar
+
+while(x > 0)
+  x <- x - 1
+
+while(TRUE)
+  break
+
+while(TRUE)
+  next
+#++++
+
+#---- while_no_body_ts_error
+while (a < b)
+#++++
+
+#---- repeat
+repeat 1
+#++++
+
+#---- repeat_no_body_ts_error
+repeat
+#++++
+
+#---- switch
+switch(foo,
+  x = 1,
+  "y" = 2,
+  z = ,
+  3
+)
+#++++
+
+#---- dollar
+foo$bar
+foo$bar$baz
+foo$bar@baz
+foo$bar()
+foo$"bar"
+foo$bar()$baz[[1]]$bam
+foo$...
+foo$..1
+#++++
+
+#---- dollar_no_rhs
+foo$
+#++++
+
+#---- slot
+foo@bar
+foo@bar$baz
+foo@bar()
+foo@"bar"
+foo@...
+foo@..1
+#++++
+
+#---- slot_no_rhs
+foo@
+#++++
+
+#---- namespace_get
+foo::
+foo::bar
+foo::bar(1)
+foo::...
+foo::..1
+...::foo
+..1::foo
+...::...
+..1::..1
+#++++
+
+#---- namespace_get_internal
+foo:::
+foo:::bar
+foo:::bar(1)
+foo:::...
+foo:::..1
+...:::foo
+..1:::foo
+...:::...
+..1:::..1
+#++++
+
+#---- namespace_with_missing_rhs
+# It's nice that `::` allows an optional RHS and enforces that it can only be a
+# string or identifier, so this gives us a pretty clean tree even though it is
+# invalid R code.
+# https://github.com/r-lib/tree-sitter-r/issues/65
+library(dplyr::)
+
+library()
+
+1
+2
+3
+#++++
+
+#---- dollar_at_namespace_namespace_internal_with_expression_rhs
+# These nodes allows an optional RHS, and the RHS must be a string/identifier,
+# so we nicely get a true node here alongside the braces. Even if that's not
+# parsable R code, it's useful for completions and highlighting.
+foo${bar}
+foo@{bar}
+foo::{bar}
+foo:::{bar}
+#++++
+
+#---- assignment
+x <- 1
+x = 1
+x := 1
+x <<- 1
+1 ->> x
+1 -> x
+x <- y(1)
+y(1) -> x
+#++++
+
+#---- calls
+f()
+f(,)
+f(,,)
+f(x,)
+f(x,,)
+f(,x)
+f(,,x)
+f(x,,y)
+f(,,x,,y,,)
+f(x=,)
+f("x"=,)
+f(,y=)
+
+f(x)
+f(1+1)
+f(1 ~ 1)
+f(x, y)
+f(x, y = 2)
+f(x = 1 + 1)
+f(x, y =)
+f(f2(x, y))
+
+# Dots as unnamed and named argument
+f(...)
+f(, ..., 1)
+f(... = 1)
+f(... = ,)
+f(... = ...)
+
+# `..i` as unnamed and named argument
+f(..1)
+f(, ..1, 1)
+f(..1 = 1)
+f(..1 = ,)
+f(..1 = ..1)
+#++++
+
+#---- calls_with_null_as_argument_name
+fn(NULL =)
+fn(NULL =,)
+fn(NULL = 1)
+
+# This was likely added to R to support this case for `switch()`
+switch(typeof(x), NULL = this, integer = that)
+#++++
+
+#---- calls_with_return_as_argument_name
+# `return` is not a reserved word in R (it's not in `?Reserved`), so it is
+# allowed as an argument name (#189).
+
+fn(return = TRUE)
+fn(return = )
+
+# One specific example from #189
+switch(
+  x,
+  return = ,
+)
+#++++
+
+#---- return_is_just_an_identifier
+# `return` is a regular symbol in R, not a keyword (#189). A `return()`
+# call is parsed the same as any other call, with `return` as the
+# identifier. A bare `return` is also parsed as an identifier.
+
+function(x) return(x)
+return(x)
+return
+#++++
+
+#---- braced_expression
+{}
+
+{1}
+
+{1; 2}
+
+{1;
+2}
+
+{1
+2
+}
+
+{
+1
+2
+}
+#++++
+
+#---- parenthesized_expression
+(1)
+((1))
+(1 + 1)
+(fn(a, b))
+fn((a), (b))
+(function() {
+  body
+})
+#++++
+
+#---- colon
+1:2
+(1 + 1):-5
+#++++
+
+#---- formulas
+~x
+y~x
+#++++
+
+#---- help_operator
+a ? b
+a ? b <- 1
+?a
+#++++
+
+#---- complex_expressions
+repeat if (1) TRUE else repeat 42
+if (TRUE) if (FALSE) 2 else NULL
+a::b$c[[d]] <- e
+TRUE ~ FALSE ~ NULL ? NA ? NaN
+if (TRUE) FALSE
+else NA
+(if (TRUE) FALSE
+else NA)
+a = TRUE ? FALSE
+TRUE <- FALSE = NA
+TRUE <- FALSE ? NA
+TRUE = FALSE ? NA
+TRUE ? FALSE = NA
+#++++
+
+#---- precedence_tests
+A$"B"^NA
+a::b$c
+a$b?c
+#++++
+
+#---- newlines
+apple
+(banana)
+
+{
+  apple
+  (banana)
+}
+
+(
+  apple
+  (banana)
+)
+#++++
+

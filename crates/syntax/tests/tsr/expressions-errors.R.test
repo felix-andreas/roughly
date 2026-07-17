@@ -1,0 +1,127 @@
+#==== expressions-errors
+
+#---- function_no_body_with_assignment_ts_error
+x <- function(x, y)
+#++++
+
+#---- function_no_body_inside_another_function_ts_error
+function(x = function()) {}
+#++++
+
+#---- not_a_call_subset_or_subset2_ts_error
+f
+(x)
+
+foo
+[bar]
+
+foo
+[[x]]
+#++++
+
+#---- not_a_call_subset_or_subset2_due_to_sequential_arguments_ts_error
+f(x y)
+foo[x y]
+foo[[x y]]
+
+f(x, y z)
+foo[x, y z]
+foo[[x, y z]]
+
+f(, x y)
+foo[, x y]
+foo[[, x y]]
+#++++
+
+#---- not_a_parenthesized_expression_1_ts_error
+()
+#++++
+
+#---- not_a_parenthesized_expression_2_ts_error
+(
+  1
+  2
+)
+#++++
+
+#---- not_a_parenthesized_expression_3_ts_error
+(1; 2)
+#++++
+
+#---- dollar_at_namespace_namespace_internal_with_if_rhs_ts_error
+# The RHS's of these nodes are restricted to strings and identifiers, and the RHS
+# is optional. This ends up trying to match to an `if_statement` node, leaving the RHS
+# empty, and then the `if_statement` node errors because it doesn't have a `(`. This
+# is actually pretty decent behavior.
+foo$if
+foo@if
+foo::if
+foo:::if
+#++++
+
+#---- dollar_at_namespace_namespace_internal_with_newline_before_operator_ts_error
+# Newlines are not allowed before the operator, so none of these are valid
+x
+$y
+
+x
+@y
+
+x
+::y
+
+x
+:::y
+#++++
+
+#---- closing_brace_ts_error
+}
+#++++
+
+#---- closing_parenthesis_ts_error
+)
+#++++
+
+#---- closing_bracket_ts_error
+]
+#++++
+
+#---- opening_brace_closing_parenthesis_ts_error
+# Parenthesis is "not valid" so it isn't matched by the external scanner
+{)
+#++++
+
+#---- opening_parenthesis_closing_brace_ts_error
+(}
+#++++
+
+#---- opening_parenthesis_closing_bracket_ts_error
+(]
+#++++
+
+#---- opening_bracket2_unmatched_closing_bracket_ts_error
+x[[2]
+#++++
+
+#---- opening_bracket_and_bracket2_unmatched_closing_bracket_ts_error
+x[y[[2]
+#++++
+
+#---- opening_bracket2_and_bracket_matched_closing_bracket_ts_error
+x[[y[2]
+#++++
+
+#---- opening_bracket2_and_bracket_unmatched_closing_bracket_ts_error
+x[[y[2]]
+#++++
+
+#---- calls_with_na_as_argument_name_ts_error
+# Unlike `NULL`, other keywords like `NA` aren't allowed here
+fn(NA = )
+#++++
+
+#---- unsupported_subset2_with_over_multiple_lines_177_ts_error
+x[["a"]
+]
+#++++
+
