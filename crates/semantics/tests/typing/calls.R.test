@@ -117,3 +117,13 @@ f <- function() {
 #++++
 f: <T> fn() -> list[T]
 64..80 error[type-mismatch] expected `fn(character) -> T`, found `fn(a: U, b: V) -> U`
+
+#---- missing_tested_formal_is_optional
+f <- function() {
+  g <- function(x, tag) {
+    if (missing(tag)) x else tag
+  }
+  g(1L)
+}
+#++++
+f: fn() -> integer

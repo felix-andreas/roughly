@@ -630,6 +630,10 @@ impl<'db> Checker<'db, '_> {
                 let parameters = parameters.clone();
                 self.table.level += 1;
                 let mark = self.environment.mark();
+                // A formal the body tests with `missing(name)` is optional at
+                // call sites — R's optional-without-default idiom.
+                let mut missing_tested = rustc_hash::FxHashSet::default();
+                self.collect_missing_tested(*body, &mut missing_tested);
                 let mut named = Vec::new();
                 let mut variadic = None;
                 for parameter in &parameters {
@@ -644,7 +648,8 @@ impl<'db> Checker<'db, '_> {
                     named.push(crate::types::RecordField {
                         name: Name::new(self.db, parameter.name.clone()),
                         ty: parameter_ty,
-                        optional: parameter.default.is_some(),
+                        optional: parameter.default.is_some()
+                            || missing_tested.contains(&parameter.name),
                     });
                     if let Some(slot) = self
                         .naming
@@ -1138,6 +1143,30 @@ impl<'db> Checker<'db, '_> {
             // Not yet stable: this pass ran under a stale entry state, so its
             // diagnostics are discarded and the body re-checks.
             self.errors.truncate(errors_mark);
+        }
+    }
+
+    /// The formal names this body tests with `missing(name)`. Nested function
+    /// bodies are excluded — their tests cover their own formals.
+    fn collect_missing_tested(&self, id: ExprId, tested: &mut rustc_hash::FxHashSet<String>) {
+        let kind = &self.module.expression(id).kind;
+        if matches!(kind, ExpressionKind::Function { .. }) {
+            return;
+        }
+        if let ExpressionKind::Call { callee, arguments } = kind
+            && matches!(
+                &self.module.expression(*callee).kind,
+                ExpressionKind::NameRef(name) if name == "missing"
+            )
+            && let [argument] = arguments.as_slice()
+            && argument.name.is_none()
+            && let Some(value) = argument.value
+            && let ExpressionKind::NameRef(name) = &self.module.expression(value).kind
+        {
+            tested.insert(name.clone());
+        }
+        for child in kind.child_ids() {
+            self.collect_missing_tested(child, tested);
         }
     }
 

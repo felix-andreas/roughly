@@ -187,6 +187,58 @@ pub enum ExpressionKind {
     Next,
 }
 
+impl ExpressionKind {
+    /// The direct child expression ids, in source order.
+    pub fn child_ids(&self) -> Vec<ExprId> {
+        match self {
+            ExpressionKind::Missing
+            | ExpressionKind::Literal(_)
+            | ExpressionKind::NameRef(_)
+            | ExpressionKind::Namespace { .. }
+            | ExpressionKind::Break
+            | ExpressionKind::Next => Vec::new(),
+            ExpressionKind::Assign { target, value, .. } => vec![*target, *value],
+            ExpressionKind::Unary { operand, .. } => vec![*operand],
+            ExpressionKind::Binary { lhs, rhs, .. } => vec![*lhs, *rhs],
+            ExpressionKind::Call { callee, arguments } => {
+                let mut ids = vec![*callee];
+                ids.extend(arguments.iter().filter_map(|argument| argument.value));
+                ids
+            }
+            ExpressionKind::Index {
+                target, arguments, ..
+            } => {
+                let mut ids = vec![*target];
+                ids.extend(arguments.iter().filter_map(|argument| argument.value));
+                ids
+            }
+            ExpressionKind::Field { target, .. } => vec![*target],
+            ExpressionKind::Function { parameters, body } => {
+                let mut ids: Vec<ExprId> = parameters
+                    .iter()
+                    .filter_map(|parameter| parameter.default)
+                    .collect();
+                ids.push(*body);
+                ids
+            }
+            ExpressionKind::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                let mut ids = vec![*condition, *then_branch];
+                ids.extend(*else_branch);
+                ids
+            }
+            ExpressionKind::For { sequence, body, .. } => vec![*sequence, *body],
+            ExpressionKind::While { condition, body } => vec![*condition, *body],
+            ExpressionKind::Repeat { body } => vec![*body],
+            ExpressionKind::Block(statements) => statements.clone(),
+            ExpressionKind::Paren(inner) => vec![*inner],
+        }
+    }
+}
+
 /// Lower one item subtree (rooted at offset 0) into a `Module`.
 pub fn lower_item(root: &SyntaxNode) -> Module {
     let mut lowering = Lowering {
