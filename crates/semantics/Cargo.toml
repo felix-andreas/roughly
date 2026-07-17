@@ -1,0 +1,13 @@
+[package]
+name = "semantics"
+edition = "2024"
+version.workspace = true
+publish = false
+
+[lib]
+path = "src/semantics.rs"
+
+[dependencies]
+rustc-hash.workspace = true
+salsa.workspace = true
+syntax = { path = "../syntax" }
