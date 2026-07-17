@@ -6,7 +6,7 @@
 //! instance must span everything that shares names (both sides of an
 //! expected/found message), because a fresh renderer restarts the numbering.
 
-use crate::check::{TypeError, TypeErrorKind};
+use crate::check::{OperandExpectation, TypeError, TypeErrorKind};
 use crate::types::{Atomic, Constraint, FunctionType, Name, Ty, TyKind, TypeScheme};
 use crate::{Db, DocumentKind, Item, SourceFile, item_check, item_tree, parse};
 use syntax::TextRange;
@@ -172,6 +172,22 @@ fn render_type_error_message(db: &dyn Db, error: &TypeError<'_>) -> String {
         ),
         TypeErrorKind::MixedListElements => {
             "All elements in `list(...)` must be either all named or all unnamed.".to_owned()
+        }
+        TypeErrorKind::InvalidOperand { expected, found } => {
+            let expected_description = match expected {
+                OperandExpectation::Numeric => "a numeric value (`integer` or `double`)",
+                OperandExpectation::ScalarNumeric => {
+                    "a scalar numeric value (`integer` or `double`)"
+                }
+                OperandExpectation::Logical => "a `logical` value",
+                OperandExpectation::Comparable => {
+                    "a comparable value (numeric, `character`, or `logical`)"
+                }
+            };
+            format!(
+                "expected {expected_description}, found `{}`",
+                renderer.render(db, *found)
+            )
         }
         TypeErrorKind::NoMatchingOverload {
             name,

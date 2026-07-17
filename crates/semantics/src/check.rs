@@ -95,7 +95,21 @@ pub enum TypeErrorKind<'db> {
     },
     /// `list(...)` mixing named and unnamed elements has no modeled shape.
     MixedListElements,
+    /// An operator operand outside the operator's accepted family.
+    InvalidOperand {
+        expected: OperandExpectation,
+        found: Ty<'db>,
+    },
     InfiniteType,
+}
+
+/// What an operator position accepts, for error wording.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::SalsaValue)]
+pub enum OperandExpectation {
+    Numeric,
+    ScalarNumeric,
+    Logical,
+    Comparable,
 }
 
 /// The result of checking one item.
@@ -304,6 +318,132 @@ struct CallArgument<'db> {
     whole_double: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OperandShape {
+    Scalar,
+    Vector,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ComparisonFamily {
+    Numeric,
+    Character,
+    Logical,
+}
+
+/// How an operand of an arithmetic operator classifies: a concrete numeric
+/// shape, a union whose members all are (accepted member-wise), a
+/// still-flexible variable or declared-numeric rigid, a vector whose element
+/// is not yet concrete, an `Any`/`Unknown` short-circuit, or a hard error.
+enum NumericOperand<'db> {
+    Concrete(OperandShape, Atomic),
+    ConcreteUnion(Vec<(OperandShape, Atomic)>),
+    Flexible(Ty<'db>),
+    /// A vector whose element is a generic variable/rigid (carried, to
+    /// constrain) or statically untracked (`Any`/`Unknown`, carrying `None`).
+    /// The shape is known — vector — even though the atomic is not.
+    FlexibleVector(Option<Ty<'db>>),
+    AnyUnknown,
+    Invalid,
+}
+
+impl NumericOperand<'_> {
+    /// The operand's member shapes: one for a concrete operand, all of them
+    /// for a union.
+    fn concrete_parts(&self) -> Option<Vec<(OperandShape, Atomic)>> {
+        match self {
+            NumericOperand::Concrete(shape, atomic) => Some(vec![(*shape, *atomic)]),
+            NumericOperand::ConcreteUnion(parts) => Some(parts.clone()),
+            _ => None,
+        }
+    }
+}
+
+/// A comparison operand whose family is not yet known: a bare variable or
+/// rigid, or a vector whose element is still generic or untracked.
+enum FlexibleComparisonOperand<'db> {
+    Bare(Ty<'db>),
+    VectorElement(Option<Ty<'db>>),
+}
+
+impl<'db> FlexibleComparisonOperand<'db> {
+    fn constrainable(&self) -> Option<Ty<'db>> {
+        match self {
+            FlexibleComparisonOperand::Bare(ty) => Some(*ty),
+            FlexibleComparisonOperand::VectorElement(ty) => *ty,
+        }
+    }
+}
+
+fn numeric_operand_parts<'db>(db: &'db dyn Db, ty: Ty<'db>) -> Option<(OperandShape, Atomic)> {
+    match ty.kind(db) {
+        TyKind::Scalar(atomic @ (Atomic::Integer | Atomic::Double)) => {
+            Some((OperandShape::Scalar, *atomic))
+        }
+        TyKind::Vector(element) | TyKind::NamedVector(element) => match element.kind(db) {
+            TyKind::Scalar(atomic @ (Atomic::Integer | Atomic::Double)) => {
+                Some((OperandShape::Vector, *atomic))
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// A comparison operand's member shapes: one for a concrete operand, all of
+/// them for a union (member-wise acceptance); `None` when any member is not
+/// comparable.
+fn comparison_operand_parts_list<'db>(
+    db: &'db dyn Db,
+    ty: Ty<'db>,
+) -> Option<Vec<(OperandShape, ComparisonFamily)>> {
+    match ty.kind(db) {
+        TyKind::Union(members) => members
+            .iter()
+            .map(|&member| comparison_operand_parts(db, member))
+            .collect(),
+        _ => comparison_operand_parts(db, ty).map(|parts| vec![parts]),
+    }
+}
+
+fn comparison_operand_parts<'db>(
+    db: &'db dyn Db,
+    ty: Ty<'db>,
+) -> Option<(OperandShape, ComparisonFamily)> {
+    let (shape, atomic) = match ty.kind(db) {
+        TyKind::Scalar(atomic) => (OperandShape::Scalar, *atomic),
+        TyKind::Vector(element) | TyKind::NamedVector(element) => match element.kind(db) {
+            TyKind::Scalar(atomic) => (OperandShape::Vector, *atomic),
+            _ => return None,
+        },
+        _ => return None,
+    };
+    let family = match atomic {
+        Atomic::Integer | Atomic::Double => ComparisonFamily::Numeric,
+        Atomic::Character => ComparisonFamily::Character,
+        Atomic::Logical => ComparisonFamily::Logical,
+        Atomic::Complex | Atomic::Raw => return None,
+    };
+    Some((shape, family))
+}
+
+fn flexible_comparison_operand<'db>(
+    db: &'db dyn Db,
+    ty: Ty<'db>,
+) -> Option<FlexibleComparisonOperand<'db>> {
+    match ty.kind(db) {
+        TyKind::Var(_) | TyKind::Rigid(_) => Some(FlexibleComparisonOperand::Bare(ty)),
+        TyKind::Vector(element) | TyKind::NamedVector(element) => match element.kind(db) {
+            TyKind::Var(_) | TyKind::Rigid(_) => {
+                Some(FlexibleComparisonOperand::VectorElement(Some(*element)))
+            }
+            TyKind::Any | TyKind::Unknown => Some(FlexibleComparisonOperand::VectorElement(None)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 impl<'db> Checker<'db, '_> {
     fn record(&mut self, id: ExprId, ty: Ty<'db>) -> Ty<'db> {
         self.recorded.insert(id, ty);
@@ -358,13 +498,12 @@ impl<'db> Checker<'db, '_> {
                 value_ty
             }
             ExpressionKind::Unary { operator, operand } => {
-                let operand_ty = self.infer(*operand);
-                self.infer_unary(range, *operator, operand_ty)
+                let (operator, operand) = (*operator, *operand);
+                self.infer_unary(operator, operand)
             }
             ExpressionKind::Binary { operator, lhs, rhs } => {
-                let lhs_ty = self.infer(*lhs);
-                let rhs_ty = self.infer(*rhs);
-                self.infer_binary(range, *operator, lhs_ty, rhs_ty)
+                let (operator, lhs, rhs) = (*operator, *lhs, *rhs);
+                self.infer_binary(range, operator, lhs, rhs)
             }
             ExpressionKind::Call { callee, arguments } => {
                 let arguments = arguments.clone();
@@ -452,7 +591,7 @@ impl<'db> Checker<'db, '_> {
                 then_branch,
                 else_branch,
             } => {
-                self.infer(*condition);
+                self.expect_scalar_logical(*condition);
                 let mark = self.environment.mark();
                 let then_ty = self.infer(*then_branch);
                 let then_writes = self.environment.writes_since(mark);
@@ -474,7 +613,7 @@ impl<'db> Checker<'db, '_> {
                 crate::types::null(self.db)
             }
             ExpressionKind::While { condition, body } => {
-                self.infer(*condition);
+                self.expect_scalar_logical(*condition);
                 let mark = self.environment.mark();
                 self.infer(*body);
                 let writes = self.environment.writes_since(mark);
@@ -557,20 +696,93 @@ impl<'db> Checker<'db, '_> {
         // by naming; their typing rules land with the container rules.
     }
 
-    fn infer_unary(
-        &mut self,
-        range: TextRange,
-        operator: UnaryOperator,
-        operand: Ty<'db>,
-    ) -> Ty<'db> {
+    fn infer_unary(&mut self, operator: UnaryOperator, operand: ExprId) -> Ty<'db> {
         match operator {
-            UnaryOperator::Minus | UnaryOperator::Plus => {
-                let numeric = self.fresh(Constraint::Numeric);
-                self.unify_or_report(range, numeric, operand);
-                numeric
+            UnaryOperator::Minus => self.infer_unary_minus(operand),
+            UnaryOperator::Not => self.infer_unary_not(operand),
+            // Unary `+`, `~` formulas, and `?` help are unsupported
+            // constructs: sound-by-refusal Unknown.
+            UnaryOperator::Plus | UnaryOperator::Tilde | UnaryOperator::Help => {
+                self.infer(operand);
+                self.unknown()
             }
-            UnaryOperator::Not => scalar(self.db, Atomic::Logical),
-            UnaryOperator::Tilde | UnaryOperator::Help => self.unknown(),
+        }
+    }
+
+    /// Negation is elementwise and type-preserving.
+    fn infer_unary_minus(&mut self, operand: ExprId) -> Ty<'db> {
+        let operand_range = self.module.expression(operand).range;
+        let inferred = self.infer(operand);
+        let resolved = self.table.resolve(self.db, inferred);
+        match self.classify_numeric_operand(resolved) {
+            NumericOperand::Concrete(shape, atomic) => self.shaped(shape, atomic),
+            // Member-wise over a union operand: negation preserves each
+            // member's shape and atomic, so the result is the same union.
+            NumericOperand::ConcreteUnion(parts) => {
+                let members: Vec<Ty<'db>> = parts
+                    .into_iter()
+                    .map(|(shape, atomic)| self.shaped(shape, atomic))
+                    .collect();
+                union_of(self.db, members)
+            }
+            NumericOperand::Flexible(ty) => {
+                self.constrain_numeric_flexible(operand_range, ty);
+                ty
+            }
+            // A generic-element vector keeps its element (constrained
+            // numeric); an untracked element stays untracked.
+            NumericOperand::FlexibleVector(element) => {
+                if let Some(element) = element {
+                    self.constrain_numeric_flexible(operand_range, element);
+                }
+                resolved
+            }
+            NumericOperand::AnyUnknown => self.unknown(),
+            NumericOperand::Invalid => {
+                self.errors.push(TypeError {
+                    range: operand_range,
+                    kind: TypeErrorKind::InvalidOperand {
+                        expected: OperandExpectation::Numeric,
+                        found: resolved,
+                    },
+                });
+                self.unknown()
+            }
+        }
+    }
+
+    fn infer_unary_not(&mut self, operand: ExprId) -> Ty<'db> {
+        let operand_range = self.module.expression(operand).range;
+        let inferred = self.infer(operand);
+        let resolved = self.table.resolve(self.db, inferred);
+        match resolved.kind(self.db) {
+            TyKind::Scalar(Atomic::Logical) => scalar(self.db, Atomic::Logical),
+            TyKind::Vector(element) | TyKind::NamedVector(element)
+                if matches!(
+                    element.kind(self.db),
+                    TyKind::Scalar(Atomic::Logical)
+                        | TyKind::Var(_)
+                        | TyKind::Any
+                        | TyKind::Unknown
+                ) =>
+            {
+                Ty::new(self.db, TyKind::Vector(scalar(self.db, Atomic::Logical)))
+            }
+            TyKind::Any | TyKind::Unknown => self.unknown(),
+            TyKind::Var(_) | TyKind::Rigid(_) => {
+                self.unify_or_report(operand_range, scalar(self.db, Atomic::Logical), resolved);
+                scalar(self.db, Atomic::Logical)
+            }
+            _ => {
+                self.errors.push(TypeError {
+                    range: operand_range,
+                    kind: TypeErrorKind::InvalidOperand {
+                        expected: OperandExpectation::Logical,
+                        found: resolved,
+                    },
+                });
+                self.unknown()
+            }
         }
     }
 
@@ -578,31 +790,477 @@ impl<'db> Checker<'db, '_> {
         &mut self,
         range: TextRange,
         operator: BinaryOperator,
-        lhs: Ty<'db>,
-        rhs: Ty<'db>,
+        lhs: ExprId,
+        rhs: ExprId,
     ) -> Ty<'db> {
         use BinaryOperator::*;
         match operator {
-            Add | Subtract | Multiply | Divide | Power | Modulo | IntegerDivide => {
-                self.arithmetic(range, lhs, rhs)
+            Add | Subtract | Multiply | Modulo | IntegerDivide => {
+                self.infer_binary_numeric(range, lhs, rhs, false)
             }
-            Sequence => {
-                let element = self.arithmetic(range, lhs, rhs);
-                Ty::new(self.db, TyKind::Vector(element))
-            }
+            // `/` and `^` always produce doubles.
+            Divide | Power => self.infer_binary_numeric(range, lhs, rhs, true),
+            Sequence => self.infer_colon(lhs, rhs),
             Less | Greater | LessEq | GreaterEq | Equal | NotEqual => {
+                self.infer_compare(range, lhs, rhs)
+            }
+            And2 | Or2 => {
+                self.expect_scalar_logical(lhs);
+                self.expect_scalar_logical(rhs);
                 scalar(self.db, Atomic::Logical)
             }
-            And | And2 | Or | Or2 => scalar(self.db, Atomic::Logical),
-            Special => self.unknown(),
-            Pipe => {
-                // `x |> f()` types as the call result; the call already
-                // inferred with the piped value prepended in a later slice —
-                // Unknown until then.
-                let _ = (lhs, rhs);
+            // Elementwise `&`/`|`, `%op%` specials, the `|>` pipe, `~`
+            // formulas, and `?` help are unsupported constructs:
+            // sound-by-refusal Unknown (the operands still infer).
+            And | Or | Special | Pipe | Tilde | Help => {
+                self.infer(lhs);
+                self.infer(rhs);
                 self.unknown()
             }
-            Tilde | Help => self.unknown(),
+        }
+    }
+
+    /// The condition of `if`/`while` and the operands of `&&`/`||` must be
+    /// scalar logicals; a still-flexible operand binds to `logical`.
+    fn expect_scalar_logical(&mut self, condition: ExprId) {
+        let condition_range = self.module.expression(condition).range;
+        let inferred = self.infer(condition);
+        let resolved = self.table.resolve(self.db, inferred);
+        self.unify_or_report(condition_range, scalar(self.db, Atomic::Logical), resolved);
+    }
+
+    /// Binary arithmetic over the classified operand shapes: member-wise over
+    /// unions (a vector member makes the pair a vector, both-`integer` pairs
+    /// stay `integer`, any `double` — or an always-`double` operator like `/`
+    /// — promotes the pair), with flexible operands collapsed onto one
+    /// representative so `x + y` ties the two together.
+    fn infer_binary_numeric(
+        &mut self,
+        range: TextRange,
+        lhs: ExprId,
+        rhs: ExprId,
+        always_double: bool,
+    ) -> Ty<'db> {
+        let lhs_range = self.module.expression(lhs).range;
+        let rhs_range = self.module.expression(rhs).range;
+        let lhs_ty = self.infer(lhs);
+        let rhs_ty = self.infer(rhs);
+        let resolved_left = self.table.resolve(self.db, lhs_ty);
+        let resolved_right = self.table.resolve(self.db, rhs_ty);
+        let left = self.classify_numeric_operand(resolved_left);
+        let right = self.classify_numeric_operand(resolved_right);
+
+        for (operand, resolved, operand_range) in [
+            (&left, resolved_left, lhs_range),
+            (&right, resolved_right, rhs_range),
+        ] {
+            if matches!(operand, NumericOperand::Invalid) {
+                self.errors.push(TypeError {
+                    range: operand_range,
+                    kind: TypeErrorKind::InvalidOperand {
+                        expected: OperandExpectation::Numeric,
+                        found: resolved,
+                    },
+                });
+                return self.unknown();
+            }
+        }
+        if matches!(left, NumericOperand::AnyUnknown) || matches!(right, NumericOperand::AnyUnknown)
+        {
+            return self.unknown();
+        }
+
+        // Collapse flexible operands (variables and numeric rigids) onto one
+        // representative so `x + y` ties the two operands together; a rigid
+        // pair that cannot unify is a genuine bound violation.
+        let mut flexible: Option<Ty<'db>> = None;
+        for operand in [&left, &right] {
+            if let NumericOperand::Flexible(ty) = operand {
+                match flexible {
+                    Some(existing) => {
+                        if let Err(error) = self.table.unify(self.db, existing, *ty) {
+                            self.report_unify(range, error);
+                            return self.unknown();
+                        }
+                    }
+                    None => flexible = Some(*ty),
+                }
+            }
+        }
+        if let Some(ty) = flexible {
+            self.constrain_numeric_flexible(range, ty);
+        }
+        // A generic vector element (`T[]`) used arithmetically must be
+        // numeric; joined with the atomic-element bound it already carries,
+        // the element becomes scalar-numeric.
+        for operand in [&left, &right] {
+            if let NumericOperand::FlexibleVector(Some(element)) = operand {
+                self.constrain_numeric_flexible(range, *element);
+            }
+        }
+
+        // A flexible-element vector operand fixes the result shape (vector)
+        // without fixing the atomic: an always-double operation or a concrete
+        // `double` (or union) partner promotes to `double[]`; an integer
+        // partner promotes *into* the element, so the result keeps the
+        // element; two generic elements unify; an untracked element stays
+        // untracked.
+        let flexible_vector_present = matches!(left, NumericOperand::FlexibleVector(_))
+            || matches!(right, NumericOperand::FlexibleVector(_));
+        if flexible_vector_present {
+            let double_vector = Ty::new(self.db, TyKind::Vector(scalar(self.db, Atomic::Double)));
+            if always_double {
+                return double_vector;
+            }
+            let concrete_parts = left.concrete_parts().or_else(|| right.concrete_parts());
+            if let Some(parts) = &concrete_parts
+                && (parts.len() > 1 || parts.iter().any(|(_, atomic)| *atomic == Atomic::Double))
+            {
+                return double_vector;
+            }
+            let element = match (&left, &right) {
+                (
+                    NumericOperand::FlexibleVector(Some(left_element)),
+                    NumericOperand::FlexibleVector(Some(right_element)),
+                ) => {
+                    if let Err(error) = self.table.unify(self.db, *left_element, *right_element) {
+                        self.report_unify(range, error);
+                        return self.unknown();
+                    }
+                    Some(*left_element)
+                }
+                (NumericOperand::FlexibleVector(None), _)
+                | (_, NumericOperand::FlexibleVector(None)) => None,
+                (NumericOperand::FlexibleVector(Some(element)), _)
+                | (_, NumericOperand::FlexibleVector(Some(element))) => Some(*element),
+                _ => None,
+            };
+            return Ty::new(
+                self.db,
+                TyKind::Vector(element.unwrap_or_else(|| self.unknown())),
+            );
+        }
+
+        match (left.concrete_parts(), right.concrete_parts()) {
+            // Member-wise; a single concrete operand is the one-member case,
+            // so this arm also carries the ordinary concrete/concrete path.
+            (Some(left_parts), Some(right_parts)) => {
+                let members =
+                    self.member_wise_numeric_results(&left_parts, &right_parts, always_double);
+                union_of(self.db, members)
+            }
+            (left_parts, right_parts) => {
+                let Some(flexible) = flexible else {
+                    return self.unknown();
+                };
+                let concrete_parts = left_parts.or(right_parts);
+                if let Some(parts) = &concrete_parts
+                    && parts.len() > 1
+                {
+                    // A union operand cannot promote into a variable
+                    // member-wise, so the flexible side pins to the default
+                    // numeric scalar (`double`) and the operation continues
+                    // member-wise.
+                    self.unify_or_report(range, flexible, scalar(self.db, Atomic::Double));
+                    let members = self.member_wise_numeric_results(
+                        &[(OperandShape::Scalar, Atomic::Double)],
+                        parts,
+                        always_double,
+                    );
+                    return union_of(self.db, members);
+                }
+                let concrete = concrete_parts.and_then(|parts| parts.first().copied());
+                let result_shape = match concrete {
+                    Some((OperandShape::Vector, _)) => OperandShape::Vector,
+                    _ => OperandShape::Scalar,
+                };
+                if always_double || concrete.map(|(_, atomic)| atomic) == Some(Atomic::Double) {
+                    return self.shaped(result_shape, Atomic::Double);
+                }
+                match result_shape {
+                    // `x + 1L` (and `x + y`) stay polymorphic over the
+                    // numeric operand: integer promotes to whatever it
+                    // resolves to, so the scalar result is the operand
+                    // itself.
+                    OperandShape::Scalar => flexible,
+                    // A vector result cannot carry an unresolved atomic, so
+                    // a flexible operand defaults to `double` here.
+                    OperandShape::Vector => {
+                        self.unify_or_report(range, flexible, scalar(self.db, Atomic::Double));
+                        self.shaped(OperandShape::Vector, Atomic::Double)
+                    }
+                }
+            }
+        }
+    }
+
+    /// R's `:` yields an integer sequence for whole-number endpoints
+    /// (`1:10` counts, via the literal rule); a `double` endpoint — or a
+    /// flexible one, which may resolve to `double` — makes it `double[]`.
+    /// Endpoints must be scalar numbers: the plain numeric bound would admit
+    /// vectors, which R only warns about and truncates.
+    fn infer_colon(&mut self, lhs: ExprId, rhs: ExprId) -> Ty<'db> {
+        let mut result_atomic = Atomic::Integer;
+        for operand in [lhs, rhs] {
+            let operand_range = self.module.expression(operand).range;
+            let whole_literal = self.is_whole_double(operand);
+            let inferred = self.infer(operand);
+            let resolved = self.table.resolve(self.db, inferred);
+            match resolved.kind(self.db) {
+                TyKind::Scalar(Atomic::Integer) => {}
+                TyKind::Scalar(Atomic::Double) if whole_literal => {}
+                TyKind::Scalar(Atomic::Double) => result_atomic = Atomic::Double,
+                TyKind::Any | TyKind::Unknown => return self.unknown(),
+                TyKind::Var(var) => {
+                    if let Err(error) =
+                        self.table
+                            .constrain(self.db, *var, Constraint::ScalarNumeric)
+                    {
+                        self.report_unify(operand_range, error);
+                        return self.unknown();
+                    }
+                    result_atomic = Atomic::Double;
+                }
+                TyKind::Rigid(name)
+                    if matches!(
+                        self.rigid_constraints.get(name),
+                        Some(Constraint::ScalarNumeric)
+                    ) =>
+                {
+                    result_atomic = Atomic::Double;
+                }
+                _ => {
+                    self.errors.push(TypeError {
+                        range: operand_range,
+                        kind: TypeErrorKind::InvalidOperand {
+                            expected: OperandExpectation::ScalarNumeric,
+                            found: resolved,
+                        },
+                    });
+                    return self.unknown();
+                }
+            }
+        }
+        Ty::new(self.db, TyKind::Vector(scalar(self.db, result_atomic)))
+    }
+
+    /// Comparisons: both sides must share a comparison family (numeric,
+    /// character, logical — member-wise over unions), a flexible operand
+    /// compared against a concrete numeric partner is constrained numeric,
+    /// and the result is `logical` shaped element-wise (a vector member
+    /// compares to `logical[]`).
+    fn infer_compare(&mut self, range: TextRange, lhs: ExprId, rhs: ExprId) -> Ty<'db> {
+        let lhs_range = self.module.expression(lhs).range;
+        let rhs_range = self.module.expression(rhs).range;
+        let lhs_ty = self.infer(lhs);
+        let rhs_ty = self.infer(rhs);
+        let resolved_left = self.table.resolve(self.db, lhs_ty);
+        let resolved_right = self.table.resolve(self.db, rhs_ty);
+        if matches!(resolved_left.kind(self.db), TyKind::Any | TyKind::Unknown)
+            || matches!(resolved_right.kind(self.db), TyKind::Any | TyKind::Unknown)
+        {
+            return self.unknown();
+        }
+
+        let left_parts = comparison_operand_parts_list(self.db, resolved_left);
+        let right_parts = comparison_operand_parts_list(self.db, resolved_right);
+        let left_flexible = flexible_comparison_operand(self.db, resolved_left);
+        let right_flexible = flexible_comparison_operand(self.db, resolved_right);
+
+        for (parts, flexible, resolved, operand_range) in [
+            (&left_parts, &left_flexible, resolved_left, lhs_range),
+            (&right_parts, &right_flexible, resolved_right, rhs_range),
+        ] {
+            if parts.is_none() && flexible.is_none() {
+                self.errors.push(TypeError {
+                    range: operand_range,
+                    kind: TypeErrorKind::InvalidOperand {
+                        expected: OperandExpectation::Comparable,
+                        found: resolved,
+                    },
+                });
+                return self.unknown();
+            }
+        }
+
+        // Two concrete operands must belong to the same comparison family,
+        // member-wise: every shape the left union can take must be comparable
+        // with every shape of the right.
+        if let (Some(left_parts), Some(right_parts)) = (&left_parts, &right_parts)
+            && left_parts.iter().any(|(_, left_family)| {
+                right_parts
+                    .iter()
+                    .any(|(_, right_family)| left_family != right_family)
+            })
+        {
+            self.errors.push(TypeError {
+                range,
+                kind: TypeErrorKind::Mismatch {
+                    expected: resolved_left,
+                    found: resolved_right,
+                },
+            });
+            return self.unknown();
+        }
+
+        // A flexible operand compared against a concrete numeric operand is
+        // constrained numeric; comparison against a non-numeric family leaves
+        // it free (the system has no character-or-logical constraint).
+        let all_numeric = |parts: &Option<Vec<(OperandShape, ComparisonFamily)>>| {
+            parts.as_ref().is_some_and(|parts| {
+                parts
+                    .iter()
+                    .all(|(_, family)| *family == ComparisonFamily::Numeric)
+            })
+        };
+        if let Some(flexible) = &left_flexible
+            && all_numeric(&right_parts)
+            && let Some(ty) = flexible.constrainable()
+        {
+            self.constrain_numeric_flexible(lhs_range, ty);
+        }
+        if let Some(flexible) = &right_flexible
+            && all_numeric(&left_parts)
+            && let Some(ty) = flexible.constrainable()
+        {
+            self.constrain_numeric_flexible(rhs_range, ty);
+        }
+
+        let shapes = |parts: &Option<Vec<(OperandShape, ComparisonFamily)>>,
+                      flexible: &Option<FlexibleComparisonOperand<'db>>|
+         -> Vec<OperandShape> {
+            match (parts, flexible) {
+                (Some(parts), _) => parts.iter().map(|(shape, _)| *shape).collect(),
+                (None, Some(FlexibleComparisonOperand::VectorElement(_))) => {
+                    vec![OperandShape::Vector]
+                }
+                _ => vec![OperandShape::Scalar],
+            }
+        };
+        let left_shapes = shapes(&left_parts, &left_flexible);
+        let right_shapes = shapes(&right_parts, &right_flexible);
+        let mut results = Vec::new();
+        for left_shape in &left_shapes {
+            for right_shape in &right_shapes {
+                let result_shape = if *left_shape == OperandShape::Vector
+                    || *right_shape == OperandShape::Vector
+                {
+                    OperandShape::Vector
+                } else {
+                    OperandShape::Scalar
+                };
+                results.push(self.shaped(result_shape, Atomic::Logical));
+            }
+        }
+        union_of(self.db, results)
+    }
+
+    fn shaped(&self, shape: OperandShape, atomic: Atomic) -> Ty<'db> {
+        let element = scalar(self.db, atomic);
+        match shape {
+            OperandShape::Scalar => element,
+            OperandShape::Vector => Ty::new(self.db, TyKind::Vector(element)),
+        }
+    }
+
+    fn member_wise_numeric_results(
+        &self,
+        left_parts: &[(OperandShape, Atomic)],
+        right_parts: &[(OperandShape, Atomic)],
+        always_double: bool,
+    ) -> Vec<Ty<'db>> {
+        let mut results = Vec::with_capacity(left_parts.len() * right_parts.len());
+        for (left_shape, left_atomic) in left_parts {
+            for (right_shape, right_atomic) in right_parts {
+                let shape = if *left_shape == OperandShape::Vector
+                    || *right_shape == OperandShape::Vector
+                {
+                    OperandShape::Vector
+                } else {
+                    OperandShape::Scalar
+                };
+                let atomic = if always_double {
+                    Atomic::Double
+                } else if *left_atomic == Atomic::Integer && *right_atomic == Atomic::Integer {
+                    Atomic::Integer
+                } else {
+                    Atomic::Double
+                };
+                results.push(self.shaped(shape, atomic));
+            }
+        }
+        results
+    }
+
+    /// Constrain a flexible operand (variable or rigid) to be numeric: a
+    /// variable's constraint joins through the lattice; a rigid satisfies it
+    /// only when its declaration promised numeric-ness.
+    fn constrain_numeric_flexible(&mut self, range: TextRange, ty: Ty<'db>) {
+        match ty.kind(self.db) {
+            TyKind::Var(var) => {
+                if let Err(error) = self.table.constrain(self.db, *var, Constraint::Numeric) {
+                    self.report_unify(range, error);
+                }
+            }
+            TyKind::Rigid(name) => {
+                if !matches!(
+                    self.rigid_constraints.get(name),
+                    Some(Constraint::Numeric | Constraint::ScalarNumeric)
+                ) {
+                    self.errors.push(TypeError {
+                        range,
+                        kind: TypeErrorKind::ConstraintViolation {
+                            constraint: Constraint::Numeric,
+                            found: ty,
+                        },
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// How an arithmetic operand classifies once resolved.
+    fn classify_numeric_operand(&self, resolved: Ty<'db>) -> NumericOperand<'db> {
+        if let Some(parts) = numeric_operand_parts(self.db, resolved) {
+            return NumericOperand::Concrete(parts.0, parts.1);
+        }
+        match resolved.kind(self.db) {
+            // A union operand is numeric when every member is; any
+            // non-numeric member makes the whole operand invalid (the error
+            // then shows the full union type).
+            TyKind::Union(members) => {
+                let mut parts = Vec::with_capacity(members.len());
+                for &member in members {
+                    match numeric_operand_parts(self.db, member) {
+                        Some(part) => parts.push(part),
+                        None => return NumericOperand::Invalid,
+                    }
+                }
+                NumericOperand::ConcreteUnion(parts)
+            }
+            TyKind::Var(_) => NumericOperand::Flexible(resolved),
+            TyKind::Rigid(name) => match self.rigid_constraints.get(name) {
+                Some(Constraint::Numeric | Constraint::ScalarNumeric) => {
+                    NumericOperand::Flexible(resolved)
+                }
+                _ => NumericOperand::Invalid,
+            },
+            TyKind::Vector(element) | TyKind::NamedVector(element) => match element.kind(self.db) {
+                TyKind::Var(_) => NumericOperand::FlexibleVector(Some(*element)),
+                TyKind::Rigid(name)
+                    if matches!(
+                        self.rigid_constraints.get(name),
+                        Some(Constraint::Numeric | Constraint::ScalarNumeric)
+                    ) =>
+                {
+                    NumericOperand::FlexibleVector(Some(*element))
+                }
+                TyKind::Any | TyKind::Unknown => NumericOperand::FlexibleVector(None),
+                _ => NumericOperand::Invalid,
+            },
+            TyKind::Any | TyKind::Unknown => NumericOperand::AnyUnknown,
+            _ => NumericOperand::Invalid,
         }
     }
 
@@ -700,74 +1358,6 @@ impl<'db> Checker<'db, '_> {
         }
         self.environment.rollback(mark);
         self.table.level -= 1;
-    }
-
-    /// Arithmetic: each operand is *checked* numeric — a variable operand
-    /// gains the numeric constraint without binding to the other side (so
-    /// `function(x) x + 1L` stays `<T: numeric> fn(x: T) -> T`); two variable
-    /// operands unify with each other; two concrete scalars promote
-    /// (integer ∘ double = double).
-    fn arithmetic(&mut self, range: TextRange, lhs: Ty<'db>, rhs: Ty<'db>) -> Ty<'db> {
-        let lhs = self.table.shallow_resolve(self.db, lhs);
-        let rhs = self.table.shallow_resolve(self.db, rhs);
-        let constrain = |checker: &mut Self, side: Ty<'db>| match side.kind(checker.db) {
-            TyKind::Var(_) => {
-                let numeric = checker.fresh(Constraint::Numeric);
-                checker.unify_or_report(range, numeric, side);
-                true
-            }
-            // A rigid binder satisfies arithmetic only when its declaration
-            // promised numeric-ness; the body must not add bounds the
-            // annotation never declared.
-            TyKind::Rigid(name)
-                if matches!(
-                    checker.rigid_constraints.get(name),
-                    Some(Constraint::Numeric | Constraint::ScalarNumeric)
-                ) =>
-            {
-                true
-            }
-            TyKind::Scalar(Atomic::Integer | Atomic::Double | Atomic::Complex)
-            | TyKind::Any
-            | TyKind::Unknown => true,
-            _ => {
-                let expected = checker.fresh(Constraint::Numeric);
-                checker.errors.push(TypeError {
-                    range,
-                    kind: TypeErrorKind::Mismatch {
-                        expected,
-                        found: checker.table.resolve(checker.db, side),
-                    },
-                });
-                false
-            }
-        };
-        let lhs_ok = constrain(self, lhs);
-        let rhs_ok = constrain(self, rhs);
-        if !lhs_ok || !rhs_ok {
-            return self.unknown();
-        }
-        match (lhs.kind(self.db), rhs.kind(self.db)) {
-            (TyKind::Var(_), TyKind::Var(_)) => {
-                self.unify_or_report(range, lhs, rhs);
-                lhs
-            }
-            (TyKind::Var(_), _) => lhs,
-            (_, TyKind::Var(_)) => rhs,
-            (TyKind::Rigid(_), _) => lhs,
-            (_, TyKind::Rigid(_)) => rhs,
-            (TyKind::Any, _) | (_, TyKind::Any) => crate::types::any(self.db),
-            (TyKind::Unknown, _) | (_, TyKind::Unknown) => self.unknown(),
-            (TyKind::Scalar(a), TyKind::Scalar(b)) => {
-                let promoted = match (a, b) {
-                    (Atomic::Complex, _) | (_, Atomic::Complex) => Atomic::Complex,
-                    (Atomic::Double, _) | (_, Atomic::Double) => Atomic::Double,
-                    _ => Atomic::Integer,
-                };
-                scalar(self.db, promoted)
-            }
-            _ => self.unknown(),
-        }
     }
 
     /// The call entry point: shape-constructing builtins (`c`, `list`,
@@ -2143,6 +2733,168 @@ mod tests {
                 .any(|error| matches!(&error.kind, TypeErrorKind::UnknownArgument { name } if name == "z")),
             "expected unknown-argument, got {:?}",
             check.errors
+        );
+    }
+
+    #[test]
+    fn arithmetic_ties_two_flexible_operands() {
+        let db = RootDatabase::default();
+        // `<T: numeric> fn(a: T, b: T) -> T`: one binder shared by all three.
+        let check = check_source(&db, "add <- function(a, b) a + b");
+        assert!(check.errors.is_empty(), "{:?}", check.errors);
+        let scheme = check.scheme.expect("scheme");
+        assert_eq!(scheme.binders.len(), 1, "{scheme:?}");
+        let TyKind::Function(function) = scheme.body.kind(&db) else {
+            panic!()
+        };
+        assert_eq!(function.named[0].ty, function.ret);
+        assert_eq!(function.named[1].ty, function.ret);
+    }
+
+    #[test]
+    fn division_is_always_double_and_keeps_the_operand_generic() {
+        let db = RootDatabase::default();
+        let check = check_source(&db, "half <- function(x) x / 2");
+        assert!(check.errors.is_empty(), "{:?}", check.errors);
+        let scheme = check.scheme.clone().expect("scheme");
+        assert_eq!(scheme.binders.len(), 1, "x stays generic: {scheme:?}");
+        assert_eq!(scheme_ret(&db, &check), scalar(&db, Atomic::Double));
+    }
+
+    #[test]
+    fn arithmetic_shape_rules_over_vectors() {
+        let db = RootDatabase::default();
+        // integer[] + integer stays integer[].
+        let vector = check_source(&db, "f <- function() c(1L, 2L) + 1L");
+        assert!(vector.errors.is_empty(), "{:?}", vector.errors);
+        assert!(matches!(
+            scheme_ret(&db, &vector).kind(&db),
+            TyKind::Vector(element) if *element == scalar(&db, Atomic::Integer)
+        ));
+        // integer[] / integer promotes to double[].
+        let divided = check_source(&db, "f <- function() c(1L, 2L) / 2L");
+        assert!(divided.errors.is_empty(), "{:?}", divided.errors);
+        assert!(matches!(
+            scheme_ret(&db, &divided).kind(&db),
+            TyKind::Vector(element) if *element == scalar(&db, Atomic::Double)
+        ));
+        // `%%` is arithmetic, not an opaque special.
+        let modulo = check_source(&db, "f <- function() 7L %% 2L");
+        assert!(modulo.errors.is_empty(), "{:?}", modulo.errors);
+        assert_eq!(scheme_ret(&db, &modulo), scalar(&db, Atomic::Integer));
+        // A non-numeric operand reports the operand, not the whole range.
+        let bad = check_source(&db, "f <- function() \"a\" + 1L");
+        assert!(
+            bad.errors.iter().any(|error| matches!(
+                error.kind,
+                TypeErrorKind::InvalidOperand {
+                    expected: OperandExpectation::Numeric,
+                    ..
+                }
+            )),
+            "{:?}",
+            bad.errors
+        );
+    }
+
+    #[test]
+    fn colon_yields_integer_sequences_with_double_fallback() {
+        let db = RootDatabase::default();
+        let literal = check_source(&db, "f <- function() 1:10");
+        assert!(literal.errors.is_empty(), "{:?}", literal.errors);
+        assert!(matches!(
+            scheme_ret(&db, &literal).kind(&db),
+            TyKind::Vector(element) if *element == scalar(&db, Atomic::Integer)
+        ));
+        // A flexible endpoint may resolve to double, so the claim is double[].
+        let flexible = check_source(&db, "f <- function(n) 1:n");
+        assert!(flexible.errors.is_empty(), "{:?}", flexible.errors);
+        assert!(matches!(
+            scheme_ret(&db, &flexible).kind(&db),
+            TyKind::Vector(element) if *element == scalar(&db, Atomic::Double)
+        ));
+    }
+
+    #[test]
+    fn comparisons_share_a_family_and_shape_elementwise() {
+        let db = RootDatabase::default();
+        // A flexible operand against a numeric partner is constrained.
+        let flexible = check_source(&db, "positive <- function(x) x > 0L");
+        assert!(flexible.errors.is_empty(), "{:?}", flexible.errors);
+        let scheme = flexible.scheme.clone().expect("scheme");
+        assert_eq!(scheme.binders.len(), 1);
+        assert_eq!(scheme.binders[0].1, Constraint::Numeric);
+        assert_eq!(scheme_ret(&db, &flexible), scalar(&db, Atomic::Logical));
+        // A vector member compares element-wise.
+        let vector = check_source(&db, "f <- function() c(1L, 2L) > 1L");
+        assert!(vector.errors.is_empty(), "{:?}", vector.errors);
+        assert!(matches!(
+            scheme_ret(&db, &vector).kind(&db),
+            TyKind::Vector(element) if *element == scalar(&db, Atomic::Logical)
+        ));
+        // Cross-family comparison is a mismatch.
+        let mixed = check_source(&db, "f <- function() 1L > \"a\"");
+        assert!(
+            mixed
+                .errors
+                .iter()
+                .any(|error| matches!(error.kind, TypeErrorKind::Mismatch { .. })),
+            "{:?}",
+            mixed.errors
+        );
+    }
+
+    #[test]
+    fn conditions_and_short_circuit_operators_expect_scalar_logical() {
+        let db = RootDatabase::default();
+        let bad_condition = check_source(&db, "f <- function() if (1L) 2L");
+        assert!(
+            bad_condition
+                .errors
+                .iter()
+                .any(|error| matches!(error.kind, TypeErrorKind::Mismatch { .. })),
+            "{:?}",
+            bad_condition.errors
+        );
+        let bad_and = check_source(&db, "f <- function() 1L && TRUE");
+        assert!(
+            bad_and
+                .errors
+                .iter()
+                .any(|error| matches!(error.kind, TypeErrorKind::Mismatch { .. })),
+            "{:?}",
+            bad_and.errors
+        );
+        let ok = check_source(&db, "f <- function(a, b) a && b");
+        assert!(ok.errors.is_empty(), "{:?}", ok.errors);
+    }
+
+    #[test]
+    fn unary_operators_preserve_shape() {
+        let db = RootDatabase::default();
+        let negated = check_source(&db, "f <- function() -c(1L, 2L)");
+        assert!(negated.errors.is_empty(), "{:?}", negated.errors);
+        assert!(matches!(
+            scheme_ret(&db, &negated).kind(&db),
+            TyKind::Vector(element) if *element == scalar(&db, Atomic::Integer)
+        ));
+        let notted = check_source(&db, "f <- function() !c(TRUE, FALSE)");
+        assert!(notted.errors.is_empty(), "{:?}", notted.errors);
+        assert!(matches!(
+            scheme_ret(&db, &notted).kind(&db),
+            TyKind::Vector(element) if *element == scalar(&db, Atomic::Logical)
+        ));
+        let bad = check_source(&db, "f <- function() -\"a\"");
+        assert!(
+            bad.errors.iter().any(|error| matches!(
+                error.kind,
+                TypeErrorKind::InvalidOperand {
+                    expected: OperandExpectation::Numeric,
+                    ..
+                }
+            )),
+            "{:?}",
+            bad.errors
         );
     }
 

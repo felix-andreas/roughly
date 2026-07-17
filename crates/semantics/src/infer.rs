@@ -374,6 +374,13 @@ impl<'db> InferenceTable<'db> {
             }
             (TyKind::Var(var), _) => self.bind(db, *var, b),
             (_, TyKind::Var(var)) => self.bind(db, *var, a),
+            // The tolerance floor: `Any` is the compatible-with-all top, and
+            // `Unknown` must never cascade a second error after its own gap
+            // was already diagnosed. (After the Var arms, so a variable still
+            // binds to `Any`/`Unknown` rather than being skipped.)
+            (TyKind::Any, _) | (_, TyKind::Any) | (TyKind::Unknown, _) | (_, TyKind::Unknown) => {
+                Ok(())
+            }
             (TyKind::Vector(left), TyKind::Vector(right))
             | (TyKind::NamedVector(left), TyKind::NamedVector(right))
             | (TyKind::List(left), TyKind::List(right))
@@ -485,6 +492,40 @@ impl<'db> InferenceTable<'db> {
             return Ok(());
         }
         Err(UnifyError::Mismatch(a, b))
+    }
+
+    /// Raise a variable's constraint through the lattice (or verify an
+    /// already-bound one admits it).
+    pub fn constrain(
+        &mut self,
+        db: &'db dyn Db,
+        var: InferenceVar,
+        constraint: Constraint,
+    ) -> Result<(), UnifyError<'db>> {
+        let representative = self.find(var);
+        match *self.entry(representative) {
+            Entry::Unbound {
+                level,
+                constraint: existing,
+            } => {
+                let joined = existing.join(constraint);
+                if joined != existing {
+                    self.set(
+                        representative,
+                        Entry::Unbound {
+                            level,
+                            constraint: joined,
+                        },
+                    );
+                }
+                Ok(())
+            }
+            Entry::Bound(ty) => match constraint_rejects(db, constraint, ty) {
+                Some(error) => Err(error),
+                None => Ok(()),
+            },
+            Entry::Redirect(_) => unreachable!("find returns a representative"),
+        }
     }
 
     /// The directional argument-compatibility relation — the coercions that
@@ -804,13 +845,16 @@ fn constraint_rejects<'db>(
     use crate::types::Atomic;
     let admissible = match constraint {
         Constraint::Unconstrained => true,
-        Constraint::Numeric => matches!(
-            ty.kind(db),
-            TyKind::Scalar(Atomic::Integer | Atomic::Double)
-                | TyKind::Vector(_)
-                | TyKind::Any
-                | TyKind::Unknown
-        ),
+        Constraint::Numeric => match ty.kind(db) {
+            TyKind::Scalar(Atomic::Integer | Atomic::Double) | TyKind::Any | TyKind::Unknown => {
+                true
+            }
+            TyKind::Vector(element) | TyKind::NamedVector(element) => matches!(
+                element.kind(db),
+                TyKind::Scalar(Atomic::Integer | Atomic::Double)
+            ),
+            _ => false,
+        },
         Constraint::AtomicElement => matches!(
             ty.kind(db),
             TyKind::Scalar(_) | TyKind::Any | TyKind::Unknown

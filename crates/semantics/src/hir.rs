@@ -434,7 +434,18 @@ impl Lowering {
                 )
             }
             kind => {
-                let Some(operator) = binary_operator(kind) else {
+                let operator = if kind == SyntaxKind::SPECIAL {
+                    // `%%` and `%/%` are arithmetic; any other `%…%` special
+                    // (including user-defined operators) stays opaque.
+                    match operator_token.text() {
+                        "%%" => Some(BinaryOperator::Modulo),
+                        "%/%" => Some(BinaryOperator::IntegerDivide),
+                        _ => Some(BinaryOperator::Special),
+                    }
+                } else {
+                    binary_operator(kind)
+                };
+                let Some(operator) = operator else {
                     return self.missing(range);
                 };
                 let lhs = self.lower_optional(lhs, range);
