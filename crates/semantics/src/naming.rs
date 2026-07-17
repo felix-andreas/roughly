@@ -175,15 +175,6 @@ impl Context<'_> {
         id
     }
 
-    fn innermost_slot(&self, name: &str) -> Option<(usize, BindingId)> {
-        for (depth, scope) in self.scopes.iter().enumerate().rev() {
-            if let Some(&slot) = scope.slots.get(name) {
-                return Some((depth, slot));
-            }
-        }
-        None
-    }
-
     fn current_function_depth(&self) -> usize {
         self.scopes
             .iter()
@@ -254,6 +245,7 @@ impl Context<'_> {
                         .insert(parameter.name.clone(), slot);
                     self.record_write(slot, Reach::Implicit);
                 }
+                self.premint_frame_assignments(*body);
                 for parameter in &parameters {
                     if let Some(default) = parameter.default {
                         self.resolve(default);
@@ -309,6 +301,7 @@ impl Context<'_> {
                 // and control flow runs straight through; only the bindings
                 // are scoped.
                 self.scopes.push(Scope::new(ScopeKind::Local));
+                self.premint_frame_assignments(*body);
                 self.resolve(*body);
                 self.scopes.pop();
             }
@@ -354,12 +347,86 @@ impl Context<'_> {
         }
     }
 
+    /// Pre-mint slots for every direct assignment target (and `for` variable)
+    /// of a frame's body, so a closure defined earlier in the frame can
+    /// resolve a name written later — the closure runs after the frame has
+    /// executed. Nested function and `local()` bodies bind their own frames.
+    fn premint_frame_assignments(&mut self, id: ExprId) {
+        let kind = self.module.expression(id).kind.clone();
+        match &kind {
+            ExpressionKind::Function { .. } | ExpressionKind::Local { .. } => {}
+            ExpressionKind::Assign {
+                spelling,
+                target,
+                value,
+            } => {
+                if *spelling != AssignSpelling::Super
+                    && let ExpressionKind::NameRef(name) = &self.module.expression(*target).kind
+                {
+                    let range = self.module.expression(*target).range;
+                    self.premint_slot(name, range, BindingKind::Local);
+                }
+                self.premint_frame_assignments(*value);
+            }
+            ExpressionKind::For {
+                variable,
+                variable_range,
+                sequence,
+                body,
+            } => {
+                if let (Some(variable), Some(range)) = (variable, variable_range) {
+                    self.premint_slot(variable, *range, BindingKind::ForVariable);
+                }
+                self.premint_frame_assignments(*sequence);
+                self.premint_frame_assignments(*body);
+            }
+            _ => {
+                for child in kind.child_ids() {
+                    self.premint_frame_assignments(child);
+                }
+            }
+        }
+    }
+
+    fn premint_slot(&mut self, name: &str, range: TextRange, kind: BindingKind) {
+        if self
+            .scopes
+            .last()
+            .expect("scope stack is never empty")
+            .slots
+            .contains_key(name)
+        {
+            return;
+        }
+        let slot = self.mint_binding(name, range, kind);
+        self.scopes
+            .last_mut()
+            .expect("scope stack is never empty")
+            .slots
+            .insert(name.to_owned(), slot);
+    }
+
     fn resolve_read(&mut self, id: ExprId, name: &str) {
         if name == "..." || name.starts_with("..") && name[2..].chars().all(|c| c.is_ascii_digit())
         {
             return;
         }
-        match self.innermost_slot(name) {
+        // A slot resolves when a write can reach the read, or when the read
+        // crosses a function boundary (a capture: the closure runs after the
+        // frame has executed, so every frame write is observable). An
+        // unassignable slot does not shadow — the lookup falls outward,
+        // exactly like R's runtime.
+        let function_depth = self.current_function_depth();
+        let resolved = self
+            .scopes
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(depth, scope)| {
+                let &slot = scope.slots.get(name)?;
+                (self.flow.contains_key(&slot) || depth < function_depth).then_some((depth, slot))
+            });
+        match resolved {
             Some((depth, slot)) => {
                 self.naming.resolutions.insert(id, slot);
                 // Mark every reaching write used; an unassigned reaching path

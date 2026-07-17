@@ -158,3 +158,30 @@ f <- function() {
 }
 #++++
 f: fn() -> NULL
+
+#---- forward_capture_resolves_after_repass
+f <- function() {
+  helper <- function() other()
+  other <- function() 1L
+  helper()
+}
+#++++
+f: fn() -> integer
+
+#---- local_mutual_recursion_is_tolerant
+f <- function(n) {
+  even <- function(k) if (k == 0L) TRUE else odd(k - 1L)
+  odd <- function(k) if (k == 0L) FALSE else even(k - 1L)
+  even(n)
+}
+#++++
+f: fn(n: Unknown) -> logical
+
+#---- forward_capture_sees_the_frame_write
+f <- function() {
+  shout <- function() toupper(word)
+  word <- 1L
+  shout()
+}
+#++++
+f: fn() -> character

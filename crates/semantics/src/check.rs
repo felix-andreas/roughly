@@ -167,6 +167,9 @@ pub fn check_item_with_annotation<'db>(
         overload_probe_depth: 0,
         return_frames: Vec::new(),
         pending_enclosing_writes: Vec::new(),
+        forward_captured: rustc_hash::FxHashSet::default(),
+        capture_joins: FxHashMap::default(),
+        capture_repass_needed: false,
     };
     let mut scheme = None;
     if let Some(root) = module.root {
@@ -318,6 +321,16 @@ struct Checker<'db, 'a> {
     /// each enclosing body's environment rollback so the join survives at the
     /// definition site.
     pending_enclosing_writes: Vec<(BindingId, Ty<'db>)>,
+    /// Slots a closure body read before any write reached them (the letrec /
+    /// forward-capture shape: `helper <- function() other(); other <- ...`).
+    forward_captured: rustc_hash::FxHashSet<BindingId>,
+    /// The running join of every write to a captured slot, variable-erased so
+    /// it survives rollbacks. Forward-capture reads resolve here — sound for
+    /// call-later semantics — instead of the empty definition-point entry.
+    capture_joins: FxHashMap<BindingId, Ty<'db>>,
+    /// The current body wrote a forward-captured slot: its closures were
+    /// inferred against an incomplete join, so the body re-checks once.
+    capture_repass_needed: bool,
 }
 
 /// One call argument, inferred exactly once before any signature matching, so
@@ -673,7 +686,7 @@ impl<'db> Checker<'db, '_> {
                     }
                 }
                 self.return_frames.push(Vec::new());
-                let trailing_ty = self.infer(*body);
+                let trailing_ty = self.infer_body_with_capture_discovery(*body, pending_mark);
                 let early_returns = self
                     .return_frames
                     .pop()
@@ -791,8 +804,20 @@ impl<'db> Checker<'db, '_> {
                 let scheme = self.schemes()[index as usize].clone();
                 self.instantiate(&scheme)
             }
-            // Forward/recursive read before any write: tolerate as Unknown.
-            None => self.unknown(),
+            // A read before any write reached the slot. A captured slot
+            // resolves to the running join of the frame's writes — the
+            // closure runs later, when they have happened (the letrec shape);
+            // the enclosing body re-checks once when the join completes
+            // after this read. Everything else tolerates as Unknown.
+            None => {
+                if self.naming.captured_slots.contains(&slot) {
+                    self.forward_captured.insert(slot);
+                    if let Some(&join) = self.capture_joins.get(&slot) {
+                        return join;
+                    }
+                }
+                self.unknown()
+            }
         }
     }
 
@@ -807,6 +832,7 @@ impl<'db> Checker<'db, '_> {
                     let written = self.table.resolve(self.db, value_ty);
                     self.join_enclosing_write(slot, written);
                     self.pending_enclosing_writes.push((slot, written));
+                    self.note_captured_write(slot, value_ty);
                 } else {
                     // Function values generalize at the binding
                     // (let-polymorphism); everything else stays a monotype
@@ -820,10 +846,35 @@ impl<'db> Checker<'db, '_> {
                         self.environment.set(slot, EnvEntry::Mono(value_ty));
                     }
                 }
+                self.note_captured_write(slot, value_ty);
             }
             self.recorded.insert(target, value_ty);
         } else {
             self.write_replacement_target(target, value_ty);
+        }
+    }
+
+    /// Maintain the call-later join for a captured slot's writes (erased, so
+    /// the value survives rollbacks) and trigger the enclosing body's
+    /// capture re-pass when the write completes a join some closure already
+    /// read.
+    fn note_captured_write(&mut self, slot: BindingId, value_ty: Ty<'db>) {
+        if !self.naming.captured_slots.contains(&slot) {
+            return;
+        }
+        let written = crate::types::erase_vars(self.db, self.table.resolve(self.db, value_ty));
+        let joined = match self.capture_joins.get(&slot) {
+            Some(&existing) if existing != written => self.join_types(existing, written),
+            Some(&existing) => existing,
+            None => written,
+        };
+        // The re-pass triggers only when this write actually GREW the join a
+        // closure already read (so a re-run's identical writes stay quiet and
+        // the pass count is bounded at two).
+        let changed = self.capture_joins.get(&slot) != Some(&joined);
+        self.capture_joins.insert(slot, joined);
+        if changed && self.forward_captured.contains(&slot) {
+            self.capture_repass_needed = true;
         }
     }
 
@@ -2104,7 +2155,7 @@ impl<'db> Checker<'db, '_> {
         }
 
         self.return_frames.push(Vec::new());
-        let trailing_ty = self.infer(*body);
+        let trailing_ty = self.infer_body_with_capture_discovery(*body, pending_mark);
         let early_returns = self
             .return_frames
             .pop()
@@ -2118,6 +2169,35 @@ impl<'db> Checker<'db, '_> {
         self.environment.rollback(mark);
         self.reapply_enclosing_writes(pending_mark);
         self.table.level -= 1;
+    }
+
+    /// Check a function body, re-running it once when the walk grew a
+    /// captured-write join some closure had already read (the letrec /
+    /// forward-capture shape): the first run exists to complete the joins and
+    /// is fully discarded — environment, unification, diagnostics, and
+    /// pending super-assign writes all roll back — so the re-run resolves
+    /// forward captures against the completed joins with no stale effects.
+    /// Bodies that never grow such a join (the overwhelming majority) pay
+    /// only the snapshot markers.
+    fn infer_body_with_capture_discovery(&mut self, body: ExprId, pending_mark: usize) -> Ty<'db> {
+        let saved_repass = std::mem::replace(&mut self.capture_repass_needed, false);
+        let body_mark = self.environment.mark();
+        let body_snapshot = self.table.snapshot();
+        let errors_mark = self.errors.len();
+        let mut trailing_ty = self.infer(body);
+        if self.capture_repass_needed {
+            self.environment.rollback(body_mark);
+            self.table.rollback(body_snapshot);
+            self.errors.truncate(errors_mark);
+            self.pending_enclosing_writes.truncate(pending_mark);
+            if let Some(frame) = self.return_frames.last_mut() {
+                frame.clear();
+            }
+            self.capture_repass_needed = false;
+            trailing_ty = self.infer(body);
+        }
+        self.capture_repass_needed = saved_repass;
+        trailing_ty
     }
 
     /// A function's return type is the union of every early `return` value
