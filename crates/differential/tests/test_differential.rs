@@ -1,25 +1,45 @@
-//! Runs every typing-fixture source through BOTH stacks and compares the
-//! semantic diagnostic classes: `type` (typing + annotation errors),
-//! `unresolved`, and `unused`. Classes only one stack models (legacy lints,
-//! legacy naming warnings, and the syntax class — the new parser's errors
-//! must be better than the oracle's, not identical) are not compared.
+//! Runs every semantics fixture source through BOTH stacks and compares the
+//! semantic diagnostic classes: `type` (typing errors), `annotation` (block
+//! and annotation-syntax errors, published regardless of typing mode),
+//! `unresolved`, `unused`, and `strict`. Classes only one stack models
+//! (legacy lints, legacy naming warnings, and the syntax class — the new
+//! parser's errors must be better than the oracle's, not identical) are not
+//! compared.
 //!
 //! Two findings match when class and message are byte-identical and the new
 //! range equals or lies inside the legacy range: the rewrite is required to
 //! be at least as precise as the oracle, and strictly tighter ranges are an
 //! intended improvement, not a divergence. Cases where the oracle itself is
 //! wrong are listed in `ACCEPTED_DIVERGENCES` with the reason; everything
-//! else must match, and the test fails on any unexplained divergence (the
-//! details land in `target/differential-report.txt`).
+//! else must match, and each suite's test fails on any unexplained
+//! divergence (the details land in `target/differential-<suite>.txt`).
+//!
+//! Publication rules mirror the legacy host edge: type errors and strict
+//! findings honor the per-file typing directive (`# typing: ...` /
+//! `#: @strict`) over the configured default, annotation and naming findings
+//! are always published.
 
 use analysis::{Analysis, CheckConfig, DiagnosticCode, LintConfig};
-use semantics::diagnostics::file_diagnostics;
-use semantics::{DocumentKind, ProjectFiles, RootDatabase, SourceFile};
+use semantics::diagnostics::{file_diagnostics, strict_diagnostics};
+use semantics::{
+    DocumentKind, ProjectFiles, RootDatabase, SourceFile, TypingMode, file_typing_mode,
+};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 /// One comparable finding: (class, start byte, end byte, message).
 type Finding = (&'static str, usize, usize, String);
+
+/// How one suite runs: where its fixtures live, how the document is
+/// classified (legacy classifies by path — only files under `R/` are package
+/// members), and whether the configured default enables strict.
+struct Suite {
+    directory: &'static str,
+    document_path: &'static str,
+    kind: DocumentKind,
+    strict: bool,
+    report: &'static str,
+}
 
 /// Cases where the legacy oracle emits findings that are wrong and the new
 /// stack is correct, with the reason each divergence is accepted.
@@ -38,18 +58,18 @@ const ACCEPTED_DIVERGENCES: &[(&str, &str)] = &[
     ),
 ];
 
-fn legacy_findings(source: &str) -> Vec<Finding> {
+fn legacy_findings(source: &str, suite: &Suite) -> Vec<Finding> {
     let mut analysis_state = Analysis::new(
         PathBuf::from("/pkg"),
         LintConfig::default(),
         CheckConfig {
             unused: true,
             typing: true,
-            strict: false,
+            strict: suite.strict,
         },
     );
     let Ok(document_id) =
-        analysis_state.add_document_from_source(PathBuf::from("/pkg/R/case.R"), source)
+        analysis_state.add_document_from_source(PathBuf::from(suite.document_path), source)
     else {
         return Vec::new();
     };
@@ -57,13 +77,14 @@ fn legacy_findings(source: &str) -> Vec<Finding> {
     let mut findings = Vec::new();
     for diagnostic in analysis_state.document_diagnostics(document_id) {
         let class = match diagnostic.code {
-            DiagnosticCode::TypeError | DiagnosticCode::AnnotationError => "type",
+            DiagnosticCode::TypeError => "type",
+            DiagnosticCode::AnnotationError => "annotation",
             DiagnosticCode::Unresolved => "unresolved",
             DiagnosticCode::Unused => "unused",
-            DiagnosticCode::SyntaxError
-            | DiagnosticCode::Lint(_)
-            | DiagnosticCode::Naming
-            | DiagnosticCode::Strict => continue,
+            DiagnosticCode::Strict => "strict",
+            DiagnosticCode::SyntaxError | DiagnosticCode::Lint(_) | DiagnosticCode::Naming => {
+                continue;
+            }
         };
         findings.push((
             class,
@@ -76,15 +97,22 @@ fn legacy_findings(source: &str) -> Vec<Finding> {
     findings
 }
 
-fn new_findings(source: &str) -> Vec<Finding> {
+fn new_findings(source: &str, suite: &Suite) -> Vec<Finding> {
     let db = RootDatabase::default();
     semantics::stubs::install_shipped_stubs(&db);
-    let file = SourceFile::new(&db, source.to_owned(), DocumentKind::Package);
+    let file = SourceFile::new(&db, source.to_owned(), suite.kind);
     ProjectFiles::new(&db, vec![file]);
+    let (typing_enabled, strict_enabled) = match file_typing_mode(&db, file) {
+        Some(TypingMode::Off) => (false, false),
+        Some(TypingMode::On) => (true, false),
+        Some(TypingMode::Strict) => (true, true),
+        None => (true, suite.strict),
+    };
     let mut findings = Vec::new();
     for diagnostic in file_diagnostics(&db, file) {
         let class = match diagnostic.code {
-            "type-mismatch" | "annotation" => "type",
+            "type-mismatch" if typing_enabled => "type",
+            "annotation" => "annotation",
             "unresolved" => "unresolved",
             "unused" => "unused",
             _ => continue,
@@ -95,6 +123,16 @@ fn new_findings(source: &str) -> Vec<Finding> {
             u32::from(diagnostic.range.end()) as usize,
             diagnostic.message,
         ));
+    }
+    if strict_enabled {
+        for diagnostic in strict_diagnostics(&db, file) {
+            findings.push((
+                "strict",
+                u32::from(diagnostic.range.start()) as usize,
+                u32::from(diagnostic.range.end()) as usize,
+                diagnostic.message,
+            ));
+        }
     }
     findings.sort();
     findings
@@ -121,14 +159,12 @@ fn findings_match(legacy: &[Finding], new: &[Finding]) -> bool {
     true
 }
 
-#[test]
-fn differential_gate() {
-    let typing_suite = Path::new(env!("CARGO_MANIFEST_DIR")).join("../semantics/tests/typing");
-    let files = syntax::testing::parse_fixture_files(&typing_suite);
-    assert!(
-        !files.is_empty(),
-        "typing suite not found at {typing_suite:?}"
-    );
+fn run_suite(suite: &Suite) {
+    let suite_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../semantics/tests")
+        .join(suite.directory);
+    let files = syntax::testing::parse_fixture_files(&suite_dir);
+    assert!(!files.is_empty(), "suite not found at {suite_dir:?}");
 
     let mut report = String::new();
     let mut cases = 0usize;
@@ -140,8 +176,8 @@ fn differential_gate() {
     for file in &files {
         for case in &file.cases {
             cases += 1;
-            let legacy = legacy_findings(&case.source);
-            let new = new_findings(&case.source);
+            let legacy = legacy_findings(&case.source, suite);
+            let new = new_findings(&case.source, suite);
             let accepted_case = ACCEPTED_DIVERGENCES.iter().any(|(id, _)| *id == case.id);
             if findings_match(&legacy, &new) {
                 matching += 1;
@@ -178,19 +214,54 @@ fn differential_gate() {
     }
 
     let summary = format!(
-        "differential: {matching}/{cases} cases match, {accepted} accepted oracle divergences, {diverging} unexplained\n"
+        "differential {}: {matching}/{cases} cases match, {accepted} accepted oracle divergences, {diverging} unexplained\n",
+        suite.directory
     );
     println!("{summary}{report}");
-    let report_path =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/differential-report.txt");
+    let report_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target")
+        .join(suite.report);
     let _ = std::fs::write(&report_path, format!("{summary}\n{report}"));
-    assert!(cases > 50, "the corpus should cover the typing suite");
     assert!(
         stale_acceptances.is_empty(),
         "cases match but are still allowlisted — remove them from ACCEPTED_DIVERGENCES: {stale_acceptances:?}"
     );
     assert!(
         diverging == 0,
-        "{diverging} unexplained divergence(s); see the report above or target/differential-report.txt"
+        "{diverging} unexplained divergence(s); see the report above or target/{}",
+        suite.report
     );
+}
+
+#[test]
+fn differential_typing() {
+    run_suite(&Suite {
+        directory: "typing",
+        document_path: "/pkg/R/case.R",
+        kind: DocumentKind::Package,
+        strict: false,
+        report: "differential-typing.txt",
+    });
+}
+
+#[test]
+fn differential_scripts() {
+    run_suite(&Suite {
+        directory: "typing-scripts",
+        document_path: "/pkg/scripts/case.R",
+        kind: DocumentKind::Script,
+        strict: false,
+        report: "differential-scripts.txt",
+    });
+}
+
+#[test]
+fn differential_strict() {
+    run_suite(&Suite {
+        directory: "typing-strict",
+        document_path: "/pkg/R/case.R",
+        kind: DocumentKind::Package,
+        strict: true,
+        report: "differential-strict.txt",
+    });
 }

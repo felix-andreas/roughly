@@ -36,6 +36,7 @@ f: <T> fn(x: T) -> Unknown
 f <- function() somepkg::mystery()
 #++++
 f: fn() -> Unknown
+16..32 warning[unresolved] unknown package namespace `somepkg`.
 16..32 error[strict] strict mode: could not determine the type of `mystery`; it has no known type
 
 #---- no_origin_when_types_are_known
@@ -74,7 +75,7 @@ f: <T> fn(x: T) -> T
 f <- function(x) x
 #++++
 f: <T> fn(x: T) -> T
-0..14 error[typing-directive] unknown `typing:` directive value — expected `off`, `on`, or `strict`
+0..14 error[annotation] Unknown typing directive `loud`. Use `# typing: on`, `# typing: off`, or `# typing: strict`.
 
 #==== masking
 #---- data_table_brackets_are_masked

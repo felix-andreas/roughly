@@ -29,6 +29,27 @@ pub struct StubLibrary<'db> {
     pub nominals: FxHashSet<String>,
     /// Variadic functions whose `...` arguments are data-masked.
     pub masked: FxHashSet<String>,
+    /// Declared names per namespace. Declaration-level, not winner-level: a
+    /// later source overriding a name's type does not un-export it from the
+    /// namespace that declared it.
+    pub exports_by_namespace: FxHashMap<String, FxHashSet<String>>,
+}
+
+/// Whether the stub corpus knows `package` as a namespace. `None` when no
+/// corpus is installed — callers skip validation entirely then.
+pub fn namespace_known(db: &dyn Db, package: &str) -> Option<bool> {
+    stubs(db).map(|library| library.exports_by_namespace.contains_key(package))
+}
+
+/// Whether `package` declares `name` (any declaration form, overloads and
+/// nominals included).
+pub fn namespace_exports(db: &dyn Db, package: &str, name: &str) -> bool {
+    stubs(db).is_some_and(|library| {
+        library
+            .exports_by_namespace
+            .get(package)
+            .is_some_and(|names| names.contains(name))
+    })
 }
 
 /// The shipped stdlib corpus (base + default-attached packages), embedded so
@@ -69,7 +90,11 @@ pub fn shipped_stub_sources() -> Vec<(String, String)> {
 #[salsa::tracked(returns(ref))]
 pub fn stub_library<'db>(db: &'db dyn Db, sources: StubSources) -> StubLibrary<'db> {
     let mut library = StubLibrary::default();
-    for (_namespace, text) in sources.sources(db) {
+    for (namespace, text) in sources.sources(db) {
+        let namespace_exports = library
+            .exports_by_namespace
+            .entry(namespace.clone())
+            .or_default();
         // Names declared earlier in THIS source append candidates; a name
         // first seen in this source replaces any earlier source's set.
         let mut seen_here: FxHashSet<&str> = FxHashSet::default();
@@ -82,6 +107,7 @@ pub fn stub_library<'db>(db: &'db dyn Db, sources: StubSources) -> StubLibrary<'
                 let name = rest.trim();
                 if !name.is_empty() {
                     library.nominals.insert(name.to_owned());
+                    namespace_exports.insert(name.to_owned());
                 }
                 continue;
             }
@@ -100,6 +126,7 @@ pub fn stub_library<'db>(db: &'db dyn Db, sources: StubSources) -> StubLibrary<'
             let Some(scheme) = lower_type_text(db, type_text) else {
                 continue;
             };
+            namespace_exports.insert(name.to_owned());
             if seen_here.insert(name) {
                 library.schemes.insert(name.to_owned(), vec![scheme]);
             } else if let Some(candidates) = library.schemes.get_mut(name) {

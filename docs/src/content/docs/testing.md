@@ -37,15 +37,18 @@ expectations and `FIXTURE_FILTER=group__case` runs one case. Suites:
 
 ### The cross-stack differential gate
 
-`cargo test -p differential` runs every typing-suite case through **both** stacks — the frozen
-legacy pipeline as the oracle and the rewrite's `file_diagnostics` — and compares the semantic
-diagnostic classes (`type`, `unresolved`, `unused`; syntax is excluded because the new parser's
-errors are required to be better, not identical). Two findings match when class and message are
-byte-identical and the new range equals or lies **inside** the legacy range — strictly tighter
-ranges are an intended improvement, not a divergence. Cases where the oracle itself is wrong are
-allowlisted in the test with the reason, the harness flags stale allowlist entries, and the test
-fails on any unexplained divergence; the per-case details land in
-`target/differential-report.txt`.
+`cargo test -p differential` runs every case of the typing, typing-scripts, and typing-strict
+suites through **both** stacks — the frozen legacy pipeline as the oracle and the rewrite's
+`file_diagnostics` / `strict_diagnostics` — and compares the semantic diagnostic classes
+(`type`, `annotation`, `unresolved`, `unused`, `strict`; syntax is excluded because the new
+parser's errors are required to be better, not identical). The harness mirrors the legacy
+publication rules: scripts are classified by path, type and strict findings honor the per-file
+typing directive over the configured default, and annotation and naming findings are always
+published. Two findings match when class and message are byte-identical and the new range equals
+or lies **inside** the legacy range — strictly tighter ranges are an intended improvement, not a
+divergence. Cases where the oracle itself is wrong are allowlisted in the test with the reason,
+the harness flags stale allowlist entries, and each suite's test fails on any unexplained
+divergence; the per-case details land in `target/differential-<suite>.txt`.
 
 ## Fixture format
 

@@ -302,7 +302,7 @@ pub fn file_typing_mode(db: &dyn Db, file: SourceFile) -> Option<TypingMode> {
 pub fn file_typing_directives(
     db: &dyn Db,
     file: SourceFile,
-) -> (Option<TypingMode>, Vec<syntax::TextRange>) {
+) -> (Option<TypingMode>, Vec<(syntax::TextRange, String)>) {
     let parse = parse(db, file);
     let root = parse.syntax_node();
     let mut mode = None;
@@ -313,16 +313,18 @@ pub fn file_typing_directives(
                 let Some(rest) = token
                     .text()
                     .trim_start_matches('#')
-                    .trim_start()
+                    .trim()
                     .strip_prefix("typing:")
                 else {
                     continue;
                 };
-                match rest.split_whitespace().next() {
-                    Some("off") => mode = Some(TypingMode::Off),
-                    Some("on") => mode = Some(TypingMode::On),
-                    Some("strict") => mode = Some(TypingMode::Strict),
-                    _ => invalid.push(token.text_range()),
+                // The whole remainder is the value — `typing: on gely` is a
+                // typo'd directive, not `on`.
+                match rest.trim() {
+                    "off" => mode = Some(TypingMode::Off),
+                    "on" => mode = Some(TypingMode::On),
+                    "strict" => mode = Some(TypingMode::Strict),
+                    other => invalid.push((token.text_range(), other.to_owned())),
                 }
             }
             rowan::NodeOrToken::Node(node) if node.kind() == syntax::SyntaxKind::ANNOTATION => {

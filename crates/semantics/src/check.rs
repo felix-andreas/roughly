@@ -691,11 +691,19 @@ impl<'db> Checker<'db, '_> {
                 let name = name.clone();
                 self.infer_field(id, range, at, target, name)
             }
-            // `pkg::name` resolves the name through the global environment
-            // (which package's namespace actually exports it is not modeled).
-            ExpressionKind::Namespace { name, .. } => {
+            // `pkg::name` resolves only through a namespace the stub corpus
+            // knows (and, for `::`, actually exports the name); the scheme
+            // itself still comes from the global environment, so a project
+            // override winning a stub name's type keeps working. `:::`
+            // reaches unexported names, so it skips the export check.
+            ExpressionKind::Namespace {
+                internal,
+                package,
+                name,
+            } => {
+                let validated = validated_namespace_name(self.db, *internal, package, name);
                 let name = name.clone();
-                match name
+                match validated
                     .as_ref()
                     .and_then(|name| self.globals.and_then(|globals| globals.scheme(name)))
                 {
@@ -2584,8 +2592,10 @@ impl<'db> Checker<'db, '_> {
             }
             // Namespace access cannot be shadowed by a local binding.
             ExpressionKind::Namespace {
-                name: Some(name), ..
-            } => name.clone(),
+                internal,
+                package,
+                name,
+            } => validated_namespace_name(self.db, *internal, package, name)?,
             _ => return None,
         };
         let schemes = self.globals?.overloads(&name)?;
@@ -3907,6 +3917,33 @@ fn widen_error_container<'db>(mut error: TypeError<'db>, union: Ty<'db>) -> Type
         _ => {}
     }
     error
+}
+
+/// The name a `pkg::name` / `pkg:::name` read may resolve under: the stub
+/// corpus must know the namespace, and `::` additionally requires the name to
+/// be declared there (`:::` reaches unexported names). With no stub corpus
+/// installed validation is impossible, so every qualified read resolves.
+fn validated_namespace_name(
+    db: &dyn Db,
+    internal: bool,
+    package: &Option<String>,
+    name: &Option<String>,
+) -> Option<String> {
+    let name = name.clone()?;
+    let Some(package) = package else {
+        return Some(name);
+    };
+    match crate::stubs::namespace_known(db, package) {
+        None => Some(name),
+        Some(false) => None,
+        Some(true) => {
+            if internal || crate::stubs::namespace_exports(db, package, &name) {
+                Some(name)
+            } else {
+                None
+            }
+        }
+    }
 }
 
 #[cfg(test)]

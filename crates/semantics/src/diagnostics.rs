@@ -42,13 +42,14 @@ pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
         });
     }
 
-    for range in crate::file_typing_directives(db, file).1 {
+    for (range, value) in crate::file_typing_directives(db, file).1 {
         diagnostics.push(Diagnostic {
             range,
             severity: Severity::Error,
-            code: "typing-directive",
-            message: "unknown `typing:` directive value — expected `off`, `on`, or `strict`"
-                .to_owned(),
+            code: "annotation",
+            message: format!(
+                "Unknown typing directive `{value}`. Use `# typing: on`, `# typing: off`, or `# typing: strict`."
+            ),
         });
     }
 
@@ -91,7 +92,23 @@ pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
                 range,
                 severity: Severity::Warning,
                 code: "unused",
-                message: format!("`{}` is assigned but its value is never used", unused.name),
+                message: format!("`{}` is assigned but never used.", unused.name),
+            });
+        }
+        for (expression, read) in &naming.namespace_reads {
+            let Some(message) = namespace_read_message(db, read) else {
+                continue;
+            };
+            let expression_range = module.expression(*expression).range;
+            let range = TextRange::new(
+                expression_range.start() + offset,
+                expression_range.end() + offset,
+            );
+            diagnostics.push(Diagnostic {
+                range,
+                severity: Severity::Warning,
+                code: "unresolved",
+                message,
             });
         }
         if *file.kind(db) == DocumentKind::Package {
@@ -114,8 +131,96 @@ pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
         }
     }
 
+    if *file.kind(db) == DocumentKind::Script {
+        diagnostics.extend(script_unused_bindings(db, file));
+    }
+
     diagnostics.sort_by_key(|diagnostic| (diagnostic.range.start(), diagnostic.range.end()));
     diagnostics
+}
+
+/// The validation failure of one qualified read, if any: an unknown
+/// namespace, or (for `::` only — `:::` reaches unexported names) a name the
+/// namespace does not declare. No stub corpus means no validation.
+fn namespace_read_message(db: &dyn Db, read: &crate::naming::NamespaceRead) -> Option<String> {
+    match crate::stubs::namespace_known(db, &read.package)? {
+        false => Some(format!("unknown package namespace `{}`.", read.package)),
+        true => {
+            let name = read.name.as_ref()?;
+            if !read.internal && !crate::stubs::namespace_exports(db, &read.package, name) {
+                Some(format!("`{name}` is not exported by `{}`.", read.package))
+            } else {
+                None
+            }
+        }
+    }
+}
+
+/// A script's top level is one frame executed in order, so its bindings are
+/// subject to the unused check across items: an assignment is dead when no
+/// later item reads it before the next rebinding, and no nested function
+/// reads the name at all (a deferred read runs after the frame is built, so
+/// it keeps every write to the name observable — the captured-slot rule).
+fn script_unused_bindings(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
+    let mut definers: Vec<(usize, String, TextRange, bool)> = Vec::new();
+    let mut items = Vec::new();
+    for item in item_tree(db, file) {
+        if !matches!(
+            *item.kind(db),
+            crate::ItemKind::Function | crate::ItemKind::Value
+        ) {
+            continue;
+        }
+        items.push(item);
+    }
+    let mut reads: Vec<(usize, String, bool)> = Vec::new();
+    for (index, &item) in items.iter().enumerate() {
+        let Some(naming) = crate::item_naming(db, item) else {
+            continue;
+        };
+        if let Some(name) = item.name(db).clone()
+            && let Some(offset) = item_offset(db, item)
+            && let Some(module) = crate::item_hir(db, item)
+            && let Some(root) = module.root
+        {
+            let root_range = module.expression(root).range;
+            let range = TextRange::new(root_range.start() + offset, root_range.end() + offset);
+            definers.push((index, name, range, false));
+        }
+        for (expression, name) in &naming.non_locals {
+            let deferred = naming.deferred_non_locals.contains(expression);
+            reads.push((index, name.clone(), deferred));
+        }
+    }
+    for (read_index, name, deferred) in &reads {
+        if *deferred {
+            // A read from inside a function: the function may run any time
+            // after the frame exists, so every write to the name is live.
+            for definer in definers.iter_mut().filter(|(_, n, _, _)| n == name) {
+                definer.3 = true;
+            }
+        } else {
+            // An immediate read sees the binding current at its item: the
+            // nearest earlier definer.
+            if let Some(definer) = definers
+                .iter_mut()
+                .filter(|(index, n, _, _)| n == name && index < read_index)
+                .next_back()
+            {
+                definer.3 = true;
+            }
+        }
+    }
+    definers
+        .into_iter()
+        .filter(|(_, _, _, used)| !used)
+        .map(|(_, name, range, _)| Diagnostic {
+            range,
+            severity: Severity::Warning,
+            code: "unused",
+            message: format!("`{name}` is assigned but never used."),
+        })
+        .collect()
 }
 
 /// The absolute byte offset of an item's subtree inside its file.

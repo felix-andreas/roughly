@@ -57,6 +57,15 @@ pub struct UnusedAssignment {
     pub range: TextRange,
 }
 
+/// A qualified `pkg::name` / `pkg:::name` read, recorded for validation
+/// against the stub corpus's per-namespace exports.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NamespaceRead {
+    pub internal: bool,
+    pub package: String,
+    pub name: Option<String>,
+}
+
 /// The naming facts of one item, item-relative like all HIR spans.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ItemNaming {
@@ -67,6 +76,10 @@ pub struct ItemNaming {
     pub maybe_undefined: BTreeSet<ExprId>,
     /// Reads no lexical slot resolves — package globals, stubs, or unresolved.
     pub non_locals: BTreeMap<ExprId, String>,
+    /// The subset of `non_locals` read from inside a nested function: the
+    /// read happens when the function is *called*, after the enclosing frame
+    /// finished executing.
+    pub deferred_non_locals: BTreeSet<ExprId>,
     /// Dead stores (surfaced only when the unused check is enabled).
     pub unused_assignments: Vec<UnusedAssignment>,
     /// Slots read or super-assigned from inside a function nested below the
@@ -75,6 +88,8 @@ pub struct ItemNaming {
     /// `[` expressions recognized as data.table syntax: their indexes
     /// evaluate in the data's frame, and the whole bracket types `Unknown`.
     pub masked_subsets: BTreeSet<ExprId>,
+    /// Qualified reads, skipping quieted (opaque-construct) contexts.
+    pub namespace_reads: BTreeMap<ExprId, NamespaceRead>,
 }
 
 /// Resolve one item's HIR. The item's own top-level assignment target (if any)
@@ -298,7 +313,25 @@ impl Context<'_> {
                 }
             }
             ExpressionKind::Field { target, .. } => self.resolve(*target),
-            ExpressionKind::Namespace { .. } => {}
+            ExpressionKind::Namespace {
+                internal,
+                package,
+                name,
+            } => {
+                if self.emit
+                    && self.quiet_depth == 0
+                    && let Some(package) = package
+                {
+                    self.naming.namespace_reads.insert(
+                        id,
+                        NamespaceRead {
+                            internal: *internal,
+                            package: package.clone(),
+                            name: name.clone(),
+                        },
+                    );
+                }
+            }
             ExpressionKind::Function { parameters, body } => {
                 self.scopes.push(Scope::new(ScopeKind::Function));
                 let saved_flow = std::mem::take(&mut self.flow);
@@ -575,6 +608,9 @@ impl Context<'_> {
             None => {
                 if self.emit && self.quiet_depth == 0 {
                     self.naming.non_locals.insert(id, name.to_owned());
+                    if self.current_function_depth() > 0 {
+                        self.naming.deferred_non_locals.insert(id);
+                    }
                 }
             }
         }

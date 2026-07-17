@@ -7,6 +7,7 @@ describe <- function() area + 1
 radius: double
 area: double
 describe: fn() -> double
+45..76 warning[unused] `describe` is assigned but never used.
 
 #---- rebinding_changes_later_uses
 x <- 1L
@@ -18,6 +19,8 @@ x: integer
 first_use: integer
 x: character
 second_use: fn() -> integer
+8..27 warning[unused] `first_use` is assigned but never used.
+40..73 warning[unused] `second_use` is assigned but never used.
 
 #---- script_calls_its_own_helpers
 double_it <- function(n) n * 2L
@@ -25,6 +28,7 @@ result <- double_it(21L)
 #++++
 double_it: <T: numeric> fn(n: T) -> T
 result: integer
+32..56 warning[unused] `result` is assigned but never used.
 
 #---- script_local_type_declarations
 #: @type Point {list{x: double, y: double}}
@@ -35,6 +39,7 @@ norm <- function() origin$x
 #++++
 origin: Point
 norm: fn() -> double
+88..115 warning[unused] `norm` is assigned but never used.
 
 #---- stub_names_still_resolve
 sizes <- c(3L, 1L, 2L)
@@ -42,6 +47,7 @@ total <- sum(sizes)
 #++++
 sizes: integer[]
 total: integer
+23..42 warning[unused] `total` is assigned but never used.
 
 #---- script_definition_shadows_a_stub
 sum <- function(a, b) a + b
@@ -49,3 +55,4 @@ shadowed <- sum(1L, 2L)
 #++++
 sum: <T: numeric> fn(a: T, b: T) -> T
 shadowed: integer
+28..51 warning[unused] `shadowed` is assigned but never used.
