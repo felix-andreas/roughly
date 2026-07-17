@@ -1,0 +1,131 @@
+//! Lossless R syntax: a hand-written lexer and recursive-descent parser producing
+//! rowan green/red trees.
+//!
+//! Every byte of the input — including whitespace, comments, and `#:` type
+//! annotations — lives in the tree and reprints exactly (`syntax_node().text()`
+//! equals the input). Annotations are lexed as structured trivia and parsed into
+//! first-class nodes with real spans. Every parse yields a tree; malformed input
+//! produces `ERROR` nodes local to the break plus `SyntaxError`s with precise
+//! ranges.
+
+pub mod ast;
+pub mod kind;
+pub mod testing;
+
+mod lexer;
+mod parser;
+
+use std::sync::Arc;
+
+pub use kind::SyntaxKind;
+pub use lexer::{Token, lex};
+pub use rowan::{TextRange, TextSize};
+
+/// The rowan language tag for R.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum RLanguage {}
+
+impl rowan::Language for RLanguage {
+    type Kind = SyntaxKind;
+
+    fn kind_from_raw(raw: rowan::SyntaxKind) -> SyntaxKind {
+        assert!(raw.0 <= SyntaxKind::ERROR as u16, "invalid syntax kind {}", raw.0);
+        // Sound: `SyntaxKind` is `repr(u16)` with dense discriminants `0..=ERROR`,
+        // and the bound was just checked.
+        unsafe { std::mem::transmute::<u16, SyntaxKind>(raw.0) }
+    }
+
+    fn kind_to_raw(kind: SyntaxKind) -> rowan::SyntaxKind {
+        kind.into()
+    }
+}
+
+pub type SyntaxNode = rowan::SyntaxNode<RLanguage>;
+pub type SyntaxToken = rowan::SyntaxToken<RLanguage>;
+pub type SyntaxElement = rowan::SyntaxElement<RLanguage>;
+pub type SyntaxNodeChildren = rowan::SyntaxNodeChildren<RLanguage>;
+
+/// A parse-time diagnostic with a precise source range.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyntaxError {
+    pub message: String,
+    pub range: TextRange,
+}
+
+impl SyntaxError {
+    pub fn new(message: impl Into<String>, range: TextRange) -> SyntaxError {
+        SyntaxError { message: message.into(), range }
+    }
+}
+
+/// The result of parsing: a green tree plus its syntax errors.
+///
+/// Cheap to clone; the green tree is the position-independent, structurally
+/// shared representation downstream layers key their early cutoffs on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Parse {
+    green: rowan::GreenNode,
+    errors: Arc<Vec<SyntaxError>>,
+}
+
+impl Parse {
+    pub fn new(green: rowan::GreenNode, errors: Vec<SyntaxError>) -> Parse {
+        Parse { green, errors: Arc::new(errors) }
+    }
+
+    pub fn green(&self) -> &rowan::GreenNode {
+        &self.green
+    }
+
+    pub fn syntax_node(&self) -> SyntaxNode {
+        SyntaxNode::new_root(self.green.clone())
+    }
+
+    pub fn errors(&self) -> &[SyntaxError] {
+        &self.errors
+    }
+
+    /// The exact source text the tree reprints to.
+    pub fn text(&self) -> String {
+        self.syntax_node().text().to_string()
+    }
+
+    /// Debug rendering of the tree (and errors), used by golden tests.
+    pub fn debug_dump(&self) -> String {
+        let mut out = String::new();
+        dump_node(&mut out, &self.syntax_node(), 0);
+        for error in self.errors.iter() {
+            out.push_str(&format!(
+                "err: {}..{}: {}\n",
+                u32::from(error.range.start()),
+                u32::from(error.range.end()),
+                error.message
+            ));
+        }
+        out
+    }
+}
+
+/// Parse R source text into a lossless syntax tree.
+pub fn parse(text: &str) -> Parse {
+    parser::parse(text)
+}
+
+fn dump_node(out: &mut String, node: &SyntaxNode, depth: usize) {
+    let indent = "  ".repeat(depth);
+    out.push_str(&format!("{indent}{:?}@{:?}\n", node.kind(), node.text_range()));
+    for child in node.children_with_tokens() {
+        match child {
+            rowan::NodeOrToken::Node(child) => dump_node(out, &child, depth + 1),
+            rowan::NodeOrToken::Token(token) => {
+                let indent = "  ".repeat(depth + 1);
+                out.push_str(&format!(
+                    "{indent}{:?}@{:?} {:?}\n",
+                    token.kind(),
+                    token.text_range(),
+                    token.text()
+                ));
+            }
+        }
+    }
+}

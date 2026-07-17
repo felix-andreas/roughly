@@ -1,0 +1,13 @@
+[package]
+name = "syntax"
+edition = "2024"
+version.workspace = true
+publish = false
+
+[lib]
+path = "src/syntax.rs"
+
+[dependencies]
+rowan.workspace = true
+
+[dev-dependencies]
