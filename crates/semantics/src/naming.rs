@@ -94,6 +94,9 @@ enum ScopeKind {
     /// A function body's frame: executes when *called*, so cross-frame reads
     /// from below are captures.
     Function,
+    /// A `local({...})` block's environment: writes bind here and vanish with
+    /// it, but execution is immediate, so it is not a capture boundary.
+    Local,
     /// The item's top level.
     TopLevel,
 }
@@ -301,7 +304,15 @@ impl Context<'_> {
                 // joining the never-entered path.
                 self.loop_body(*body, false);
             }
-            ExpressionKind::Block(statements) => {
+            ExpressionKind::Local { body } => {
+                // Reads fall through to enclosing scopes as ordinary reads
+                // and control flow runs straight through; only the bindings
+                // are scoped.
+                self.scopes.push(Scope::new(ScopeKind::Local));
+                self.resolve(*body);
+                self.scopes.pop();
+            }
+            ExpressionKind::Block { statements, .. } => {
                 let statements = statements.clone();
                 self.resolve_many(&statements);
             }
@@ -427,7 +438,7 @@ impl Context<'_> {
                             self.scopes.last().expect("scope stack is never empty").kind;
                         let kind = match scope_kind {
                             ScopeKind::TopLevel => BindingKind::TopLevel,
-                            ScopeKind::Function => BindingKind::Local,
+                            ScopeKind::Function | ScopeKind::Local => BindingKind::Local,
                         };
                         let slot = match self
                             .scopes

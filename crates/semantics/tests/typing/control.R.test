@@ -114,3 +114,47 @@ f: <T> fn(x: T) -> integer | character | NULL
 f <- function(x) switch(x, a = 1L, 2L)
 #++++
 f: <T> fn(x: T) -> integer
+
+#==== scoping
+#---- local_scopes_its_bindings
+f <- function() {
+  n <- local({
+    y <- 1L
+    y + 1L
+  })
+  n
+}
+#++++
+f: fn() -> integer
+
+#---- super_assignment_survives_the_closure
+counter <- function() {
+  n <- 0L
+  bump <- function() {
+    n <<- n + 1L
+    n
+  }
+  bump()
+  n
+}
+#++++
+counter: fn() -> integer
+
+#---- super_assignment_joins_as_a_union
+f <- function() {
+  x <- 1L
+  set <- function() {
+    x <<- "s"
+  }
+  set()
+  x
+}
+#++++
+f: fn() -> integer | character
+
+#---- trailing_semicolon_yields_null
+f <- function() {
+  1L;
+}
+#++++
+f: fn() -> NULL

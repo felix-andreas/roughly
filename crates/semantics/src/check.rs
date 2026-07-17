@@ -15,7 +15,8 @@
 
 use crate::Db;
 use crate::hir::{
-    Argument, BinaryOperator, ExprId, ExpressionKind, LiteralKind, Module, UnaryOperator,
+    Argument, AssignSpelling, BinaryOperator, ExprId, ExpressionKind, LiteralKind, Module,
+    UnaryOperator,
 };
 use crate::infer::{Entry, InferenceTable, UnifyError};
 use crate::naming::{BindingId, ItemNaming};
@@ -165,6 +166,7 @@ pub fn check_item_with_annotation<'db>(
         errors: Vec::new(),
         overload_probe_depth: 0,
         return_frames: Vec::new(),
+        pending_enclosing_writes: Vec::new(),
     };
     let mut scheme = None;
     if let Some(root) = module.root {
@@ -312,6 +314,10 @@ struct Checker<'db, 'a> {
     /// Early-`return` value types per enclosing function frame; a function's
     /// return type is their union with the body's trailing value.
     return_frames: Vec<Vec<Ty<'db>>>,
+    /// Super-assignment (`<<-`) writes to enclosing slots: re-applied after
+    /// each enclosing body's environment rollback so the join survives at the
+    /// definition site.
+    pending_enclosing_writes: Vec<(BindingId, Ty<'db>)>,
 }
 
 /// One call argument, inferred exactly once before any signature matching, so
@@ -575,12 +581,13 @@ impl<'db> Checker<'db, '_> {
             ExpressionKind::Literal(literal) => self.literal_ty(literal),
             ExpressionKind::NameRef(_) => self.infer_read(id),
             ExpressionKind::Assign {
-                spelling: _,
+                spelling,
                 target,
                 value,
             } => {
+                let spelling = *spelling;
                 let value_ty = self.infer(*value);
-                self.write_target(*target, value_ty);
+                self.write_target(spelling, *target, value_ty);
                 value_ty
             }
             ExpressionKind::Unary { operator, operand } => {
@@ -629,6 +636,7 @@ impl<'db> Checker<'db, '_> {
             ExpressionKind::Function { parameters, body } => {
                 let parameters = parameters.clone();
                 self.table.level += 1;
+                let pending_mark = self.pending_enclosing_writes.len();
                 let mark = self.environment.mark();
                 // A formal the body tests with `missing(name)` is optional at
                 // call sites — R's optional-without-default idiom.
@@ -672,6 +680,7 @@ impl<'db> Checker<'db, '_> {
                     .expect("return frames stay balanced around body inference");
                 let return_ty = self.join_early_returns(early_returns, trailing_ty);
                 self.environment.rollback(mark);
+                self.reapply_enclosing_writes(pending_mark);
                 self.table.level -= 1;
                 Ty::new(
                     self.db,
@@ -716,13 +725,34 @@ impl<'db> Checker<'db, '_> {
                 self.check_loop_body(None, body, true, None);
                 crate::types::null(self.db)
             }
-            ExpressionKind::Block(statements) => {
+            // `local(expr)` evaluates its body in a fresh environment: the
+            // bindings vanish afterwards (only super-assignment joins
+            // survive), and the value is the body's value.
+            ExpressionKind::Local { body } => {
+                let body = *body;
+                let pending_mark = self.pending_enclosing_writes.len();
+                let mark = self.environment.mark();
+                let value = self.infer(body);
+                self.environment.rollback(mark);
+                self.reapply_enclosing_writes(pending_mark);
+                value
+            }
+            ExpressionKind::Block {
+                statements,
+                trailing_semicolon,
+            } => {
                 let statements = statements.clone();
+                let trailing_semicolon = *trailing_semicolon;
                 let mut last = crate::types::null(self.db);
                 for statement in statements {
                     last = self.infer(statement);
                 }
-                last
+                // A `;`-terminated final expression discards the value.
+                if trailing_semicolon {
+                    crate::types::null(self.db)
+                } else {
+                    last
+                }
             }
             ExpressionKind::Paren(inner) => self.infer(*inner),
             ExpressionKind::Break | ExpressionKind::Next => self.unknown(),
@@ -766,24 +796,64 @@ impl<'db> Checker<'db, '_> {
         }
     }
 
-    fn write_target(&mut self, target: ExprId, value_ty: Ty<'db>) {
+    fn write_target(&mut self, spelling: AssignSpelling, target: ExprId, value_ty: Ty<'db>) {
         let target_expression = self.module.expression(target).clone();
         if let ExpressionKind::NameRef(_) = target_expression.kind {
             if let Some(&slot) = self.naming.resolutions.get(&target) {
-                // Function values generalize at the binding (let-polymorphism);
-                // everything else stays a monotype slot write.
-                let resolved = self.table.shallow_resolve(self.db, value_ty);
-                if matches!(resolved.kind(self.db), TyKind::Function(_)) {
-                    let scheme = self.generalize(value_ty);
-                    let index = self.push_scheme(scheme);
-                    self.environment.set(slot, EnvEntry::Scheme(index));
+                if spelling == AssignSpelling::Super {
+                    // `<<-` mutates an *enclosing* slot: the write joins into
+                    // the entry as a monotype and is recorded so it survives
+                    // the enclosing body's environment rollback.
+                    let written = self.table.resolve(self.db, value_ty);
+                    self.join_enclosing_write(slot, written);
+                    self.pending_enclosing_writes.push((slot, written));
                 } else {
-                    self.environment.set(slot, EnvEntry::Mono(value_ty));
+                    // Function values generalize at the binding
+                    // (let-polymorphism); everything else stays a monotype
+                    // slot write.
+                    let resolved = self.table.shallow_resolve(self.db, value_ty);
+                    if matches!(resolved.kind(self.db), TyKind::Function(_)) {
+                        let scheme = self.generalize(value_ty);
+                        let index = self.push_scheme(scheme);
+                        self.environment.set(slot, EnvEntry::Scheme(index));
+                    } else {
+                        self.environment.set(slot, EnvEntry::Mono(value_ty));
+                    }
                 }
             }
             self.recorded.insert(target, value_ty);
         } else {
             self.write_replacement_target(target, value_ty);
+        }
+    }
+
+    /// Join a super-assignment's written type into an environment entry as a
+    /// monotype (an absent entry takes the written type directly; a
+    /// scheme-holding entry contributes its instantiated body).
+    fn join_enclosing_write(&mut self, slot: BindingId, written: Ty<'db>) {
+        let entry = match self.environment.get(slot) {
+            Some(EnvEntry::Mono(existing)) if existing != written => {
+                EnvEntry::Mono(self.join_types(existing, written))
+            }
+            Some(entry @ EnvEntry::Mono(_)) => entry,
+            Some(EnvEntry::Scheme(index)) => {
+                let scheme = self.schemes()[index as usize].clone();
+                let instantiated = self.instantiate(&scheme);
+                EnvEntry::Mono(self.join_types(instantiated, written))
+            }
+            None => EnvEntry::Mono(written),
+        };
+        self.environment.set(slot, entry);
+    }
+
+    /// Super-assignments in a body mutate *enclosing* slots, so their joins
+    /// survive the body's environment rollback: re-apply them at the
+    /// definition site. They stay recorded so each further enclosing scope
+    /// re-applies them too (the join is idempotent).
+    fn reapply_enclosing_writes(&mut self, mark: usize) {
+        let writes: Vec<(BindingId, Ty<'db>)> = self.pending_enclosing_writes[mark..].to_vec();
+        for (slot, written) in writes {
+            self.join_enclosing_write(slot, written);
         }
     }
 
@@ -1182,7 +1252,7 @@ impl<'db> Checker<'db, '_> {
                 &self.module.expression(*callee).kind,
                 ExpressionKind::NameRef(name) if name == "return" || name == "stop"
             ),
-            ExpressionKind::Block(statements) => {
+            ExpressionKind::Block { statements, .. } => {
                 statements.last().is_some_and(|&last| self.diverges(last))
             }
             ExpressionKind::If {
@@ -1959,6 +2029,7 @@ impl<'db> Checker<'db, '_> {
         let range = expression.range;
 
         self.table.level += 1;
+        let pending_mark = self.pending_enclosing_writes.len();
         let mark = self.environment.mark();
         let mut positional_index = 0usize;
         let mut used_named: Vec<bool> = vec![false; declared.named.len()];
@@ -2045,6 +2116,7 @@ impl<'db> Checker<'db, '_> {
             self.unify_or_report(body_range, declared.ret, body_ty);
         }
         self.environment.rollback(mark);
+        self.reapply_enclosing_writes(pending_mark);
         self.table.level -= 1;
     }
 

@@ -181,7 +181,18 @@ pub enum ExpressionKind {
     Repeat {
         body: ExprId,
     },
-    Block(Vec<ExprId>),
+    /// `local(expr)`: the body evaluates immediately in a fresh environment.
+    /// Recognized by the bare callee name during lowering (rebinding `local`
+    /// is not modeled), like `return` and `stop`.
+    Local {
+        body: ExprId,
+    },
+    Block {
+        statements: Vec<ExprId>,
+        /// The last expression is terminated with `;`, so the block's value
+        /// is `NULL`.
+        trailing_semicolon: bool,
+    },
     Paren(ExprId),
     Break,
     Next,
@@ -232,8 +243,8 @@ impl ExpressionKind {
             }
             ExpressionKind::For { sequence, body, .. } => vec![*sequence, *body],
             ExpressionKind::While { condition, body } => vec![*condition, *body],
-            ExpressionKind::Repeat { body } => vec![*body],
-            ExpressionKind::Block(statements) => statements.clone(),
+            ExpressionKind::Repeat { body } | ExpressionKind::Local { body } => vec![*body],
+            ExpressionKind::Block { statements, .. } => statements.clone(),
             ExpressionKind::Paren(inner) => vec![*inner],
         }
     }
@@ -301,7 +312,34 @@ impl Lowering {
                     .iter()
                     .map(|child| self.lower_expression(child))
                     .collect();
-                self.allocate(ExpressionKind::Block(statements), range)
+                // Walking backwards over the block's direct tokens: hitting a
+                // `;` before any statement node means the last expression is
+                // terminated (statement content lives in child nodes, so the
+                // direct tokens are only braces, separators, and trivia).
+                let trailing_semicolon = node
+                    .children_with_tokens()
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .find_map(|element| match element {
+                        rowan::NodeOrToken::Token(token) => match token.kind() {
+                            SyntaxKind::WHITESPACE
+                            | SyntaxKind::NEWLINE
+                            | SyntaxKind::COMMENT
+                            | SyntaxKind::R_BRACE => None,
+                            SyntaxKind::SEMICOLON => Some(true),
+                            _ => Some(false),
+                        },
+                        rowan::NodeOrToken::Node(_) => Some(false),
+                    })
+                    .unwrap_or(false);
+                self.allocate(
+                    ExpressionKind::Block {
+                        statements,
+                        trailing_semicolon,
+                    },
+                    range,
+                )
             }
             SyntaxKind::UNARY_EXPR => {
                 let operator = node
@@ -319,9 +357,25 @@ impl Lowering {
             }
             SyntaxKind::BINARY_EXPR => self.lower_binary(node, range),
             SyntaxKind::CALL_EXPR => {
-                let callee = Self::child_expressions(node).next();
-                let callee = self.lower_optional(callee, range);
+                let callee_node = Self::child_expressions(node).next();
+                let is_local = callee_node.as_ref().is_some_and(|callee| {
+                    callee.kind() == SyntaxKind::NAME
+                        && syntax::ast::Name::cast(callee.clone())
+                            .and_then(|name| name.text())
+                            .is_some_and(|text| text == "local")
+                });
                 let arguments = self.lower_arguments(node);
+                if is_local
+                    && let [
+                        Argument {
+                            name: None,
+                            value: Some(body),
+                        },
+                    ] = arguments.as_slice()
+                {
+                    return self.allocate(ExpressionKind::Local { body: *body }, range);
+                }
+                let callee = self.lower_optional(callee_node, range);
                 self.allocate(ExpressionKind::Call { callee, arguments }, range)
             }
             SyntaxKind::SUBSET_EXPR | SyntaxKind::SUBSET2_EXPR => {
