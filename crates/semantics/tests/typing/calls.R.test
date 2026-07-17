@@ -92,3 +92,28 @@ f <- function(flag) {
 }
 #++++
 f: fn(flag: logical) -> integer | character
+
+#---- lapply_maps_the_element_type
+f <- function() {
+  words <- c("alpha", "beta")
+  lapply(words, nchar)
+}
+#++++
+f: fn() -> list[integer]
+
+#---- lapply_forwards_extra_arguments
+f <- function() {
+  words <- c("alpha", "beta")
+  lapply(words, gsub, pattern = "a", replacement = "o")
+}
+#++++
+f: fn() -> list[character]
+
+#---- lapply_rejects_a_wrong_callback
+f <- function() {
+  words <- c("alpha", "beta")
+  lapply(words, function(a, b) a)
+}
+#++++
+f: <T> fn() -> list[T]
+64..80 error[type-mismatch] expected `fn(character) -> T`, found `fn(a: U, b: V) -> U`

@@ -2531,6 +2531,49 @@ impl<'db> Checker<'db, '_> {
         let mut remaining_named = function.named.clone();
         let mut next_positional = 0usize;
 
+        // Which arguments the rest parameter will absorb, decided up front
+        // with the same accounting the loop below applies (no type checks):
+        // a function-typed argument earlier in the call may be checked
+        // against the arguments forwarded to it later in the call
+        // (`lapply(x, gsub, pattern = "a")`).
+        let forwarded_argument_indexes: Vec<usize> = if function.variadic.is_some() {
+            let mut consumed_named: Vec<&str> = Vec::new();
+            let mut positional_seen = 0usize;
+            let mut pre_rest_slots = pre_rest_remaining;
+            let mut forwarded = Vec::new();
+            for (index, argument) in arguments.iter().enumerate() {
+                match &argument.name {
+                    Some(name) => {
+                        let declared_index = function.named.iter().position(|field| {
+                            field.name.text(self.db) == name.as_str()
+                                && !consumed_named.contains(&name.as_str())
+                        });
+                        match declared_index {
+                            Some(declared_index) => {
+                                consumed_named.push(name.as_str());
+                                if declared_index < pre_rest_slots {
+                                    pre_rest_slots -= 1;
+                                }
+                            }
+                            None => forwarded.push(index),
+                        }
+                    }
+                    None => {
+                        if positional_seen < function.positional.len() {
+                            positional_seen += 1;
+                        } else if pre_rest_slots > 0 {
+                            pre_rest_slots -= 1;
+                        } else {
+                            forwarded.push(index);
+                        }
+                    }
+                }
+            }
+            forwarded
+        } else {
+            Vec::new()
+        };
+
         for argument in arguments {
             match &argument.name {
                 Some(name) => {
@@ -2543,13 +2586,22 @@ impl<'db> Checker<'db, '_> {
                             if index < pre_rest_remaining {
                                 pre_rest_remaining -= 1;
                             }
-                            if let Some(ty) = argument.ty {
-                                self.check_argument(
+                            if let Some(ty) = argument.ty
+                                && let Err(error) = self.check_argument(
                                     field.ty,
                                     ty,
                                     argument.range,
                                     argument.whole_double,
-                                )?;
+                                )
+                                && !self.forwarding_callback_probe(
+                                    field.ty,
+                                    ty,
+                                    &forwarded_argument_indexes,
+                                    arguments,
+                                    argument.range,
+                                )
+                            {
+                                return Err(error);
                             }
                         }
                         None => {
@@ -2599,13 +2651,22 @@ impl<'db> Checker<'db, '_> {
                     } else if pre_rest_remaining > 0 {
                         let field = remaining_named.remove(0);
                         pre_rest_remaining -= 1;
-                        if let Some(ty) = argument.ty {
-                            self.check_argument(
+                        if let Some(ty) = argument.ty
+                            && let Err(error) = self.check_argument(
                                 field.ty,
                                 ty,
                                 argument.range,
                                 argument.whole_double,
-                            )?;
+                            )
+                            && !self.forwarding_callback_probe(
+                                field.ty,
+                                ty,
+                                &forwarded_argument_indexes,
+                                arguments,
+                                argument.range,
+                            )
+                        {
+                            return Err(error);
                         }
                     } else if let Some(element) = variadic_element {
                         if let Some(ty) = argument.ty {
@@ -2641,6 +2702,180 @@ impl<'db> Checker<'db, '_> {
             });
         }
         Ok(())
+    }
+
+    /// The forwarding retry for a callback argument of a variadic callee.
+    /// R's apply family invokes `FUN(element, ...)`, so a callback with more
+    /// formals than the declared interface is still correct when the caller
+    /// forwards the difference — `lapply(x, gsub, pattern = "a",
+    /// replacement = "o")` calls `gsub(x[[i]], pattern = "a",
+    /// replacement = "o")`, and formals the forwarding leaves unfilled may
+    /// default. When the plain interface check fails, this simulates that
+    /// invocation against the callback's real signature: forwarded named
+    /// arguments consume same-named formals, the interface's parameter types
+    /// then fill the remaining formals in order together with forwarded
+    /// positionals, leftovers must be optional, and the callback's return
+    /// must satisfy the interface's. Runs as a probe: bindings commit only on
+    /// success, and a failed probe reports the original interface mismatch.
+    fn forwarding_callback_probe(
+        &mut self,
+        expected_parameter: Ty<'db>,
+        actual_argument: Ty<'db>,
+        forwarded_argument_indexes: &[usize],
+        arguments: &[CallArgument<'db>],
+        callback_range: TextRange,
+    ) -> bool {
+        let expected = self.table.resolve(self.db, expected_parameter);
+        let actual = self.table.resolve(self.db, actual_argument);
+        let (TyKind::Function(expected_callback), TyKind::Function(actual_callback)) =
+            (expected.kind(self.db).clone(), actual.kind(self.db).clone())
+        else {
+            return false;
+        };
+        let snapshot = self.table.snapshot();
+        let verdict = self.forwarding_callback_probe_inner(
+            &expected_callback,
+            &actual_callback,
+            forwarded_argument_indexes,
+            arguments,
+            callback_range,
+        );
+        if !verdict {
+            self.table.rollback(snapshot);
+        }
+        verdict
+    }
+
+    fn forwarding_callback_probe_inner(
+        &mut self,
+        expected_callback: &FunctionType<'db>,
+        actual_callback: &FunctionType<'db>,
+        forwarded_argument_indexes: &[usize],
+        arguments: &[CallArgument<'db>],
+        callback_range: TextRange,
+    ) -> bool {
+        let mut open_positionals = actual_callback.positional.clone();
+        let mut open_named = actual_callback.named.clone();
+        let mut pre_rest_open = match &actual_callback.variadic {
+            Some(rest) => rest.preceding_named,
+            None => open_named.len(),
+        };
+        let actual_rest_element = actual_callback.variadic.as_ref().map(|rest| rest.element);
+
+        // Forwarded named arguments consume the callback's same-named formals
+        // first, as R matches names before positions.
+        let mut forwarded_positionals = Vec::new();
+        for &index in forwarded_argument_indexes {
+            let argument = &arguments[index];
+            match &argument.name {
+                Some(name) => {
+                    match open_named
+                        .iter()
+                        .position(|field| field.name.text(self.db) == name.as_str())
+                    {
+                        Some(position) => {
+                            let field = open_named.remove(position);
+                            if position < pre_rest_open {
+                                pre_rest_open -= 1;
+                            }
+                            if let Some(ty) = argument.ty
+                                && self
+                                    .check_argument(
+                                        field.ty,
+                                        ty,
+                                        argument.range,
+                                        argument.whole_double,
+                                    )
+                                    .is_err()
+                            {
+                                return false;
+                            }
+                        }
+                        None => match actual_rest_element {
+                            Some(element) => {
+                                if let Some(ty) = argument.ty
+                                    && self
+                                        .check_argument(
+                                            element,
+                                            ty,
+                                            argument.range,
+                                            argument.whole_double,
+                                        )
+                                        .is_err()
+                                {
+                                    return false;
+                                }
+                            }
+                            None => return false,
+                        },
+                    }
+                }
+                None => forwarded_positionals.push(index),
+            }
+        }
+
+        // The interface's parameter types are the elements the callee will
+        // pass; they fill the callback's remaining formals in order, before
+        // the forwarded positionals.
+        enum Filled<'db> {
+            Element(Ty<'db>),
+            Forwarded(usize),
+        }
+        let sequence = expected_callback
+            .positional
+            .iter()
+            .copied()
+            .map(Filled::Element)
+            .chain(
+                expected_callback
+                    .named
+                    .iter()
+                    .map(|field| Filled::Element(field.ty)),
+            )
+            .chain(forwarded_positionals.into_iter().map(Filled::Forwarded))
+            .collect::<Vec<_>>();
+        for filled in sequence {
+            let (argument_ty, blame_range, whole_double) = match filled {
+                Filled::Element(element) => (Some(element), callback_range, false),
+                Filled::Forwarded(index) => (
+                    arguments[index].ty,
+                    arguments[index].range,
+                    arguments[index].whole_double,
+                ),
+            };
+            let formal = if !open_positionals.is_empty() {
+                Some(open_positionals.remove(0))
+            } else if pre_rest_open > 0 {
+                pre_rest_open -= 1;
+                Some(open_named.remove(0).ty)
+            } else {
+                None
+            };
+            let target = match formal {
+                Some(formal) => formal,
+                None => match actual_rest_element {
+                    Some(element) => element,
+                    None => return false,
+                },
+            };
+            if let Some(argument_ty) = argument_ty
+                && self
+                    .check_argument(target, argument_ty, blame_range, whole_double)
+                    .is_err()
+            {
+                return false;
+            }
+        }
+
+        // Every formal the invocation leaves unfilled must have a default.
+        if !open_positionals.is_empty() || open_named.iter().any(|field| !field.optional) {
+            return false;
+        }
+
+        // The callback's result flows out through the interface's return type
+        // (covariant).
+        self.table
+            .compatible(self.db, actual_callback.ret, expected_callback.ret)
     }
 
     /// One argument against one parameter type: compatibility, not
