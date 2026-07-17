@@ -8,6 +8,7 @@
 //! recomputes only the items whose derived values actually changed.
 
 pub mod hir;
+pub mod types;
 
 use syntax::Parse;
 use syntax::ast::AstNode as _;
