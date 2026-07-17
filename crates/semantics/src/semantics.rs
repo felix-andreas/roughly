@@ -13,6 +13,7 @@ pub mod diagnostics;
 pub mod hir;
 pub mod infer;
 pub mod naming;
+pub mod stubs;
 pub mod types;
 
 use syntax::Parse;
@@ -144,12 +145,19 @@ pub fn item_syntax<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<ItemSyntax> 
 /// The item's current red node inside the FILE tree (absolute offsets) — the
 /// rendering edge uses this to re-anchor item-relative spans; everything else
 /// must go through the position-independent `item_syntax`.
-pub(crate) fn resolve_item_node<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<syntax::SyntaxNode> {
+pub(crate) fn resolve_item_node<'db>(
+    db: &'db dyn Db,
+    item: Item<'db>,
+) -> Option<syntax::SyntaxNode> {
     let parse = parse(db, *item.file(db));
     let root = parse.syntax_node();
     let mut counts: rustc_hash::FxHashMap<(ItemKind, Option<String>), u32> =
         rustc_hash::FxHashMap::default();
-    let target = (*item.kind(db), item.name(db).clone(), *item.disambiguator(db));
+    let target = (
+        *item.kind(db),
+        item.name(db).clone(),
+        *item.disambiguator(db),
+    );
     for node in root.children() {
         if !syntax::ast::is_expression_kind(node.kind()) && node.kind() != syntax::SyntaxKind::ERROR
         {
@@ -195,12 +203,19 @@ pub fn item_naming<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<naming::Item
     Some(naming::resolve_item(&module))
 }
 
-/// Whether a package definition with this name exists (used to silence
-/// could-not-resolve on names the interface will serve).
+/// Whether any global definition with this name exists — a package definition
+/// or a stdlib stub declaration (used to silence could-not-resolve on names
+/// the interface will serve).
 pub fn package_scheme_exists(db: &dyn Db, name: &str) -> bool {
-    ProjectFiles::try_get(db)
+    if ProjectFiles::try_get(db)
         .map(|files| package_definitions(db, files).contains_key(name))
         .unwrap_or(false)
+    {
+        return true;
+    }
+    stubs::stubs(db).is_some_and(|library| {
+        library.schemes.contains_key(name) || library.nominals.contains(name)
+    })
 }
 
 /// The annotation region immediately preceding an item (only trivia between),
@@ -213,7 +228,11 @@ pub fn item_annotation_syntax<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<I
     let root = parse.syntax_node();
     let mut counts: rustc_hash::FxHashMap<(ItemKind, Option<String>), u32> =
         rustc_hash::FxHashMap::default();
-    let target = (*item.kind(db), item.name(db).clone(), *item.disambiguator(db));
+    let target = (
+        *item.kind(db),
+        item.name(db).clone(),
+        *item.disambiguator(db),
+    );
     let mut pending_annotation: Option<syntax::SyntaxNode> = None;
     for child in root.children_with_tokens() {
         match child {
@@ -335,7 +354,10 @@ pub fn item_check<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<check::ItemCh
     let naming = item_naming(db, item)?;
     let annotation = item_annotation_syntax(db, item)
         .map(|syntax| annotations::lower_annotation(db, &syntax.syntax_node()));
-    let globals = SalsaGlobals { db, definitions: ProjectFiles::try_get(db).map(|files| package_definitions(db, files)) };
+    let globals = SalsaGlobals {
+        db,
+        definitions: ProjectFiles::try_get(db).map(|files| package_definitions(db, files)),
+    };
     Some(check::check_item_with_annotation(
         db,
         &module,
@@ -373,8 +395,18 @@ struct SalsaGlobals<'db> {
 
 impl<'db> check::GlobalEnv<'db> for SalsaGlobals<'db> {
     fn scheme(&self, name: &str) -> Option<types::TypeScheme<'db>> {
-        let item = self.definitions.as_ref()?.get(name)?;
-        Some(global_scheme(self.db, *item))
+        if let Some(item) = self
+            .definitions
+            .as_ref()
+            .and_then(|winners| winners.get(name))
+        {
+            return Some(global_scheme(self.db, *item));
+        }
+        // Until overload-set probing lands, a stub name resolves to its last
+        // candidate: the corpus orders candidates specific-first, so the last
+        // one is the most general fallback.
+        let library = stubs::stubs(self.db)?;
+        library.schemes.get(name)?.last().cloned()
     }
 }
 
@@ -386,12 +418,17 @@ fn classify_top_level(node: &syntax::SyntaxNode) -> (ItemKind, Option<String>) {
         return (ItemKind::Statement, None);
     }
     let binary = syntax::ast::BinaryExpr::cast(node.clone());
-    let Some(binary) = binary else { return (ItemKind::Statement, None) };
-    let Some(operator) = binary.operator() else { return (ItemKind::Statement, None) };
+    let Some(binary) = binary else {
+        return (ItemKind::Statement, None);
+    };
+    let Some(operator) = binary.operator() else {
+        return (ItemKind::Statement, None);
+    };
     let (target, value) = match operator.kind() {
-        SyntaxKind::LESS_MINUS | SyntaxKind::EQ | SyntaxKind::LESS2_MINUS | SyntaxKind::COLON_EQ => {
-            (binary.lhs(), binary.rhs())
-        }
+        SyntaxKind::LESS_MINUS
+        | SyntaxKind::EQ
+        | SyntaxKind::LESS2_MINUS
+        | SyntaxKind::COLON_EQ => (binary.lhs(), binary.rhs()),
         SyntaxKind::MINUS_GREATER | SyntaxKind::MINUS_GREATER2 => (binary.rhs(), binary.lhs()),
         _ => return (ItemKind::Statement, None),
     };
@@ -403,7 +440,9 @@ fn classify_top_level(node: &syntax::SyntaxNode) -> (ItemKind, Option<String>) {
             // A string target (`"name" <- ...`) defines the unquoted name.
             target.as_ref().and_then(|node| {
                 (node.kind() == SyntaxKind::LITERAL
-                    && node.first_token().is_some_and(|t| t.kind() == SyntaxKind::STRING))
+                    && node
+                        .first_token()
+                        .is_some_and(|t| t.kind() == SyntaxKind::STRING))
                 .then(|| {
                     let text = node.text().to_string();
                     text.trim_matches(['"', '\'']).to_owned()
@@ -458,7 +497,8 @@ mod tests {
         // interned id re-minted from the same fields) and its green subtree
         // must both survive unchanged: structural equality across shifted
         // offsets is what early cutoff rests on.
-        file.set_text(&mut db).to("f <- function(x) x + 100\ng <- function(y) y\n".to_owned());
+        file.set_text(&mut db)
+            .to("f <- function(x) x + 100\ng <- function(y) y\n".to_owned());
         {
             let items = item_tree(&db, file);
             assert_eq!(items.len(), 2);
@@ -482,14 +522,20 @@ mod tests {
             "pad <- 1\nadd <- function(x, y = 2) x + y\n".to_owned(),
             DocumentKind::Package,
         );
-        let add = Item::new(&db, file, ItemKind::Function, Some("add".to_owned()), None, 0);
+        let add = Item::new(
+            &db,
+            file,
+            ItemKind::Function,
+            Some("add".to_owned()),
+            None,
+            0,
+        );
         let before = item_hir(&db, add).expect("add lowers");
         let root = before.expression(before.root.expect("has root"));
         let hir::ExpressionKind::Assign { value, .. } = &root.kind else {
             panic!("expected an assignment root, got {root:?}");
         };
-        let hir::ExpressionKind::Function { parameters, body } =
-            &before.expression(*value).kind
+        let hir::ExpressionKind::Function { parameters, body } = &before.expression(*value).kind
         else {
             panic!("expected a function value");
         };
@@ -506,7 +552,14 @@ mod tests {
         // Module: spans are item-relative, so nothing downstream re-runs.
         file.set_text(&mut db)
             .to("pad <- 100000\nadd <- function(x, y = 2) x + y\n".to_owned());
-        let add = Item::new(&db, file, ItemKind::Function, Some("add".to_owned()), None, 0);
+        let add = Item::new(
+            &db,
+            file,
+            ItemKind::Function,
+            Some("add".to_owned()),
+            None,
+            0,
+        );
         let after = item_hir(&db, add).expect("add still lowers");
         assert_eq!(before, after);
     }
@@ -526,11 +579,25 @@ mod tests {
         );
         ProjectFiles::new(&db, vec![util, main]);
 
-        let use_item = Item::new(&db, main, ItemKind::Function, Some("use".to_owned()), None, 0);
+        let use_item = Item::new(
+            &db,
+            main,
+            ItemKind::Function,
+            Some("use".to_owned()),
+            None,
+            0,
+        );
         let use_check = item_check(&db, use_item).expect("use checks");
         assert!(use_check.errors.is_empty(), "{:?}", use_check.errors);
 
-        let bad_item = Item::new(&db, main, ItemKind::Function, Some("bad".to_owned()), None, 0);
+        let bad_item = Item::new(
+            &db,
+            main,
+            ItemKind::Function,
+            Some("bad".to_owned()),
+            None,
+            0,
+        );
         let bad_check = item_check(&db, bad_item).expect("bad checks");
         assert!(
             !bad_check.errors.is_empty(),
@@ -540,7 +607,14 @@ mod tests {
         // Editing the callee body (same shape) leaves the caller check equal.
         util.set_text(&mut db)
             .to("add <- function(x, y) y + x\n".to_owned());
-        let use_item = Item::new(&db, main, ItemKind::Function, Some("use".to_owned()), None, 0);
+        let use_item = Item::new(
+            &db,
+            main,
+            ItemKind::Function,
+            Some("use".to_owned()),
+            None,
+            0,
+        );
         let again = item_check(&db, use_item).expect("use still checks");
         assert!(again.errors.is_empty());
     }
@@ -554,7 +628,14 @@ mod tests {
             DocumentKind::Package,
         );
         ProjectFiles::new(&db, vec![file]);
-        let even = Item::new(&db, file, ItemKind::Function, Some("is_even".to_owned()), None, 0);
+        let even = Item::new(
+            &db,
+            file,
+            ItemKind::Function,
+            Some("is_even".to_owned()),
+            None,
+            0,
+        );
         let check = item_check(&db, even).expect("checks");
         assert!(check.errors.is_empty(), "{:?}", check.errors);
         let scheme = global_scheme(&db, even);
@@ -574,7 +655,14 @@ mod tests {
             DocumentKind::Package,
         );
         ProjectFiles::new(&db, vec![file]);
-        let item = Item::new(&db, file, ItemKind::Function, Some("count".to_owned()), None, 0);
+        let item = Item::new(
+            &db,
+            file,
+            ItemKind::Function,
+            Some("count".to_owned()),
+            None,
+            0,
+        );
         // Must not panic; the self-cycle iterates to a stable scheme.
         let check = item_check(&db, item).expect("checks");
         assert!(check.errors.is_empty(), "{:?}", check.errors);
@@ -583,11 +671,7 @@ mod tests {
     #[test]
     fn later_file_wins_the_definition() {
         let db = RootDatabase::default();
-        let first = SourceFile::new(
-            &db,
-            "limit <- \"low\"\n".to_owned(),
-            DocumentKind::Package,
-        );
+        let first = SourceFile::new(&db, "limit <- \"low\"\n".to_owned(), DocumentKind::Package);
         let second = SourceFile::new(&db, "limit <- 10L\n".to_owned(), DocumentKind::Package);
         let files = ProjectFiles::new(&db, vec![first, second]);
         let winners = package_definitions(&db, files);

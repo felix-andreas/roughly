@@ -15,7 +15,7 @@
 //! (`masked_reads` / `masked_subsets`), the nested-loop region memo, and the
 //! unused-parameter lint.
 
-use crate::hir::{AssignSpelling, Argument, ExprId, ExpressionKind, Module, UnaryOperator};
+use crate::hir::{Argument, AssignSpelling, ExprId, ExpressionKind, Module, UnaryOperator};
 use rustc_hash::FxHashMap;
 use std::collections::{BTreeMap, BTreeSet};
 use syntax::TextRange;
@@ -105,7 +105,10 @@ struct Scope {
 
 impl Scope {
     fn new(kind: ScopeKind) -> Scope {
-        Scope { kind, slots: BTreeMap::new() }
+        Scope {
+            kind,
+            slots: BTreeMap::new(),
+        }
     }
 }
 
@@ -145,13 +148,12 @@ struct Context<'a> {
 }
 
 impl Context<'_> {
-    fn mint_binding(
-        &mut self,
-        name: &str,
-        range: TextRange,
-        kind: BindingKind,
-    ) -> BindingId {
-        let key = (u32::from(range.start()), u32::from(range.end()), name.to_owned());
+    fn mint_binding(&mut self, name: &str, range: TextRange, kind: BindingKind) -> BindingId {
+        let key = (
+            u32::from(range.start()),
+            u32::from(range.end()),
+            name.to_owned(),
+        );
         if let Some(&existing) = self.bindings_by_site.get(&key) {
             return existing;
         }
@@ -160,7 +162,12 @@ impl Context<'_> {
         self.bindings_by_site.insert(key, id);
         self.naming.bindings.insert(
             id,
-            BindingInfo { id, name: name.to_owned(), range, kind },
+            BindingInfo {
+                id,
+                name: name.to_owned(),
+                range,
+                kind,
+            },
         );
         id
     }
@@ -175,7 +182,10 @@ impl Context<'_> {
     }
 
     fn current_function_depth(&self) -> usize {
-        self.scopes.iter().rposition(|scope| scope.kind == ScopeKind::Function).unwrap_or(0)
+        self.scopes
+            .iter()
+            .rposition(|scope| scope.kind == ScopeKind::Function)
+            .unwrap_or(0)
     }
 
     fn record_write(&mut self, slot: BindingId, reach: Reach) {
@@ -196,7 +206,11 @@ impl Context<'_> {
             ExpressionKind::Missing | ExpressionKind::Break | ExpressionKind::Next => {}
             ExpressionKind::Literal(_) => {}
             ExpressionKind::NameRef(name) => self.resolve_read(id, name),
-            ExpressionKind::Assign { spelling, target, value } => {
+            ExpressionKind::Assign {
+                spelling,
+                target,
+                value,
+            } => {
                 // Value first: `x <- x + 1` reads the previous state.
                 self.resolve(*value);
                 self.resolve_assignment_target(id, *target, *spelling);
@@ -215,7 +229,9 @@ impl Context<'_> {
                 self.resolve(*callee);
                 self.resolve_arguments(arguments);
             }
-            ExpressionKind::Index { target, arguments, .. } => {
+            ExpressionKind::Index {
+                target, arguments, ..
+            } => {
                 self.resolve(*target);
                 self.resolve_arguments(arguments);
             }
@@ -244,7 +260,11 @@ impl Context<'_> {
                 self.scopes.pop();
                 self.flow = saved_flow;
             }
-            ExpressionKind::If { condition, then_branch, else_branch } => {
+            ExpressionKind::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
                 self.resolve(*condition);
                 let entry = self.flow.clone();
                 self.resolve(*then_branch);
@@ -254,7 +274,12 @@ impl Context<'_> {
                 }
                 join_flow(&mut self.flow, &after_then);
             }
-            ExpressionKind::For { variable, variable_range, sequence, body } => {
+            ExpressionKind::For {
+                variable,
+                variable_range,
+                sequence,
+                body,
+            } => {
                 self.resolve(*sequence);
                 if let (Some(variable), Some(range)) = (variable, variable_range) {
                     let slot = self.mint_binding(variable, *range, BindingKind::ForVariable);
@@ -468,9 +493,10 @@ impl Context<'_> {
     fn collect_unused(&mut self) {
         for write in &self.writes {
             if write.reportable && !write.used {
-                self.naming
-                    .unused_assignments
-                    .push(UnusedAssignment { name: write.name.clone(), range: write.range });
+                self.naming.unused_assignments.push(UnusedAssignment {
+                    name: write.name.clone(),
+                    range: write.range,
+                });
             }
         }
     }
@@ -514,9 +540,7 @@ mod tests {
 
     #[test]
     fn conditional_write_joins_and_read_resolves() {
-        let naming = naming_of(
-            "f <- function(flag) {\n  x <- 1\n  if (flag) x <- 2\n  x\n}",
-        );
+        let naming = naming_of("f <- function(flag) {\n  x <- 1\n  if (flag) x <- 2\n  x\n}");
         // Both writes reach the final read: neither is a dead store.
         assert!(naming.unused_assignments.is_empty());
         assert!(naming.maybe_undefined.is_empty());
@@ -549,6 +573,11 @@ mod tests {
     #[test]
     fn unresolved_reads_are_non_local() {
         let naming = naming_of("f <- function() unknown_helper(1)");
-        assert!(naming.non_locals.values().any(|name| name == "unknown_helper"));
+        assert!(
+            naming
+                .non_locals
+                .values()
+                .any(|name| name == "unknown_helper")
+        );
     }
 }

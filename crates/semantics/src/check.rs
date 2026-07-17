@@ -35,12 +35,24 @@ pub struct TypeError<'db> {
 
 #[derive(Debug, Clone, PartialEq, Eq, salsa::SalsaValue)]
 pub enum TypeErrorKind<'db> {
-    Mismatch { expected: Ty<'db>, found: Ty<'db> },
-    NotAFunction { found: Ty<'db> },
-    TooManyArguments { expected: usize, found: usize },
-    UnknownArgument { name: String },
+    Mismatch {
+        expected: Ty<'db>,
+        found: Ty<'db>,
+    },
+    NotAFunction {
+        found: Ty<'db>,
+    },
+    TooManyArguments {
+        expected: usize,
+        found: usize,
+    },
+    UnknownArgument {
+        name: String,
+    },
     /// An annotation declares a parameter the definition has no formal for.
-    AnnotationParameterMismatch { name: String },
+    AnnotationParameterMismatch {
+        name: String,
+    },
     InfiniteType,
 }
 
@@ -99,7 +111,10 @@ pub fn check_item_with_annotation<'db>(
             // refuse to bind), and check the result against the declared
             // return. The declared scheme wins as the export.
             (ExpressionKind::Assign { value, .. }, Some((declared, function)))
-                if matches!(module.expression(*value).kind, ExpressionKind::Function { .. }) =>
+                if matches!(
+                    module.expression(*value).kind,
+                    ExpressionKind::Function { .. }
+                ) =>
             {
                 for (name, constraint) in &declared.binders {
                     context.rigid_constraints.insert(*name, *constraint);
@@ -144,7 +159,11 @@ pub fn check_item_with_annotation<'db>(
         .iter()
         .map(|(&id, &ty)| (id, context.table.resolve(context.db, ty)))
         .collect();
-    ItemCheck { expression_types, errors: context.errors, scheme }
+    ItemCheck {
+        expression_types,
+        errors: context.errors,
+        scheme,
+    }
 }
 
 /// The slot environment: an undo-logged map from binding slots to types.
@@ -260,7 +279,11 @@ impl<'db> Checker<'db, '_> {
             ExpressionKind::Missing => self.unknown(),
             ExpressionKind::Literal(literal) => self.literal_ty(literal),
             ExpressionKind::NameRef(_) => self.infer_read(id),
-            ExpressionKind::Assign { spelling: _, target, value } => {
+            ExpressionKind::Assign {
+                spelling: _,
+                target,
+                value,
+            } => {
                 let value_ty = self.infer(*value);
                 self.write_target(*target, value_ty);
                 value_ty
@@ -280,7 +303,9 @@ impl<'db> Checker<'db, '_> {
             }
             // Indexing and field access type as Unknown until the container
             // rules land (tuple/record projection, vector element rules).
-            ExpressionKind::Index { target, arguments, .. } => {
+            ExpressionKind::Index {
+                target, arguments, ..
+            } => {
                 self.infer(*target);
                 for argument in arguments {
                     if let Some(value) = argument.value {
@@ -329,7 +354,11 @@ impl<'db> Checker<'db, '_> {
                     }),
                 )
             }
-            ExpressionKind::If { condition, then_branch, else_branch } => {
+            ExpressionKind::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
                 self.infer(*condition);
                 let mark = self.environment.mark();
                 let then_ty = self.infer(*then_branch);
@@ -489,13 +518,11 @@ impl<'db> Checker<'db, '_> {
     /// by name, positional declarations fill the rest in order; rigid binder
     /// types refuse to bind), the body infers under them, and the result
     /// checks against the declared return.
-    fn check_declared_function(
-        &mut self,
-        function_id: ExprId,
-        declared: &FunctionType<'db>,
-    ) {
+    fn check_declared_function(&mut self, function_id: ExprId, declared: &FunctionType<'db>) {
         let expression = self.module.expression(function_id).clone();
-        let ExpressionKind::Function { parameters, body } = &expression.kind else { return };
+        let ExpressionKind::Function { parameters, body } = &expression.kind else {
+            return;
+        };
         let range = expression.range;
 
         self.table.level += 1;
@@ -527,8 +554,7 @@ impl<'db> Checker<'db, '_> {
                 });
                 None
             };
-            let parameter_ty =
-                declared_ty.unwrap_or_else(|| self.fresh(Constraint::Unconstrained));
+            let parameter_ty = declared_ty.unwrap_or_else(|| self.fresh(Constraint::Unconstrained));
             if let Some(slot) = self
                 .naming
                 .bindings
@@ -546,7 +572,9 @@ impl<'db> Checker<'db, '_> {
         // Declared named parameters the definition never declares.
         for (index, field) in declared.named.iter().enumerate() {
             if !used_named[index]
-                && !parameters.iter().any(|p| p.name == field.name.text(self.db))
+                && !parameters
+                    .iter()
+                    .any(|p| p.name == field.name.text(self.db))
             {
                 self.errors.push(TypeError {
                     range,
@@ -635,12 +663,7 @@ impl<'db> Checker<'db, '_> {
         }
     }
 
-    fn infer_call(
-        &mut self,
-        range: TextRange,
-        callee: Ty<'db>,
-        arguments: &[Argument],
-    ) -> Ty<'db> {
+    fn infer_call(&mut self, range: TextRange, callee: Ty<'db>, arguments: &[Argument]) -> Ty<'db> {
         let arguments: Vec<(Option<String>, Option<Ty<'db>>, TextRange)> = arguments
             .iter()
             .map(|argument| {
@@ -752,8 +775,7 @@ impl<'db> Checker<'db, '_> {
                     } else {
                         // Unconsumed named formals absorb leftover positionals
                         // (R fills unmatched formals in order).
-                        let next_named =
-                            named_consumed.iter().position(|consumed| !consumed);
+                        let next_named = named_consumed.iter().position(|consumed| !consumed);
                         match next_named {
                             Some(index) => {
                                 named_consumed[index] = true;
@@ -766,8 +788,7 @@ impl<'db> Checker<'db, '_> {
                                 self.errors.push(TypeError {
                                     range,
                                     kind: TypeErrorKind::TooManyArguments {
-                                        expected: function.positional.len()
-                                            + function.named.len(),
+                                        expected: function.positional.len() + function.named.len(),
                                         found: arguments.len(),
                                     },
                                 });
@@ -854,8 +875,7 @@ impl<'db> Checker<'db, '_> {
                 if let Some(&name) = mapping.get(&representative) {
                     return Ty::new(self.db, TyKind::Rigid(name));
                 }
-                let Entry::Unbound { level, constraint } = *self.table.entry(representative)
-                else {
+                let Entry::Unbound { level, constraint } = *self.table.entry(representative) else {
                     return ty;
                 };
                 if level <= self.table.level {
@@ -891,8 +911,10 @@ impl<'db> Checker<'db, '_> {
                 Ty::new(self.db, TyKind::NamedList(inner))
             }
             TyKind::Tuple(items) => {
-                let items =
-                    items.iter().map(|&item| self.abstract_vars(item, binders, mapping)).collect();
+                let items = items
+                    .iter()
+                    .map(|&item| self.abstract_vars(item, binders, mapping))
+                    .collect();
                 Ty::new(self.db, TyKind::Tuple(items))
             }
             TyKind::Record(fields) => {
@@ -983,8 +1005,10 @@ impl<'db> Checker<'db, '_> {
                 Ty::new(self.db, TyKind::NamedList(inner))
             }
             TyKind::Tuple(items) => {
-                let items =
-                    items.iter().map(|&item| self.substitute_rigid(item, substitution)).collect();
+                let items = items
+                    .iter()
+                    .map(|&item| self.substitute_rigid(item, substitution))
+                    .collect();
                 Ty::new(self.db, TyKind::Tuple(items))
             }
             TyKind::Record(fields) => {
@@ -1045,9 +1069,9 @@ impl<'db> Checker<'db, '_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::RootDatabase;
     use crate::hir::lower_item;
     use crate::naming::resolve_item;
-    use crate::RootDatabase;
 
     fn check_source<'db>(db: &'db RootDatabase, source: &str) -> ItemCheck<'db> {
         let parse = syntax::parse(source);
@@ -1098,7 +1122,11 @@ mod tests {
             &db,
             "use <- function() {\n  id <- function(x) x\n  id(1L)\n  id(\"s\")\n}",
         );
-        assert!(check.errors.is_empty(), "let-polymorphism failed: {:?}", check.errors);
+        assert!(
+            check.errors.is_empty(),
+            "let-polymorphism failed: {:?}",
+            check.errors
+        );
     }
 
     #[test]
@@ -1108,7 +1136,9 @@ mod tests {
         let check = check_source(&db, "pick <- function(f) if (f) 1L else NULL");
         assert!(check.errors.is_empty());
         let scheme = check.scheme.expect("scheme");
-        let TyKind::Function(function) = scheme.body.kind(&db) else { panic!() };
+        let TyKind::Function(function) = scheme.body.kind(&db) else {
+            panic!()
+        };
         let TyKind::Union(members) = function.ret.kind(&db) else {
             panic!("expected integer | NULL, got {:?}", function.ret.kind(&db));
         };
@@ -1143,9 +1173,14 @@ mod tests {
         );
         assert!(check.errors.is_empty());
         let scheme = check.scheme.expect("scheme");
-        let TyKind::Function(function) = scheme.body.kind(&db) else { panic!() };
+        let TyKind::Function(function) = scheme.body.kind(&db) else {
+            panic!()
+        };
         let TyKind::Union(members) = function.ret.kind(&db) else {
-            panic!("expected integer | character return, got {:?}", function.ret.kind(&db));
+            panic!(
+                "expected integer | character return, got {:?}",
+                function.ret.kind(&db)
+            );
         };
         assert_eq!(members.len(), 2);
     }
@@ -1173,17 +1208,21 @@ mod tests {
         assert!(check.errors.is_empty(), "{:?}", check.errors);
         let scheme = check.scheme.expect("declared scheme");
         assert_eq!(scheme.binders.len(), 1);
-        let TyKind::Function(function) = scheme.body.kind(&db) else { panic!() };
+        let TyKind::Function(function) = scheme.body.kind(&db) else {
+            panic!()
+        };
         assert!(matches!(function.ret.kind(&db), TyKind::Rigid(_)));
     }
 
     #[test]
     fn annotated_return_mismatch_reports() {
         let db = RootDatabase::default();
-        let check =
-            check_annotated(&db, "#: fn(x: integer) -> character\nf <- function(x) x");
+        let check = check_annotated(&db, "#: fn(x: integer) -> character\nf <- function(x) x");
         assert!(
-            check.errors.iter().any(|e| matches!(e.kind, TypeErrorKind::Mismatch { .. })),
+            check
+                .errors
+                .iter()
+                .any(|e| matches!(e.kind, TypeErrorKind::Mismatch { .. })),
             "expected return mismatch, got {:?}",
             check.errors
         );
@@ -1192,8 +1231,7 @@ mod tests {
     #[test]
     fn annotated_parameter_name_mismatch_reports() {
         let db = RootDatabase::default();
-        let check =
-            check_annotated(&db, "#: fn(x: integer) -> integer\nf <- function(y) 1L");
+        let check = check_annotated(&db, "#: fn(x: integer) -> integer\nf <- function(y) 1L");
         assert!(
             check
                 .errors
@@ -1214,8 +1252,10 @@ mod tests {
             "plain <T> must refuse arithmetic, got no errors"
         );
         // With the declared numeric constraint the same body is fine.
-        let ok =
-            check_annotated(&db, "#: <T: numeric> fn(x: T) -> T\nok <- function(x) x + 1L");
+        let ok = check_annotated(
+            &db,
+            "#: <T: numeric> fn(x: T) -> T\nok <- function(x) x + 1L",
+        );
         assert!(ok.errors.is_empty(), "{:?}", ok.errors);
     }
 

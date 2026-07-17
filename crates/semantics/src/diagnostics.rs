@@ -43,18 +43,25 @@ pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
     }
 
     for item in item_tree(db, file) {
-        let Some(offset) = item_offset(db, item) else { continue };
-        let Some(check) = item_check(db, item) else { continue };
+        let Some(offset) = item_offset(db, item) else {
+            continue;
+        };
+        let Some(check) = item_check(db, item) else {
+            continue;
+        };
         for error in &check.errors {
             let range = TextRange::new(error.range.start() + offset, error.range.end() + offset);
             diagnostics.push(render_type_error(db, range, error));
         }
         // Naming findings are item-relative too.
-        let Some(module) = crate::item_hir(db, item) else { continue };
-        let Some(naming) = crate::item_naming(db, item) else { continue };
+        let Some(module) = crate::item_hir(db, item) else {
+            continue;
+        };
+        let Some(naming) = crate::item_naming(db, item) else {
+            continue;
+        };
         for unused in &naming.unused_assignments {
-            let range =
-                TextRange::new(unused.range.start() + offset, unused.range.end() + offset);
+            let range = TextRange::new(unused.range.start() + offset, unused.range.end() + offset);
             diagnostics.push(Diagnostic {
                 range,
                 severity: Severity::Warning,
@@ -113,7 +120,12 @@ fn render_type_error(db: &dyn Db, range: TextRange, error: &TypeError<'_>) -> Di
         }
         TypeErrorKind::InfiniteType => "this would create an infinite type".to_owned(),
     };
-    Diagnostic { range, severity: Severity::Error, code: "type-mismatch", message }
+    Diagnostic {
+        range,
+        severity: Severity::Error,
+        code: "type-mismatch",
+        message,
+    }
 }
 
 /// The user-facing type renderer: `T`/`U`/`V`… in first-occurrence order.
@@ -140,31 +152,32 @@ impl<'db> TypeRenderer<'db> {
             TyKind::List(element) => format!("list[{}]", self.render(db, *element)),
             TyKind::NamedList(element) => format!("list[named: {}]", self.render(db, *element)),
             TyKind::Tuple(items) => {
-                let items: Vec<String> =
-                    items.iter().map(|&item| self.render(db, item)).collect();
+                let items: Vec<String> = items.iter().map(|&item| self.render(db, item)).collect();
                 format!("list{{{}}}", items.join(", "))
             }
             TyKind::Record(fields) => {
                 let fields: Vec<String> = fields
                     .iter()
-                    .map(|field| {
-                        format!("{}: {}", field.name.text(db), self.render(db, field.ty))
-                    })
+                    .map(|field| format!("{}: {}", field.name.text(db), self.render(db, field.ty)))
                     .collect();
                 format!("list{{{}}}", fields.join(", "))
             }
             TyKind::Function(function) => self.render_function(db, function),
             TyKind::Union(members) => {
-                let members: Vec<String> =
-                    members.iter().map(|&member| self.render(db, member)).collect();
+                let members: Vec<String> = members
+                    .iter()
+                    .map(|&member| self.render(db, member))
+                    .collect();
                 members.join(" | ")
             }
             TyKind::Named(name, arguments) => {
                 if arguments.is_empty() {
                     name.text(db).to_owned()
                 } else {
-                    let arguments: Vec<String> =
-                        arguments.iter().map(|&argument| self.render(db, argument)).collect();
+                    let arguments: Vec<String> = arguments
+                        .iter()
+                        .map(|&argument| self.render(db, argument))
+                        .collect();
                     format!("{}<{}>", name.text(db), arguments.join(", "))
                 }
             }
@@ -223,7 +236,11 @@ impl<'db> TypeRenderer<'db> {
         };
         let letter = (b'T' + (index as u8 % 7)) as char;
         let suffix = index / 7;
-        if suffix == 0 { letter.to_string() } else { format!("{letter}{suffix}") }
+        if suffix == 0 {
+            letter.to_string()
+        } else {
+            format!("{letter}{suffix}")
+        }
     }
 }
 
@@ -272,8 +289,7 @@ mod tests {
         );
         let main = SourceFile::new(
             &db,
-            "bad <- function() add(\"a\", 2L)\nmissing_fn <- function() nowhere()\n"
-                .to_owned(),
+            "bad <- function() add(\"a\", 2L)\nmissing_fn <- function() nowhere()\n".to_owned(),
             DocumentKind::Package,
         );
         ProjectFiles::new(&db, vec![util, main]);

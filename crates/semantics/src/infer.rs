@@ -51,7 +51,10 @@ pub struct InferenceTable<'db> {
 impl<'db> InferenceTable<'db> {
     pub fn fresh(&mut self, constraint: Constraint) -> InferenceVar {
         let var = InferenceVar(self.entries.len() as u32);
-        self.entries.push(Entry::Unbound { level: self.level, constraint });
+        self.entries.push(Entry::Unbound {
+            level: self.level,
+            constraint,
+        });
         var
     }
 
@@ -61,7 +64,10 @@ impl<'db> InferenceTable<'db> {
     }
 
     pub fn snapshot(&self) -> Snapshot {
-        Snapshot { entries: self.entries.len(), undo: self.undo.len() }
+        Snapshot {
+            entries: self.entries.len(),
+            undo: self.undo.len(),
+        }
     }
 
     pub fn rollback(&mut self, snapshot: Snapshot) {
@@ -164,13 +170,17 @@ impl<'db> InferenceTable<'db> {
             }
             TyKind::Union(members) => {
                 // Members can collapse after resolution: re-normalize.
-                let members: Vec<Ty<'db>> =
-                    members.iter().map(|&member| self.resolve(db, member)).collect();
+                let members: Vec<Ty<'db>> = members
+                    .iter()
+                    .map(|&member| self.resolve(db, member))
+                    .collect();
                 union_of(db, members)
             }
             TyKind::Named(name, arguments) => {
-                let arguments =
-                    arguments.iter().map(|&argument| self.resolve(db, argument)).collect();
+                let arguments = arguments
+                    .iter()
+                    .map(|&argument| self.resolve(db, argument))
+                    .collect();
                 Ty::new(db, TyKind::Named(*name, arguments))
             }
         }
@@ -178,7 +188,11 @@ impl<'db> InferenceTable<'db> {
 
     fn resolve_function(&self, db: &'db dyn Db, function: &FunctionType<'db>) -> FunctionType<'db> {
         FunctionType {
-            positional: function.positional.iter().map(|&ty| self.resolve(db, ty)).collect(),
+            positional: function
+                .positional
+                .iter()
+                .map(|&ty| self.resolve(db, ty))
+                .collect(),
             named: function
                 .named
                 .iter()
@@ -198,7 +212,12 @@ impl<'db> InferenceTable<'db> {
     }
 
     /// Bind `var` to `ty` after the occurs check and constraint admission.
-    fn bind(&mut self, db: &'db dyn Db, var: InferenceVar, ty: Ty<'db>) -> Result<(), UnifyError<'db>> {
+    fn bind(
+        &mut self,
+        db: &'db dyn Db,
+        var: InferenceVar,
+        ty: Ty<'db>,
+    ) -> Result<(), UnifyError<'db>> {
         let representative = self.find(var);
         if self.occurs(db, representative, ty) {
             return Err(UnifyError::Occurs(representative, ty));
@@ -221,8 +240,10 @@ impl<'db> InferenceTable<'db> {
         match shallow.kind(db) {
             TyKind::Var(var) => {
                 let representative = self.find(*var);
-                if let Entry::Unbound { level: var_level, constraint } =
-                    *self.entry(representative)
+                if let Entry::Unbound {
+                    level: var_level,
+                    constraint,
+                } = *self.entry(representative)
                     && var_level > level
                 {
                     self.set(representative, Entry::Unbound { level, constraint });
@@ -280,8 +301,14 @@ impl<'db> InferenceTable<'db> {
             TyKind::Tuple(items) => items.iter().any(|&item| self.occurs(db, var, item)),
             TyKind::Record(fields) => fields.iter().any(|field| self.occurs(db, var, field.ty)),
             TyKind::Function(function) => {
-                function.positional.iter().any(|&ty| self.occurs(db, var, ty))
-                    || function.named.iter().any(|field| self.occurs(db, var, field.ty))
+                function
+                    .positional
+                    .iter()
+                    .any(|&ty| self.occurs(db, var, ty))
+                    || function
+                        .named
+                        .iter()
+                        .any(|field| self.occurs(db, var, field.ty))
                     || function
                         .variadic
                         .as_ref()
@@ -289,14 +316,19 @@ impl<'db> InferenceTable<'db> {
                     || self.occurs(db, var, function.ret)
             }
             TyKind::Union(members) => members.iter().any(|&member| self.occurs(db, var, member)),
-            TyKind::Named(_, arguments) => {
-                arguments.iter().any(|&argument| self.occurs(db, var, argument))
-            }
+            TyKind::Named(_, arguments) => arguments
+                .iter()
+                .any(|&argument| self.occurs(db, var, argument)),
             _ => false,
         }
     }
 
-    pub fn unify(&mut self, db: &'db dyn Db, a: Ty<'db>, b: Ty<'db>) -> Result<(), UnifyError<'db>> {
+    pub fn unify(
+        &mut self,
+        db: &'db dyn Db,
+        a: Ty<'db>,
+        b: Ty<'db>,
+    ) -> Result<(), UnifyError<'db>> {
         let a = self.shallow_resolve(db, a);
         let b = self.shallow_resolve(db, b);
         if a == b {
@@ -309,19 +341,27 @@ impl<'db> InferenceTable<'db> {
                 if left == right {
                     return Ok(());
                 }
-                let Entry::Unbound { level: left_level, constraint: left_constraint } =
-                    *self.entry(left)
+                let Entry::Unbound {
+                    level: left_level,
+                    constraint: left_constraint,
+                } = *self.entry(left)
                 else {
                     unreachable!("shallow resolve leaves only unbound variables")
                 };
-                let Entry::Unbound { level: right_level, constraint: right_constraint } =
-                    *self.entry(right)
+                let Entry::Unbound {
+                    level: right_level,
+                    constraint: right_constraint,
+                } = *self.entry(right)
                 else {
                     unreachable!("shallow resolve leaves only unbound variables")
                 };
                 // Redirect the younger to the older, joining constraints and
                 // keeping the minimum level.
-                let (winner, loser) = if left.0 <= right.0 { (left, right) } else { (right, left) };
+                let (winner, loser) = if left.0 <= right.0 {
+                    (left, right)
+                } else {
+                    (right, left)
+                };
                 self.set(
                     winner,
                     Entry::Unbound {
@@ -337,9 +377,7 @@ impl<'db> InferenceTable<'db> {
             (TyKind::Vector(left), TyKind::Vector(right))
             | (TyKind::NamedVector(left), TyKind::NamedVector(right))
             | (TyKind::List(left), TyKind::List(right))
-            | (TyKind::NamedList(left), TyKind::NamedList(right)) => {
-                self.unify(db, *left, *right)
-            }
+            | (TyKind::NamedList(left), TyKind::NamedList(right)) => self.unify(db, *left, *right),
             (TyKind::Tuple(left), TyKind::Tuple(right)) => {
                 if left.len() != right.len() {
                     return Err(UnifyError::Mismatch(a, b));
@@ -360,8 +398,11 @@ impl<'db> InferenceTable<'db> {
                 {
                     return Err(UnifyError::Mismatch(a, b));
                 }
-                let pairs: Vec<(Ty<'db>, Ty<'db>)> =
-                    left.iter().map(|f| f.ty).zip(right.iter().map(|f| f.ty)).collect();
+                let pairs: Vec<(Ty<'db>, Ty<'db>)> = left
+                    .iter()
+                    .map(|f| f.ty)
+                    .zip(right.iter().map(|f| f.ty))
+                    .collect();
                 for (left, right) in pairs {
                     self.unify(db, left, right)?;
                 }
@@ -392,7 +433,10 @@ impl<'db> InferenceTable<'db> {
                 }
                 self.unify(db, left.ret, right.ret)
             }
-            (TyKind::Named(left_name, left_arguments), TyKind::Named(right_name, right_arguments)) => {
+            (
+                TyKind::Named(left_name, left_arguments),
+                TyKind::Named(right_name, right_arguments),
+            ) => {
                 if left_name != right_name || left_arguments.len() != right_arguments.len() {
                     return Err(UnifyError::Mismatch(a, b));
                 }
@@ -414,20 +458,27 @@ impl<'db> InferenceTable<'db> {
     /// Unions unify by set equality after resolution, plus the single
     /// `T | NULL` vs `U | NULL` member-wise case (both two-member nullable
     /// unions: unify the non-NULL members).
-    fn unify_unions(&mut self, db: &'db dyn Db, a: Ty<'db>, b: Ty<'db>) -> Result<(), UnifyError<'db>> {
+    fn unify_unions(
+        &mut self,
+        db: &'db dyn Db,
+        a: Ty<'db>,
+        b: Ty<'db>,
+    ) -> Result<(), UnifyError<'db>> {
         let resolved_a = self.resolve(db, a);
         let resolved_b = self.resolve(db, b);
         if resolved_a == resolved_b {
             return Ok(());
         }
-        let (TyKind::Union(left), TyKind::Union(right)) = (resolved_a.kind(db), resolved_b.kind(db))
+        let (TyKind::Union(left), TyKind::Union(right)) =
+            (resolved_a.kind(db), resolved_b.kind(db))
         else {
             // Resolution collapsed one side; retry the general path.
             return self.unify(db, resolved_a, resolved_b);
         };
-        if let (Some(left_inner), Some(right_inner)) =
-            (nullable_single_member(db, left), nullable_single_member(db, right))
-        {
+        if let (Some(left_inner), Some(right_inner)) = (
+            nullable_single_member(db, left),
+            nullable_single_member(db, right),
+        ) {
             return self.unify(db, left_inner, right_inner);
         }
         if left.len() == right.len() && left.iter().all(|member| right.contains(member)) {
@@ -442,7 +493,9 @@ fn nullable_single_member<'db>(db: &'db dyn Db, members: &[Ty<'db>]) -> Option<T
     if members.len() != 2 {
         return None;
     }
-    let null_at = members.iter().position(|member| matches!(member.kind(db), TyKind::Null))?;
+    let null_at = members
+        .iter()
+        .position(|member| matches!(member.kind(db), TyKind::Null))?;
     Some(members[1 - null_at])
 }
 
@@ -496,7 +549,10 @@ mod tests {
         let var = table.fresh(Constraint::Unconstrained);
         let var_ty = Ty::new(&db, TyKind::Var(var));
         let list = Ty::new(&db, TyKind::List(var_ty));
-        assert!(matches!(table.unify(&db, var_ty, list), Err(UnifyError::Occurs(..))));
+        assert!(matches!(
+            table.unify(&db, var_ty, list),
+            Err(UnifyError::Occurs(..))
+        ));
     }
 
     #[test]
@@ -525,12 +581,20 @@ mod tests {
         let snapshot = table.snapshot();
         let probe = table.fresh_ty(&db, Constraint::Unconstrained);
         table.unify(&db, outer, probe).expect("unifies");
-        table.unify(&db, probe, scalar(&db, Atomic::Double)).expect("binds");
+        table
+            .unify(&db, probe, scalar(&db, Atomic::Double))
+            .expect("binds");
         assert_eq!(table.resolve(&db, outer), scalar(&db, Atomic::Double));
         table.rollback(snapshot);
         // The pre-probe variable is unbound again.
-        assert!(matches!(table.entry(InferenceVar(0)), Entry::Unbound { .. }));
-        assert!(matches!(table.resolve(&db, outer).kind(&db), TyKind::Var(_)));
+        assert!(matches!(
+            table.entry(InferenceVar(0)),
+            Entry::Unbound { .. }
+        ));
+        assert!(matches!(
+            table.resolve(&db, outer).kind(&db),
+            TyKind::Var(_)
+        ));
     }
 
     #[test]
@@ -548,7 +612,9 @@ mod tests {
         let var = table.fresh_ty(&db, Constraint::Unconstrained);
         let left = union_of(&db, [var, null]);
         let right = union_of(&db, [int, null]);
-        table.unify(&db, left, right).expect("nullable member-wise case");
+        table
+            .unify(&db, left, right)
+            .expect("nullable member-wise case");
         assert_eq!(table.resolve(&db, var), int);
 
         // Distinct non-nullable unions refuse.

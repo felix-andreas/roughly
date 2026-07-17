@@ -132,7 +132,10 @@ pub struct TypeScheme<'db> {
 
 impl<'db> TypeScheme<'db> {
     pub fn monomorphic(body: Ty<'db>) -> TypeScheme<'db> {
-        TypeScheme { binders: Vec::new(), body }
+        TypeScheme {
+            binders: Vec::new(),
+            body,
+        }
     }
 }
 
@@ -227,7 +230,9 @@ mod tests {
         // Flatten + dedupe keeping first occurrence + NULL last.
         let inner = union_of(&db, [null(&db), int]);
         let outer = union_of(&db, [inner, chr, int]);
-        let TyKind::Union(members) = outer.kind(&db) else { panic!("expected a union") };
+        let TyKind::Union(members) = outer.kind(&db) else {
+            panic!("expected a union")
+        };
         assert_eq!(members, &vec![int, chr, null(&db)]);
 
         // Any and Unknown absorb.
@@ -239,7 +244,9 @@ mod tests {
         assert_eq!(union_of(&db, []), null(&db));
         // `T | NULL` stays a union with NULL last.
         let optional = union_of(&db, [null(&db), chr]);
-        let TyKind::Union(members) = optional.kind(&db) else { panic!("expected a union") };
+        let TyKind::Union(members) = optional.kind(&db) else {
+            panic!("expected a union")
+        };
         assert_eq!(members, &vec![chr, null(&db)]);
     }
 

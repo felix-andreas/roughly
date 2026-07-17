@@ -186,7 +186,9 @@ pub enum ExpressionKind {
 
 /// Lower one item subtree (rooted at offset 0) into a `Module`.
 pub fn lower_item(root: &SyntaxNode) -> Module {
-    let mut lowering = Lowering { module: Module::default() };
+    let mut lowering = Lowering {
+        module: Module::default(),
+    };
     let root_id = lowering.lower_expression(root);
     lowering.module.root = Some(root_id);
     lowering.module
@@ -209,7 +211,8 @@ impl Lowering {
 
     /// Child expressions of a node, trivia and error regions skipped.
     fn child_expressions(node: &SyntaxNode) -> impl Iterator<Item = SyntaxNode> + '_ {
-        node.children().filter(|child| syntax::ast::is_expression_kind(child.kind()))
+        node.children()
+            .filter(|child| syntax::ast::is_expression_kind(child.kind()))
     }
 
     fn lower_optional(&mut self, node: Option<SyntaxNode>, fallback: TextRange) -> ExprId {
@@ -271,7 +274,14 @@ impl Lowering {
                 let target = Self::child_expressions(node).next();
                 let target = self.lower_optional(target, range);
                 let arguments = self.lower_arguments(node);
-                self.allocate(ExpressionKind::Index { double, target, arguments }, range)
+                self.allocate(
+                    ExpressionKind::Index {
+                        double,
+                        target,
+                        arguments,
+                    },
+                    range,
+                )
             }
             SyntaxKind::DOLLAR_EXPR | SyntaxKind::AT_EXPR => {
                 let at = node.kind() == SyntaxKind::AT_EXPR;
@@ -289,7 +299,14 @@ impl Lowering {
                 let mut children = Self::child_expressions(node);
                 let package = children.next().and_then(|child| field_name_text(&child));
                 let name = children.next().and_then(|child| field_name_text(&child));
-                self.allocate(ExpressionKind::Namespace { internal, package, name }, range)
+                self.allocate(
+                    ExpressionKind::Namespace {
+                        internal,
+                        package,
+                        name,
+                    },
+                    range,
+                )
             }
             SyntaxKind::FUNCTION_DEF => {
                 let parameters = node
@@ -310,7 +327,11 @@ impl Lowering {
                 let then_branch = self.lower_optional(then_branch, range);
                 let else_branch = else_branch.map(|node| self.lower_expression(&node));
                 self.allocate(
-                    ExpressionKind::If { condition, then_branch, else_branch },
+                    ExpressionKind::If {
+                        condition,
+                        then_branch,
+                        else_branch,
+                    },
                     range,
                 )
             }
@@ -330,7 +351,12 @@ impl Lowering {
                 let sequence = self.lower_optional(sequence, range);
                 let body = self.lower_optional(body, range);
                 self.allocate(
-                    ExpressionKind::For { variable, variable_range, sequence, body },
+                    ExpressionKind::For {
+                        variable,
+                        variable_range,
+                        sequence,
+                        body,
+                    },
                     range,
                 )
             }
@@ -360,11 +386,16 @@ impl Lowering {
         let operator_token = binary.operator();
         let lhs = binary.lhs();
         let rhs = binary.rhs();
-        let Some(operator_token) = operator_token else { return self.missing(range) };
+        let Some(operator_token) = operator_token else {
+            return self.missing(range);
+        };
 
         match operator_token.kind() {
             // Assignments normalize to target/value regardless of spelling.
-            SyntaxKind::LESS_MINUS | SyntaxKind::EQ | SyntaxKind::LESS2_MINUS | SyntaxKind::COLON_EQ => {
+            SyntaxKind::LESS_MINUS
+            | SyntaxKind::EQ
+            | SyntaxKind::LESS2_MINUS
+            | SyntaxKind::COLON_EQ => {
                 let spelling = match operator_token.kind() {
                     SyntaxKind::LESS_MINUS => AssignSpelling::Local,
                     SyntaxKind::EQ => AssignSpelling::Equals,
@@ -373,7 +404,14 @@ impl Lowering {
                 };
                 let target = self.lower_optional(lhs, range);
                 let value = self.lower_optional(rhs, range);
-                self.allocate(ExpressionKind::Assign { spelling, target, value }, range)
+                self.allocate(
+                    ExpressionKind::Assign {
+                        spelling,
+                        target,
+                        value,
+                    },
+                    range,
+                )
             }
             SyntaxKind::MINUS_GREATER | SyntaxKind::MINUS_GREATER2 => {
                 let spelling = if operator_token.kind() == SyntaxKind::MINUS_GREATER {
@@ -383,7 +421,14 @@ impl Lowering {
                 };
                 let value = self.lower_optional(lhs, range);
                 let target = self.lower_optional(rhs, range);
-                self.allocate(ExpressionKind::Assign { spelling, target, value }, range)
+                self.allocate(
+                    ExpressionKind::Assign {
+                        spelling,
+                        target,
+                        value,
+                    },
+                    range,
+                )
             }
             kind => {
                 let Some(operator) = binary_operator(kind) else {
@@ -397,7 +442,9 @@ impl Lowering {
     }
 
     fn lower_arguments(&mut self, node: &SyntaxNode) -> Vec<Argument> {
-        let Some(list) = node.children().find(|child| child.kind() == SyntaxKind::ARGUMENT_LIST)
+        let Some(list) = node
+            .children()
+            .find(|child| child.kind() == SyntaxKind::ARGUMENT_LIST)
         else {
             return Vec::new();
         };
@@ -448,16 +495,23 @@ impl Lowering {
                             .to_owned()
                     })
                     .unwrap_or_default();
-                let default =
-                    Self::child_expressions(parameter).next().map(|node| self.lower_expression(&node));
-                Parameter { name, default, range: parameter.text_range() }
+                let default = Self::child_expressions(parameter)
+                    .next()
+                    .map(|node| self.lower_expression(&node));
+                Parameter {
+                    name,
+                    default,
+                    range: parameter.text_range(),
+                }
             })
             .collect()
     }
 }
 
 fn literal_kind(node: &SyntaxNode) -> LiteralKind {
-    let Some(token) = node.first_token() else { return LiteralKind::Null };
+    let Some(token) = node.first_token() else {
+        return LiteralKind::Null;
+    };
     match token.kind() {
         SyntaxKind::INTEGER => LiteralKind::Integer,
         SyntaxKind::DOUBLE => LiteralKind::Double,
@@ -478,7 +532,9 @@ fn literal_kind(node: &SyntaxNode) -> LiteralKind {
 /// later slice; raw strings strip their full delimiters.
 fn string_value(text: &str) -> String {
     if let Some(rest) = text.strip_prefix(['r', 'R']) {
-        let Some(quote) = rest.chars().next() else { return text.to_owned() };
+        let Some(quote) = rest.chars().next() else {
+            return text.to_owned();
+        };
         let inner = &rest[quote.len_utf8()..];
         let dashes = inner.chars().take_while(|&c| c == '-').count();
         let open = inner[dashes..].chars().next();
@@ -493,7 +549,10 @@ fn string_value(text: &str) -> String {
             closer.extend(std::iter::repeat_n('-', dashes));
             closer.push(quote);
             let body = &inner[body_start..];
-            return body.strip_suffix(closer.as_str()).unwrap_or(body).to_owned();
+            return body
+                .strip_suffix(closer.as_str())
+                .unwrap_or(body)
+                .to_owned();
         }
         return text.to_owned();
     }
