@@ -7,6 +7,8 @@
 //! class-constructor calls and function bodies), never whole files, so an edit
 //! recomputes only the items whose derived values actually changed.
 
+pub mod hir;
+
 use syntax::Parse;
 use syntax::ast::AstNode as _;
 
@@ -163,6 +165,15 @@ impl ItemSyntax {
     }
 }
 
+/// The lowered HIR of one item, derived from its position-independent green
+/// subtree only — never from the whole file — so it stays equal (and cuts off)
+/// across edits elsewhere in the file. `None` when the item no longer exists.
+#[salsa::tracked(returns(clone))]
+pub fn item_hir<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<hir::Module> {
+    let syntax = item_syntax(db, item)?;
+    Some(hir::lower_item(&syntax.syntax_node()))
+}
+
 /// Kind + name of one top-level statement, mirroring R assignment spellings:
 /// `<-`, `=`, `<<-`, `:=` bind on the left, `->`, `->>` on the right.
 fn classify_top_level(node: &syntax::SyntaxNode) -> (ItemKind, Option<String>) {
@@ -257,5 +268,42 @@ mod tests {
         file.set_text(&mut db).to("f <- function(x) x\n".to_owned());
         let g = Item::new(&db, file, ItemKind::Function, Some("g".to_owned()), None, 0);
         assert_eq!(item_syntax(&db, g), None);
+    }
+
+    #[test]
+    fn hir_lowers_and_survives_shifts() {
+        let mut db = RootDatabase::default();
+        let file = SourceFile::new(
+            &db,
+            "pad <- 1\nadd <- function(x, y = 2) x + y\n".to_owned(),
+            DocumentKind::Package,
+        );
+        let add = Item::new(&db, file, ItemKind::Function, Some("add".to_owned()), None, 0);
+        let before = item_hir(&db, add).expect("add lowers");
+        let root = before.expression(before.root.expect("has root"));
+        let hir::ExpressionKind::Assign { value, .. } = &root.kind else {
+            panic!("expected an assignment root, got {root:?}");
+        };
+        let hir::ExpressionKind::Function { parameters, body } =
+            &before.expression(*value).kind
+        else {
+            panic!("expected a function value");
+        };
+        assert_eq!(parameters.len(), 2);
+        assert_eq!(parameters[0].name, "x");
+        assert_eq!(parameters[1].name, "y");
+        assert!(parameters[1].default.is_some());
+        let hir::ExpressionKind::Binary { operator, .. } = &before.expression(*body).kind else {
+            panic!("expected a binary body");
+        };
+        assert_eq!(*operator, hir::BinaryOperator::Add);
+
+        // Shifting `add` (an edit in the item before it) reproduces an equal
+        // Module: spans are item-relative, so nothing downstream re-runs.
+        file.set_text(&mut db)
+            .to("pad <- 100000\nadd <- function(x, y = 2) x + y\n".to_owned());
+        let add = Item::new(&db, file, ItemKind::Function, Some("add".to_owned()), None, 0);
+        let after = item_hir(&db, add).expect("add still lowers");
+        assert_eq!(before, after);
     }
 }

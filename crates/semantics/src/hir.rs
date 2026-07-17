@@ -1,0 +1,551 @@
+//! Per-item HIR: the desugared expression tree inference walks.
+//!
+//! Lowered from an item's green subtree (`item_syntax`), never from the whole
+//! file, so every span here is **item-relative** (the subtree's offsets start
+//! at 0). That keeps the HIR position-independent: an edit elsewhere in the
+//! file reproduces an equal `Module`, and salsa's early cutoff stops
+//! recomputation before naming or inference run. Absolute positions are
+//! reintroduced only at the diagnostic-rendering edge.
+//!
+//! Error tolerance mirrors the project contract: a broken region lowers to
+//! `Missing` (no cascading diagnostics — its syntax error already marks it),
+//! and well-formed siblings lower normally.
+
+use syntax::ast::AstNode as _;
+use syntax::{SyntaxKind, SyntaxNode, TextRange};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ExprId(pub u32);
+
+/// One item's lowered body: an expression arena plus the root.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Module {
+    pub expressions: Vec<Expression>,
+    pub root: Option<ExprId>,
+}
+
+impl Module {
+    pub fn expression(&self, id: ExprId) -> &Expression {
+        &self.expressions[id.0 as usize]
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Expression {
+    pub kind: ExpressionKind,
+    /// Item-relative source range.
+    pub range: TextRange,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AssignSpelling {
+    /// `<-` / `->` (the HIR normalizes right assignment into left form).
+    Local,
+    /// `=`
+    Equals,
+    /// `<<-` / `->>`
+    Super,
+    /// `:=`
+    Walrus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum UnaryOperator {
+    Minus,
+    Plus,
+    Not,
+    Tilde,
+    Help,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BinaryOperator {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Power,
+    Modulo,
+    IntegerDivide,
+    /// Any other `%…%` operator (including user-defined).
+    Special,
+    Sequence,
+    Less,
+    Greater,
+    LessEq,
+    GreaterEq,
+    Equal,
+    NotEqual,
+    And,
+    And2,
+    Or,
+    Or2,
+    Pipe,
+    Tilde,
+    Help,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LiteralKind {
+    Integer,
+    Double,
+    Complex,
+    String(String),
+    Logical(bool),
+    Null,
+    Na,
+    Inf,
+    NaN,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Argument {
+    pub name: Option<String>,
+    /// `None` is a positional hole (`f(, x)`) or an empty tagged value.
+    pub value: Option<ExprId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Parameter {
+    pub name: String,
+    pub default: Option<ExprId>,
+    pub range: TextRange,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExpressionKind {
+    /// A hole from a broken region: types as Unknown, records no strict
+    /// origin, produces no diagnostics of its own.
+    Missing,
+    Literal(LiteralKind),
+    /// A name reference (`x`, backticks stripped, `...`, `..1`, `_`).
+    NameRef(String),
+    Assign {
+        spelling: AssignSpelling,
+        target: ExprId,
+        value: ExprId,
+    },
+    Unary {
+        operator: UnaryOperator,
+        operand: ExprId,
+    },
+    Binary {
+        operator: BinaryOperator,
+        lhs: ExprId,
+        rhs: ExprId,
+    },
+    Call {
+        callee: ExprId,
+        arguments: Vec<Argument>,
+    },
+    /// `x[…]` / `x[[…]]`.
+    Index {
+        double: bool,
+        target: ExprId,
+        arguments: Vec<Argument>,
+    },
+    /// `x$name` / `x@name`.
+    Field {
+        at: bool,
+        target: ExprId,
+        name: Option<String>,
+    },
+    /// `pkg::name` / `pkg:::name`.
+    Namespace {
+        internal: bool,
+        package: Option<String>,
+        name: Option<String>,
+    },
+    Function {
+        parameters: Vec<Parameter>,
+        body: ExprId,
+    },
+    If {
+        condition: ExprId,
+        then_branch: ExprId,
+        else_branch: Option<ExprId>,
+    },
+    For {
+        variable: Option<String>,
+        variable_range: Option<TextRange>,
+        sequence: ExprId,
+        body: ExprId,
+    },
+    While {
+        condition: ExprId,
+        body: ExprId,
+    },
+    Repeat {
+        body: ExprId,
+    },
+    Block(Vec<ExprId>),
+    Paren(ExprId),
+    Break,
+    Next,
+}
+
+/// Lower one item subtree (rooted at offset 0) into a `Module`.
+pub fn lower_item(root: &SyntaxNode) -> Module {
+    let mut lowering = Lowering { module: Module::default() };
+    let root_id = lowering.lower_expression(root);
+    lowering.module.root = Some(root_id);
+    lowering.module
+}
+
+struct Lowering {
+    module: Module,
+}
+
+impl Lowering {
+    fn allocate(&mut self, kind: ExpressionKind, range: TextRange) -> ExprId {
+        let id = ExprId(self.module.expressions.len() as u32);
+        self.module.expressions.push(Expression { kind, range });
+        id
+    }
+
+    fn missing(&mut self, range: TextRange) -> ExprId {
+        self.allocate(ExpressionKind::Missing, range)
+    }
+
+    /// Child expressions of a node, trivia and error regions skipped.
+    fn child_expressions(node: &SyntaxNode) -> impl Iterator<Item = SyntaxNode> + '_ {
+        node.children().filter(|child| syntax::ast::is_expression_kind(child.kind()))
+    }
+
+    fn lower_optional(&mut self, node: Option<SyntaxNode>, fallback: TextRange) -> ExprId {
+        match node {
+            Some(node) => self.lower_expression(&node),
+            None => self.missing(fallback),
+        }
+    }
+
+    fn lower_expression(&mut self, node: &SyntaxNode) -> ExprId {
+        let range = node.text_range();
+        match node.kind() {
+            SyntaxKind::NAME => {
+                let text = syntax::ast::Name::cast(node.clone())
+                    .and_then(|name| name.text())
+                    .unwrap_or_default();
+                self.allocate(ExpressionKind::NameRef(text), range)
+            }
+            SyntaxKind::LITERAL => {
+                let kind = literal_kind(node);
+                self.allocate(ExpressionKind::Literal(kind), range)
+            }
+            SyntaxKind::PAREN_EXPR => {
+                let inner = Self::child_expressions(node).next();
+                let inner = self.lower_optional(inner, range);
+                self.allocate(ExpressionKind::Paren(inner), range)
+            }
+            SyntaxKind::BRACE_EXPR => {
+                let statements: Vec<ExprId> = Self::child_expressions(node)
+                    .collect::<Vec<_>>()
+                    .iter()
+                    .map(|child| self.lower_expression(child))
+                    .collect();
+                self.allocate(ExpressionKind::Block(statements), range)
+            }
+            SyntaxKind::UNARY_EXPR => {
+                let operator = node
+                    .children_with_tokens()
+                    .filter_map(|element| element.into_token())
+                    .find_map(|token| unary_operator(token.kind()));
+                let operand = Self::child_expressions(node).next();
+                let operand = self.lower_optional(operand, range);
+                match operator {
+                    Some(operator) => {
+                        self.allocate(ExpressionKind::Unary { operator, operand }, range)
+                    }
+                    None => self.missing(range),
+                }
+            }
+            SyntaxKind::BINARY_EXPR => self.lower_binary(node, range),
+            SyntaxKind::CALL_EXPR => {
+                let callee = Self::child_expressions(node).next();
+                let callee = self.lower_optional(callee, range);
+                let arguments = self.lower_arguments(node);
+                self.allocate(ExpressionKind::Call { callee, arguments }, range)
+            }
+            SyntaxKind::SUBSET_EXPR | SyntaxKind::SUBSET2_EXPR => {
+                let double = node.kind() == SyntaxKind::SUBSET2_EXPR;
+                let target = Self::child_expressions(node).next();
+                let target = self.lower_optional(target, range);
+                let arguments = self.lower_arguments(node);
+                self.allocate(ExpressionKind::Index { double, target, arguments }, range)
+            }
+            SyntaxKind::DOLLAR_EXPR | SyntaxKind::AT_EXPR => {
+                let at = node.kind() == SyntaxKind::AT_EXPR;
+                let mut children = Self::child_expressions(node);
+                let target = children.next();
+                let target = self.lower_optional(target, range);
+                let name = children.next().and_then(|child| field_name_text(&child));
+                self.allocate(ExpressionKind::Field { at, target, name }, range)
+            }
+            SyntaxKind::NAMESPACE_EXPR => {
+                let internal = node
+                    .children_with_tokens()
+                    .filter_map(|element| element.into_token())
+                    .any(|token| token.kind() == SyntaxKind::COLON3);
+                let mut children = Self::child_expressions(node);
+                let package = children.next().and_then(|child| field_name_text(&child));
+                let name = children.next().and_then(|child| field_name_text(&child));
+                self.allocate(ExpressionKind::Namespace { internal, package, name }, range)
+            }
+            SyntaxKind::FUNCTION_DEF => {
+                let parameters = node
+                    .children()
+                    .find(|child| child.kind() == SyntaxKind::PARAMETER_LIST)
+                    .map(|list| self.lower_parameters(&list))
+                    .unwrap_or_default();
+                let body = Self::child_expressions(node).next();
+                let body = self.lower_optional(body, range);
+                self.allocate(ExpressionKind::Function { parameters, body }, range)
+            }
+            SyntaxKind::IF_EXPR => {
+                let mut children = Self::child_expressions(node);
+                let condition = children.next();
+                let then_branch = children.next();
+                let else_branch = children.next();
+                let condition = self.lower_optional(condition, range);
+                let then_branch = self.lower_optional(then_branch, range);
+                let else_branch = else_branch.map(|node| self.lower_expression(&node));
+                self.allocate(
+                    ExpressionKind::If { condition, then_branch, else_branch },
+                    range,
+                )
+            }
+            SyntaxKind::FOR_EXPR => {
+                let mut children = Self::child_expressions(node);
+                // The loop variable is the first NAME child; sequence and body follow.
+                let variable_node = children.next();
+                let (variable, variable_range) = match &variable_node {
+                    Some(node) if node.kind() == SyntaxKind::NAME => (
+                        syntax::ast::Name::cast(node.clone()).and_then(|name| name.text()),
+                        Some(node.text_range()),
+                    ),
+                    _ => (None, None),
+                };
+                let sequence = children.next();
+                let body = children.next();
+                let sequence = self.lower_optional(sequence, range);
+                let body = self.lower_optional(body, range);
+                self.allocate(
+                    ExpressionKind::For { variable, variable_range, sequence, body },
+                    range,
+                )
+            }
+            SyntaxKind::WHILE_EXPR => {
+                let mut children = Self::child_expressions(node);
+                let condition = children.next();
+                let body = children.next();
+                let condition = self.lower_optional(condition, range);
+                let body = self.lower_optional(body, range);
+                self.allocate(ExpressionKind::While { condition, body }, range)
+            }
+            SyntaxKind::REPEAT_EXPR => {
+                let body = Self::child_expressions(node).next();
+                let body = self.lower_optional(body, range);
+                self.allocate(ExpressionKind::Repeat { body }, range)
+            }
+            SyntaxKind::BREAK_EXPR => self.allocate(ExpressionKind::Break, range),
+            SyntaxKind::NEXT_EXPR => self.allocate(ExpressionKind::Next, range),
+            _ => self.missing(range),
+        }
+    }
+
+    fn lower_binary(&mut self, node: &SyntaxNode, range: TextRange) -> ExprId {
+        let Some(binary) = syntax::ast::BinaryExpr::cast(node.clone()) else {
+            return self.missing(range);
+        };
+        let operator_token = binary.operator();
+        let lhs = binary.lhs();
+        let rhs = binary.rhs();
+        let Some(operator_token) = operator_token else { return self.missing(range) };
+
+        match operator_token.kind() {
+            // Assignments normalize to target/value regardless of spelling.
+            SyntaxKind::LESS_MINUS | SyntaxKind::EQ | SyntaxKind::LESS2_MINUS | SyntaxKind::COLON_EQ => {
+                let spelling = match operator_token.kind() {
+                    SyntaxKind::LESS_MINUS => AssignSpelling::Local,
+                    SyntaxKind::EQ => AssignSpelling::Equals,
+                    SyntaxKind::LESS2_MINUS => AssignSpelling::Super,
+                    _ => AssignSpelling::Walrus,
+                };
+                let target = self.lower_optional(lhs, range);
+                let value = self.lower_optional(rhs, range);
+                self.allocate(ExpressionKind::Assign { spelling, target, value }, range)
+            }
+            SyntaxKind::MINUS_GREATER | SyntaxKind::MINUS_GREATER2 => {
+                let spelling = if operator_token.kind() == SyntaxKind::MINUS_GREATER {
+                    AssignSpelling::Local
+                } else {
+                    AssignSpelling::Super
+                };
+                let value = self.lower_optional(lhs, range);
+                let target = self.lower_optional(rhs, range);
+                self.allocate(ExpressionKind::Assign { spelling, target, value }, range)
+            }
+            kind => {
+                let Some(operator) = binary_operator(kind) else {
+                    return self.missing(range);
+                };
+                let lhs = self.lower_optional(lhs, range);
+                let rhs = self.lower_optional(rhs, range);
+                self.allocate(ExpressionKind::Binary { operator, lhs, rhs }, range)
+            }
+        }
+    }
+
+    fn lower_arguments(&mut self, node: &SyntaxNode) -> Vec<Argument> {
+        let Some(list) = node.children().find(|child| child.kind() == SyntaxKind::ARGUMENT_LIST)
+        else {
+            return Vec::new();
+        };
+        list.children()
+            .filter(|child| child.kind() == SyntaxKind::ARGUMENT)
+            .collect::<Vec<_>>()
+            .iter()
+            .map(|argument| {
+                let name = argument
+                    .children()
+                    .find(|child| {
+                        child.kind() == SyntaxKind::NAME || child.kind() == SyntaxKind::LITERAL
+                    })
+                    .filter(|_| {
+                        argument
+                            .children_with_tokens()
+                            .filter_map(|element| element.into_token())
+                            .any(|token| token.kind() == SyntaxKind::EQ)
+                    })
+                    .and_then(|tag| field_name_text(&tag));
+                let value_node = {
+                    let mut expressions = Self::child_expressions(argument);
+                    if name.is_some() {
+                        // The tag itself is the first expression child.
+                        expressions.next();
+                    }
+                    expressions.next()
+                };
+                let value = value_node.map(|node| self.lower_expression(&node));
+                Argument { name, value }
+            })
+            .collect()
+    }
+
+    fn lower_parameters(&mut self, list: &SyntaxNode) -> Vec<Parameter> {
+        list.children()
+            .filter(|child| child.kind() == SyntaxKind::PARAMETER)
+            .collect::<Vec<_>>()
+            .iter()
+            .map(|parameter| {
+                let name = parameter
+                    .first_token()
+                    .map(|token| {
+                        let text = token.text();
+                        text.strip_prefix('`')
+                            .and_then(|t| t.strip_suffix('`'))
+                            .unwrap_or(text)
+                            .to_owned()
+                    })
+                    .unwrap_or_default();
+                let default =
+                    Self::child_expressions(parameter).next().map(|node| self.lower_expression(&node));
+                Parameter { name, default, range: parameter.text_range() }
+            })
+            .collect()
+    }
+}
+
+fn literal_kind(node: &SyntaxNode) -> LiteralKind {
+    let Some(token) = node.first_token() else { return LiteralKind::Null };
+    match token.kind() {
+        SyntaxKind::INTEGER => LiteralKind::Integer,
+        SyntaxKind::DOUBLE => LiteralKind::Double,
+        SyntaxKind::COMPLEX => LiteralKind::Complex,
+        SyntaxKind::STRING | SyntaxKind::RAW_STRING => {
+            LiteralKind::String(string_value(token.text()))
+        }
+        SyntaxKind::TRUE_KW => LiteralKind::Logical(true),
+        SyntaxKind::FALSE_KW => LiteralKind::Logical(false),
+        SyntaxKind::NULL_KW => LiteralKind::Null,
+        SyntaxKind::INF_KW => LiteralKind::Inf,
+        SyntaxKind::NAN_KW => LiteralKind::NaN,
+        _ => LiteralKind::Na,
+    }
+}
+
+/// The value of a string literal with quotes stripped. Escape *decoding* is a
+/// later slice; raw strings strip their full delimiters.
+fn string_value(text: &str) -> String {
+    if let Some(rest) = text.strip_prefix(['r', 'R']) {
+        let Some(quote) = rest.chars().next() else { return text.to_owned() };
+        let inner = &rest[quote.len_utf8()..];
+        let dashes = inner.chars().take_while(|&c| c == '-').count();
+        let open = inner[dashes..].chars().next();
+        if open.is_some() {
+            let body_start = dashes + 1;
+            let mut closer = String::new();
+            closer.push(match open {
+                Some('(') => ')',
+                Some('[') => ']',
+                _ => '}',
+            });
+            closer.extend(std::iter::repeat_n('-', dashes));
+            closer.push(quote);
+            let body = &inner[body_start..];
+            return body.strip_suffix(closer.as_str()).unwrap_or(body).to_owned();
+        }
+        return text.to_owned();
+    }
+    text.trim_matches(['"', '\'']).to_owned()
+}
+
+fn field_name_text(node: &SyntaxNode) -> Option<String> {
+    match node.kind() {
+        SyntaxKind::NAME => syntax::ast::Name::cast(node.clone()).and_then(|name| name.text()),
+        SyntaxKind::LITERAL => {
+            let token = node.first_token()?;
+            (token.kind() == SyntaxKind::STRING).then(|| string_value(token.text()))
+        }
+        _ => None,
+    }
+}
+
+fn unary_operator(kind: SyntaxKind) -> Option<UnaryOperator> {
+    let operator = match kind {
+        SyntaxKind::MINUS => UnaryOperator::Minus,
+        SyntaxKind::PLUS => UnaryOperator::Plus,
+        SyntaxKind::BANG => UnaryOperator::Not,
+        SyntaxKind::TILDE => UnaryOperator::Tilde,
+        SyntaxKind::QUESTION => UnaryOperator::Help,
+        _ => return None,
+    };
+    Some(operator)
+}
+
+fn binary_operator(kind: SyntaxKind) -> Option<BinaryOperator> {
+    let operator = match kind {
+        SyntaxKind::PLUS => BinaryOperator::Add,
+        SyntaxKind::MINUS => BinaryOperator::Subtract,
+        SyntaxKind::STAR => BinaryOperator::Multiply,
+        SyntaxKind::SLASH => BinaryOperator::Divide,
+        SyntaxKind::CARET => BinaryOperator::Power,
+        SyntaxKind::SPECIAL => BinaryOperator::Special,
+        SyntaxKind::PIPE_GREATER => BinaryOperator::Pipe,
+        SyntaxKind::COLON => BinaryOperator::Sequence,
+        SyntaxKind::LESS => BinaryOperator::Less,
+        SyntaxKind::GREATER => BinaryOperator::Greater,
+        SyntaxKind::LESS_EQ => BinaryOperator::LessEq,
+        SyntaxKind::GREATER_EQ => BinaryOperator::GreaterEq,
+        SyntaxKind::EQ2 => BinaryOperator::Equal,
+        SyntaxKind::BANG_EQ => BinaryOperator::NotEqual,
+        SyntaxKind::AMP => BinaryOperator::And,
+        SyntaxKind::AMP2 => BinaryOperator::And2,
+        SyntaxKind::PIPE => BinaryOperator::Or,
+        SyntaxKind::PIPE2 => BinaryOperator::Or2,
+        SyntaxKind::TILDE => BinaryOperator::Tilde,
+        SyntaxKind::QUESTION => BinaryOperator::Help,
+        _ => return None,
+    };
+    Some(operator)
+}
