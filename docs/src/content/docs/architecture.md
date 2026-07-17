@@ -3,6 +3,10 @@ title: Architecture
 description: Implementation architecture of Roughly's analysis engine and its durable phase and representation boundaries
 ---
 
+:::note
+This page describes the **current shipped architecture**. A greenfield rewrite of the whole stack (hand-written parser, rowan-style syntax trees, salsa-based semantics) is the decided direction; until its cutover, the stack described here remains the shipping product and is frozen except for bug fixes. The rewrite's contract lives in the repository's decision log (`.agents/memory/decisions.md`, "target architecture" record); this page will be rewritten at cutover.
+:::
+
 This document is the authoritative implementation architecture for Roughly's analysis. Two crates cooperate:
 
 - **`engine`** — a generic red-green *memoized query* core. It holds no R knowledge and does not depend on `analysis`; it is the substrate that turns the analysis phases into incrementally-recomputed queries with automatic, dependency-tracked invalidation.
