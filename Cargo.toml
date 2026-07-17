@@ -4,7 +4,7 @@ members = ["crates/*", "editors/zed"]
 default-members = ["crates/roughly"]
 
 [workspace.package]
-version = "0.2.7-alpha"
+version = "0.2.8-alpha"
 license = "UPL-1.0"
 repository = "https://github.com/felix-andreas/roughly"
 
