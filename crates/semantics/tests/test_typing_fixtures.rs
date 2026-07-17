@@ -11,9 +11,17 @@ use semantics::{
 use std::path::Path;
 
 fn render(source: &str) -> String {
+    render_as(source, DocumentKind::Package)
+}
+
+fn render_script(source: &str) -> String {
+    render_as(source, DocumentKind::Script)
+}
+
+fn render_as(source: &str, kind: DocumentKind) -> String {
     let db = RootDatabase::default();
     semantics::stubs::install_shipped_stubs(&db);
-    let file = SourceFile::new(&db, source.to_owned(), DocumentKind::Package);
+    let file = SourceFile::new(&db, source.to_owned(), kind);
     ProjectFiles::new(&db, vec![file]);
 
     let mut output = String::new();
@@ -56,4 +64,11 @@ fn render(source: &str) -> String {
 fn typing_fixtures() {
     let suite = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/typing");
     syntax::testing::run_fixture_suite(&suite, &render);
+}
+
+/// The same pipeline over script documents: one sequential top-down scope.
+#[test]
+fn typing_script_fixtures() {
+    let suite = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/typing-scripts");
+    syntax::testing::run_fixture_suite(&suite, &render_script);
 }

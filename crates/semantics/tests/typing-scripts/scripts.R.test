@@ -1,0 +1,50 @@
+#==== sequential
+#---- later_items_see_earlier_bindings
+radius <- 2.5
+area <- 3.14 * radius * radius
+describe <- function() area + 1
+#++++
+radius: double
+area: double
+describe: fn() -> double
+
+#---- rebinding_changes_later_uses
+x <- 1L
+first_use <- x + 1L
+x <- "text"
+second_use <- function() nchar(x)
+#++++
+x: integer
+first_use: integer
+x: character
+second_use: fn() -> integer
+
+#---- script_calls_its_own_helpers
+double_it <- function(n) n * 2L
+result <- double_it(21L)
+#++++
+double_it: <T: numeric> fn(n: T) -> T
+result: integer
+
+#---- script_local_type_declarations
+#: @type Point {list{x: double, y: double}}
+#: @new Point
+origin <- list(x = 0, y = 0)
+norm <- function() origin$x
+#++++
+origin: Point
+norm: fn() -> double
+
+#---- stub_names_still_resolve
+sizes <- c(3L, 1L, 2L)
+total <- sum(sizes)
+#++++
+sizes: integer[]
+total: integer
+
+#---- script_definition_shadows_a_stub
+sum <- function(a, b) a + b
+shadowed <- sum(1L, 2L)
+#++++
+sum: <T: numeric> fn(a: T, b: T) -> T
+shadowed: integer

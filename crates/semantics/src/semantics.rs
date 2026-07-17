@@ -399,10 +399,7 @@ pub fn item_check<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<check::ItemCh
     let naming = item_naming(db, item)?;
     let annotation = item_annotation_syntax(db, item)
         .map(|syntax| annotations::lower_annotation(db, &syntax.syntax_node()));
-    let globals = SalsaGlobals {
-        db,
-        definitions: ProjectFiles::try_get(db).map(|files| package_definitions(db, files)),
-    };
+    let globals = SalsaGlobals::for_item(db, item);
     Some(check::check_item_with_annotation(
         db,
         &module,
@@ -436,10 +433,54 @@ fn item_check_recover<'db>(
 struct SalsaGlobals<'db> {
     db: &'db dyn Db,
     definitions: Option<rustc_hash::FxHashMap<String, Item<'db>>>,
+    /// For an item in a script: the script's earlier items, in order. A
+    /// script executes top-down, so a binding is visible only after its
+    /// assignment and rebinding changes later uses — the nearest earlier
+    /// definition wins, before package globals.
+    script_predecessors: Option<Vec<Item<'db>>>,
+    /// The script file itself, for its file-local type declarations.
+    script_file: Option<SourceFile>,
+}
+
+impl<'db> SalsaGlobals<'db> {
+    fn for_item(db: &'db dyn Db, item: Item<'db>) -> SalsaGlobals<'db> {
+        let definitions = ProjectFiles::try_get(db).map(|files| package_definitions(db, files));
+        let file = *item.file(db);
+        let is_script = *file.kind(db) == DocumentKind::Script;
+        let script_predecessors = is_script.then(|| {
+            let items = item_tree(db, file);
+            let index = items
+                .iter()
+                .position(|&candidate| candidate == item)
+                .unwrap_or(items.len());
+            items[..index].to_vec()
+        });
+        SalsaGlobals {
+            db,
+            definitions,
+            script_predecessors,
+            script_file: is_script.then_some(file),
+        }
+    }
+
+    fn script_definition(&self, name: &str) -> Option<Item<'db>> {
+        self.script_predecessors
+            .as_ref()?
+            .iter()
+            .rev()
+            .find(|item| {
+                matches!(*item.kind(self.db), ItemKind::Function | ItemKind::Value)
+                    && item.name(self.db).as_deref() == Some(name)
+            })
+            .copied()
+    }
 }
 
 impl<'db> check::GlobalEnv<'db> for SalsaGlobals<'db> {
     fn scheme(&self, name: &str) -> Option<types::TypeScheme<'db>> {
+        if let Some(item) = self.script_definition(name) {
+            return Some(global_scheme(self.db, item));
+        }
         if let Some(item) = self
             .definitions
             .as_ref()
@@ -455,8 +496,11 @@ impl<'db> check::GlobalEnv<'db> for SalsaGlobals<'db> {
     }
 
     fn overloads(&self, name: &str) -> Option<Vec<types::TypeScheme<'db>>> {
-        // A package definition wins over the stub set, disabling per-call
-        // overload selection for that name.
+        // A script-local or package definition wins over the stub set,
+        // disabling per-call overload selection for that name.
+        if self.script_definition(name).is_some() {
+            return None;
+        }
         if self
             .definitions
             .as_ref()
@@ -471,9 +515,17 @@ impl<'db> check::GlobalEnv<'db> for SalsaGlobals<'db> {
     fn type_definitions(
         &self,
     ) -> rustc_hash::FxHashMap<types::Name<'db>, annotations::NamedDefinition<'db>> {
-        ProjectFiles::try_get(self.db)
+        let mut definitions = ProjectFiles::try_get(self.db)
             .map(|files| project_type_definitions(self.db, files))
-            .unwrap_or_default()
+            .unwrap_or_default();
+        // A script's own `@type` / `@alias` declarations are visible to
+        // itself (and only to itself), shadowing project-global names.
+        if let Some(file) = self.script_file {
+            for definition in file_type_definitions(self.db, file) {
+                definitions.insert(definition.name, definition);
+            }
+        }
+        definitions
     }
 }
 
