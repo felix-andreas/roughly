@@ -27,7 +27,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "analysis"
+name = "analysis-legacy"
 version = "0.2.8-alpha"
 dependencies = [
  "fixtures",
@@ -412,10 +412,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34aa73646ffb006b8f5147f3dc182bd4bcb190227ce861fc4a4844bf8e3cb2c0"
 
 [[package]]
-name = "engine"
+name = "engine-legacy"
 version = "0.2.8-alpha"
 dependencies = [
- "analysis",
+ "analysis-legacy",
  "ropey",
  "rustc-hash",
  "stacker",
@@ -1219,14 +1219,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "roughly"
+name = "roughly-legacy"
 version = "0.2.8-alpha"
 dependencies = [
- "analysis",
+ "analysis-legacy",
  "async-lsp",
  "clap",
  "console",
- "engine",
+ "engine-legacy",
  "fixtures",
  "futures",
  "ignore",

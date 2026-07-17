@@ -7,7 +7,7 @@
 # lacks GitHub `workflow` scope (GitHub 403s workflow-file writes without it).
 #
 # What changed vs the active ci.yml: every cargo command is widened from the
-# default member (crates/roughly) to `--workspace --exclude rofy --exclude
+# default member (crates/roughly-legacy) to `--workspace --exclude rofy --exclude
 # zed_roughly`, so the analysis + engine crates (the type checker and the full
 # fixture suite) are actually linted and tested, not just built as dependencies.
 #

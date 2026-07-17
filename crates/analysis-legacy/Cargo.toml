@@ -1,10 +1,13 @@
 [package]
-name = "analysis"
+name = "analysis-legacy"
 edition = "2024"
 version.workspace = true
 publish = false
 
+# Package renamed for the greenfield rewrite; the lib target keeps its original
+# name so `use analysis::` in this frozen stack needs no source churn.
 [lib]
+name = "analysis"
 path = "src/lib.rs"
 
 [dependencies]

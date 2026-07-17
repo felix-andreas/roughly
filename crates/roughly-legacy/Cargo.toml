@@ -1,5 +1,5 @@
 [package]
-name = "roughly"
+name = "roughly-legacy"
 edition = "2024"
 # Minimum supported Rust: the code uses `if let ... && let ...` let-chains, stabilized in 1.88 — the
 # binding floor above edition 2024's own 1.85 requirement.
@@ -13,6 +13,17 @@ repository.workspace = true
 readme = "README.md"
 keywords = ["r", "language-server", "lsp", "formatter", "linter"]
 categories = ["development-tools", "command-line-utilities"]
+
+# Package renamed for the greenfield rewrite; lib and bin targets keep their original names
+# (`use roughly::`, the shipped `roughly` binary) so the frozen stack needs no source churn.
+# The new `crates/roughly` takes the bin name back at the Phase 3 cutover.
+[lib]
+name = "roughly"
+path = "src/lib.rs"
+
+[[bin]]
+name = "roughly"
+path = "src/main.rs"
 
 [dependencies]
 clap.workspace = true
@@ -31,8 +42,8 @@ tracing-subscriber.workspace = true
 tracing-tree.workspace = true
 tree-sitter.workspace = true
 serde_json.workspace = true
-analysis = { path = "../analysis" }
-engine = { path = "../engine" }
+analysis-legacy = { path = "../analysis-legacy" }
+engine-legacy = { path = "../engine-legacy" }
 
 # async-lsp
 async-lsp.workspace = true

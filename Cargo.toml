@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "editors/zed"]
-default-members = ["crates/roughly"]
+default-members = ["crates/roughly-legacy"]
 
 [workspace.package]
 version = "0.2.8-alpha"
