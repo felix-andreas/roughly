@@ -142,6 +142,37 @@ fn render_type_error_message(db: &dyn Db, error: &TypeError<'_>) -> String {
                 renderer.render(db, *found)
             )
         }
+        TypeErrorKind::NotAList { found } => {
+            format!("expected a list, found `{}`", renderer.render(db, *found))
+        }
+        TypeErrorKind::UnsupportedSubset { found } => {
+            format!("`[` is not supported on `{}`", renderer.render(db, *found))
+        }
+        TypeErrorKind::UnsupportedIndexShape { index_count } => match index_count {
+            0 => "indexing with an empty index (`x[]`) is not supported yet".to_owned(),
+            1 => "indexing with a named index argument is not supported yet".to_owned(),
+            count => format!(
+                "indexing with {count} indexes is not supported yet — matrix and data.frame subsetting is not modeled"
+            ),
+        },
+        TypeErrorKind::PositionDoesNotExist {
+            position,
+            container,
+        } => format!(
+            "position {position} does not exist in `{}`",
+            renderer.render(db, *container)
+        ),
+        TypeErrorKind::FieldDoesNotExist { field, container } => format!(
+            "field `{field}` does not exist in `{}`",
+            renderer.render(db, *container)
+        ),
+        TypeErrorKind::DollarOnAtomicVector { found } => format!(
+            "R's `$` operator is invalid on atomic vectors; this value is `{}` — extract an element with `[[` instead.",
+            renderer.render(db, *found)
+        ),
+        TypeErrorKind::MixedListElements => {
+            "All elements in `list(...)` must be either all named or all unnamed.".to_owned()
+        }
         TypeErrorKind::NoMatchingOverload {
             name,
             candidates,

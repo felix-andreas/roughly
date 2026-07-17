@@ -386,6 +386,18 @@ mod tests {
     }
 
     #[test]
+    fn namespace_access_resolves_through_globals() {
+        let db = RootDatabase::default();
+        install_shipped_stubs(&db);
+        let check = first_item_check(&db, "f <- function(x) base::length(x)\n");
+        assert!(check.errors.is_empty(), "{:?}", check.errors);
+        assert!(matches!(
+            scheme_return(&db, &check).kind(&db),
+            crate::types::TyKind::Scalar(crate::types::Atomic::Integer)
+        ));
+    }
+
+    #[test]
     fn overloads_and_replacement_across_sources() {
         let db = RootDatabase::default();
         let sources = StubSources::new(

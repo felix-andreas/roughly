@@ -67,6 +67,34 @@ pub enum TypeErrorKind<'db> {
         candidates: usize,
         first: Option<Box<TypeError<'db>>>,
     },
+    /// `[[` on a value that supports no element extraction.
+    NotAList {
+        found: Ty<'db>,
+    },
+    /// `[` on a value the slice rules do not cover.
+    UnsupportedSubset {
+        found: Ty<'db>,
+    },
+    /// Multi-index, empty, or named-index forms (`m[i, j]`) are not modeled.
+    UnsupportedIndexShape {
+        index_count: usize,
+    },
+    /// A literal `[[` position outside a fixed-shape container (1-based).
+    PositionDoesNotExist {
+        position: usize,
+        container: Ty<'db>,
+    },
+    /// A literal field name absent from a fixed-shape container.
+    FieldDoesNotExist {
+        field: String,
+        container: Ty<'db>,
+    },
+    /// R rejects `$` on every atomic vector, named ones included.
+    DollarOnAtomicVector {
+        found: Ty<'db>,
+    },
+    /// `list(...)` mixing named and unnamed elements has no modeled shape.
+    MixedListElements,
     InfiniteType,
 }
 
@@ -342,24 +370,31 @@ impl<'db> Checker<'db, '_> {
                 let arguments = arguments.clone();
                 self.infer_call_expression(range, *callee, &arguments)
             }
-            // Indexing and field access type as Unknown until the container
-            // rules land (tuple/record projection, vector element rules).
             ExpressionKind::Index {
-                target, arguments, ..
+                double,
+                target,
+                arguments,
             } => {
-                self.infer(*target);
-                for argument in arguments {
-                    if let Some(value) = argument.value {
-                        self.infer(value);
-                    }
-                }
-                self.unknown()
+                let double = *double;
+                let target = *target;
+                let arguments = arguments.clone();
+                self.infer_index(range, double, target, &arguments)
             }
-            ExpressionKind::Field { target, .. } => {
-                self.infer(*target);
-                self.unknown()
+            ExpressionKind::Field { at, target, name } => {
+                let at = *at;
+                let target = *target;
+                let name = name.clone();
+                self.infer_field(range, at, target, name)
             }
-            ExpressionKind::Namespace { .. } => self.unknown(),
+            // `pkg::name` resolves the name through the global environment
+            // (which package's namespace actually exports it is not modeled).
+            ExpressionKind::Namespace { name, .. } => match name
+                .clone()
+                .and_then(|name| self.globals.and_then(|globals| globals.scheme(&name)))
+            {
+                Some(namespace_scheme) => self.instantiate(&namespace_scheme),
+                None => self.unknown(),
+            },
             // R parameters are always matchable by name and by position, so
             // inferred function types carry every formal as a named parameter
             // (optional when it defaults); a `...` formal becomes a rest
@@ -467,8 +502,8 @@ impl<'db> Checker<'db, '_> {
 
     fn literal_ty(&mut self, literal: &LiteralKind) -> Ty<'db> {
         match literal {
-            LiteralKind::Integer => scalar(self.db, Atomic::Integer),
-            LiteralKind::Double { .. } => scalar(self.db, Atomic::Double),
+            LiteralKind::Integer(_) => scalar(self.db, Atomic::Integer),
+            LiteralKind::Double(_) => scalar(self.db, Atomic::Double),
             LiteralKind::Complex => scalar(self.db, Atomic::Complex),
             LiteralKind::String(_) => scalar(self.db, Atomic::Character),
             LiteralKind::Logical(_) => scalar(self.db, Atomic::Logical),
@@ -735,21 +770,224 @@ impl<'db> Checker<'db, '_> {
         }
     }
 
-    /// The call entry point: an overloaded stub callee resolves per call site
-    /// (each candidate probed in declaration order); everything else infers
-    /// the callee and dispatches on its type.
+    /// The call entry point: shape-constructing builtins (`c`, `list`,
+    /// `switch`) intercept first, an overloaded stub callee resolves per call
+    /// site (each candidate probed in declaration order), and everything else
+    /// infers the callee and dispatches on its type.
     fn infer_call_expression(
         &mut self,
         range: TextRange,
         callee: ExprId,
         arguments: &[Argument],
     ) -> Ty<'db> {
+        if let ExpressionKind::NameRef(name) = &self.module.expression(callee).kind {
+            let builtin = match name.as_str() {
+                "c" => Some(self.infer_combine(arguments)),
+                "list" => Some(self.infer_list(range, arguments)),
+                "switch" => Some(self.infer_switch(range, arguments)),
+                _ => None,
+            };
+            if let Some(ty) = builtin {
+                return ty;
+            }
+        }
         if let Some(ty) = self.try_overloaded_call(range, callee, arguments) {
             return ty;
         }
         let callee_ty = self.infer(callee);
         let call_arguments = self.infer_call_arguments(range, arguments);
         self.dispatch_call(range, callee_ty, &call_arguments)
+    }
+
+    /// `c(...)` follows R's atomic coercion hierarchy (logical < integer <
+    /// double < complex < character; `raw` only combines with itself), drops
+    /// `NULL` arguments (`c(x, NULL)` is `c(x)`, `c()` is `NULL`), and keeps
+    /// names: an all-named call builds a map-like vector.
+    fn infer_combine(&mut self, arguments: &[Argument]) -> Ty<'db> {
+        if arguments.is_empty() {
+            return crate::types::null(self.db);
+        }
+        let mut item_atomic: Option<Atomic> = None;
+        let mut all_arguments_are_named = true;
+        let mut saw_non_null_argument = false;
+        let mut result_indeterminate = false;
+        for argument in arguments {
+            let Some(value) = argument.value else {
+                continue;
+            };
+            let argument_range = self.module.expression(value).range;
+            let inferred = self.infer(value);
+            let resolved = self.table.resolve(self.db, inferred);
+            if matches!(resolved.kind(self.db), TyKind::Null) {
+                continue;
+            }
+            saw_non_null_argument = true;
+            all_arguments_are_named &= argument.name.is_some();
+            // A non-concrete argument whose element atomic is not statically
+            // known — `Any`, `Unknown` (which must never cascade), or an
+            // unresolved variable (`function(x) c(x, 1L)`) — cannot pin the
+            // combined element type: the result is `Unknown` rather than a
+            // rejection or an unsound concrete claim. The variable stays
+            // unconstrained, mirroring `$`/`[[`/`[` on the same subject.
+            match resolved.kind(self.db) {
+                TyKind::Any | TyKind::Unknown | TyKind::Var(_) | TyKind::Rigid(_) => {
+                    result_indeterminate = true;
+                    continue;
+                }
+                _ => {}
+            }
+            // A union argument combines member-wise; its `NULL` members
+            // contribute nothing (the idiomatic accumulator seeded with
+            // `c()` has type `T[] | NULL` at the loop join and is no error).
+            let argument_atomics: Option<Vec<Atomic>> = match resolved.kind(self.db).clone() {
+                TyKind::Union(members) => members
+                    .iter()
+                    .filter(|member| !matches!(member.kind(self.db), TyKind::Null))
+                    .map(|&member| combine_operand_atomic(self.db, member))
+                    .collect(),
+                _ => combine_operand_atomic(self.db, resolved).map(|atomic| vec![atomic]),
+            };
+            let Some(argument_atomics) = argument_atomics.filter(|atomics| !atomics.is_empty())
+            else {
+                self.errors.push(TypeError {
+                    range: argument_range,
+                    kind: TypeErrorKind::Mismatch {
+                        expected: scalar(self.db, Atomic::Integer),
+                        found: resolved,
+                    },
+                });
+                result_indeterminate = true;
+                continue;
+            };
+            for current_atomic in argument_atomics {
+                item_atomic = Some(match item_atomic {
+                    Some(previous_atomic) => {
+                        match promote_combine_atomic(previous_atomic, current_atomic) {
+                            Some(promoted) => promoted,
+                            None => {
+                                self.errors.push(TypeError {
+                                    range: argument_range,
+                                    kind: TypeErrorKind::Mismatch {
+                                        expected: scalar(self.db, previous_atomic),
+                                        found: resolved,
+                                    },
+                                });
+                                result_indeterminate = true;
+                                previous_atomic
+                            }
+                        }
+                    }
+                    None => current_atomic,
+                });
+            }
+        }
+        if !saw_non_null_argument {
+            return crate::types::null(self.db);
+        }
+        if result_indeterminate {
+            return self.unknown();
+        }
+        let element = scalar(self.db, item_atomic.unwrap_or(Atomic::Integer));
+        Ty::new(
+            self.db,
+            if all_arguments_are_named {
+                TyKind::NamedVector(element)
+            } else {
+                TyKind::Vector(element)
+            },
+        )
+    }
+
+    /// `list(...)` builds the fixed shapes: all-unnamed → tuple-like,
+    /// all-named → record-like, mixed → no modeled shape.
+    fn infer_list(&mut self, range: TextRange, arguments: &[Argument]) -> Ty<'db> {
+        if arguments.is_empty() {
+            return Ty::new(self.db, TyKind::Tuple(Vec::new()));
+        }
+        let all_named = arguments.iter().all(|argument| argument.name.is_some());
+        let all_unnamed = arguments.iter().all(|argument| argument.name.is_none());
+        if !(all_named || all_unnamed) {
+            for argument in arguments {
+                if let Some(value) = argument.value {
+                    self.infer(value);
+                }
+            }
+            self.errors.push(TypeError {
+                range,
+                kind: TypeErrorKind::MixedListElements,
+            });
+            return self.unknown();
+        }
+        if all_named {
+            let mut fields = Vec::with_capacity(arguments.len());
+            for argument in arguments {
+                let ty = match argument.value {
+                    Some(value) => {
+                        let inferred = self.infer(value);
+                        self.table.resolve(self.db, inferred)
+                    }
+                    None => self.unknown(),
+                };
+                let name = argument.name.clone().expect("all_named was checked");
+                fields.push(crate::types::RecordField {
+                    name: Name::new(self.db, name),
+                    ty,
+                    optional: false,
+                });
+            }
+            Ty::new(self.db, TyKind::Record(fields))
+        } else {
+            let mut items = Vec::with_capacity(arguments.len());
+            for argument in arguments {
+                let ty = match argument.value {
+                    Some(value) => {
+                        let inferred = self.infer(value);
+                        self.table.resolve(self.db, inferred)
+                    }
+                    None => self.unknown(),
+                };
+                items.push(ty);
+            }
+            Ty::new(self.db, TyKind::Tuple(items))
+        }
+    }
+
+    /// `switch(subject, a = ..., b = ..., default)` selects one branch by the
+    /// subject's runtime value. Selection cannot be modeled statically, but
+    /// every branch IS checked, and the call's type is the union of the
+    /// branch values. R returns invisible `NULL` when nothing matches, so
+    /// `NULL` joins the union unless a default (unnamed) branch exists; a
+    /// named branch with no value falls through and contributes no type.
+    fn infer_switch(&mut self, range: TextRange, arguments: &[Argument]) -> Ty<'db> {
+        let Some((subject, branches)) = arguments.split_first() else {
+            self.errors.push(TypeError {
+                range,
+                kind: TypeErrorKind::ArityMismatch {
+                    expected: 1,
+                    found: 0,
+                },
+            });
+            return self.unknown();
+        };
+        if let Some(value) = subject.value {
+            self.infer(value);
+        }
+        let mut members = Vec::with_capacity(branches.len() + 1);
+        let mut has_default = false;
+        for branch in branches {
+            if branch.name.is_none() {
+                has_default = true;
+            }
+            let Some(value) = branch.value else {
+                continue;
+            };
+            let ty = self.infer(value);
+            members.push(self.table.resolve(self.db, ty));
+        }
+        if !has_default {
+            members.push(crate::types::null(self.db));
+        }
+        union_of(self.db, members)
     }
 
     /// Ordered overload probing: the first candidate whose signature accepts
@@ -763,13 +1001,19 @@ impl<'db> Checker<'db, '_> {
         callee: ExprId,
         arguments: &[Argument],
     ) -> Option<Ty<'db>> {
-        let ExpressionKind::NameRef(name) = &self.module.expression(callee).kind else {
-            return None;
+        let name = match &self.module.expression(callee).kind {
+            ExpressionKind::NameRef(name) => {
+                if self.naming.resolutions.contains_key(&callee) {
+                    return None;
+                }
+                name.clone()
+            }
+            // Namespace access cannot be shadowed by a local binding.
+            ExpressionKind::Namespace {
+                name: Some(name), ..
+            } => name.clone(),
+            _ => return None,
         };
-        let name = name.clone();
-        if self.naming.resolutions.contains_key(&callee) {
-            return None;
-        }
         let schemes = self.globals?.overloads(&name)?;
         if schemes.len() < 2 {
             return None;
@@ -889,10 +1133,12 @@ impl<'db> Checker<'db, '_> {
     }
 
     fn is_whole_double(&self, value: ExprId) -> bool {
-        matches!(
-            self.module.expression(value).kind,
-            ExpressionKind::Literal(LiteralKind::Double { whole_number: true })
-        )
+        match &self.module.expression(value).kind {
+            ExpressionKind::Literal(LiteralKind::Double(text)) => {
+                crate::hir::is_whole_number_double(text)
+            }
+            _ => false,
+        }
     }
 
     fn dispatch_call(
@@ -1198,6 +1444,291 @@ impl<'db> Checker<'db, '_> {
         })
     }
 
+    /// `x[[i]]` / `x[i]`: the subject and every index infer first regardless
+    /// of shape, so names inside an unsupported form (`m[i, j]`) still
+    /// resolve and get their own diagnostics.
+    fn infer_index(
+        &mut self,
+        range: TextRange,
+        double: bool,
+        target: ExprId,
+        arguments: &[Argument],
+    ) -> Ty<'db> {
+        let target_ty = self.infer(target);
+        for argument in arguments {
+            if let Some(value) = argument.value {
+                self.infer(value);
+            }
+        }
+        let subject = self.table.resolve(self.db, target_ty);
+        // An Unknown/Any subject stays Unknown/Any even under an unsupported
+        // index shape — the subject's own gap was already diagnosed, so
+        // `m[i, j]` must not cascade an arity error. A sealed nominal
+        // supports value-dependent indexing of any shape at runtime
+        // (`df[rows, cols]`), none of it modeled — Unknown before the
+        // index-arity check, so idiomatic two-index subsetting is no error.
+        match subject.kind(self.db) {
+            TyKind::Unknown => return self.unknown(),
+            TyKind::Any => return crate::types::any(self.db),
+            TyKind::Named(..) => return self.unknown(),
+            _ => {}
+        }
+        if arguments.len() != 1 || arguments[0].name.is_some() {
+            self.errors.push(TypeError {
+                range,
+                kind: TypeErrorKind::UnsupportedIndexShape {
+                    index_count: arguments.len(),
+                },
+            });
+            return self.unknown();
+        }
+        let result = if double {
+            let index = arguments[0]
+                .value
+                .map(|value| self.module.expression(value).kind.clone());
+            self.extract_result(range, subject, index.as_ref())
+        } else {
+            self.subset_result(range, subject)
+        };
+        match result {
+            Ok(ty) => ty,
+            Err(error) => {
+                self.errors.push(error);
+                self.unknown()
+            }
+        }
+    }
+
+    /// `[[` — single-element extraction.
+    fn extract_result(
+        &mut self,
+        range: TextRange,
+        subject: Ty<'db>,
+        index: Option<&ExpressionKind>,
+    ) -> Result<Ty<'db>, TypeError<'db>> {
+        // Member-wise over a union subject: `[[` must be valid on every shape
+        // the subject can take, and the element's type is the join of the
+        // per-member results; a failing member reports the full union.
+        if let TyKind::Union(members) = subject.kind(self.db).clone() {
+            let mut results = Vec::with_capacity(members.len());
+            for member in members {
+                let result = self
+                    .extract_result(range, member, index)
+                    .map_err(|error| widen_error_container(error, subject))?;
+                results.push(result);
+            }
+            return Ok(union_of(self.db, results));
+        }
+        let literal_position = index.and_then(crate::hir::integer_literal_position);
+        let literal_name = match index {
+            Some(ExpressionKind::Literal(LiteralKind::String(name))) => Some(name.clone()),
+            _ => None,
+        };
+        match subject.kind(self.db).clone() {
+            TyKind::Unknown => Ok(self.unknown()),
+            TyKind::Any => Ok(crate::types::any(self.db)),
+            TyKind::Scalar(atomic) => Ok(scalar(self.db, atomic)),
+            TyKind::Vector(element) | TyKind::List(element) => Ok(element),
+            // A literal name may be absent at runtime (`T | NULL`), while
+            // positional and computed access extract an element like R does
+            // on any vector or list.
+            TyKind::NamedVector(element) | TyKind::NamedList(element) => {
+                Ok(if literal_name.is_some() {
+                    union_of(self.db, [element, crate::types::null(self.db)])
+                } else {
+                    element
+                })
+            }
+            // A computed position could reach any item, so the extraction is
+            // the union of the item types; only a *literal* position is
+            // precise (and still errors when out of range).
+            TyKind::Tuple(items) => match literal_position {
+                Some(position) => match items.get(position) {
+                    Some(&item) => Ok(item),
+                    None => Err(TypeError {
+                        range,
+                        kind: TypeErrorKind::PositionDoesNotExist {
+                            position: position + 1,
+                            container: subject,
+                        },
+                    }),
+                },
+                None => Ok(union_of(self.db, items)),
+            },
+            TyKind::Record(fields) => {
+                // Record fields are declaration-ordered, so a positional `[[`
+                // extracts the field at that position exactly like a tuple
+                // item.
+                if let Some(position) = literal_position {
+                    return match fields.get(position) {
+                        Some(field) => Ok(field.ty),
+                        None => Err(TypeError {
+                            range,
+                            kind: TypeErrorKind::PositionDoesNotExist {
+                                position: position + 1,
+                                container: subject,
+                            },
+                        }),
+                    };
+                }
+                match literal_name {
+                    // A computed name could reach any field — the
+                    // dispatch-table idiom, `handlers[[name]](...)`.
+                    None => Ok(union_of(self.db, fields.iter().map(|field| field.ty))),
+                    Some(name) => {
+                        match fields.iter().find(|field| field.name.text(self.db) == name) {
+                            Some(field) => Ok(field.ty),
+                            None => Err(TypeError {
+                                range,
+                                kind: TypeErrorKind::FieldDoesNotExist {
+                                    field: name,
+                                    container: subject,
+                                },
+                            }),
+                        }
+                    }
+                }
+            }
+            // A sealed nominal and an unresolved inference variable both
+            // support element access the system cannot model — sound-by-
+            // refusal Unknown, never a rejection (idiomatic R walks generic
+            // data this way: `function(x) x[[1L]]`). The variable stays
+            // unconstrained.
+            TyKind::Named(..) | TyKind::Var(_) | TyKind::Rigid(_) => Ok(self.unknown()),
+            _ => Err(TypeError {
+                range,
+                kind: TypeErrorKind::NotAList { found: subject },
+            }),
+        }
+    }
+
+    /// `[` — the list slice.
+    fn subset_result(
+        &mut self,
+        range: TextRange,
+        subject: Ty<'db>,
+    ) -> Result<Ty<'db>, TypeError<'db>> {
+        // Member-wise over a union subject, like `[[`.
+        if let TyKind::Union(members) = subject.kind(self.db).clone() {
+            let mut results = Vec::with_capacity(members.len());
+            for member in members {
+                let result = self
+                    .subset_result(range, member)
+                    .map_err(|error| widen_error_container(error, subject))?;
+                results.push(result);
+            }
+            return Ok(union_of(self.db, results));
+        }
+        match subject.kind(self.db).clone() {
+            TyKind::Unknown => Ok(self.unknown()),
+            TyKind::Any => Ok(crate::types::any(self.db)),
+            TyKind::List(_) | TyKind::NamedList(_) => Ok(subject),
+            // A `[` slice of a fixed-shape list is a sub-list that can
+            // contain any of the item types, so the element type is their
+            // union (collapsing back for a homogeneous list; slicing the
+            // empty list yields `list[NULL]`).
+            TyKind::Tuple(items) => Ok(Ty::new(self.db, TyKind::List(union_of(self.db, items)))),
+            TyKind::Record(fields) => Ok(Ty::new(
+                self.db,
+                TyKind::NamedList(union_of(self.db, fields.iter().map(|field| field.ty))),
+            )),
+            // Sound-by-refusal, as for `[[`.
+            TyKind::Named(..) | TyKind::Var(_) | TyKind::Rigid(_) => Ok(self.unknown()),
+            _ => Err(TypeError {
+                range,
+                kind: TypeErrorKind::UnsupportedSubset { found: subject },
+            }),
+        }
+    }
+
+    /// `x$name` behaves as `[["name"]]` on lists and records — but not on
+    /// atomic vectors, which R rejects outright. `x@name` (S4 slot access) is
+    /// not modeled: sound-by-refusal Unknown.
+    fn infer_field(
+        &mut self,
+        range: TextRange,
+        at: bool,
+        target: ExprId,
+        name: Option<String>,
+    ) -> Ty<'db> {
+        let target_ty = self.infer(target);
+        if at {
+            return self.unknown();
+        }
+        let Some(name) = name else {
+            return self.unknown();
+        };
+        let subject = self.table.resolve(self.db, target_ty);
+        match self.dollar_result(range, subject, &name) {
+            Ok(ty) => ty,
+            Err(error) => {
+                self.errors.push(error);
+                self.unknown()
+            }
+        }
+    }
+
+    fn dollar_result(
+        &mut self,
+        range: TextRange,
+        subject: Ty<'db>,
+        name: &str,
+    ) -> Result<Ty<'db>, TypeError<'db>> {
+        // Member-wise over a union subject: the field must exist on every
+        // shape the subject can take.
+        if let TyKind::Union(members) = subject.kind(self.db).clone() {
+            let mut results = Vec::with_capacity(members.len());
+            for member in members {
+                let result = self
+                    .dollar_result(range, member, name)
+                    .map_err(|error| widen_error_container(error, subject))?;
+                results.push(result);
+            }
+            return Ok(union_of(self.db, results));
+        }
+        match subject.kind(self.db).clone() {
+            TyKind::Unknown => Ok(self.unknown()),
+            TyKind::Any => Ok(crate::types::any(self.db)),
+            // R rejects `$` on every atomic vector ("$ operator is invalid
+            // for atomic vectors"), named ones included — element extraction
+            // is `[[`'s job.
+            TyKind::Scalar(_) | TyKind::Vector(_) | TyKind::NamedVector(_) => Err(TypeError {
+                range,
+                kind: TypeErrorKind::DollarOnAtomicVector { found: subject },
+            }),
+            TyKind::NamedList(element) => {
+                Ok(union_of(self.db, [element, crate::types::null(self.db)]))
+            }
+            TyKind::Record(fields) => {
+                match fields.iter().find(|field| field.name.text(self.db) == name) {
+                    Some(field) => Ok(field.ty),
+                    None => Err(TypeError {
+                        range,
+                        kind: TypeErrorKind::FieldDoesNotExist {
+                            field: name.to_owned(),
+                            container: subject,
+                        },
+                    }),
+                }
+            }
+            TyKind::Tuple(_) | TyKind::List(_) => Err(TypeError {
+                range,
+                kind: TypeErrorKind::FieldDoesNotExist {
+                    field: name.to_owned(),
+                    container: subject,
+                },
+            }),
+            // Sound-by-refusal for sealed nominals (`df$col` is the most
+            // idiomatic R there is) and unresolved variables
+            // (`function(node) node$value`).
+            TyKind::Named(..) | TyKind::Var(_) | TyKind::Rigid(_) => Ok(self.unknown()),
+            _ => Err(TypeError {
+                range,
+                kind: TypeErrorKind::NotAList { found: subject },
+            }),
+        }
+    }
+
     /// Branch-merge join: unify when possible (keeps the chooser idiom linking
     /// two inference variables), otherwise the union of the branch types; a
     /// NULL branch joins by pure union so it never binds a variable to NULL.
@@ -1463,6 +1994,57 @@ impl<'db> Checker<'db, '_> {
     }
 }
 
+/// The statically known element atomic of a `c(...)` operand: a scalar or a
+/// vector with a concrete scalar element; anything else cannot combine.
+fn combine_operand_atomic<'db>(db: &'db dyn Db, ty: Ty<'db>) -> Option<Atomic> {
+    match ty.kind(db) {
+        TyKind::Scalar(atomic) => Some(*atomic),
+        TyKind::Vector(element) | TyKind::NamedVector(element) => match element.kind(db) {
+            TyKind::Scalar(atomic) => Some(*atomic),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// R's atomic coercion hierarchy for `c(...)`: logical < integer < double <
+/// complex < character (`c(1L, NA)` is `integer`, `c(1L, "a")` is
+/// `character`); `raw` does not participate and only combines with itself.
+fn promote_combine_atomic(left: Atomic, right: Atomic) -> Option<Atomic> {
+    if left == right {
+        return Some(left);
+    }
+    let rank = |atomic: Atomic| match atomic {
+        Atomic::Logical => Some(0u8),
+        Atomic::Integer => Some(1),
+        Atomic::Double => Some(2),
+        Atomic::Complex => Some(3),
+        Atomic::Character => Some(4),
+        Atomic::Raw => None,
+    };
+    Some(match rank(left)?.max(rank(right)?) {
+        0 => Atomic::Logical,
+        1 => Atomic::Integer,
+        2 => Atomic::Double,
+        3 => Atomic::Complex,
+        _ => Atomic::Character,
+    })
+}
+
+/// A failing union member reports the full union — the subject's actual type —
+/// not the single member that failed.
+fn widen_error_container<'db>(mut error: TypeError<'db>, union: Ty<'db>) -> TypeError<'db> {
+    match &mut error.kind {
+        TypeErrorKind::NotAList { found }
+        | TypeErrorKind::UnsupportedSubset { found }
+        | TypeErrorKind::DollarOnAtomicVector { found } => *found = union,
+        TypeErrorKind::PositionDoesNotExist { container, .. }
+        | TypeErrorKind::FieldDoesNotExist { container, .. } => *container = union,
+        _ => {}
+    }
+    error
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1588,6 +2170,158 @@ mod tests {
         // A defaulted formal may stay unfilled.
         let defaulted = check_source(&db, "g <- function() {\n  f <- function(x = 1) x\n  f()\n}");
         assert!(defaulted.errors.is_empty(), "{:?}", defaulted.errors);
+    }
+
+    fn scheme_ret<'db>(db: &'db RootDatabase, check: &ItemCheck<'db>) -> Ty<'db> {
+        let scheme = check.scheme.clone().expect("scheme");
+        let TyKind::Function(function) = scheme.body.kind(db).clone() else {
+            panic!("expected a function scheme");
+        };
+        function.ret
+    }
+
+    #[test]
+    fn list_builds_fixed_shapes_and_extraction_is_precise() {
+        let db = RootDatabase::default();
+        // Literal position on a tuple-like list.
+        let tuple = check_source(
+            &db,
+            "f <- function() {\n  x <- list(1L, \"a\")\n  x[[1L]]\n}",
+        );
+        assert!(tuple.errors.is_empty(), "{:?}", tuple.errors);
+        assert_eq!(scheme_ret(&db, &tuple), scalar(&db, Atomic::Integer));
+        // Literal field via `$` on a record-like list.
+        let record = check_source(
+            &db,
+            "f <- function() {\n  p <- list(a = 1L, b = \"s\")\n  p$b\n}",
+        );
+        assert!(record.errors.is_empty(), "{:?}", record.errors);
+        assert_eq!(scheme_ret(&db, &record), scalar(&db, Atomic::Character));
+        // A computed index is the union of the item types.
+        let computed = check_source(
+            &db,
+            "f <- function(i) {\n  x <- list(1L, \"a\")\n  x[[i]]\n}",
+        );
+        assert!(computed.errors.is_empty(), "{:?}", computed.errors);
+        assert!(matches!(
+            scheme_ret(&db, &computed).kind(&db),
+            TyKind::Union(members) if members.len() == 2
+        ));
+        // `[` slices into a sub-list of the union.
+        let slice = check_source(&db, "f <- function() {\n  x <- list(1L, \"a\")\n  x[1L]\n}");
+        assert!(slice.errors.is_empty(), "{:?}", slice.errors);
+        assert!(matches!(
+            scheme_ret(&db, &slice).kind(&db),
+            TyKind::List(element) if matches!(element.kind(&db), TyKind::Union(_))
+        ));
+    }
+
+    #[test]
+    fn index_errors_report_precisely() {
+        let db = RootDatabase::default();
+        let out_of_range = check_source(
+            &db,
+            "f <- function() {\n  x <- list(1L, \"a\")\n  x[[3L]]\n}",
+        );
+        assert!(
+            out_of_range.errors.iter().any(|error| matches!(
+                error.kind,
+                TypeErrorKind::PositionDoesNotExist { position: 3, .. }
+            )),
+            "{:?}",
+            out_of_range.errors
+        );
+        let missing_field =
+            check_source(&db, "f <- function() {\n  p <- list(a = 1L)\n  p$oops\n}");
+        assert!(
+            missing_field.errors.iter().any(|error| matches!(
+                &error.kind,
+                TypeErrorKind::FieldDoesNotExist { field, .. } if field == "oops"
+            )),
+            "{:?}",
+            missing_field.errors
+        );
+        // R rejects `$` on atomic vectors, named ones included.
+        let dollar_atomic = check_source(&db, "f <- function() {\n  v <- c(a = 1L)\n  v$a\n}");
+        assert!(
+            dollar_atomic
+                .errors
+                .iter()
+                .any(|error| matches!(error.kind, TypeErrorKind::DollarOnAtomicVector { .. })),
+            "{:?}",
+            dollar_atomic.errors
+        );
+        // Multi-index forms are not modeled.
+        let matrix = check_source(&db, "f <- function() {\n  x <- list(1L)\n  x[1L, 2L]\n}");
+        assert!(
+            matrix.errors.iter().any(|error| matches!(
+                error.kind,
+                TypeErrorKind::UnsupportedIndexShape { index_count: 2 }
+            )),
+            "{:?}",
+            matrix.errors
+        );
+    }
+
+    #[test]
+    fn named_vector_extraction_is_nullable_by_name() {
+        let db = RootDatabase::default();
+        let check = check_source(&db, "f <- function() {\n  v <- c(a = 1L)\n  v[[\"a\"]]\n}");
+        assert!(check.errors.is_empty(), "{:?}", check.errors);
+        let TyKind::Union(members) = scheme_ret(&db, &check).kind(&db) else {
+            panic!("expected integer | NULL");
+        };
+        assert!(members.contains(&scalar(&db, Atomic::Integer)));
+        assert!(members.contains(&crate::types::null(&db)));
+    }
+
+    #[test]
+    fn combine_promotes_drops_null_and_keeps_names() {
+        let db = RootDatabase::default();
+        let promoted = check_source(&db, "f <- function() c(1L, 2.5)");
+        assert!(promoted.errors.is_empty());
+        assert!(matches!(
+            scheme_ret(&db, &promoted).kind(&db),
+            TyKind::Vector(element) if *element == scalar(&db, Atomic::Double)
+        ));
+        let character = check_source(&db, "f <- function() c(1L, \"a\")");
+        assert!(character.errors.is_empty());
+        assert!(matches!(
+            scheme_ret(&db, &character).kind(&db),
+            TyKind::Vector(element) if *element == scalar(&db, Atomic::Character)
+        ));
+        let named = check_source(&db, "f <- function() c(a = 1L, b = 2L)");
+        assert!(named.errors.is_empty());
+        assert!(matches!(
+            scheme_ret(&db, &named).kind(&db),
+            TyKind::NamedVector(_)
+        ));
+        let null_dropped = check_source(&db, "f <- function() c(1L, NULL)");
+        assert!(null_dropped.errors.is_empty());
+        assert!(matches!(
+            scheme_ret(&db, &null_dropped).kind(&db),
+            TyKind::Vector(_)
+        ));
+        let empty = check_source(&db, "f <- function() c()");
+        assert!(matches!(scheme_ret(&db, &empty).kind(&db), TyKind::Null));
+    }
+
+    #[test]
+    fn switch_unions_branches_with_null_unless_defaulted() {
+        let db = RootDatabase::default();
+        let no_default = check_source(&db, "f <- function(x) switch(x, a = 1L, b = \"s\")");
+        assert!(no_default.errors.is_empty(), "{:?}", no_default.errors);
+        let TyKind::Union(members) = scheme_ret(&db, &no_default).kind(&db) else {
+            panic!("expected a union");
+        };
+        assert_eq!(members.len(), 3, "integer | character | NULL: {members:?}");
+        let with_default = check_source(&db, "f <- function(x) switch(x, a = 1L, 2L)");
+        assert!(with_default.errors.is_empty());
+        assert_eq!(
+            scheme_ret(&db, &with_default),
+            scalar(&db, Atomic::Integer),
+            "both branches integer, no NULL member"
+        );
     }
 
     #[test]

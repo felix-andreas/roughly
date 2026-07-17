@@ -87,14 +87,11 @@ pub enum BinaryOperator {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LiteralKind {
-    Integer,
-    /// `whole_number` marks a literal like `1` or `2.0` whose value is a
-    /// finite whole number — R programmers write `seq_len(10)`, not
-    /// `seq_len(10L)`, so such a literal counts as an integer at a parameter
-    /// position (the literal-as-integer courtesy).
-    Double {
-        whole_number: bool,
-    },
+    /// Numeric literals keep their source text: the checker needs the value
+    /// for literal index positions (`x[[2L]]`) and the literal-as-integer
+    /// courtesy (`seq_len(10)`).
+    Integer(String),
+    Double(String),
     Complex,
     String(String),
     Logical(bool),
@@ -519,13 +516,8 @@ fn literal_kind(node: &SyntaxNode) -> LiteralKind {
         return LiteralKind::Null;
     };
     match token.kind() {
-        SyntaxKind::INTEGER => LiteralKind::Integer,
-        SyntaxKind::DOUBLE => LiteralKind::Double {
-            whole_number: token
-                .text()
-                .parse::<f64>()
-                .is_ok_and(|value| value.fract() == 0.0 && value.is_finite()),
-        },
+        SyntaxKind::INTEGER => LiteralKind::Integer(token.text().to_owned()),
+        SyntaxKind::DOUBLE => LiteralKind::Double(token.text().to_owned()),
         SyntaxKind::COMPLEX => LiteralKind::Complex,
         SyntaxKind::STRING | SyntaxKind::RAW_STRING => {
             LiteralKind::String(string_value(token.text()))
@@ -537,6 +529,33 @@ fn literal_kind(node: &SyntaxNode) -> LiteralKind {
         SyntaxKind::NAN_KW => LiteralKind::NaN,
         _ => LiteralKind::Na,
     }
+}
+
+/// A finite whole-number double literal (`1`, `2.0`) — the shape eligible for
+/// the literal-as-integer courtesy at parameter positions.
+pub fn is_whole_number_double(text: &str) -> bool {
+    text.parse::<f64>()
+        .is_ok_and(|value| value.fract() == 0.0 && value.is_finite())
+}
+
+/// The 0-based position of a statically known index literal. R indexes
+/// identically with `x[[2]]` and `x[[2L]]`, so a whole-number double literal
+/// is just as valid a position as an integer literal.
+pub fn integer_literal_position(kind: &ExpressionKind) -> Option<usize> {
+    let one_based_index = match kind {
+        ExpressionKind::Literal(LiteralKind::Integer(text)) => {
+            text.trim_end_matches('L').parse::<usize>().ok()?
+        }
+        ExpressionKind::Literal(LiteralKind::Double(text)) => {
+            let value = text.parse::<f64>().ok()?;
+            if value.fract() != 0.0 || value < 1.0 || !value.is_finite() {
+                return None;
+            }
+            value as usize
+        }
+        _ => return None,
+    };
+    one_based_index.checked_sub(1)
 }
 
 /// The value of a string literal with quotes stripped. Escape *decoding* is a
