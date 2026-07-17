@@ -145,6 +145,10 @@ fn render_type_error_message(db: &dyn Db, error: &TypeError<'_>) -> String {
         TypeErrorKind::NotAList { found } => {
             format!("expected a list, found `{}`", renderer.render(db, *found))
         }
+        TypeErrorKind::NotIterable { found } => format!(
+            "this `for` sequence is `{}`, which cannot be iterated — expected a vector or list.",
+            renderer.render(db, *found)
+        ),
         TypeErrorKind::UnsupportedSubset { found } => {
             format!("`[` is not supported on `{}`", renderer.render(db, *found))
         }

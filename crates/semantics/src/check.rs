@@ -100,6 +100,10 @@ pub enum TypeErrorKind<'db> {
         expected: OperandExpectation,
         found: Ty<'db>,
     },
+    /// A `for` sequence that is neither a vector nor a list shape.
+    NotIterable {
+        found: Ty<'db>,
+    },
     InfiniteType,
 }
 
@@ -683,26 +687,28 @@ impl<'db> Checker<'db, '_> {
                     (*condition, *then_branch, *else_branch);
                 self.infer_if(condition, then_branch, else_branch)
             }
-            ExpressionKind::For { sequence, body, .. } => {
-                self.infer(*sequence);
-                let mark = self.environment.mark();
-                self.infer(*body);
-                let writes = self.environment.writes_since(mark);
-                self.environment.rollback(mark);
-                self.join_writes(writes);
-                crate::types::null(self.db)
+            ExpressionKind::For {
+                variable_range,
+                sequence,
+                body,
+                ..
+            } => {
+                let (variable_range, sequence, body) = (*variable_range, *sequence, *body);
+                self.infer_for(variable_range, sequence, body)
             }
+            // The condition re-evaluates before every iteration, so its reads
+            // also see the loop's joined state — it checks inside the fixed
+            // point.
             ExpressionKind::While { condition, body } => {
-                self.expect_scalar_logical(*condition);
-                let mark = self.environment.mark();
-                self.infer(*body);
-                let writes = self.environment.writes_since(mark);
-                self.environment.rollback(mark);
-                self.join_writes(writes);
+                let (condition, body) = (*condition, *body);
+                self.check_loop_body(Some(condition), body, false, None);
                 crate::types::null(self.db)
             }
+            // `repeat` runs at least once, so the body's exit state applies
+            // after the loop (back edges still join inside it).
             ExpressionKind::Repeat { body } => {
-                self.infer(*body);
+                let body = *body;
+                self.check_loop_body(None, body, true, None);
                 crate::types::null(self.db)
             }
             ExpressionKind::Block(statements) => {
@@ -771,9 +777,176 @@ impl<'db> Checker<'db, '_> {
                 }
             }
             self.recorded.insert(target, value_ty);
+        } else {
+            self.write_replacement_target(target, value_ty);
         }
-        // Replacement targets (`names(x) <- v`) were already inferred as reads
-        // by naming; their typing rules land with the container rules.
+    }
+
+    /// A replacement-form assignment (`x$field <- v`, `x[["name"]] <- v`,
+    /// `x[[key]] <- v`, `names(x) <- v`) reads the base variable, applies the
+    /// write, and writes the result back to the base's slot.
+    fn write_replacement_target(&mut self, target: ExprId, value_ty: Ty<'db>) {
+        let base = self.replacement_base(target);
+        self.infer_replacement_spine(target, base);
+        let Some(base) = base else {
+            // The accessor spine has no variable at its root (`f(x)$a <- v`);
+            // R rejects this shape at run time, so refuse rather than guess.
+            return;
+        };
+        let prior = self.infer(base);
+        let prior = self.table.resolve(self.db, prior);
+        let value_resolved = self.table.resolve(self.db, value_ty);
+        let written = self.replacement_written_type(target, base, prior, value_resolved);
+        if let Some(&slot) = self.naming.resolutions.get(&base) {
+            self.environment.set(slot, EnvEntry::Mono(written));
+        }
+    }
+
+    /// The root variable of a replacement target's accessor spine: through
+    /// index and field accessors and through a replacement call's first
+    /// argument (`names(x) <- v` calls `names<-` on `x`).
+    fn replacement_base(&self, id: ExprId) -> Option<ExprId> {
+        match &self.module.expression(id).kind {
+            ExpressionKind::NameRef(_) => Some(id),
+            ExpressionKind::Index { target, .. } | ExpressionKind::Field { target, .. } => {
+                self.replacement_base(*target)
+            }
+            ExpressionKind::Call { arguments, .. } => arguments
+                .first()
+                .and_then(|argument| argument.value)
+                .and_then(|value| self.replacement_base(value)),
+            _ => None,
+        }
+    }
+
+    /// The pieces of a replacement target that are ordinary reads: index and
+    /// surplus-argument expressions, and — when the spine has no variable
+    /// root — the base position itself. The callee of a replacement call is
+    /// skipped (`names(x) <- v` calls `names<-`, not `names`), and the base
+    /// variable is skipped (its read supplies the prior type separately).
+    fn infer_replacement_spine(&mut self, id: ExprId, base: Option<ExprId>) {
+        if Some(id) == base {
+            return;
+        }
+        match self.module.expression(id).kind.clone() {
+            ExpressionKind::Index {
+                target, arguments, ..
+            } => {
+                self.infer_replacement_spine(target, base);
+                for argument in &arguments {
+                    if let Some(value) = argument.value {
+                        self.infer(value);
+                    }
+                }
+            }
+            ExpressionKind::Field { target, .. } => {
+                self.infer_replacement_spine(target, base);
+            }
+            ExpressionKind::Call { arguments, .. } => {
+                let mut argument_iter = arguments.iter();
+                if let Some(first) = argument_iter.next()
+                    && let Some(value) = first.value
+                {
+                    self.infer_replacement_spine(value, base);
+                }
+                for argument in argument_iter {
+                    if let Some(value) = argument.value {
+                        self.infer(value);
+                    }
+                }
+            }
+            _ => {
+                self.infer(id);
+            }
+        }
+    }
+
+    /// The base slot's type after a replacement write: a known-field write
+    /// (`$field` / `[["literal"]]`) on a record-like base sets that field
+    /// (adding it if absent; an empty `list()` starts a record); a
+    /// computed-key `[[<-` refines the reachable list shapes' element type;
+    /// everything else (a `[<-`, an `@slot<-`, a multi-index form, or a
+    /// replacement-function call) keeps the prior type.
+    fn replacement_written_type(
+        &mut self,
+        lhs: ExprId,
+        base: ExprId,
+        prior: Ty<'db>,
+        value: Ty<'db>,
+    ) -> Ty<'db> {
+        let kind = self.module.expression(lhs).kind.clone();
+        let field_name = match &kind {
+            ExpressionKind::Field {
+                at: false,
+                target,
+                name,
+            } if *target == base => name.clone(),
+            ExpressionKind::Index {
+                double: true,
+                target,
+                arguments,
+            } if *target == base => match arguments.as_slice() {
+                [argument] if argument.name.is_none() => {
+                    argument
+                        .value
+                        .and_then(|value| match &self.module.expression(value).kind {
+                            ExpressionKind::Literal(LiteralKind::String(name)) => {
+                                Some(name.clone())
+                            }
+                            _ => None,
+                        })
+                }
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(field_name) = field_name {
+            return match prior.kind(self.db).clone() {
+                TyKind::Record(mut fields) => {
+                    match fields
+                        .iter_mut()
+                        .find(|field| field.name.text(self.db) == field_name)
+                    {
+                        Some(field) => field.ty = value,
+                        None => fields.push(crate::types::RecordField {
+                            name: Name::new(self.db, field_name),
+                            ty: value,
+                            optional: false,
+                        }),
+                    }
+                    Ty::new(self.db, TyKind::Record(fields))
+                }
+                TyKind::Tuple(items) if items.is_empty() => Ty::new(
+                    self.db,
+                    TyKind::Record(vec![crate::types::RecordField {
+                        name: Name::new(self.db, field_name),
+                        ty: value,
+                        optional: false,
+                    }]),
+                ),
+                _ => prior,
+            };
+        }
+        let is_computed_extract = matches!(
+            &kind,
+            ExpressionKind::Index { double: true, target, arguments }
+                if *target == base
+                    && matches!(arguments.as_slice(), [argument] if argument.name.is_none())
+        );
+        if !is_computed_extract {
+            return prior;
+        }
+        match prior.kind(self.db).clone() {
+            TyKind::Tuple(items) if items.is_empty() => Ty::new(self.db, TyKind::NamedList(value)),
+            TyKind::NamedList(element) => Ty::new(
+                self.db,
+                TyKind::NamedList(union_of(self.db, [element, value])),
+            ),
+            TyKind::List(element) => {
+                Ty::new(self.db, TyKind::List(union_of(self.db, [element, value])))
+            }
+            _ => prior,
+        }
     }
 
     /// `if`/`else` with guard narrowing and diverging-branch flow: a
@@ -841,6 +1014,130 @@ impl<'db> Checker<'db, '_> {
                 self.environment.rollback(false_mark);
                 self.join_types(then_ty, else_ty)
             }
+        }
+    }
+
+    /// `for (name in value) body`: the source is evaluated once and must be
+    /// iterable; the loop variable holds the element type inside the body
+    /// (re-initialized every iteration, invisible after the loop).
+    fn infer_for(
+        &mut self,
+        variable_range: Option<TextRange>,
+        sequence: ExprId,
+        body: ExprId,
+    ) -> Ty<'db> {
+        let sequence_range = self.module.expression(sequence).range;
+        let inferred = self.infer(sequence);
+        let resolved = self.table.resolve(self.db, inferred);
+        let element = match self.iteration_element(resolved) {
+            Ok(element) => element,
+            Err(found) => {
+                self.errors.push(TypeError {
+                    range: sequence_range,
+                    kind: TypeErrorKind::NotIterable { found },
+                });
+                self.unknown()
+            }
+        };
+        let loop_slot = variable_range.and_then(|variable_range| {
+            self.naming
+                .bindings
+                .iter()
+                .find(|(_, info)| info.range == variable_range)
+                .map(|(id, _)| *id)
+        });
+        self.check_loop_body(None, body, false, loop_slot.map(|slot| (slot, element)));
+        crate::types::null(self.db)
+    }
+
+    /// What one iteration binds, per source shape; `Err` carries the
+    /// non-iterable type for the error.
+    fn iteration_element(&mut self, resolved: Ty<'db>) -> Result<Ty<'db>, Ty<'db>> {
+        match resolved.kind(self.db).clone() {
+            // A union of iterables iterates member-wise; a failing member
+            // reports the full union.
+            TyKind::Union(members) => {
+                let mut elements = Vec::with_capacity(members.len());
+                for member in members {
+                    let element = self.iteration_element(member).map_err(|_| resolved)?;
+                    elements.push(element);
+                }
+                Ok(union_of(self.db, elements))
+            }
+            TyKind::Scalar(atomic) => Ok(scalar(self.db, atomic)),
+            TyKind::Vector(element)
+            | TyKind::NamedVector(element)
+            | TyKind::List(element)
+            | TyKind::NamedList(element) => Ok(element),
+            TyKind::Tuple(items) => Ok(union_of(self.db, items)),
+            TyKind::Record(fields) => Ok(union_of(self.db, fields.iter().map(|field| field.ty))),
+            // `NULL` iterates zero times (legal R).
+            TyKind::Null => Ok(crate::types::null(self.db)),
+            TyKind::Any => Ok(crate::types::any(self.db)),
+            // An already-failed source does not produce a second error.
+            TyKind::Unknown => Ok(self.unknown()),
+            // An opaque nominal's element shape is not visible.
+            TyKind::Named(..) => Ok(crate::types::any(self.db)),
+            // Iteration commits neither vector nor list for the caller, so an
+            // unresolved variable stays unconstrained and the element
+            // degrades to Unknown.
+            TyKind::Var(_) | TyKind::Rigid(_) => Ok(self.unknown()),
+            _ => Err(resolved),
+        }
+    }
+
+    /// Check a loop body to a control-flow fixed point: each pass runs from
+    /// the join of the pre-loop state and the previous pass's exit writes;
+    /// diagnostics count only on the final (stable) pass, and a slot still
+    /// changing at the pass cap widens to `Unknown`. `repeat` bodies apply
+    /// their exit state after the loop instead of the zero-iterations join.
+    fn check_loop_body(
+        &mut self,
+        condition: Option<ExprId>,
+        body: ExprId,
+        runs_at_least_once: bool,
+        loop_variable: Option<(BindingId, Ty<'db>)>,
+    ) {
+        const LOOP_PASS_CAP: usize = 3;
+        let mut passes = 0;
+        loop {
+            passes += 1;
+            let errors_mark = self.errors.len();
+            let mark = self.environment.mark();
+            if let Some((slot, element)) = loop_variable {
+                self.environment.set(slot, EnvEntry::Mono(element));
+            }
+            if let Some(condition) = condition {
+                self.expect_scalar_logical(condition);
+            }
+            self.infer(body);
+            let writes: Vec<(BindingId, Option<EnvEntry<'db>>)> = self
+                .environment
+                .writes_since(mark)
+                .into_iter()
+                .filter(|(slot, _)| loop_variable.is_none_or(|(loop_slot, _)| *slot != loop_slot))
+                .collect();
+            self.environment.rollback(mark);
+            let changed = self.join_writes_reporting(&writes);
+            if changed.is_empty() {
+                if runs_at_least_once {
+                    for (slot, entry) in writes {
+                        if let Some(entry) = entry {
+                            self.environment.set(slot, entry);
+                        }
+                    }
+                }
+                return;
+            }
+            if passes >= LOOP_PASS_CAP {
+                for slot in changed {
+                    self.environment.set(slot, EnvEntry::Mono(self.unknown()));
+                }
+                return;
+            }
+            // Not yet stable: this pass ran under a stale entry state, so its
+            // diagnostics are discarded and the body re-checks.
+            self.errors.truncate(errors_mark);
         }
     }
 
@@ -2717,7 +3014,17 @@ impl<'db> Checker<'db, '_> {
     /// branch joins with its other-path value (or stays, optimistically, when
     /// the other path had none).
     fn join_writes(&mut self, writes: Vec<(BindingId, Option<EnvEntry<'db>>)>) {
-        for (slot, branch_entry) in writes {
+        self.join_writes_reporting(&writes);
+    }
+
+    /// Like `join_writes`, reporting the slots whose entries actually changed
+    /// (the loop fixed point's stability signal).
+    fn join_writes_reporting(
+        &mut self,
+        writes: &[(BindingId, Option<EnvEntry<'db>>)],
+    ) -> Vec<BindingId> {
+        let mut changed = Vec::new();
+        for &(slot, branch_entry) in writes {
             let current = self.environment.get(slot);
             let joined = match (current, branch_entry) {
                 (Some(EnvEntry::Mono(a)), Some(EnvEntry::Mono(b))) if a != b => {
@@ -2728,10 +3035,14 @@ impl<'db> Checker<'db, '_> {
                 (Some(_), Some(entry)) => Some(entry),
                 (_, None) => None,
             };
-            if let Some(entry) = joined {
+            if let Some(entry) = joined
+                && Some(entry) != current
+            {
                 self.environment.set(slot, entry);
+                changed.push(slot);
             }
         }
+        changed
     }
 
     // ---- schemes ----
@@ -3107,6 +3418,96 @@ mod tests {
             "expected unknown-argument, got {:?}",
             check.errors
         );
+    }
+
+    #[test]
+    fn for_loops_bind_the_element_and_reach_a_fixed_point() {
+        let db = RootDatabase::default();
+        // The idiomatic accumulator is clean and stays integer.
+        let accumulator = check_source(
+            &db,
+            "f <- function() {\n  total <- 0L\n  for (i in 1:3) {\n    total <- total + i\n  }\n  total\n}",
+        );
+        assert!(accumulator.errors.is_empty(), "{:?}", accumulator.errors);
+        assert_eq!(scheme_ret(&db, &accumulator), scalar(&db, Atomic::Integer));
+        // A heterogeneous fixed-shape list binds the union of item types.
+        let heterogeneous = check_source(
+            &db,
+            "f <- function() {\n  out <- 1L\n  for (item in list(2L, \"a\")) {\n    out <- item\n  }\n  out\n}",
+        );
+        assert!(
+            heterogeneous.errors.is_empty(),
+            "{:?}",
+            heterogeneous.errors
+        );
+        assert!(matches!(
+            scheme_ret(&db, &heterogeneous).kind(&db),
+            TyKind::Union(members) if members.len() == 2
+        ));
+        // A function is not iterable.
+        let bad = check_source(
+            &db,
+            "f <- function() {\n  g <- function() 1L\n  for (i in g) i\n}",
+        );
+        assert!(
+            bad.errors
+                .iter()
+                .any(|error| matches!(error.kind, TypeErrorKind::NotIterable { .. })),
+            "{:?}",
+            bad.errors
+        );
+    }
+
+    #[test]
+    fn while_condition_checks_inside_the_fixed_point() {
+        let db = RootDatabase::default();
+        let check = check_source(
+            &db,
+            "f <- function() {\n  done <- FALSE\n  while (!done) {\n    done <- TRUE\n  }\n  done\n}",
+        );
+        assert!(check.errors.is_empty(), "{:?}", check.errors);
+    }
+
+    #[test]
+    fn repeat_applies_the_exit_state() {
+        let db = RootDatabase::default();
+        let check = check_source(
+            &db,
+            "f <- function() {\n  repeat {\n    x <- 1L\n    break\n  }\n  x + 1L\n}",
+        );
+        assert!(check.errors.is_empty(), "{:?}", check.errors);
+    }
+
+    #[test]
+    fn replacement_writes_update_the_base_slot() {
+        let db = RootDatabase::default();
+        // A known-field write replaces the field's type.
+        let replaced = check_source(
+            &db,
+            "f <- function() {\n  p <- list(a = 1L)\n  p$a <- \"s\"\n  p$a\n}",
+        );
+        assert!(replaced.errors.is_empty(), "{:?}", replaced.errors);
+        assert_eq!(scheme_ret(&db, &replaced), scalar(&db, Atomic::Character));
+        // A fresh field is added; an empty list() starts a record.
+        let added = check_source(
+            &db,
+            "f <- function() {\n  p <- list()\n  p$b <- TRUE\n  p$b\n}",
+        );
+        assert!(added.errors.is_empty(), "{:?}", added.errors);
+        assert_eq!(scheme_ret(&db, &added), scalar(&db, Atomic::Logical));
+        // A computed-key write turns an empty list map-like.
+        let computed = check_source(
+            &db,
+            "f <- function(key) {\n  m <- list()\n  m[[key]] <- 1L\n  m[[key]]\n}",
+        );
+        assert!(computed.errors.is_empty(), "{:?}", computed.errors);
+        assert_eq!(scheme_ret(&db, &computed), scalar(&db, Atomic::Integer));
+        // A replacement-function call keeps the base's type.
+        let kept = check_source(
+            &db,
+            "f <- function() {\n  v <- c(1L, 2L)\n  names(v) <- c(\"a\", \"b\")\n  v + 1L\n}",
+        );
+        assert!(kept.errors.is_empty(), "{:?}", kept.errors);
     }
 
     #[test]
