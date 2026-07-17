@@ -5,6 +5,7 @@
 
 bugs:
 * when saving roughly.toml: "received did_save for non-open document /home/felix/Projects/typing-demo/roughly.toml"
+* this is allowed `4 <- 4` or `4 <- "foo"`. but it shouldn't be
 
 code quality:
 - it still uses child_by_field_name instead by id
