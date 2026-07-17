@@ -33,6 +33,10 @@ pub struct Annotation<'db> {
     pub strict: Option<bool>,
     /// `@trust TYPE` — the declared type applies unchecked.
     pub trusted: bool,
+    /// The block violates the form-mixing rules (compact, expanded, and
+    /// definition forms cannot share a `#:` block). An invalid block carries
+    /// no typing payload — only this refusal, worded for the diagnostic.
+    pub invalid: Option<&'static str>,
     pub range: TextRange,
 }
 
@@ -56,6 +60,10 @@ pub fn lower_annotation<'db>(db: &'db dyn Db, node: &SyntaxNode) -> Annotation<'
         range: node.text_range(),
         ..Annotation::default()
     };
+    if let Some(message) = block_form_violation(node) {
+        annotation.invalid = Some(message);
+        return annotation;
+    }
 
     // Expanded-form accumulation.
     let mut forall: Vec<(Name<'db>, Constraint)> = Vec::new();
@@ -209,6 +217,65 @@ pub fn lower_annotation<'db>(db: &'db dyn Db, node: &SyntaxNode) -> Annotation<'
     }
 
     annotation
+}
+
+/// The three annotation block forms. A block must commit to one: `@type` /
+/// `@alias` definitions, the expanded directives (`@forall` / `@param` /
+/// `@return`), or a single compact annotation (a type, optionally behind
+/// `@trust` / `@new` / `@if-unknown`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BlockForm {
+    Compact,
+    Expanded,
+    Definition,
+}
+
+/// Checks the block's items against the form-mixing rules and returns the
+/// refusal wording for the first violation. Directives own their payload
+/// types as nested children, so each top-level child is one block item —
+/// except a binder list, which belongs to the compact type following it.
+fn block_form_violation(node: &SyntaxNode) -> Option<&'static str> {
+    let mut previous: Option<BlockForm> = None;
+    let mut children = node.children().peekable();
+    while let Some(child) = children.next() {
+        let form = match child.kind() {
+            SyntaxKind::ANNOTATION_DIRECTIVE => match directive_name(&child).as_str() {
+                "type" | "alias" => BlockForm::Definition,
+                "param" | "return" | "returns" | "forall" => BlockForm::Expanded,
+                _ => BlockForm::Compact,
+            },
+            SyntaxKind::TYPE_BINDER_LIST => {
+                if children
+                    .peek()
+                    .is_some_and(|next| is_type_kind(next.kind()))
+                {
+                    children.next();
+                }
+                BlockForm::Compact
+            }
+            kind if is_type_kind(kind) => BlockForm::Compact,
+            _ => continue,
+        };
+        match (previous, form) {
+            (None, _)
+            | (Some(BlockForm::Definition), BlockForm::Definition)
+            | (Some(BlockForm::Expanded), BlockForm::Expanded) => {}
+            (Some(BlockForm::Compact), BlockForm::Compact) => {
+                return Some("cannot use multiple compact annotations in the same `#:` block.");
+            }
+            (Some(BlockForm::Definition), _) | (_, BlockForm::Definition) => {
+                return Some(
+                    "cannot mix definition and annotation directives in the same `#:` block.",
+                );
+            }
+            (Some(BlockForm::Compact), BlockForm::Expanded)
+            | (Some(BlockForm::Expanded), BlockForm::Compact) => {
+                return Some("cannot mix compact and expanded annotations in the same `#:` block.");
+            }
+        }
+        previous = Some(form);
+    }
+    None
 }
 
 pub fn is_type_kind(kind: SyntaxKind) -> bool {

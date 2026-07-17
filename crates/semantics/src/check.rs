@@ -49,8 +49,11 @@ pub enum TypeErrorKind<'db> {
         expected: usize,
         found: usize,
     },
-    UnknownArgument {
-        name: String,
+    /// A named argument matching no declared formal (or duplicating one
+    /// already given); carries both sides for the message.
+    NamedArgumentMismatch {
+        expected_parameters: Vec<String>,
+        actual_arguments: Vec<String>,
     },
     /// An annotation declares a parameter the definition has no formal for.
     AnnotationParameterMismatch {
@@ -2210,12 +2213,9 @@ impl<'db> Checker<'db, '_> {
             } else if declared.variadic.is_some() {
                 None
             } else {
-                self.errors.push(TypeError {
-                    range: parameter.range,
-                    kind: TypeErrorKind::AnnotationParameterMismatch {
-                        name: parameter.name.clone(),
-                    },
-                });
+                // A formal the annotation does not declare infers from its
+                // uses; the annotation-side check below owns the mismatch
+                // report.
                 None
             };
             let declared = declared_ty.is_some();
@@ -2362,9 +2362,10 @@ impl<'db> Checker<'db, '_> {
         if let Some(ty) = self.try_overloaded_call(range, callee, arguments) {
             return ty;
         }
+        let callee_range = self.module.expression(callee).range;
         let callee_ty = self.infer(callee);
         let call_arguments = self.infer_call_arguments(range, arguments);
-        self.dispatch_call(range, callee_ty, &call_arguments)
+        self.dispatch_call(range, callee_range, callee_ty, &call_arguments)
     }
 
     /// `c(...)` follows R's atomic coercion hierarchy (logical < integer <
@@ -2641,7 +2642,8 @@ impl<'db> Checker<'db, '_> {
                 if !courtesy {
                     self.overload_probe_depth += 1;
                 }
-                let outcome = self.match_arguments(range, &function, &call_arguments);
+                let callee_range = self.module.expression(callee).range;
+                let outcome = self.match_arguments(range, callee_range, &function, &call_arguments);
                 if !courtesy {
                     self.overload_probe_depth -= 1;
                 }
@@ -2717,6 +2719,7 @@ impl<'db> Checker<'db, '_> {
     fn dispatch_call(
         &mut self,
         range: TextRange,
+        callee_range: TextRange,
         callee: Ty<'db>,
         arguments: &[CallArgument<'db>],
     ) -> Ty<'db> {
@@ -2724,7 +2727,8 @@ impl<'db> Checker<'db, '_> {
         match resolved.kind(self.db) {
             TyKind::Function(function) => {
                 let function = function.clone();
-                if let Err(error) = self.match_arguments(range, &function, arguments) {
+                if let Err(error) = self.match_arguments(range, callee_range, &function, arguments)
+                {
                     self.errors.push(error);
                 }
                 function.ret
@@ -2786,7 +2790,7 @@ impl<'db> Checker<'db, '_> {
                         continue;
                     };
                     let snapshot = self.table.snapshot();
-                    match self.match_arguments(range, &function, arguments) {
+                    match self.match_arguments(range, callee_range, &function, arguments) {
                         Ok(()) => {
                             let member_return = self.table.resolve(self.db, function.ret);
                             self.table.rollback(snapshot);
@@ -2822,6 +2826,7 @@ impl<'db> Checker<'db, '_> {
     fn match_arguments(
         &mut self,
         range: TextRange,
+        callee_range: TextRange,
         function: &FunctionType<'db>,
         arguments: &[CallArgument<'db>],
     ) -> Result<(), TypeError<'db>> {
@@ -2941,8 +2946,8 @@ impl<'db> Checker<'db, '_> {
                                 }
                                 _ => {
                                     return Err(TypeError {
-                                        range: argument.range,
-                                        kind: TypeErrorKind::UnknownArgument { name: name.clone() },
+                                        range,
+                                        kind: self.named_argument_mismatch(function, arguments),
                                     });
                                 }
                             }
@@ -2992,7 +2997,7 @@ impl<'db> Checker<'db, '_> {
                         }
                     } else {
                         return Err(TypeError {
-                            range,
+                            range: callee_range,
                             kind: TypeErrorKind::ArityMismatch {
                                 expected: total,
                                 found: arguments.len(),
@@ -3007,7 +3012,7 @@ impl<'db> Checker<'db, '_> {
             || remaining_named.iter().any(|field| !field.optional)
         {
             return Err(TypeError {
-                range,
+                range: callee_range,
                 kind: TypeErrorKind::ArityMismatch {
                     expected: required,
                     found: arguments.len(),
@@ -3015,6 +3020,24 @@ impl<'db> Checker<'db, '_> {
             });
         }
         Ok(())
+    }
+
+    fn named_argument_mismatch(
+        &self,
+        function: &FunctionType<'db>,
+        arguments: &[CallArgument<'db>],
+    ) -> TypeErrorKind<'db> {
+        TypeErrorKind::NamedArgumentMismatch {
+            expected_parameters: function
+                .named
+                .iter()
+                .map(|field| field.name.text(self.db).to_owned())
+                .collect(),
+            actual_arguments: arguments
+                .iter()
+                .filter_map(|argument| argument.name.clone())
+                .collect(),
+        }
     }
 
     /// The forwarding retry for a callback argument of a variadic callee.
@@ -3293,10 +3316,13 @@ impl<'db> Checker<'db, '_> {
                 .table
                 .compatible(self.db, resolved_value, representation)
             {
+                // The value is checked against the representation, so the
+                // expected side names the shape the value must have — the
+                // nominal name alone would just restate the `@new` line.
                 self.errors.push(TypeError {
                     range,
                     kind: TypeErrorKind::Mismatch {
-                        expected: self.table.resolve(self.db, nominal),
+                        expected: self.table.resolve(self.db, representation),
                         found: resolved_value,
                     },
                 });
@@ -3975,11 +4001,12 @@ mod tests {
             "g <- function() {\n  f <- function(x) x\n  f(z = 1)\n}",
         );
         assert!(
-            check
-                .errors
-                .iter()
-                .any(|error| matches!(&error.kind, TypeErrorKind::UnknownArgument { name } if name == "z")),
-            "expected unknown-argument, got {:?}",
+            check.errors.iter().any(|error| matches!(
+                &error.kind,
+                TypeErrorKind::NamedArgumentMismatch { actual_arguments, .. }
+                    if actual_arguments.iter().any(|name| name == "z")
+            )),
+            "expected a named-argument mismatch, got {:?}",
             check.errors
         );
     }

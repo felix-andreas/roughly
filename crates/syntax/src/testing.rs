@@ -26,6 +26,23 @@ pub struct FixtureFile {
     pub cases: Vec<FixtureCase>,
 }
 
+/// Parse every `.test` fixture file under `suite_dir` (recursively), without
+/// running anything — for harnesses that reuse the corpus, like the
+/// cross-stack differential.
+pub fn parse_fixture_files(suite_dir: &Path) -> Vec<FixtureFile> {
+    let mut paths = Vec::new();
+    collect_fixture_files(suite_dir, &mut paths);
+    paths.sort();
+    paths
+        .into_iter()
+        .map(|path| {
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("read fixture {}: {error}", path.display()));
+            parse_fixture_file(&path, text)
+        })
+        .collect()
+}
+
 /// Run every `.test` fixture under `suite_dir` through `render`, comparing (or
 /// blessing) expectations. Panics with a readable report on mismatch.
 pub fn run_fixture_suite(suite_dir: &Path, render: &dyn Fn(&str) -> String) {

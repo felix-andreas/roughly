@@ -48,7 +48,7 @@ f <- function() {
 }
 #++++
 f: <T> fn() -> T
-47..48 error[type-mismatch] unknown argument `z`
+41..49 error[type-mismatch] This call uses named argument(s) `z`, but the function accepts named parameter(s) `x`.
 
 #---- surplus_positional
 f <- function() {
@@ -57,7 +57,7 @@ f <- function() {
 }
 #++++
 f: fn() -> double
-41..48 error[type-mismatch] this call passes 2 argument(s), but the function accepts 1
+41..42 error[type-mismatch] This call passes 2 positional argument(s), but the function accepts 1.
 
 #---- missing_required
 f <- function() {
@@ -66,7 +66,7 @@ f <- function() {
 }
 #++++
 f: fn() -> integer
-44..49 error[type-mismatch] this call passes 1 argument(s), but the function accepts 2
+44..45 error[type-mismatch] This call passes 1 positional argument(s), but the function accepts 2.
 
 #---- defaulted_formal_may_stay_unfilled
 f <- function() {

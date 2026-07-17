@@ -1,0 +1,17 @@
+[package]
+name = "differential"
+edition = "2024"
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+path = "src/differential.rs"
+
+[dependencies]
+
+[dev-dependencies]
+analysis-legacy = { path = "../analysis-legacy" }
+semantics = { path = "../semantics" }
+syntax = { path = "../syntax" }

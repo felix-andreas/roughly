@@ -30,6 +30,22 @@ expectations and `FIXTURE_FILTER=group__case` runs one case. Suites:
   pipeline on one package file (shipped stubs installed) and renders every named top-level
   definition's exported scheme (`name: <T: numeric> fn(x: T) -> T`) followed by the file's
   diagnostics (`start..end severity[code] message`, byte offsets)
+- `crates/semantics/tests/typing-scripts` — the same pipeline over script documents (one
+  sequential top-down scope)
+- `crates/semantics/tests/typing-strict` — the strict stream: the per-file typing mode and
+  the `strict`-code diagnostics appended after the ordinary rendering
+
+### The cross-stack differential gate
+
+`cargo test -p differential` runs every typing-suite case through **both** stacks — the frozen
+legacy pipeline as the oracle and the rewrite's `file_diagnostics` — and compares the semantic
+diagnostic classes (`type`, `unresolved`, `unused`; syntax is excluded because the new parser's
+errors are required to be better, not identical). Two findings match when class and message are
+byte-identical and the new range equals or lies **inside** the legacy range — strictly tighter
+ranges are an intended improvement, not a divergence. Cases where the oracle itself is wrong are
+allowlisted in the test with the reason, the harness flags stale allowlist entries, and the test
+fails on any unexplained divergence; the per-case details land in
+`target/differential-report.txt`.
 
 ## Fixture format
 

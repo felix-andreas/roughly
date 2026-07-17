@@ -28,6 +28,7 @@ result: integer
 
 #---- script_local_type_declarations
 #: @type Point {list{x: double, y: double}}
+
 #: @new Point
 origin <- list(x = 0, y = 0)
 norm <- function() origin$x

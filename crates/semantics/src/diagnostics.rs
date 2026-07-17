@@ -52,6 +52,21 @@ pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
         });
     }
 
+    for node in parsed
+        .syntax_node()
+        .descendants()
+        .filter(|node| node.kind() == syntax::SyntaxKind::ANNOTATION)
+    {
+        if let Some(violation) = crate::annotations::lower_annotation(db, &node).invalid {
+            diagnostics.push(Diagnostic {
+                range: node.text_range(),
+                severity: Severity::Error,
+                code: "annotation",
+                message: format!("invalid semantics: {violation}"),
+            });
+        }
+    }
+
     for item in item_tree(db, file) {
         let Some(offset) = item_offset(db, item) else {
             continue;
@@ -177,6 +192,17 @@ pub fn strict_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
     diagnostics
 }
 
+fn render_names(names: &[String]) -> String {
+    if names.is_empty() {
+        return "<none>".to_owned();
+    }
+    names
+        .iter()
+        .map(|name| format!("`{name}`"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn render_type_error(db: &dyn Db, range: TextRange, error: &TypeError<'_>) -> Diagnostic {
     let message = render_type_error_message(db, error);
     Diagnostic {
@@ -198,15 +224,20 @@ fn render_type_error_message(db: &dyn Db, error: &TypeError<'_>) -> String {
         TypeErrorKind::NotAFunction { found } => {
             format!("this is not a function: `{}`", renderer.render(db, *found))
         }
-        TypeErrorKind::ArityMismatch { expected, found } => {
-            format!("this call passes {found} argument(s), but the function accepts {expected}")
-        }
-        TypeErrorKind::UnknownArgument { name } => {
-            format!("unknown argument `{name}`")
-        }
-        TypeErrorKind::AnnotationParameterMismatch { name } => {
-            format!("the annotation and the definition disagree about parameter `{name}`")
-        }
+        TypeErrorKind::ArityMismatch { expected, found } => format!(
+            "This call passes {found} positional argument(s), but the function accepts {expected}."
+        ),
+        TypeErrorKind::NamedArgumentMismatch {
+            expected_parameters,
+            actual_arguments,
+        } => format!(
+            "This call uses named argument(s) {}, but the function accepts named parameter(s) {}.",
+            render_names(actual_arguments),
+            render_names(expected_parameters)
+        ),
+        TypeErrorKind::AnnotationParameterMismatch { name } => format!(
+            "this annotation names a parameter `{name}`, but the function does not define one — annotation parameter names must match the function's parameter names"
+        ),
         TypeErrorKind::ConstraintViolation { constraint, found } => {
             let expected_description = match constraint {
                 Constraint::Unconstrained => "a value",

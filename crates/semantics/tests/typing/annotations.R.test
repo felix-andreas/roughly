@@ -17,8 +17,7 @@ f: fn(x: integer) -> character
 f <- function(y) 1L
 #++++
 f: fn(x: integer) -> integer
-34..48 error[type-mismatch] the annotation and the definition disagree about parameter `x`
-43..44 error[type-mismatch] the annotation and the definition disagree about parameter `y`
+34..48 error[type-mismatch] this annotation names a parameter `x`, but the function does not define one — annotation parameter names must match the function's parameter names
 
 #---- rigid_refuses_undeclared_bound
 #: <T> fn(x: T) -> T
@@ -57,3 +56,37 @@ bad: character
 f <- function(x) x
 #++++
 f: fn(x: integer) -> character
+
+#==== blocks
+#---- definition_mixed_with_compact_is_refused
+#: @type Person {list{name: character}}
+#: integer
+n <- 1L
+#++++
+n: integer
+0..50 error[annotation] invalid semantics: cannot mix definition and annotation directives in the same `#:` block.
+
+#---- definition_mixed_with_expanded_is_refused
+#: @type Person {list{name: character}}
+#: @param count {integer}
+#: @return {Person}
+make <- function(count) list(name = "a")
+#++++
+make: <T> fn(count: T) -> list{name: character}
+0..85 error[annotation] invalid semantics: cannot mix definition and annotation directives in the same `#:` block.
+
+#---- compact_mixed_with_expanded_is_refused
+#: fn(x: integer) -> integer
+#: @return {integer}
+f <- function(x) x
+#++++
+f: <T> fn(x: T) -> T
+0..49 error[annotation] invalid semantics: cannot mix compact and expanded annotations in the same `#:` block.
+
+#---- multiple_compact_annotations_are_refused
+#: integer
+#: double
+n <- 1L
+#++++
+n: integer
+0..20 error[annotation] invalid semantics: cannot use multiple compact annotations in the same `#:` block.
