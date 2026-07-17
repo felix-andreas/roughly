@@ -160,6 +160,7 @@ pub fn check_item_with_annotation<'db>(
         recorded: FxHashMap::default(),
         errors: Vec::new(),
         overload_probe_depth: 0,
+        return_frames: Vec::new(),
     };
     let mut scheme = None;
     if let Some(root) = module.root {
@@ -304,6 +305,9 @@ struct Checker<'db, 'a> {
     /// the literal-as-integer courtesy is off, so it cannot decide which
     /// candidate wins (exact matches outrank conversions).
     overload_probe_depth: u32,
+    /// Early-`return` value types per enclosing function frame; a function's
+    /// return type is their union with the body's trailing value.
+    return_frames: Vec<Vec<Ty<'db>>>,
 }
 
 /// One call argument, inferred exactly once before any signature matching, so
@@ -356,6 +360,84 @@ impl NumericOperand<'_> {
             NumericOperand::ConcreteUnion(parts) => Some(parts.clone()),
             _ => None,
         }
+    }
+}
+
+/// One recognized type-guard condition: the tested slot and the refined type
+/// on each `if` edge (`None` = no refinement on that edge).
+struct GuardRefinement<'db> {
+    slot: BindingId,
+    true_edge: Option<Ty<'db>>,
+    false_edge: Option<Ty<'db>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GuardKind {
+    Null,
+    Family(GuardFamily),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GuardFamily {
+    Character,
+    Logical,
+    Integer,
+    Double,
+    Numeric,
+    Function,
+    List,
+}
+
+fn guard_kind(name: &str) -> Option<GuardKind> {
+    Some(match name {
+        "is.null" => GuardKind::Null,
+        "is.character" => GuardKind::Family(GuardFamily::Character),
+        "is.logical" => GuardKind::Family(GuardFamily::Logical),
+        "is.integer" => GuardKind::Family(GuardFamily::Integer),
+        "is.double" => GuardKind::Family(GuardFamily::Double),
+        "is.numeric" => GuardKind::Family(GuardFamily::Numeric),
+        "is.function" => GuardKind::Family(GuardFamily::Function),
+        "is.list" => GuardKind::Family(GuardFamily::List),
+        _ => return None,
+    })
+}
+
+/// A non-union type narrows as its own one-member union.
+fn guard_members<'db>(db: &'db dyn Db, resolved: Ty<'db>) -> Vec<Ty<'db>> {
+    match resolved.kind(db) {
+        TyKind::Union(members) => members.clone(),
+        _ => vec![resolved],
+    }
+}
+
+/// Whether a member belongs to a guard family: `Some(bool)` when statically
+/// decidable, `None` (kept on both edges) otherwise. A family membership test
+/// covers the scalar and the vector of the atomic; `is.list` covers every
+/// list shape; `is.function` covers function types.
+fn family_membership<'db>(db: &'db dyn Db, member: Ty<'db>, family: GuardFamily) -> Option<bool> {
+    match member.kind(db) {
+        TyKind::Null => Some(false),
+        TyKind::Scalar(atomic) => Some(atomic_in_family(*atomic, family)),
+        TyKind::Vector(element) | TyKind::NamedVector(element) => match element.kind(db) {
+            TyKind::Scalar(atomic) => Some(atomic_in_family(*atomic, family)),
+            _ => None,
+        },
+        TyKind::List(_) | TyKind::NamedList(_) | TyKind::Tuple(_) | TyKind::Record(_) => {
+            Some(family == GuardFamily::List)
+        }
+        TyKind::Function(_) => Some(family == GuardFamily::Function),
+        _ => None,
+    }
+}
+
+fn atomic_in_family(atomic: Atomic, family: GuardFamily) -> bool {
+    match family {
+        GuardFamily::Character => atomic == Atomic::Character,
+        GuardFamily::Logical => atomic == Atomic::Logical,
+        GuardFamily::Integer => atomic == Atomic::Integer,
+        GuardFamily::Double => atomic == Atomic::Double,
+        GuardFamily::Numeric => matches!(atomic, Atomic::Integer | Atomic::Double),
+        GuardFamily::Function | GuardFamily::List => false,
     }
 }
 
@@ -573,7 +655,13 @@ impl<'db> Checker<'db, '_> {
                         self.infer(default);
                     }
                 }
-                let return_ty = self.infer(*body);
+                self.return_frames.push(Vec::new());
+                let trailing_ty = self.infer(*body);
+                let early_returns = self
+                    .return_frames
+                    .pop()
+                    .expect("return frames stay balanced around body inference");
+                let return_ty = self.join_early_returns(early_returns, trailing_ty);
                 self.environment.rollback(mark);
                 self.table.level -= 1;
                 Ty::new(
@@ -591,17 +679,9 @@ impl<'db> Checker<'db, '_> {
                 then_branch,
                 else_branch,
             } => {
-                self.expect_scalar_logical(*condition);
-                let mark = self.environment.mark();
-                let then_ty = self.infer(*then_branch);
-                let then_writes = self.environment.writes_since(mark);
-                self.environment.rollback(mark);
-                let else_ty = match else_branch {
-                    Some(else_branch) => self.infer(*else_branch),
-                    None => crate::types::null(self.db),
-                };
-                self.join_writes(then_writes);
-                self.join_types(then_ty, else_ty)
+                let (condition, then_branch, else_branch) =
+                    (*condition, *then_branch, *else_branch);
+                self.infer_if(condition, then_branch, else_branch)
             }
             ExpressionKind::For { sequence, body, .. } => {
                 self.infer(*sequence);
@@ -694,6 +774,282 @@ impl<'db> Checker<'db, '_> {
         }
         // Replacement targets (`names(x) <- v`) were already inferred as reads
         // by naming; their typing rules land with the container rules.
+    }
+
+    /// `if`/`else` with guard narrowing and diverging-branch flow: a
+    /// type-guard condition refines the tested slot along each edge, and a
+    /// branch that never falls through (ends in `return`/`stop`/`break`/
+    /// `next`) contributes neither its value nor its slot state — which also
+    /// makes the surviving edge's refinement persist after the `if` (the
+    /// idiomatic early-exit guard).
+    fn infer_if(
+        &mut self,
+        condition: ExprId,
+        then_branch: ExprId,
+        else_branch: Option<ExprId>,
+    ) -> Ty<'db> {
+        self.expect_scalar_logical(condition);
+        let guard = self.recognize_guard(condition);
+
+        let mark = self.environment.mark();
+        if let Some(guard) = &guard
+            && let Some(true_edge) = guard.true_edge
+        {
+            self.environment.set(guard.slot, EnvEntry::Mono(true_edge));
+        }
+        let then_ty = self.infer(then_branch);
+        let then_diverges = self.diverges(then_branch);
+        let then_writes = self.environment.writes_since(mark);
+        self.environment.rollback(mark);
+
+        // The false edge applies to the else branch and — when the then
+        // branch diverges — to everything after the `if`.
+        let false_mark = self.environment.mark();
+        if let Some(guard) = &guard
+            && let Some(false_edge) = guard.false_edge
+        {
+            self.environment.set(guard.slot, EnvEntry::Mono(false_edge));
+        }
+        let (else_ty, else_diverges) = match else_branch {
+            Some(else_branch) => (self.infer(else_branch), self.diverges(else_branch)),
+            None => (crate::types::null(self.db), false),
+        };
+
+        match (then_diverges, else_diverges) {
+            // Only the else edge survives: its state (including the false-edge
+            // refinement) flows on; the diverging branch contributes nothing.
+            (true, false) => else_ty,
+            // Only the then edge survives: discard the else state and re-apply
+            // the then writes (including the true-edge refinement) as the
+            // ongoing state.
+            (false, true) => {
+                self.environment.rollback(false_mark);
+                for (slot, entry) in then_writes {
+                    if let Some(entry) = entry {
+                        self.environment.set(slot, entry);
+                    }
+                }
+                then_ty
+            }
+            (false, false) => {
+                self.join_writes(then_writes);
+                self.join_types(then_ty, else_ty)
+            }
+            // Nothing falls through; the state after the `if` is unreachable,
+            // so keep the pre-`if` state.
+            (true, true) => {
+                self.environment.rollback(false_mark);
+                self.join_types(then_ty, else_ty)
+            }
+        }
+    }
+
+    /// Whether an expression never falls through to the code after it: it is
+    /// (or is a block ending in) `return(...)`, `stop(...)`, `break`, or
+    /// `next`, or an `if ... else` both of whose branches diverge.
+    /// `return`/`stop` are recognized by their bare names (rebinding them is
+    /// not modeled).
+    fn diverges(&self, id: ExprId) -> bool {
+        match &self.module.expression(id).kind {
+            ExpressionKind::Break | ExpressionKind::Next => true,
+            ExpressionKind::Call { callee, .. } => matches!(
+                &self.module.expression(*callee).kind,
+                ExpressionKind::NameRef(name) if name == "return" || name == "stop"
+            ),
+            ExpressionKind::Block(statements) => {
+                statements.last().is_some_and(|&last| self.diverges(last))
+            }
+            ExpressionKind::If {
+                then_branch,
+                else_branch: Some(else_branch),
+                ..
+            } => self.diverges(*then_branch) && self.diverges(*else_branch),
+            ExpressionKind::Paren(inner) => self.diverges(*inner),
+            _ => false,
+        }
+    }
+
+    /// `return(x)` exits the enclosing function with `x` (`return()` with
+    /// `NULL`): the value joins the frame's return union, and the expression
+    /// itself yields no observable value where it stands. A top-level
+    /// `return` (an R runtime error) still checks its value but joins no
+    /// frame.
+    fn infer_return(&mut self, arguments: &[Argument]) -> Ty<'db> {
+        let value_ty = match arguments.first().and_then(|argument| argument.value) {
+            Some(value) => self.infer(value),
+            None => crate::types::null(self.db),
+        };
+        for argument in arguments.iter().skip(1) {
+            if let Some(value) = argument.value {
+                self.infer(value);
+            }
+        }
+        let resolved = self.table.resolve(self.db, value_ty);
+        if let Some(frame) = self.return_frames.last_mut() {
+            frame.push(resolved);
+        }
+        crate::types::null(self.db)
+    }
+
+    /// A condition that is a type-guard predicate applied to a plain local
+    /// variable; `!cond` swaps the edges. `None` when the condition is not a
+    /// recognized guard or the guard cannot refine anything.
+    fn recognize_guard(&mut self, condition: ExprId) -> Option<GuardRefinement<'db>> {
+        match &self.module.expression(condition).kind {
+            ExpressionKind::Unary {
+                operator: UnaryOperator::Not,
+                operand,
+            } => {
+                let inner = self.recognize_guard(*operand)?;
+                Some(GuardRefinement {
+                    slot: inner.slot,
+                    true_edge: inner.false_edge,
+                    false_edge: inner.true_edge,
+                })
+            }
+            ExpressionKind::Paren(inner) => self.recognize_guard(*inner),
+            ExpressionKind::Call { callee, arguments } => {
+                let ExpressionKind::NameRef(name) = &self.module.expression(*callee).kind else {
+                    return None;
+                };
+                if self.naming.resolutions.contains_key(callee) {
+                    return None;
+                }
+                let guard = guard_kind(name)?;
+                let [argument] = arguments.as_slice() else {
+                    return None;
+                };
+                if argument.name.is_some() {
+                    return None;
+                }
+                let value = argument.value?;
+                if !matches!(
+                    self.module.expression(value).kind,
+                    ExpressionKind::NameRef(_)
+                ) {
+                    return None;
+                }
+                let slot = *self.naming.resolutions.get(&value)?;
+                let EnvEntry::Mono(current) = self.environment.get(slot)? else {
+                    return None;
+                };
+                let resolved = self.table.resolve(self.db, current);
+                self.guard_edges(guard, slot, resolved)
+            }
+            _ => None,
+        }
+    }
+
+    fn guard_edges(
+        &mut self,
+        guard: GuardKind,
+        slot: BindingId,
+        resolved: Ty<'db>,
+    ) -> Option<GuardRefinement<'db>> {
+        match guard {
+            GuardKind::Null => {
+                match resolved.kind(self.db) {
+                    // The runtime guarantees the true edge is NULL even when
+                    // the static type is untracked.
+                    TyKind::Any | TyKind::Unknown => {
+                        return Some(GuardRefinement {
+                            slot,
+                            true_edge: Some(crate::types::null(self.db)),
+                            false_edge: None,
+                        });
+                    }
+                    // A completely unconstrained variable is SHAPED by the
+                    // test: `NULL` is asserted possible, so it becomes
+                    // `T | NULL` for a fresh `T` and the edges narrow as an
+                    // ordinary union — the unannotated coalesce idiom. Never
+                    // on a constrained variable (it cannot hold NULL) or a
+                    // rigid (an annotation's contract is not reshaped).
+                    TyKind::Var(var) => {
+                        let Entry::Unbound {
+                            constraint: Constraint::Unconstrained,
+                            ..
+                        } = *self.table.entry(*var)
+                        else {
+                            return None;
+                        };
+                        let fresh = self.fresh(Constraint::Unconstrained);
+                        let shaped = union_of(self.db, [fresh, crate::types::null(self.db)]);
+                        if self.table.unify(self.db, resolved, shaped).is_err() {
+                            return None;
+                        }
+                        return Some(GuardRefinement {
+                            slot,
+                            true_edge: Some(shaped),
+                            false_edge: Some(fresh),
+                        });
+                    }
+                    _ => {}
+                }
+                let members = guard_members(self.db, resolved);
+                // The guard cannot fire without a NULL member; dead branches
+                // are not typed specially.
+                if !members
+                    .iter()
+                    .any(|member| matches!(member.kind(self.db), TyKind::Null))
+                {
+                    return None;
+                }
+                let decide = |db: &'db dyn Db, member: Ty<'db>| match member.kind(db) {
+                    TyKind::Null => Some(true),
+                    TyKind::Var(_) | TyKind::Rigid(_) | TyKind::Named(..) => None,
+                    _ => Some(false),
+                };
+                Some(self.filtered_edges(slot, &members, decide))
+            }
+            GuardKind::Family(family) => {
+                // Family guards do not refine `Any`/`Unknown` (inventing a
+                // concrete shape there would false-positive against
+                // scalar-claim stub signatures) and never touch an
+                // unresolved variable or rigid.
+                if matches!(
+                    resolved.kind(self.db),
+                    TyKind::Any | TyKind::Unknown | TyKind::Var(_) | TyKind::Rigid(_)
+                ) {
+                    return None;
+                }
+                let members = guard_members(self.db, resolved);
+                let decide =
+                    move |db: &'db dyn Db, member: Ty<'db>| family_membership(db, member, family);
+                Some(self.filtered_edges(slot, &members, decide))
+            }
+        }
+    }
+
+    /// Narrowing filters union members; an undecidable member is
+    /// conservatively kept on both edges, and an edge that removes nothing
+    /// (or keeps nothing) refines nothing.
+    fn filtered_edges(
+        &self,
+        slot: BindingId,
+        members: &[Ty<'db>],
+        decide: impl Fn(&'db dyn Db, Ty<'db>) -> Option<bool>,
+    ) -> GuardRefinement<'db> {
+        let true_members: Vec<Ty<'db>> = members
+            .iter()
+            .copied()
+            .filter(|&member| decide(self.db, member) != Some(false))
+            .collect();
+        let false_members: Vec<Ty<'db>> = members
+            .iter()
+            .copied()
+            .filter(|&member| decide(self.db, member) != Some(true))
+            .collect();
+        let edge = |kept: Vec<Ty<'db>>| -> Option<Ty<'db>> {
+            if kept.is_empty() || kept.len() == members.len() {
+                return None;
+            }
+            Some(union_of(self.db, kept))
+        };
+        GuardRefinement {
+            slot,
+            true_edge: edge(true_members),
+            false_edge: edge(false_members),
+        }
     }
 
     fn infer_unary(&mut self, operator: UnaryOperator, operand: ExprId) -> Ty<'db> {
@@ -1350,7 +1706,13 @@ impl<'db> Checker<'db, '_> {
             }
         }
 
-        let body_ty = self.infer(*body);
+        self.return_frames.push(Vec::new());
+        let trailing_ty = self.infer(*body);
+        let early_returns = self
+            .return_frames
+            .pop()
+            .expect("return frames stay balanced around body inference");
+        let body_ty = self.join_early_returns(early_returns, trailing_ty);
         // An Unknown declared return (elided `->`) constrains nothing.
         if !matches!(declared.ret.kind(self.db), TyKind::Unknown) {
             let body_range = self.module.expression(*body).range;
@@ -1358,6 +1720,16 @@ impl<'db> Checker<'db, '_> {
         }
         self.environment.rollback(mark);
         self.table.level -= 1;
+    }
+
+    /// A function's return type is the union of every early `return` value
+    /// with the body's trailing value.
+    fn join_early_returns(&self, mut early_returns: Vec<Ty<'db>>, trailing: Ty<'db>) -> Ty<'db> {
+        if early_returns.is_empty() {
+            return trailing;
+        }
+        early_returns.push(self.table.resolve(self.db, trailing));
+        union_of(self.db, early_returns)
     }
 
     /// The call entry point: shape-constructing builtins (`c`, `list`,
@@ -1375,6 +1747,7 @@ impl<'db> Checker<'db, '_> {
                 "c" => Some(self.infer_combine(arguments)),
                 "list" => Some(self.infer_list(range, arguments)),
                 "switch" => Some(self.infer_switch(range, arguments)),
+                "return" => Some(self.infer_return(arguments)),
                 _ => None,
             };
             if let Some(ty) = builtin {
@@ -2733,6 +3106,88 @@ mod tests {
                 .any(|error| matches!(&error.kind, TypeErrorKind::UnknownArgument { name } if name == "z")),
             "expected unknown-argument, got {:?}",
             check.errors
+        );
+    }
+
+    #[test]
+    fn early_returns_union_with_the_trailing_value() {
+        let db = RootDatabase::default();
+        let check = check_source(&db, "f <- function(c) {\n  if (c) return(\"foo\")\n  5\n}");
+        assert!(check.errors.is_empty(), "{:?}", check.errors);
+        let TyKind::Union(members) = scheme_ret(&db, &check).kind(&db) else {
+            panic!(
+                "expected character | double, got {:?}",
+                scheme_ret(&db, &check).kind(&db)
+            );
+        };
+        assert!(members.contains(&scalar(&db, Atomic::Character)));
+        assert!(members.contains(&scalar(&db, Atomic::Double)));
+    }
+
+    #[test]
+    fn diverging_branch_contributes_neither_value_nor_state() {
+        let db = RootDatabase::default();
+        // The value: `if (c) return(NULL) else 5` is `double`, not
+        // `NULL | double`.
+        let value = check_source(
+            &db,
+            "f <- function(c) {\n  x <- if (c) return(NULL) else 5\n  x + 1\n}",
+        );
+        assert!(value.errors.is_empty(), "{:?}", value.errors);
+        // The state: a write inside a diverging branch does not join, so the
+        // arithmetic below stays clean.
+        let state = check_source(
+            &db,
+            "f <- function(flag) {\n  x <- 1L\n  if (flag) {\n    x <- \"s\"\n    return(x)\n  }\n  x + 1L\n}",
+        );
+        assert!(state.errors.is_empty(), "{:?}", state.errors);
+    }
+
+    #[test]
+    fn null_guard_narrows_the_early_exit_idiom() {
+        let db = RootDatabase::default();
+        let check = check_annotated(
+            &db,
+            "#: fn(x: integer | NULL) -> integer\nf <- function(x) {\n  if (is.null(x)) {\n    return(0L)\n  }\n  x + 1L\n}",
+        );
+        assert!(check.errors.is_empty(), "{:?}", check.errors);
+    }
+
+    #[test]
+    fn null_guard_shapes_the_unannotated_coalesce_idiom() {
+        let db = RootDatabase::default();
+        let check = check_source(
+            &db,
+            "coalesce <- function(value, fallback) if (is.null(value)) fallback else value",
+        );
+        assert!(check.errors.is_empty(), "{:?}", check.errors);
+        // `<T> fn(value: T | NULL, fallback: T) -> T`.
+        let scheme = check.scheme.clone().expect("scheme");
+        assert_eq!(scheme.binders.len(), 1, "{scheme:?}");
+        let TyKind::Function(function) = scheme.body.kind(&db) else {
+            panic!()
+        };
+        assert!(matches!(function.ret.kind(&db), TyKind::Rigid(_)));
+        assert_eq!(function.named[1].ty, function.ret, "fallback ties to T");
+        let TyKind::Union(members) = function.named[0].ty.kind(&db) else {
+            panic!("value must be T | NULL, got {:?}", function.named[0].ty);
+        };
+        assert!(members.contains(&function.ret));
+        assert!(members.contains(&crate::types::null(&db)));
+    }
+
+    #[test]
+    fn family_guard_filters_union_members() {
+        let db = RootDatabase::default();
+        let check = check_source(
+            &db,
+            "f <- function(flag) {\n  y <- if (flag) 1L else \"a\"\n  if (is.character(y)) y else \"z\"\n}",
+        );
+        assert!(check.errors.is_empty(), "{:?}", check.errors);
+        assert_eq!(
+            scheme_ret(&db, &check),
+            scalar(&db, Atomic::Character),
+            "the true edge must narrow y to character"
         );
     }
 
