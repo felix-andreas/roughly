@@ -7,6 +7,7 @@
 //! class-constructor calls and function bodies), never whole files, so an edit
 //! recomputes only the items whose derived values actually changed.
 
+pub mod annotations;
 pub mod check;
 pub mod hir;
 pub mod infer;
@@ -176,6 +177,59 @@ impl ItemSyntax {
 pub fn item_hir<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<hir::Module> {
     let syntax = item_syntax(db, item)?;
     Some(hir::lower_item(&syntax.syntax_node()))
+}
+
+/// The annotation region immediately preceding an item (only trivia between),
+/// as a position-independent green subtree. Annotations are siblings of the
+/// item statement in the file tree, so attachment happens here, not inside
+/// `item_syntax`.
+#[salsa::tracked(returns(clone))]
+pub fn item_annotation_syntax<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<ItemSyntax> {
+    let parse = parse(db, *item.file(db));
+    let root = parse.syntax_node();
+    let mut counts: rustc_hash::FxHashMap<(ItemKind, Option<String>), u32> =
+        rustc_hash::FxHashMap::default();
+    let target = (*item.kind(db), item.name(db).clone(), *item.disambiguator(db));
+    let mut pending_annotation: Option<syntax::SyntaxNode> = None;
+    for child in root.children_with_tokens() {
+        match child {
+            rowan::NodeOrToken::Node(node) if node.kind() == syntax::SyntaxKind::ANNOTATION => {
+                pending_annotation = Some(node);
+            }
+            rowan::NodeOrToken::Node(node)
+                if syntax::ast::is_expression_kind(node.kind())
+                    || node.kind() == syntax::SyntaxKind::ERROR =>
+            {
+                let (kind, name) = classify_top_level(&node);
+                let counter = counts.entry((kind, name.clone())).or_insert(0);
+                let disambiguator = *counter;
+                *counter += 1;
+                if (kind, name, disambiguator) == target {
+                    return pending_annotation.map(|node| ItemSyntax(node.green().into()));
+                }
+                pending_annotation = None;
+            }
+            rowan::NodeOrToken::Token(token)
+                if matches!(
+                    token.kind(),
+                    syntax::SyntaxKind::WHITESPACE | syntax::SyntaxKind::NEWLINE
+                ) => {}
+            _ => pending_annotation = None,
+        }
+    }
+    None
+}
+
+/// The full per-item check: HIR + naming + annotation lowering + inference.
+/// Derived from position-independent per-item values only, so it cuts off
+/// whenever the item (and its annotation) are untouched.
+#[salsa::tracked(returns(clone))]
+pub fn item_check<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<check::ItemCheck<'db>> {
+    let module = item_hir(db, item)?;
+    let naming = naming::resolve_item(&module);
+    let annotation = item_annotation_syntax(db, item)
+        .map(|syntax| annotations::lower_annotation(db, &syntax.syntax_node()));
+    Some(check::check_item_with_annotation(db, &module, &naming, annotation.as_ref()))
 }
 
 /// Kind + name of one top-level statement, mirroring R assignment spellings:

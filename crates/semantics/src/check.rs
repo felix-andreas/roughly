@@ -27,23 +27,25 @@ use syntax::TextRange;
 
 /// A structured type finding; rendering to wording happens at the diagnostic
 /// edge.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, salsa::SalsaValue)]
 pub struct TypeError<'db> {
     pub range: TextRange,
     pub kind: TypeErrorKind<'db>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, salsa::SalsaValue)]
 pub enum TypeErrorKind<'db> {
     Mismatch { expected: Ty<'db>, found: Ty<'db> },
     NotAFunction { found: Ty<'db> },
     TooManyArguments { expected: usize, found: usize },
     UnknownArgument { name: String },
+    /// An annotation declares a parameter the definition has no formal for.
+    AnnotationParameterMismatch { name: String },
     InfiniteType,
 }
 
 /// The result of checking one item.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, salsa::SalsaValue)]
 pub struct ItemCheck<'db> {
     /// Per-expression resolved types (post-substitution).
     pub expression_types: FxHashMap<ExprId, Ty<'db>>,
@@ -54,6 +56,15 @@ pub struct ItemCheck<'db> {
 }
 
 pub fn check_item<'db>(db: &'db dyn Db, module: &Module, naming: &ItemNaming) -> ItemCheck<'db> {
+    check_item_with_annotation(db, module, naming, None)
+}
+
+pub fn check_item_with_annotation<'db>(
+    db: &'db dyn Db,
+    module: &Module,
+    naming: &ItemNaming,
+    annotation: Option<&crate::annotations::Annotation<'db>>,
+) -> ItemCheck<'db> {
     let mut context = Checker {
         db,
         module,
@@ -61,16 +72,63 @@ pub fn check_item<'db>(db: &'db dyn Db, module: &Module, naming: &ItemNaming) ->
         table: InferenceTable::default(),
         environment: Environment::default(),
         scheme_arena: Vec::new(),
+        rigid_constraints: FxHashMap::default(),
         recorded: FxHashMap::default(),
         errors: Vec::new(),
     };
     let mut scheme = None;
     if let Some(root) = module.root {
-        let root_ty = context.infer(root);
-        // A definition item's scheme is its value's generalization.
-        if let ExpressionKind::Assign { value, .. } = &module.expression(root).kind {
-            let value_ty = context.recorded.get(value).copied().unwrap_or(root_ty);
-            scheme = Some(context.generalize(value_ty));
+        let declared_fn = annotation.filter(|a| !a.trusted).and_then(|a| {
+            let declared = a.declared.as_ref()?;
+            match declared.body.kind(db) {
+                TyKind::Function(function) => Some((declared.clone(), function.clone())),
+                _ => None,
+            }
+        });
+        match (&module.expression(root).kind, declared_fn) {
+            // A declared function annotation on a function definition: check
+            // the body under the declared parameter types (rigid — they
+            // refuse to bind), and check the result against the declared
+            // return. The declared scheme wins as the export.
+            (ExpressionKind::Assign { value, .. }, Some((declared, function)))
+                if matches!(module.expression(*value).kind, ExpressionKind::Function { .. }) =>
+            {
+                for (name, constraint) in &declared.binders {
+                    context.rigid_constraints.insert(*name, *constraint);
+                }
+                context.check_declared_function(*value, &function);
+                context.recorded.insert(root, declared.body);
+                scheme = Some(declared);
+            }
+            (ExpressionKind::Assign { value, .. }, _) => {
+                let root_ty = context.infer(root);
+                let value_ty = context.recorded.get(value).copied().unwrap_or(root_ty);
+                scheme = match annotation.and_then(|a| a.declared.clone()) {
+                    // A declared non-function type (or a trusted one): the
+                    // declaration is the contract.
+                    Some(declared) => {
+                        if annotation.is_some_and(|a| !a.trusted) {
+                            let expected = declared.body;
+                            if matches!(
+                                declared.body.kind(db),
+                                TyKind::Scalar(_)
+                                    | TyKind::Null
+                                    | TyKind::Vector(_)
+                                    | TyKind::List(_)
+                                    | TyKind::Union(_)
+                            ) {
+                                let range = module.expression(*value).range;
+                                context.unify_or_report(range, expected, value_ty);
+                            }
+                        }
+                        Some(declared)
+                    }
+                    None => Some(context.generalize(value_ty)),
+                };
+            }
+            _ => {
+                context.infer(root);
+            }
         }
     }
     let expression_types = context
@@ -145,6 +203,8 @@ struct Checker<'db, 'a> {
     table: InferenceTable<'db>,
     environment: Environment<'db>,
     scheme_arena: Vec<TypeScheme<'db>>,
+    /// Declared constraints of in-scope rigid binders (`<T: numeric>`).
+    rigid_constraints: FxHashMap<Name<'db>, Constraint>,
     recorded: FxHashMap<ExprId, Ty<'db>>,
     errors: Vec<TypeError<'db>>,
 }
@@ -409,6 +469,89 @@ impl<'db> Checker<'db, '_> {
         }
     }
 
+    /// Check a function definition against its declared annotation type:
+    /// formals get their declared types (name-aware: named declarations match
+    /// by name, positional declarations fill the rest in order; rigid binder
+    /// types refuse to bind), the body infers under them, and the result
+    /// checks against the declared return.
+    fn check_declared_function(
+        &mut self,
+        function_id: ExprId,
+        declared: &FunctionType<'db>,
+    ) {
+        let expression = self.module.expression(function_id).clone();
+        let ExpressionKind::Function { parameters, body } = &expression.kind else { return };
+        let range = expression.range;
+
+        self.table.level += 1;
+        let mark = self.environment.mark();
+        let mut positional_index = 0usize;
+        let mut used_named: Vec<bool> = vec![false; declared.named.len()];
+        for parameter in parameters {
+            let declared_ty = if let Some(index) = declared
+                .named
+                .iter()
+                .position(|field| field.name.text(self.db) == parameter.name)
+            {
+                used_named[index] = true;
+                Some(declared.named[index].ty)
+            } else if parameter.name == "..." {
+                None
+            } else if positional_index < declared.positional.len() {
+                let ty = declared.positional[positional_index];
+                positional_index += 1;
+                Some(ty)
+            } else if declared.variadic.is_some() {
+                None
+            } else {
+                self.errors.push(TypeError {
+                    range: parameter.range,
+                    kind: TypeErrorKind::AnnotationParameterMismatch {
+                        name: parameter.name.clone(),
+                    },
+                });
+                None
+            };
+            let parameter_ty =
+                declared_ty.unwrap_or_else(|| self.fresh(Constraint::Unconstrained));
+            if let Some(slot) = self
+                .naming
+                .bindings
+                .iter()
+                .find(|(_, info)| info.range == parameter.range)
+                .map(|(id, _)| *id)
+            {
+                self.environment.set(slot, EnvEntry::Mono(parameter_ty));
+            }
+            if let Some(default) = parameter.default {
+                let default_ty = self.infer(default);
+                self.unify_or_report(parameter.range, parameter_ty, default_ty);
+            }
+        }
+        // Declared named parameters the definition never declares.
+        for (index, field) in declared.named.iter().enumerate() {
+            if !used_named[index]
+                && !parameters.iter().any(|p| p.name == field.name.text(self.db))
+            {
+                self.errors.push(TypeError {
+                    range,
+                    kind: TypeErrorKind::AnnotationParameterMismatch {
+                        name: field.name.text(self.db).to_owned(),
+                    },
+                });
+            }
+        }
+
+        let body_ty = self.infer(*body);
+        // An Unknown declared return (elided `->`) constrains nothing.
+        if !matches!(declared.ret.kind(self.db), TyKind::Unknown) {
+            let body_range = self.module.expression(*body).range;
+            self.unify_or_report(body_range, declared.ret, body_ty);
+        }
+        self.environment.rollback(mark);
+        self.table.level -= 1;
+    }
+
     /// Arithmetic: each operand is *checked* numeric — a variable operand
     /// gains the numeric constraint without binding to the other side (so
     /// `function(x) x + 1L` stays `<T: numeric> fn(x: T) -> T`); two variable
@@ -421,6 +564,17 @@ impl<'db> Checker<'db, '_> {
             TyKind::Var(_) => {
                 let numeric = checker.fresh(Constraint::Numeric);
                 checker.unify_or_report(range, numeric, side);
+                true
+            }
+            // A rigid binder satisfies arithmetic only when its declaration
+            // promised numeric-ness; the body must not add bounds the
+            // annotation never declared.
+            TyKind::Rigid(name)
+                if matches!(
+                    checker.rigid_constraints.get(name),
+                    Some(Constraint::Numeric | Constraint::ScalarNumeric)
+                ) =>
+            {
                 true
             }
             TyKind::Scalar(Atomic::Integer | Atomic::Double | Atomic::Complex)
@@ -450,6 +604,8 @@ impl<'db> Checker<'db, '_> {
             }
             (TyKind::Var(_), _) => lhs,
             (_, TyKind::Var(_)) => rhs,
+            (TyKind::Rigid(_), _) => lhs,
+            (_, TyKind::Rigid(_)) => rhs,
             (TyKind::Any, _) | (_, TyKind::Any) => crate::types::any(self.db),
             (TyKind::Unknown, _) | (_, TyKind::Unknown) => self.unknown(),
             (TyKind::Scalar(a), TyKind::Scalar(b)) => {
@@ -977,5 +1133,98 @@ mod tests {
             panic!("expected integer | character return, got {:?}", function.ret.kind(&db));
         };
         assert_eq!(members.len(), 2);
+    }
+
+    fn check_annotated<'db>(db: &'db RootDatabase, source: &str) -> ItemCheck<'db> {
+        let parse = syntax::parse(source);
+        let root = parse.syntax_node();
+        let annotation = root
+            .children()
+            .find(|child| child.kind() == syntax::SyntaxKind::ANNOTATION)
+            .map(|node| crate::annotations::lower_annotation(db, &node));
+        let item = root
+            .children()
+            .find(|child| syntax::ast::is_expression_kind(child.kind()))
+            .expect("one top-level item");
+        let module = lower_item(&item);
+        let naming = resolve_item(&module);
+        check_item_with_annotation(db, &module, &naming, annotation.as_ref())
+    }
+
+    #[test]
+    fn annotated_identity_keeps_declared_scheme() {
+        let db = RootDatabase::default();
+        let check = check_annotated(&db, "#: <T> fn(x: T) -> T\nid <- function(x) x");
+        assert!(check.errors.is_empty(), "{:?}", check.errors);
+        let scheme = check.scheme.expect("declared scheme");
+        assert_eq!(scheme.binders.len(), 1);
+        let TyKind::Function(function) = scheme.body.kind(&db) else { panic!() };
+        assert!(matches!(function.ret.kind(&db), TyKind::Rigid(_)));
+    }
+
+    #[test]
+    fn annotated_return_mismatch_reports() {
+        let db = RootDatabase::default();
+        let check =
+            check_annotated(&db, "#: fn(x: integer) -> character\nf <- function(x) x");
+        assert!(
+            check.errors.iter().any(|e| matches!(e.kind, TypeErrorKind::Mismatch { .. })),
+            "expected return mismatch, got {:?}",
+            check.errors
+        );
+    }
+
+    #[test]
+    fn annotated_parameter_name_mismatch_reports() {
+        let db = RootDatabase::default();
+        let check =
+            check_annotated(&db, "#: fn(x: integer) -> integer\nf <- function(y) 1L");
+        assert!(
+            check
+                .errors
+                .iter()
+                .any(|e| matches!(&e.kind, TypeErrorKind::AnnotationParameterMismatch { .. })),
+            "expected parameter mismatch, got {:?}",
+            check.errors
+        );
+    }
+
+    #[test]
+    fn rigid_binder_refuses_undeclared_bound() {
+        let db = RootDatabase::default();
+        // The body adds an arithmetic bound the annotation never declared.
+        let bad = check_annotated(&db, "#: <T> fn(x: T) -> T\nbad <- function(x) x + 1L");
+        assert!(
+            !bad.errors.is_empty(),
+            "plain <T> must refuse arithmetic, got no errors"
+        );
+        // With the declared numeric constraint the same body is fine.
+        let ok =
+            check_annotated(&db, "#: <T: numeric> fn(x: T) -> T\nok <- function(x) x + 1L");
+        assert!(ok.errors.is_empty(), "{:?}", ok.errors);
+    }
+
+    #[test]
+    fn expanded_param_return_form_checks() {
+        let db = RootDatabase::default();
+        let check = check_annotated(
+            &db,
+            "#: @forall T: numeric\n#: @param x {T}\n#: @return {T}\nround2 <- function(x) x + 1L",
+        );
+        assert!(check.errors.is_empty(), "{:?}", check.errors);
+        let scheme = check.scheme.expect("declared scheme");
+        assert_eq!(scheme.binders.len(), 1);
+        assert_eq!(scheme.binders[0].1, Constraint::Numeric);
+    }
+
+    #[test]
+    fn trusted_annotation_skips_enforcement() {
+        let db = RootDatabase::default();
+        let check = check_annotated(
+            &db,
+            "#: @trust fn(x: integer) -> character\nf <- function(x) x",
+        );
+        assert!(check.errors.is_empty(), "{:?}", check.errors);
+        assert!(check.scheme.is_some());
     }
 }

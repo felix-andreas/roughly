@@ -14,7 +14,7 @@
 use syntax::ast::AstNode as _;
 use syntax::{SyntaxKind, SyntaxNode, TextRange};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, salsa::SalsaValue)]
 pub struct ExprId(pub u32);
 
 /// One item's lowered body: an expression arena plus the root.
