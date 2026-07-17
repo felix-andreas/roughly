@@ -55,8 +55,14 @@ pub struct ItemCheck<'db> {
     pub scheme: Option<TypeScheme<'db>>,
 }
 
+/// Resolver for names that are not item-local: package globals (and, in a
+/// later slice, the stdlib stub corpus).
+pub trait GlobalEnv<'db> {
+    fn scheme(&self, name: &str) -> Option<TypeScheme<'db>>;
+}
+
 pub fn check_item<'db>(db: &'db dyn Db, module: &Module, naming: &ItemNaming) -> ItemCheck<'db> {
-    check_item_with_annotation(db, module, naming, None)
+    check_item_with_annotation(db, module, naming, None, None)
 }
 
 pub fn check_item_with_annotation<'db>(
@@ -64,11 +70,13 @@ pub fn check_item_with_annotation<'db>(
     module: &Module,
     naming: &ItemNaming,
     annotation: Option<&crate::annotations::Annotation<'db>>,
+    globals: Option<&dyn GlobalEnv<'db>>,
 ) -> ItemCheck<'db> {
     let mut context = Checker {
         db,
         module,
         naming,
+        globals,
         table: InferenceTable::default(),
         environment: Environment::default(),
         scheme_arena: Vec::new(),
@@ -200,6 +208,7 @@ struct Checker<'db, 'a> {
     db: &'db dyn Db,
     module: &'a Module,
     naming: &'a ItemNaming,
+    globals: Option<&'a dyn GlobalEnv<'db>>,
     table: InferenceTable<'db>,
     environment: Environment<'db>,
     scheme_arena: Vec<TypeScheme<'db>>,
@@ -384,8 +393,14 @@ impl<'db> Checker<'db, '_> {
 
     fn infer_read(&mut self, id: ExprId) -> Ty<'db> {
         let Some(&slot) = self.naming.resolutions.get(&id) else {
-            // Non-locals resolve against stubs / package globals in a later
-            // slice; unresolved reads stay silent Unknown here.
+            // A non-local read: resolve through the package interface (and, in
+            // a later slice, the stub corpus). Unresolved reads stay silent
+            // Unknown; naming owns the could-not-resolve diagnostic.
+            if let Some(name) = self.naming.non_locals.get(&id)
+                && let Some(scheme) = self.globals.and_then(|globals| globals.scheme(name))
+            {
+                return self.instantiate(&scheme);
+            }
             return self.unknown();
         };
         match self.environment.get(slot) {
@@ -1148,7 +1163,7 @@ mod tests {
             .expect("one top-level item");
         let module = lower_item(&item);
         let naming = resolve_item(&module);
-        check_item_with_annotation(db, &module, &naming, annotation.as_ref())
+        check_item_with_annotation(db, &module, &naming, annotation.as_ref(), None)
     }
 
     #[test]

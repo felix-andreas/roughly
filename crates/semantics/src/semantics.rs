@@ -220,16 +220,138 @@ pub fn item_annotation_syntax<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<I
     None
 }
 
-/// The full per-item check: HIR + naming + annotation lowering + inference.
-/// Derived from position-independent per-item values only, so it cuts off
-/// whenever the item (and its annotation) are untouched.
+/// The ordered project file set (package files first, in path order — the
+/// order that decides last-writer-wins winners). A singleton input the host
+/// keeps current.
+#[salsa::input(singleton, debug)]
+pub struct ProjectFiles {
+    #[returns(ref)]
+    pub files: Vec<SourceFile>,
+}
+
+/// The winning definition item per package-exported name: later files (and
+/// later assignments within one file) override earlier ones.
 #[salsa::tracked(returns(clone))]
+pub fn package_definitions<'db>(
+    db: &'db dyn Db,
+    files: ProjectFiles,
+) -> rustc_hash::FxHashMap<String, Item<'db>> {
+    let mut winners = rustc_hash::FxHashMap::default();
+    for &file in files.files(db) {
+        if *file.kind(db) != DocumentKind::Package {
+            continue;
+        }
+        for item in item_tree(db, file) {
+            if matches!(*item.kind(db), ItemKind::Function | ItemKind::Value)
+                && let Some(name) = item.name(db).clone()
+            {
+                winners.insert(name, item);
+            }
+        }
+    }
+    winners
+}
+
+/// The exported scheme of one definition item. Cross-item references route
+/// through this query, so mutually recursive definitions form salsa cycles:
+/// fixpoint iteration starts every member at the tolerant `Unknown` scheme and
+/// iterates to convergence; a non-converging (oscillating) member pins to
+/// `Unknown` at the round cap instead of ever reaching salsa's hard limit.
+#[salsa::tracked(
+    returns(clone),
+    cycle_fn = global_scheme_recover,
+    cycle_initial = global_scheme_initial
+)]
+pub fn global_scheme<'db>(db: &'db dyn Db, item: Item<'db>) -> types::TypeScheme<'db> {
+    item_check(db, item)
+        .and_then(|check| check.scheme)
+        .unwrap_or_else(|| types::TypeScheme::monomorphic(types::unknown(db)))
+}
+
+fn global_scheme_initial<'db>(
+    db: &'db dyn Db,
+    _id: salsa::Id,
+    _item: Item<'db>,
+) -> types::TypeScheme<'db> {
+    types::TypeScheme::monomorphic(types::unknown(db))
+}
+
+/// Bound fixpoint rounds mirroring the legacy interface round cap: a scheme
+/// still changing after the cap pins to `Unknown` (sound-by-refusal) rather
+/// than iterating toward salsa's panic limit.
+const SCHEME_ROUND_CAP: u32 = 16;
+
+fn global_scheme_recover<'db>(
+    db: &'db dyn Db,
+    cycle: &salsa::Cycle,
+    last_provisional: &types::TypeScheme<'db>,
+    value: types::TypeScheme<'db>,
+    _item: Item<'db>,
+) -> types::TypeScheme<'db> {
+    if &value == last_provisional {
+        return value;
+    }
+    if cycle.iteration() >= SCHEME_ROUND_CAP {
+        return types::TypeScheme::monomorphic(types::unknown(db));
+    }
+    value
+}
+
+/// The full per-item check: HIR + naming + annotation lowering + inference,
+/// with cross-item reads resolved through `global_scheme` (the cycle-aware
+/// interface edge). Derived from position-independent per-item values only,
+/// so it cuts off whenever the item (and its annotation) are untouched.
+#[salsa::tracked(
+    returns(clone),
+    cycle_fn = item_check_recover,
+    cycle_initial = item_check_initial
+)]
 pub fn item_check<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<check::ItemCheck<'db>> {
     let module = item_hir(db, item)?;
     let naming = naming::resolve_item(&module);
     let annotation = item_annotation_syntax(db, item)
         .map(|syntax| annotations::lower_annotation(db, &syntax.syntax_node()));
-    Some(check::check_item_with_annotation(db, &module, &naming, annotation.as_ref()))
+    let globals = SalsaGlobals { db, definitions: ProjectFiles::try_get(db).map(|files| package_definitions(db, files)) };
+    Some(check::check_item_with_annotation(
+        db,
+        &module,
+        &naming,
+        annotation.as_ref(),
+        Some(&globals),
+    ))
+}
+
+fn item_check_initial<'db>(
+    _db: &'db dyn Db,
+    _id: salsa::Id,
+    _item: Item<'db>,
+) -> Option<check::ItemCheck<'db>> {
+    None
+}
+
+fn item_check_recover<'db>(
+    _db: &'db dyn Db,
+    _cycle: &salsa::Cycle,
+    _last_provisional: &Option<check::ItemCheck<'db>>,
+    value: Option<check::ItemCheck<'db>>,
+    _item: Item<'db>,
+) -> Option<check::ItemCheck<'db>> {
+    // Convergence is decided at the `global_scheme` edge; the check value
+    // simply follows the iteration.
+    value
+}
+
+/// The salsa-backed cross-item resolver handed to the checker.
+struct SalsaGlobals<'db> {
+    db: &'db dyn Db,
+    definitions: Option<rustc_hash::FxHashMap<String, Item<'db>>>,
+}
+
+impl<'db> check::GlobalEnv<'db> for SalsaGlobals<'db> {
+    fn scheme(&self, name: &str) -> Option<types::TypeScheme<'db>> {
+        let item = self.definitions.as_ref()?.get(name)?;
+        Some(global_scheme(self.db, *item))
+    }
 }
 
 /// Kind + name of one top-level statement, mirroring R assignment spellings:
@@ -363,5 +485,95 @@ mod tests {
         let add = Item::new(&db, file, ItemKind::Function, Some("add".to_owned()), None, 0);
         let after = item_hir(&db, add).expect("add still lowers");
         assert_eq!(before, after);
+    }
+
+    #[test]
+    fn cross_file_reads_resolve_through_the_interface() {
+        let mut db = RootDatabase::default();
+        let util = SourceFile::new(
+            &db,
+            "add <- function(x, y) x + y\n".to_owned(),
+            DocumentKind::Package,
+        );
+        let main = SourceFile::new(
+            &db,
+            "use <- function() add(1L, 2L)\nbad <- function() add(\"a\", 2L)\n".to_owned(),
+            DocumentKind::Package,
+        );
+        ProjectFiles::new(&db, vec![util, main]);
+
+        let use_item = Item::new(&db, main, ItemKind::Function, Some("use".to_owned()), None, 0);
+        let use_check = item_check(&db, use_item).expect("use checks");
+        assert!(use_check.errors.is_empty(), "{:?}", use_check.errors);
+
+        let bad_item = Item::new(&db, main, ItemKind::Function, Some("bad".to_owned()), None, 0);
+        let bad_check = item_check(&db, bad_item).expect("bad checks");
+        assert!(
+            !bad_check.errors.is_empty(),
+            "character into numeric parameter must report"
+        );
+
+        // Editing the callee body (same shape) leaves the caller check equal.
+        util.set_text(&mut db)
+            .to("add <- function(x, y) y + x\n".to_owned());
+        let use_item = Item::new(&db, main, ItemKind::Function, Some("use".to_owned()), None, 0);
+        let again = item_check(&db, use_item).expect("use still checks");
+        assert!(again.errors.is_empty());
+    }
+
+    #[test]
+    fn mutual_recursion_converges_through_the_fixpoint() {
+        let db = RootDatabase::default();
+        let file = SourceFile::new(
+            &db,
+            "is_even <- function(n) if (n == 0L) TRUE else is_odd(n - 1L)\nis_odd <- function(n) if (n == 0L) FALSE else is_even(n - 1L)\n".to_owned(),
+            DocumentKind::Package,
+        );
+        ProjectFiles::new(&db, vec![file]);
+        let even = Item::new(&db, file, ItemKind::Function, Some("is_even".to_owned()), None, 0);
+        let check = item_check(&db, even).expect("checks");
+        assert!(check.errors.is_empty(), "{:?}", check.errors);
+        let scheme = global_scheme(&db, even);
+        assert!(
+            matches!(scheme.body.kind(&db), types::TyKind::Function(_)),
+            "mutual recursion must converge to a function scheme, got {:?}",
+            scheme.body.kind(&db)
+        );
+    }
+
+    #[test]
+    fn self_recursion_stays_tolerant() {
+        let db = RootDatabase::default();
+        let file = SourceFile::new(
+            &db,
+            "count <- function(n) if (n == 0L) 0L else count(n - 1L)\n".to_owned(),
+            DocumentKind::Package,
+        );
+        ProjectFiles::new(&db, vec![file]);
+        let item = Item::new(&db, file, ItemKind::Function, Some("count".to_owned()), None, 0);
+        // Must not panic; the self-cycle iterates to a stable scheme.
+        let check = item_check(&db, item).expect("checks");
+        assert!(check.errors.is_empty(), "{:?}", check.errors);
+    }
+
+    #[test]
+    fn later_file_wins_the_definition() {
+        let db = RootDatabase::default();
+        let first = SourceFile::new(
+            &db,
+            "limit <- \"low\"\n".to_owned(),
+            DocumentKind::Package,
+        );
+        let second = SourceFile::new(&db, "limit <- 10L\n".to_owned(), DocumentKind::Package);
+        let files = ProjectFiles::new(&db, vec![first, second]);
+        let winners = package_definitions(&db, files);
+        let winner = winners.get("limit").expect("winner exists");
+        assert_eq!(*winner.file(&db), second);
+        let scheme = global_scheme(&db, *winner);
+        assert_eq!(
+            scheme.body,
+            types::scalar(&db, types::Atomic::Integer),
+            "the later file's integer wins"
+        );
     }
 }
