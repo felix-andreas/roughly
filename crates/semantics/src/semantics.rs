@@ -9,6 +9,7 @@
 
 pub mod annotations;
 pub mod check;
+pub mod diagnostics;
 pub mod hir;
 pub mod infer;
 pub mod naming;
@@ -137,6 +138,13 @@ pub fn item_tree<'db>(db: &'db dyn Db, file: SourceFile) -> Vec<Item<'db>> {
 /// at the final rendering edge.
 #[salsa::tracked(returns(clone))]
 pub fn item_syntax<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<ItemSyntax> {
+    resolve_item_node(db, item).map(|node| ItemSyntax(node.green().into()))
+}
+
+/// The item's current red node inside the FILE tree (absolute offsets) — the
+/// rendering edge uses this to re-anchor item-relative spans; everything else
+/// must go through the position-independent `item_syntax`.
+pub(crate) fn resolve_item_node<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<syntax::SyntaxNode> {
     let parse = parse(db, *item.file(db));
     let root = parse.syntax_node();
     let mut counts: rustc_hash::FxHashMap<(ItemKind, Option<String>), u32> =
@@ -152,7 +160,7 @@ pub fn item_syntax<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<ItemSyntax> 
         let disambiguator = *counter;
         *counter += 1;
         if (kind, name, disambiguator) == target {
-            return Some(ItemSyntax(node.green().into()));
+            return Some(node);
         }
     }
     None
@@ -177,6 +185,22 @@ impl ItemSyntax {
 pub fn item_hir<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<hir::Module> {
     let syntax = item_syntax(db, item)?;
     Some(hir::lower_item(&syntax.syntax_node()))
+}
+
+/// The naming facts of one item (position-independent, like the HIR they are
+/// derived from).
+#[salsa::tracked(returns(clone))]
+pub fn item_naming<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<naming::ItemNaming> {
+    let module = item_hir(db, item)?;
+    Some(naming::resolve_item(&module))
+}
+
+/// Whether a package definition with this name exists (used to silence
+/// could-not-resolve on names the interface will serve).
+pub fn package_scheme_exists(db: &dyn Db, name: &str) -> bool {
+    ProjectFiles::try_get(db)
+        .map(|files| package_definitions(db, files).contains_key(name))
+        .unwrap_or(false)
 }
 
 /// The annotation region immediately preceding an item (only trivia between),
@@ -308,7 +332,7 @@ fn global_scheme_recover<'db>(
 )]
 pub fn item_check<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<check::ItemCheck<'db>> {
     let module = item_hir(db, item)?;
-    let naming = naming::resolve_item(&module);
+    let naming = item_naming(db, item)?;
     let annotation = item_annotation_syntax(db, item)
         .map(|syntax| annotations::lower_annotation(db, &syntax.syntax_node()));
     let globals = SalsaGlobals { db, definitions: ProjectFiles::try_get(db).map(|files| package_definitions(db, files)) };
