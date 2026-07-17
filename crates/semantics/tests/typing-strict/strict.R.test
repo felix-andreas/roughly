@@ -75,3 +75,33 @@ f <- function(x) x
 #++++
 f: <T> fn(x: T) -> T
 0..14 error[typing-directive] unknown `typing:` directive value — expected `off`, `on`, or `strict`
+
+#==== masking
+#---- data_table_brackets_are_masked
+summarize <- function(dt) {
+  dt[, .(m = mean(speed)), by = cyl]
+}
+#++++
+summarize: <T> fn(dt: T) -> Unknown
+
+#---- data_table_column_assignment
+add_column <- function(dt) {
+  dt[, ratio := speed / dist]
+  dt
+}
+#++++
+add_column: <T> fn(dt: T) -> T
+
+#---- base_masking_family
+pick <- function(df) subset(df, cyl > 4)
+#++++
+pick: <T> fn(df: T) -> Unknown
+
+#---- base_indexing_keeps_checking
+f <- function() {
+  x <- list(1L)
+  x[1L, 2L]
+}
+#++++
+f: fn() -> Unknown
+36..45 error[type-mismatch] indexing with 2 indexes is not supported yet — matrix and data.frame subsetting is not modeled

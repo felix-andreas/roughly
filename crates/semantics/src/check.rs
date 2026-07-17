@@ -3344,6 +3344,13 @@ impl<'db> Checker<'db, '_> {
                 self.infer(value);
             }
         }
+        // A bracket the naming walk recognized as data.table syntax
+        // evaluates its indexes in the data's frame and returns a shape no
+        // base indexing rule covers — silent Unknown, like the masked column
+        // reads inside it.
+        if self.naming.masked_subsets.contains(&id) {
+            return self.unknown();
+        }
         let subject = self.structural(target_ty);
         // An Unknown/Any subject stays Unknown/Any even under an unsupported
         // index shape — the subject's own gap was already diagnosed, so

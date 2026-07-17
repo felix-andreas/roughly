@@ -11,9 +11,15 @@
 //! creation made idempotent by site (re-walks mint no new ids) and effects
 //! recorded only on the final pass.
 //!
-//! Deferred (structure already carries them): data-mask recognition
-//! (`masked_reads` / `masked_subsets`), the nested-loop region memo, and the
-//! unused-parameter lint.
+//! Data-masked evaluation (NSE) is recognized structurally: a `[` carrying an
+//! unambiguous data.table signature masks its index arguments (recorded in
+//! `masked_subsets`), and the base masking family (`with`, `within`,
+//! `subset`, `transform`) masks every argument after the data. Masked reads
+//! that resolve keep their ordinary resolution; ones that do not stay quiet —
+//! column references are not unresolved names.
+//!
+//! Deferred (structure already carries them): the nested-loop region memo and
+//! the unused-parameter lint.
 
 use crate::hir::{Argument, AssignSpelling, ExprId, ExpressionKind, Module, UnaryOperator};
 use rustc_hash::FxHashMap;
@@ -66,6 +72,9 @@ pub struct ItemNaming {
     /// Slots read or super-assigned from inside a function nested below the
     /// slot's frame: every write to them stays observable.
     pub captured_slots: BTreeSet<BindingId>,
+    /// `[` expressions recognized as data.table syntax: their indexes
+    /// evaluate in the data's frame, and the whole bracket types `Unknown`.
+    pub masked_subsets: BTreeSet<ExprId>,
 }
 
 /// Resolve one item's HIR. The item's own top-level assignment target (if any)
@@ -247,13 +256,46 @@ impl Context<'_> {
             }
             ExpressionKind::Call { callee, arguments } => {
                 self.resolve(*callee);
-                self.resolve_arguments(arguments);
+                // The base masking family evaluates every argument after the
+                // data inside the data's frame; a locally defined function of
+                // the same name masks nothing.
+                let masking_family = matches!(
+                    &self.module.expression(*callee).kind,
+                    ExpressionKind::NameRef(name)
+                        if matches!(name.as_str(), "with" | "within" | "subset" | "transform")
+                ) && !self.naming.resolutions.contains_key(callee);
+                if masking_family {
+                    let mut argument_iter = arguments.iter();
+                    if let Some(data) = argument_iter.next()
+                        && let Some(value) = data.value
+                    {
+                        self.resolve(value);
+                    }
+                    self.quiet_depth += 1;
+                    for argument in argument_iter {
+                        if let Some(value) = argument.value {
+                            self.resolve(value);
+                        }
+                    }
+                    self.quiet_depth -= 1;
+                } else {
+                    self.resolve_arguments(arguments);
+                }
             }
             ExpressionKind::Index {
-                target, arguments, ..
+                double,
+                target,
+                arguments,
             } => {
                 self.resolve(*target);
-                self.resolve_arguments(arguments);
+                if !*double && self.data_table_signature(arguments) {
+                    self.naming.masked_subsets.insert(id);
+                    self.quiet_depth += 1;
+                    self.resolve_arguments(arguments);
+                    self.quiet_depth -= 1;
+                } else {
+                    self.resolve_arguments(arguments);
+                }
             }
             ExpressionKind::Field { target, .. } => self.resolve(*target),
             ExpressionKind::Namespace { .. } => {}
@@ -344,6 +386,51 @@ impl Context<'_> {
             if let Some(value) = argument.value {
                 self.resolve(value);
             }
+        }
+    }
+
+    /// A `[` bracket carrying an unambiguous data.table signature: a `by =` /
+    /// `keyby =` argument, a `:=` column assignment, a `.()` list call, or a
+    /// `.SD`-family special anywhere in its index arguments.
+    fn data_table_signature(&self, arguments: &[Argument]) -> bool {
+        arguments.iter().any(|argument| {
+            if matches!(argument.name.as_deref(), Some("by") | Some("keyby")) {
+                return true;
+            }
+            argument
+                .value
+                .is_some_and(|value| self.data_table_marker(value))
+        })
+    }
+
+    fn data_table_marker(&self, id: ExprId) -> bool {
+        let kind = &self.module.expression(id).kind;
+        match kind {
+            ExpressionKind::Assign {
+                spelling: AssignSpelling::Walrus,
+                ..
+            } => true,
+            ExpressionKind::NameRef(name) => {
+                matches!(
+                    name.as_str(),
+                    ".SD" | ".N" | ".I" | ".BY" | ".GRP" | ".EACHI"
+                )
+            }
+            ExpressionKind::Call { callee, .. }
+                if matches!(
+                    &self.module.expression(*callee).kind,
+                    ExpressionKind::NameRef(name) if name == "."
+                ) =>
+            {
+                true
+            }
+            // Markers can sit anywhere inside the index expressions, but a
+            // nested function body is its own evaluation context.
+            ExpressionKind::Function { .. } => false,
+            _ => kind
+                .child_ids()
+                .iter()
+                .any(|&child| self.data_table_marker(child)),
         }
     }
 
@@ -499,6 +586,12 @@ impl Context<'_> {
         target: ExprId,
         spelling: AssignSpelling,
     ) {
+        // A masked `:=` assigns a data.table column, not a variable: the
+        // target is a (quiet) column reference, never a binding.
+        if spelling == AssignSpelling::Walrus && self.quiet_depth > 0 {
+            self.resolve(target);
+            return;
+        }
         let target_expression = self.module.expression(target).clone();
         match &target_expression.kind {
             ExpressionKind::NameRef(name) => {
