@@ -1,0 +1,59 @@
+#==== checked
+#---- declared_scheme_wins
+#: <T> fn(x: T) -> T
+id <- function(x) x
+#++++
+id: <T> fn(x: T) -> T
+
+#---- return_mismatch
+#: fn(x: integer) -> character
+f <- function(x) x
+#++++
+f: fn(x: integer) -> character
+48..49 error[type-mismatch] expected `character`, found `integer`
+
+#---- parameter_name_mismatch
+#: fn(x: integer) -> integer
+f <- function(y) 1L
+#++++
+f: fn(x: integer) -> integer
+34..48 error[type-mismatch] the annotation and the definition disagree about parameter `x`
+43..44 error[type-mismatch] the annotation and the definition disagree about parameter `y`
+
+#---- rigid_refuses_undeclared_bound
+#: <T> fn(x: T) -> T
+bad <- function(x) x + 1L
+#++++
+bad: <T> fn(x: T) -> T
+40..41 error[type-mismatch] expected a numeric value (`integer` or `double`), found `T`
+
+#---- declared_numeric_bound_admits_arithmetic
+#: <T: numeric> fn(x: T) -> T
+ok <- function(x) x + 1L
+#++++
+ok: <T: numeric> fn(x: T) -> T
+
+#---- expanded_form
+#: @forall T: numeric
+#: @param x {T}
+#: @return {T}
+round2 <- function(x) x + 1L
+#++++
+round2: <T: numeric> fn(x: T) -> T
+
+#---- value_annotation_checks
+#: integer
+n <- 1L
+#: character
+bad <- 2L
+#++++
+n: integer
+bad: character
+39..41 error[type-mismatch] expected `character`, found `integer`
+
+#==== trusted
+#---- trust_skips_enforcement
+#: @trust fn(x: integer) -> character
+f <- function(x) x
+#++++
+f: fn(x: integer) -> character

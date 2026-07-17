@@ -1,0 +1,136 @@
+#==== construction
+#---- combine_promotes
+ints <- c(1L, 2L)
+doubles <- c(1L, 2.5)
+chars <- c(1L, "a")
+named <- c(a = 1L, b = 2L)
+empty <- c()
+dropped <- c(1L, NULL)
+#++++
+ints: integer[]
+doubles: double[]
+chars: character[]
+named: integer[named]
+empty: NULL
+dropped: integer[]
+
+#---- list_shapes
+tuple <- list(1L, "a")
+record <- list(a = 1L, b = "s")
+empty <- list()
+#++++
+tuple: list{integer, character}
+record: list{a: integer, b: character}
+empty: list{}
+
+#---- mixed_list_is_refused
+f <- function() list(1L, b = 2L)
+#++++
+f: fn() -> Unknown
+16..32 error[type-mismatch] All elements in `list(...)` must be either all named or all unnamed.
+
+#==== extraction
+#---- tuple_literal_position
+f <- function() {
+  x <- list(1L, "a")
+  x[[1L]]
+}
+#++++
+f: fn() -> integer
+
+#---- record_field
+f <- function() {
+  p <- list(a = 1L, b = "s")
+  p$b
+}
+#++++
+f: fn() -> character
+
+#---- computed_index_unions
+f <- function(i) {
+  x <- list(1L, "a")
+  x[[i]]
+}
+#++++
+f: <T> fn(i: T) -> integer | character
+
+#---- named_vector_by_name_is_nullable
+f <- function() {
+  v <- c(a = 1L)
+  v[["a"]]
+}
+#++++
+f: fn() -> integer | NULL
+
+#---- slice_is_a_sub_list
+f <- function() {
+  x <- list(1L, "a")
+  x[1L]
+}
+#++++
+f: fn() -> list[integer | character]
+
+#==== errors
+#---- position_out_of_range
+f <- function() {
+  x <- list(1L, "a")
+  x[[3L]]
+}
+#++++
+f: fn() -> Unknown
+41..48 error[type-mismatch] position 3 does not exist in `list{integer, character}`
+
+#---- field_does_not_exist
+f <- function() {
+  p <- list(a = 1L)
+  p$oops
+}
+#++++
+f: fn() -> Unknown
+40..46 error[type-mismatch] field `oops` does not exist in `list{a: integer}`
+
+#---- dollar_on_atomic_vector
+f <- function() {
+  v <- c(a = 1L)
+  v$a
+}
+#++++
+f: fn() -> Unknown
+37..40 error[type-mismatch] R's `$` operator is invalid on atomic vectors; this value is `integer[named]` — extract an element with `[[` instead.
+
+#---- matrix_indexing_unsupported
+f <- function() {
+  x <- list(1L)
+  x[1L, 2L]
+}
+#++++
+f: fn() -> Unknown
+36..45 error[type-mismatch] indexing with 2 indexes is not supported yet — matrix and data.frame subsetting is not modeled
+
+#==== replacement
+#---- known_field_write
+f <- function() {
+  p <- list(a = 1L)
+  p$a <- "s"
+  p$a
+}
+#++++
+f: fn() -> character
+
+#---- computed_key_builds_a_map
+f <- function(key) {
+  m <- list()
+  m[[key]] <- 1L
+  m[[key]]
+}
+#++++
+f: <T> fn(key: T) -> integer
+
+#---- replacement_call_keeps_the_type
+f <- function() {
+  v <- c(1L, 2L)
+  names(v) <- c("a", "b")
+  v + 1L
+}
+#++++
+f: fn() -> integer[]

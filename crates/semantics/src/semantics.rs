@@ -203,10 +203,17 @@ pub fn item_naming<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<naming::Item
     Some(naming::resolve_item(&module))
 }
 
-/// Whether any global definition with this name exists — a package definition
-/// or a stdlib stub declaration (used to silence could-not-resolve on names
-/// the interface will serve).
+/// Names the checker recognizes structurally rather than through the stub
+/// corpus: the shape-constructing builtins and the control-flow constructs.
+const BUILTIN_GLOBAL_NAMES: &[&str] = &["c", "list", "switch", "return", "stop"];
+
+/// Whether any global definition with this name exists — a package
+/// definition, a stdlib stub declaration, or a checker builtin (used to
+/// silence could-not-resolve on names the interface will serve).
 pub fn package_scheme_exists(db: &dyn Db, name: &str) -> bool {
+    if BUILTIN_GLOBAL_NAMES.contains(&name) {
+        return true;
+    }
     if ProjectFiles::try_get(db)
         .map(|files| package_definitions(db, files).contains_key(name))
         .unwrap_or(false)

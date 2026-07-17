@@ -1,0 +1,116 @@
+#==== joins
+#---- if_unifies_or_unions
+same <- function(flag) if (flag) 1L else 2L
+mixed <- function(flag) if (flag) 1L else "foo"
+nullable <- function(flag) if (flag) 1L else NULL
+#++++
+same: fn(flag: logical) -> integer
+mixed: fn(flag: logical) -> integer | character
+nullable: fn(flag: logical) -> integer | NULL
+
+#---- if_without_else_is_nullable
+f <- function(flag) if (flag) 1L
+#++++
+f: fn(flag: logical) -> integer | NULL
+
+#---- condition_must_be_scalar_logical
+f <- function() if (1L) 2L
+#++++
+f: fn() -> integer | NULL
+20..22 error[type-mismatch] expected `logical`, found `integer`
+
+#==== returns
+#---- early_return_unions
+f <- function(c) {
+  if (c) return("foo")
+  5
+}
+#++++
+f: fn(c: logical) -> character | double
+
+#---- diverging_branch_drops_value_and_state
+f <- function(c) {
+  x <- if (c) return(NULL) else 5
+  x + 1
+}
+#++++
+f: fn(c: logical) -> double | NULL
+
+#==== guards
+#---- early_exit_narrows
+#: fn(x: integer | NULL) -> integer
+f <- function(x) {
+  if (is.null(x)) {
+    return(0L)
+  }
+  x + 1L
+}
+#++++
+f: fn(x: integer | NULL) -> integer
+
+#---- coalesce_idiom_shapes
+coalesce <- function(value, fallback) if (is.null(value)) fallback else value
+#++++
+coalesce: <T> fn(value: T | NULL, fallback: T) -> T
+
+#---- family_guard_filters
+f <- function(flag) {
+  y <- if (flag) 1L else "a"
+  if (is.character(y)) y else "z"
+}
+#++++
+f: fn(flag: logical) -> character
+
+#==== loops
+#---- accumulator_is_stable
+f <- function() {
+  total <- 0L
+  for (i in 1:3) {
+    total <- total + i
+  }
+  total
+}
+#++++
+f: fn() -> integer
+
+#---- heterogeneous_iteration
+f <- function() {
+  out <- 1L
+  for (item in list(2L, "a")) {
+    out <- item
+  }
+  out
+}
+#++++
+f: fn() -> integer | character
+
+#---- function_is_not_iterable
+f <- function() {
+  g <- function() 1L
+  for (i in g) i
+}
+#++++
+f: fn() -> NULL
+51..52 error[type-mismatch] this `for` sequence is `fn() -> integer`, which cannot be iterated — expected a vector or list.
+
+#---- repeat_applies_exit_state
+f <- function() {
+  repeat {
+    x <- 1L
+    break
+  }
+  x + 1L
+}
+#++++
+f: fn() -> integer
+
+#==== switch
+#---- branches_union_with_null
+f <- function(x) switch(x, a = 1L, b = "s")
+#++++
+f: <T> fn(x: T) -> integer | character | NULL
+
+#---- default_removes_null
+f <- function(x) switch(x, a = 1L, 2L)
+#++++
+f: <T> fn(x: T) -> integer

@@ -1,0 +1,69 @@
+#==== schemes
+#---- identity
+id <- function(x) x
+#++++
+id: <T> fn(x: T) -> T
+
+#---- arithmetic_generalizes
+add1 <- function(x) x + 1L
+#++++
+add1: <T: numeric> fn(x: T) -> T
+
+#---- two_operands_tie
+add <- function(a, b) a + b
+#++++
+add: <T: numeric> fn(a: T, b: T) -> T
+
+#---- division_is_double
+half <- function(x) x / 2
+#++++
+half: <T: numeric> fn(x: T) -> double
+
+#---- comparison_constrains
+positive <- function(x) x > 0L
+#++++
+positive: <T: numeric> fn(x: T) -> logical
+
+#---- values
+n <- 1L
+s <- "hi"
+flag <- TRUE
+#++++
+n: integer
+s: character
+flag: logical
+
+#---- let_polymorphism
+use <- function() {
+  id <- function(x) x
+  id(1L)
+  id("s")
+}
+#++++
+use: fn() -> character
+
+#---- conditional_reassignment_monomorphizes
+f <- function(flag) {
+  x <- 1L
+  if (flag) x <- "two"
+  x
+}
+#++++
+f: fn(flag: logical) -> integer | character
+
+#==== errors
+#---- call_numeric_violation
+f <- function() {
+  add1 <- function(x) x + 1L
+  add1("txt")
+}
+#++++
+f: <T: numeric> fn() -> T
+54..59 error[type-mismatch] expected a numeric value (`integer` or `double`), found `character`
+
+#---- forward_read_is_tolerant
+f <- function() later()
+later <- function() 1L
+#++++
+f: fn() -> integer
+later: fn() -> integer

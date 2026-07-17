@@ -1,0 +1,94 @@
+#==== stubs
+#---- resolves_cleanly
+total <- function(x) sum(x, na.rm = TRUE)
+size <- function(x) length(x)
+#++++
+total: <T> fn(x: T) -> Any
+size: <T> fn(x: T) -> integer
+
+#---- overload_picks_specific
+f <- function() cumsum(1L)
+#++++
+f: fn() -> integer[]
+
+#---- strict_round_keeps_double
+f <- function() sum(1, 2)
+#++++
+f: fn() -> double
+
+#---- literal_courtesy
+f <- function() seq_len(10)
+#++++
+f: fn() -> integer[]
+
+#---- stub_argument_mismatch
+f <- function(x) grepl(1L, x)
+#++++
+f: <T> fn(x: T) -> logical
+23..25 error[type-mismatch] expected `character`, found `integer`
+
+#---- namespace_access
+f <- function(x) base::length(x)
+#++++
+f: <T> fn(x: T) -> integer
+
+#==== matching
+#---- named_arguments_match_formals
+f <- function() {
+  g <- function(x, y) x
+  g(y = 1L, x = "a")
+}
+#++++
+f: fn() -> character
+
+#---- unknown_named_argument
+f <- function() {
+  g <- function(x) x
+  g(z = 1)
+}
+#++++
+f: <T> fn() -> T
+47..48 error[type-mismatch] unknown argument `z`
+
+#---- surplus_positional
+f <- function() {
+  g <- function(x) x
+  g(1, 2)
+}
+#++++
+f: fn() -> double
+41..48 error[type-mismatch] this call passes 2 argument(s), but the function accepts 1
+
+#---- missing_required
+f <- function() {
+  g <- function(x, y) x
+  g(1L)
+}
+#++++
+f: fn() -> integer
+44..49 error[type-mismatch] this call passes 1 argument(s), but the function accepts 2
+
+#---- defaulted_formal_may_stay_unfilled
+f <- function() {
+  g <- function(x, y = 2L) x
+  g(1L)
+}
+#++++
+f: fn() -> integer
+
+#==== higher_order
+#---- callback_pairs_positionally
+apply1 <- function() {
+  call_with <- function(f) f(1L)
+  call_with(function(x) x + 1L)
+}
+#++++
+apply1: fn() -> integer
+
+#---- dispatch_table_union
+f <- function(flag) {
+  h <- if (flag) function(x) 1L else function(x) "a"
+  h(2L)
+}
+#++++
+f: fn(flag: logical) -> integer | character
