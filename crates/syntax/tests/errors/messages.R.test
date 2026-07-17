@@ -1,0 +1,121 @@
+#==== delimiters
+#---- unclosed_call_paren
+result <- f(1, 2
+#++++
+error: unclosed `(`; expected `)` to close it
+ --> 1:12
+  | result <- f(1, 2
+  |            ^
+
+#---- unclosed_brace
+f <- function() {
+  x <- 1
+#++++
+error: unclosed `{`; expected a matching `}`
+ --> 1:17
+  | f <- function() {
+  |                 ^
+
+#---- unclosed_subset
+v <- x[1
+#++++
+error: unclosed `[`; expected `]` to close it
+ --> 1:7
+  | v <- x[1
+  |       ^
+
+#---- half_closed_subset2
+v <- x[[1]
+#++++
+error: expected `]]` to close `[[`
+ --> 1:7
+  | v <- x[[1]
+  |       ^^
+
+#---- stray_paren
+x <- 1)
+#++++
+error: unexpected `)` after this expression; expected a newline or `;`
+ --> 1:7
+  | x <- 1)
+  |       ^
+
+#==== operators
+#---- missing_rhs_plus
+total <- 1 +
+#++++
+error: expected an expression after `+`
+ --> 1:12
+  | total <- 1 +
+  |            ^
+
+#---- missing_rhs_assign
+x <-
+#++++
+error: expected an expression after `<-`
+ --> 1:3
+  | x <-
+  |   ^^
+
+#---- missing_condition
+if () 1
+#++++
+error: expected a condition inside `if (…)`, found `)`
+ --> 1:5
+  | if () 1
+  |     ^
+
+#==== statements
+#---- else_at_top_level
+if (ok) 1
+else 2
+#++++
+error: unexpected `else`: it must stay on the same line as the `if` branch it belongs to (or the `if` must be inside braces)
+ --> 2:1
+  | else 2
+  | ^^^^
+
+#---- two_exprs_one_line
+x <- 1 y <- 2
+#++++
+error: unexpected identifier after this expression; expected a newline or `;`
+ --> 1:8
+  | x <- 1 y <- 2
+  |        ^
+
+#---- for_missing_in
+for (x seq) print(x)
+#++++
+error: expected `in` in the `for` head, found identifier
+ --> 1:8
+  | for (x seq) print(x)
+  |        ^^^
+
+#---- function_bad_parameter
+f <- function(1) x
+#++++
+error: expected a parameter name, found number
+ --> 1:15
+  | f <- function(1) x
+  |               ^
+
+#==== recovery_locality
+#---- broken_line_does_not_poison_file
+good1 <- 1
+bad <- ((
+good2 <- 2
+#++++
+error: unclosed `(`; expected a matching `)`
+ --> 2:9
+  | bad <- ((
+  |         ^
+error: unclosed `(`; expected a matching `)`
+ --> 2:8
+  | bad <- ((
+  |        ^
+
+#==== valid_stays_clean
+#---- tricky_but_valid
+x <- if (a) 1 else 2; y = \(q) q[[1]]$z
+#++++
+no errors
