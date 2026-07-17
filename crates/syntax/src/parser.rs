@@ -69,7 +69,7 @@ impl Parser<'_> {
         self.current() == Some(kind)
     }
 
-    fn token_text(&self, pos: usize) -> &str {
+    fn token_str(&self, pos: usize) -> &str {
         &self.text[self.offsets[pos]..self.offsets[pos + 1]]
     }
 
@@ -205,14 +205,628 @@ impl Parser<'_> {
         }
     }
 
-    /// One stitched `#:` annotation region as a first-class node. The annotation
-    /// body grammar (types, directives) is parsed by a later slice; for now the
-    /// body tokens are preserved verbatim inside the node.
+    /// One stitched `#:` annotation region as a first-class node containing the
+    /// parsed annotation grammar: `@` directives and type expressions, with
+    /// markers, newlines, and comments inside the region acting as trivia (so a
+    /// type may continue across stitched `#:` lines).
     fn annotation(&mut self) {
         self.start(SyntaxKind::ANNOTATION);
         let end = self.annotation_region_end(self.pos);
+        loop {
+            self.ann_trivia(end);
+            if self.pos >= end {
+                break;
+            }
+            let before = self.pos;
+            if self.at(SyntaxKind::AT) {
+                self.ann_directive(end);
+            } else {
+                self.ann_type(end, true);
+            }
+            // Malformed bodies may consume nothing; never spin in place.
+            if self.pos == before {
+                self.bump();
+            }
+        }
+        self.finish();
+    }
+
+    // ---- annotation grammar ----
+    //
+    // The type-notation grammar inside `#:` regions: an optional outermost
+    // binder list `<T, U: numeric>`, unions `A | B`, `(TYPE)` groups,
+    // `list[...]` / `list{...}`, `fn(...) -> T`, named/generic types with
+    // dotted names, `T[]` / `T[named]` vector suffixes, and the `@` directives
+    // (`@type`, `@alias`, `@param`, `@return(s)`, `@forall`, `@trust`, `@new`,
+    // `@if-unknown`, `@strict`). Structure and spans are the parser's job;
+    // vocabulary semantics (constraint names, duplicate checks) belong to the
+    // semantics layer.
+
+    /// Trivia inside an annotation region: whitespace, newlines, further `#:`
+    /// markers, and comments.
+    fn ann_trivia(&mut self, end: usize) {
         while self.pos < end {
+            match self.current() {
+                Some(
+                    SyntaxKind::WHITESPACE
+                    | SyntaxKind::NEWLINE
+                    | SyntaxKind::ANNOTATION_MARKER
+                    | SyntaxKind::COMMENT,
+                ) => self.bump(),
+                _ => return,
+            }
+        }
+    }
+
+    /// True when the token at `pos` starts exactly where the previous one ended
+    /// (no interleaving trivia) — used to join multi-token directive names.
+    fn adjacent(&self, pos: usize) -> bool {
+        pos > 0 && pos < self.tokens.len() && self.offsets[pos] == self.offsets[pos - 1] + usize::from(self.tokens[pos - 1].len)
+    }
+
+    fn ann_directive(&mut self, end: usize) {
+        self.start(SyntaxKind::ANNOTATION_DIRECTIVE);
+        debug_assert!(self.at(SyntaxKind::AT));
+        self.bump();
+        // Directive names may span several tokens when adjacent (`@if-unknown`
+        // lexes as `if` `-` `unknown`); every name token must touch its
+        // predecessor (the first one touches the `@`).
+        let name_start = self.pos;
+        let mut name = String::new();
+        while self.pos < end {
+            let joinable = match self.current() {
+                Some(SyntaxKind::IDENT | SyntaxKind::MINUS) => true,
+                Some(kind) => kind.is_keyword(),
+                None => false,
+            };
+            if !joinable || !self.adjacent(self.pos) {
+                break;
+            }
+            name.push_str(self.token_str(self.pos));
             self.bump();
+        }
+        if name.is_empty() {
+            self.error_here("expected a directive name after `@`");
+            self.finish();
+            return;
+        }
+        match name.as_str() {
+            "type" | "alias" => {
+                self.ann_trivia(end);
+                if matches!(self.current(), Some(SyntaxKind::IDENT)) && self.pos < end {
+                    self.wrap_name();
+                } else {
+                    self.error_here(format!("expected a type name after `@{name}`"));
+                }
+                self.ann_trivia(end);
+                // Optional `<T, U>` parameter list.
+                if self.at(SyntaxKind::LESS) && self.pos < end {
+                    self.ann_binder_list(end);
+                }
+                self.ann_trivia(end);
+                self.ann_braced_type(end, &name);
+            }
+            "param" => {
+                self.ann_trivia(end);
+                match self.current() {
+                    Some(SyntaxKind::IDENT | SyntaxKind::DOTS) if self.pos < end => self.wrap_name(),
+                    Some(SyntaxKind::L_BRACKET) if self.pos < end => {
+                        // Optional parameter: `[name]`.
+                        self.bump();
+                        self.ann_trivia(end);
+                        if matches!(self.current(), Some(SyntaxKind::IDENT)) && self.pos < end {
+                            self.wrap_name();
+                        } else {
+                            self.error_here("expected a parameter name inside `[...]`");
+                        }
+                        self.ann_trivia(end);
+                        if self.at(SyntaxKind::R_BRACKET) && self.pos < end {
+                            self.bump();
+                        } else {
+                            self.error_here("expected `]` after the optional parameter name");
+                        }
+                    }
+                    _ => self.error_here("expected a parameter name after `@param`"),
+                }
+                self.ann_trivia(end);
+                self.ann_braced_type(end, "param");
+            }
+            "return" | "returns" => {
+                self.ann_trivia(end);
+                self.ann_braced_type(end, &name);
+            }
+            "forall" => loop {
+                self.ann_trivia(end);
+                if !matches!(self.current(), Some(SyntaxKind::IDENT)) || self.pos >= end {
+                    self.error_here("expected a type parameter name after `@forall`");
+                    break;
+                }
+                self.ann_binder(end);
+                self.ann_trivia(end);
+                if self.at(SyntaxKind::COMMA) && self.pos < end {
+                    self.bump();
+                } else {
+                    break;
+                }
+            },
+            "trust" => {
+                self.ann_trivia(end);
+                if self.pos < end {
+                    self.ann_type(end, false);
+                } else {
+                    self.error_here("expected a type after `@trust`");
+                }
+            }
+            "new" => {
+                self.ann_trivia(end);
+                if self.pos < end {
+                    self.ann_type(end, false);
+                } else {
+                    self.error_here("expected a type after `@new`");
+                }
+            }
+            "if-unknown" => {
+                self.ann_trivia(end);
+                if self.at(SyntaxKind::L_BRACE) && self.pos < end {
+                    self.bump();
+                    self.ann_trivia(end);
+                    if self.at(SyntaxKind::R_BRACE) && self.pos < end {
+                        self.bump();
+                    } else {
+                        self.error_here("expected `}` in `@if-unknown {}`");
+                    }
+                } else {
+                    self.error_here("expected `{}` after `@if-unknown`");
+                }
+            }
+            "strict" => {
+                self.ann_trivia(end);
+                // Optional `off`.
+                if matches!(self.current(), Some(SyntaxKind::IDENT))
+                    && self.pos < end
+                    && self.token_str(self.pos) == "off"
+                {
+                    self.bump();
+                }
+            }
+            _ => {
+                let range = TextRange::new(
+                    self.token_range(name_start).start(),
+                    self.token_range(self.pos.saturating_sub(1)).end(),
+                );
+                self.error_at(range, format!("unknown annotation directive `@{name}`"));
+                // Preserve the rest of the region inside the directive node.
+                while self.pos < end {
+                    self.bump();
+                }
+            }
+        }
+        self.finish();
+    }
+
+    /// `{ TYPE }` after a directive head.
+    fn ann_braced_type(&mut self, end: usize, directive: &str) {
+        if self.at(SyntaxKind::L_BRACE) && self.pos < end {
+            let open_range = self.token_range(self.pos);
+            self.bump();
+            self.ann_trivia(end);
+            if self.at(SyntaxKind::R_BRACE) || self.pos >= end {
+                self.error_here(format!("expected a type inside `{{...}}` of `@{directive}`"));
+            } else {
+                self.ann_type(end, true);
+            }
+            self.ann_trivia(end);
+            if self.at(SyntaxKind::R_BRACE) && self.pos < end {
+                self.bump();
+            } else {
+                self.error_at(open_range, format!("unclosed `{{` in `@{directive}`; expected a matching `}}`"));
+            }
+        } else {
+            self.error_here(format!("expected `{{TYPE}}` after `@{directive}`"));
+        }
+    }
+
+    /// A full type expression; `allow_binders` permits an outermost
+    /// `<T, U: numeric>` binder list.
+    fn ann_type(&mut self, end: usize, allow_binders: bool) {
+        if allow_binders && self.at(SyntaxKind::LESS) && self.pos < end {
+            self.ann_binder_list(end);
+            self.ann_trivia(end);
+        }
+        self.ann_union(end);
+    }
+
+    fn ann_binder_list(&mut self, end: usize) {
+        self.start(SyntaxKind::TYPE_BINDER_LIST);
+        debug_assert!(self.at(SyntaxKind::LESS));
+        self.bump();
+        loop {
+            self.ann_trivia(end);
+            match self.current() {
+                Some(SyntaxKind::GREATER) if self.pos < end => {
+                    self.bump();
+                    break;
+                }
+                Some(SyntaxKind::IDENT) if self.pos < end => {
+                    self.ann_binder(end);
+                    self.ann_trivia(end);
+                    if self.at(SyntaxKind::COMMA) && self.pos < end {
+                        self.bump();
+                    } else if self.at(SyntaxKind::GREATER) && self.pos < end {
+                        self.bump();
+                        break;
+                    } else {
+                        self.error_here("expected `,` or `>` in the type parameter list");
+                        break;
+                    }
+                }
+                _ => {
+                    self.error_here("expected a type parameter name in `<...>`");
+                    break;
+                }
+            }
+        }
+        self.finish();
+    }
+
+    /// `T` or `T: constraint` inside binder lists and `@forall`.
+    fn ann_binder(&mut self, end: usize) {
+        self.start(SyntaxKind::TYPE_BINDER);
+        self.wrap_name();
+        self.ann_trivia(end);
+        if self.at(SyntaxKind::COLON) && self.pos < end {
+            self.bump();
+            self.ann_trivia(end);
+            if matches!(self.current(), Some(SyntaxKind::IDENT)) && self.pos < end {
+                self.wrap_name();
+            } else {
+                self.error_here("expected a constraint name after `:`");
+            }
+        }
+        self.finish();
+    }
+
+    fn ann_union(&mut self, end: usize) {
+        let checkpoint = self.checkpoint();
+        self.ann_primary(end);
+        let mut members = 1usize;
+        loop {
+            self.ann_trivia(end);
+            if self.at(SyntaxKind::PIPE) && self.pos < end {
+                if members == 1 {
+                    self.start_at(checkpoint, SyntaxKind::TYPE_UNION);
+                }
+                members += 1;
+                self.bump();
+                self.ann_trivia(end);
+                self.ann_primary(end);
+            } else {
+                break;
+            }
+        }
+        if members > 1 {
+            self.finish();
+        }
+    }
+
+    fn ann_primary(&mut self, end: usize) {
+        if self.pos >= end {
+            self.error_here("expected a type");
+            return;
+        }
+        if self.depth >= MAX_DEPTH {
+            self.error_here("type nesting is too deep");
+            return;
+        }
+        self.depth += 1;
+        self.ann_primary_inner(end);
+        self.depth -= 1;
+    }
+
+    fn ann_primary_inner(&mut self, end: usize) {
+        let checkpoint = self.checkpoint();
+        match self.current() {
+            Some(SyntaxKind::LESS) => {
+                self.error_here("higher-rank polymorphism is not supported: type parameter binders may only appear at the outermost level");
+                // Consume the binder list anyway to keep going.
+                self.ann_binder_list(end);
+                return;
+            }
+            Some(SyntaxKind::L_PAREN) => {
+                self.start(SyntaxKind::TYPE_PAREN);
+                let open_range = self.token_range(self.pos);
+                self.bump();
+                self.ann_trivia(end);
+                self.ann_type(end, false);
+                self.ann_trivia(end);
+                if self.at(SyntaxKind::R_PAREN) && self.pos < end {
+                    self.bump();
+                } else {
+                    self.error_at(open_range, "unclosed `(` in this type; expected a matching `)`");
+                }
+                self.finish();
+            }
+            Some(SyntaxKind::IDENT | SyntaxKind::NULL_KW) => {
+                match self.token_str(self.pos) {
+                    "list" if self.ann_next_significant(end) == Some(SyntaxKind::L_BRACKET) => {
+                        self.ann_list_brackets(end);
+                    }
+                    "list" if self.ann_next_significant(end) == Some(SyntaxKind::L_BRACE) => {
+                        self.ann_list_braces(end);
+                    }
+                    "fn" if self.ann_next_significant(end) == Some(SyntaxKind::L_PAREN) => {
+                        self.ann_function_type(end);
+                    }
+                    _ => {
+                        if self.ann_next_significant(end) == Some(SyntaxKind::LESS) {
+                            self.start(SyntaxKind::TYPE_APPLY);
+                            self.wrap_name();
+                            self.ann_trivia(end);
+                            self.ann_type_arg_list(end);
+                            self.finish();
+                        } else {
+                            self.start(SyntaxKind::TYPE_REF);
+                            self.bump();
+                            self.finish();
+                        }
+                    }
+                }
+            }
+            _ => {
+                let description = self.describe_current();
+                self.error_here(format!("expected a type, found {description}"));
+                return;
+            }
+        }
+        // Vector suffixes: `T[]` and `T[named]`, repeatable.
+        loop {
+            self.ann_trivia(end);
+            if !self.at(SyntaxKind::L_BRACKET) || self.pos >= end {
+                break;
+            }
+            // Only `[]` and `[named]` are suffixes; anything else is not ours.
+            let after = self.peek_significant(self.pos + 1, true);
+            let is_suffix = match after {
+                Some((SyntaxKind::R_BRACKET, _)) => true,
+                Some((SyntaxKind::IDENT, ident_pos)) => {
+                    self.token_str(ident_pos) == "named"
+                        && matches!(self.peek_significant(ident_pos + 1, true), Some((SyntaxKind::R_BRACKET, _)))
+                }
+                _ => false,
+            };
+            if !is_suffix {
+                break;
+            }
+            self.start_at(checkpoint, SyntaxKind::TYPE_VECTOR);
+            self.bump();
+            self.ann_trivia(end);
+            if matches!(self.current(), Some(SyntaxKind::IDENT)) {
+                self.bump();
+                self.ann_trivia(end);
+            }
+            if self.at(SyntaxKind::R_BRACKET) && self.pos < end {
+                self.bump();
+            }
+            self.finish();
+        }
+    }
+
+    fn ann_next_significant(&self, end: usize) -> Option<SyntaxKind> {
+        let (kind, pos) = self.peek_significant(self.pos + 1, true)?;
+        (pos < end).then_some(kind)
+    }
+
+    fn ann_type_arg_list(&mut self, end: usize) {
+        self.start(SyntaxKind::TYPE_ARG_LIST);
+        debug_assert!(self.at(SyntaxKind::LESS));
+        self.bump();
+        loop {
+            self.ann_trivia(end);
+            match self.current() {
+                Some(SyntaxKind::GREATER) if self.pos < end => {
+                    self.bump();
+                    break;
+                }
+                _ if self.pos >= end => {
+                    self.error_here("expected `>` to close the type argument list");
+                    break;
+                }
+                _ => {
+                    self.ann_type(end, false);
+                    self.ann_trivia(end);
+                    if self.at(SyntaxKind::COMMA) && self.pos < end {
+                        self.bump();
+                    } else if self.at(SyntaxKind::GREATER) && self.pos < end {
+                        self.bump();
+                        break;
+                    } else {
+                        self.error_here("expected `,` or `>` in the type argument list");
+                        break;
+                    }
+                }
+            }
+        }
+        self.finish();
+    }
+
+    /// `list[T]` / `list[named: T]`.
+    fn ann_list_brackets(&mut self, end: usize) {
+        self.start(SyntaxKind::TYPE_LIST);
+        self.wrap_name();
+        self.ann_trivia(end);
+        debug_assert!(self.at(SyntaxKind::L_BRACKET));
+        let open_range = self.token_range(self.pos);
+        self.bump();
+        self.ann_trivia(end);
+        // `named:` prefix.
+        if matches!(self.current(), Some(SyntaxKind::IDENT))
+            && self.pos < end
+            && self.token_str(self.pos) == "named"
+            && self.ann_next_significant(end) == Some(SyntaxKind::COLON)
+        {
+            self.bump();
+            self.ann_trivia(end);
+            self.bump();
+            self.ann_trivia(end);
+        }
+        self.ann_type(end, false);
+        self.ann_trivia(end);
+        if self.at(SyntaxKind::R_BRACKET) && self.pos < end {
+            self.bump();
+        } else {
+            self.error_at(open_range, "unclosed `[` in this list type; expected a matching `]`");
+        }
+        self.finish();
+    }
+
+    /// `list{A, B}` (tuple) / `list{a: A, b: B}` (record).
+    fn ann_list_braces(&mut self, end: usize) {
+        let checkpoint = self.checkpoint();
+        self.wrap_name();
+        self.ann_trivia(end);
+        debug_assert!(self.at(SyntaxKind::L_BRACE));
+        let open_range = self.token_range(self.pos);
+        self.bump();
+        let mut is_record = false;
+        let mut first = true;
+        loop {
+            self.ann_trivia(end);
+            if self.at(SyntaxKind::R_BRACE) && self.pos < end {
+                self.bump();
+                break;
+            }
+            if self.pos >= end {
+                self.error_at(open_range, "unclosed `{` in this list type; expected a matching `}`");
+                break;
+            }
+            let named_field = matches!(self.current(), Some(SyntaxKind::IDENT))
+                && self.ann_next_significant(end) == Some(SyntaxKind::COLON);
+            if first {
+                is_record = named_field;
+                first = false;
+            }
+            if named_field {
+                self.start(SyntaxKind::TYPE_FIELD);
+                self.wrap_name();
+                self.ann_trivia(end);
+                self.bump();
+                self.ann_trivia(end);
+                self.ann_type(end, false);
+                self.finish();
+            } else {
+                self.ann_type(end, false);
+            }
+            self.ann_trivia(end);
+            if self.at(SyntaxKind::COMMA) && self.pos < end {
+                self.bump();
+            } else if self.at(SyntaxKind::R_BRACE) && self.pos < end {
+                self.bump();
+                break;
+            } else {
+                self.error_here("expected `,` or `}` in this list type");
+                break;
+            }
+        }
+        self.start_at(checkpoint, if is_record { SyntaxKind::TYPE_RECORD } else { SyntaxKind::TYPE_TUPLE });
+        self.finish();
+    }
+
+    /// `fn(params) -> RET` (the return type is optional).
+    fn ann_function_type(&mut self, end: usize) {
+        self.start(SyntaxKind::TYPE_FUNCTION);
+        self.wrap_name();
+        self.ann_trivia(end);
+        debug_assert!(self.at(SyntaxKind::L_PAREN));
+        self.start(SyntaxKind::TYPE_PARAMETER_LIST);
+        let open_range = self.token_range(self.pos);
+        self.bump();
+        loop {
+            self.ann_trivia(end);
+            if self.at(SyntaxKind::R_PAREN) && self.pos < end {
+                self.bump();
+                break;
+            }
+            if self.pos >= end {
+                self.error_at(open_range, "unclosed `(` in this function type; expected a matching `)`");
+                break;
+            }
+            self.ann_function_parameter(end);
+            self.ann_trivia(end);
+            if self.at(SyntaxKind::COMMA) && self.pos < end {
+                self.bump();
+            } else if self.at(SyntaxKind::R_PAREN) && self.pos < end {
+                self.bump();
+                break;
+            } else {
+                self.error_here("expected `,` or `)` in this function type's parameters");
+                break;
+            }
+        }
+        self.finish();
+        self.ann_trivia(end);
+        if self.at(SyntaxKind::MINUS_GREATER) && self.pos < end {
+            self.bump();
+            self.ann_trivia(end);
+            if self.pos < end {
+                self.ann_type(end, false);
+            } else {
+                self.error_here("expected a return type after `->`");
+            }
+        }
+        self.finish();
+    }
+
+    fn ann_function_parameter(&mut self, end: usize) {
+        self.start(SyntaxKind::TYPE_PARAMETER);
+        match self.current() {
+            // Rest parameter: `...`, `...name`, `...: TYPE`, `...name: TYPE`.
+            Some(SyntaxKind::DOTS) => {
+                self.bump();
+                if matches!(self.current(), Some(SyntaxKind::IDENT)) && self.adjacent(self.pos) && self.pos < end {
+                    self.wrap_name();
+                }
+                self.ann_trivia(end);
+                if self.at(SyntaxKind::COLON) && self.pos < end {
+                    self.bump();
+                    self.ann_trivia(end);
+                    self.ann_type(end, false);
+                }
+            }
+            // Optional named parameter: `[name]: TYPE`.
+            Some(SyntaxKind::L_BRACKET) => {
+                self.bump();
+                self.ann_trivia(end);
+                if matches!(self.current(), Some(SyntaxKind::IDENT)) && self.pos < end {
+                    self.wrap_name();
+                } else {
+                    self.error_here("expected `[name]: TYPE` for an optional parameter");
+                }
+                self.ann_trivia(end);
+                if self.at(SyntaxKind::R_BRACKET) && self.pos < end {
+                    self.bump();
+                } else {
+                    self.error_here("expected `]` after the optional parameter name");
+                }
+                self.ann_trivia(end);
+                if self.at(SyntaxKind::COLON) && self.pos < end {
+                    self.bump();
+                    self.ann_trivia(end);
+                    self.ann_type(end, false);
+                } else {
+                    self.error_here("expected `:` after `[name]` in an optional parameter");
+                }
+            }
+            // Named parameter `name: TYPE` or a positional type.
+            Some(SyntaxKind::IDENT)
+                if self.ann_next_significant(end) == Some(SyntaxKind::COLON) =>
+            {
+                self.wrap_name();
+                self.ann_trivia(end);
+                self.bump();
+                self.ann_trivia(end);
+                self.ann_type(end, false);
+            }
+            _ => self.ann_type(end, false),
         }
         self.finish();
     }

@@ -470,7 +470,8 @@ SOURCE_FILE@0..18
   ANNOTATION@0..10
     ANNOTATION_MARKER@0..2 "#:"
     WHITESPACE@2..3 " "
-    IDENT@3..10 "integer"
+    TYPE_REF@3..10
+      IDENT@3..10 "integer"
   NEWLINE@10..11 "\n"
   BINARY_EXPR@11..18
     NAME@11..12
@@ -490,19 +491,26 @@ SOURCE_FILE@0..55
   ANNOTATION@0..32
     ANNOTATION_MARKER@0..2 "#:"
     WHITESPACE@2..3 " "
-    IDENT@3..5 "fn"
-    L_PAREN@5..6 "("
-    IDENT@6..7 "x"
-    COLON@7..8 ":"
-    WHITESPACE@8..9 " "
-    IDENT@9..16 "integer"
-    R_PAREN@16..17 ")"
-    NEWLINE@17..18 "\n"
-    ANNOTATION_MARKER@18..20 "#:"
-    WHITESPACE@20..23 "   "
-    MINUS_GREATER@23..25 "->"
-    WHITESPACE@25..26 " "
-    IDENT@26..32 "double"
+    TYPE_FUNCTION@3..32
+      NAME@3..5
+        IDENT@3..5 "fn"
+      TYPE_PARAMETER_LIST@5..17
+        L_PAREN@5..6 "("
+        TYPE_PARAMETER@6..16
+          NAME@6..7
+            IDENT@6..7 "x"
+          COLON@7..8 ":"
+          WHITESPACE@8..9 " "
+          TYPE_REF@9..16
+            IDENT@9..16 "integer"
+        R_PAREN@16..17 ")"
+      NEWLINE@17..18 "\n"
+      ANNOTATION_MARKER@18..20 "#:"
+      WHITESPACE@20..23 "   "
+      MINUS_GREATER@23..25 "->"
+      WHITESPACE@25..26 " "
+      TYPE_REF@26..32
+        IDENT@26..32 "double"
   NEWLINE@32..33 "\n"
   BINARY_EXPR@33..55
     NAME@33..34

@@ -160,9 +160,13 @@ pub enum SyntaxKind {
     /// `<T, U: numeric>`
     TYPE_BINDER_LIST,
     TYPE_BINDER,
-    /// `{a: integer, b: character}`
+    /// `list{a: integer, b: character}`
     TYPE_RECORD,
     TYPE_FIELD,
+    /// `list{integer, character}`
+    TYPE_TUPLE,
+    /// `list[T]` / `list[named: T]`
+    TYPE_LIST,
     TYPE_PAREN,
     TYPE_ARG_LIST,
 
@@ -343,6 +347,8 @@ impl SyntaxKind {
             TYPE_BINDER => "type binder",
             TYPE_RECORD => "record type",
             TYPE_FIELD => "record field",
+            TYPE_TUPLE => "tuple type",
+            TYPE_LIST => "list type",
             TYPE_PAREN => "parenthesized type",
             TYPE_ARG_LIST => "type argument list",
             ERROR => "error",
