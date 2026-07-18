@@ -117,6 +117,44 @@ property: a file with an R-grammar syntax error is refused, while errors raised 
 annotation grammar (marked `in_annotation` by the parser) only send the affected block down
 the verbatim path.
 
+### The lint fixture suites
+
+`crates/semantics/tests/lints/` runs `lints::lint_file` under the default configuration and
+`tests/lints-style/` under `naming-style = "snake_case"` plus `unused-parameter = "warn"`
+(both off by default); each case renders every finding as `start..end severity[code] message`
+(or `clean`). Run with `cargo test -p semantics --test test_lint_fixtures`.
+
+### The CLI contract suite
+
+`crates/roughly/tests/test_cli.rs` drives the real `roughly` binary end to end: diagnostic
+rendering (1-based positions, gutters, carets), JSON Lines output, the documented exit-code
+contract (0 clean, 1 findings, 2 usage/configuration/IO errors), configuration discovery and
+failure, per-file `# typing:` directives, suppression comments, NAMESPACE validation, project
+stub overrides (including loader-problem reporting), data-masked evaluation, and the
+formatter's `--check`/`--diff`/in-place modes.
+
+### The LSP behavioral suite
+
+`crates/roughly/tests/test_lsp.rs` spawns the real `roughly server` process and drives it over
+LSP stdio with an async-lsp test client. Coverage: capability negotiation (position encodings,
+pull diagnostics, refresh, label offsets, snippets), document sync (incremental and full-text,
+untitled/non-`file:` buffers, close-time disk rereads), the two-wave push contract and its
+settled-superset invariant, burst settling under latest-edit-wins cancellation, pull
+diagnostics (result ids, unchanged reports, retryable cancellation, push suppression),
+diagnostic refresh on save and config change, the config matrix (live reload, ancestor
+configs, failure keeps the previous config, the config-file diagnostic), every feature
+endpoint including UTF-16/UTF-8 range correctness with BMP and non-BMP content and
+out-of-bounds safety, semantic tokens for `#:` bodies, and `.Rtypes`/NAMESPACE buffer serving.
+
+### The perf and memory witnesses
+
+`crates/differential/tests/test_stats.rs` (ignored; needs the fetched corpus and a release
+build) carries the measurement instruments — one process per stack reporting wall, phase
+splits, and resident/peak memory into `target/stats-{new,legacy}.txt` — and `stats_witness`,
+the CI-checkable assertion form: cold-pass wall per line, resident bytes per line, and
+resolve steps per line (the resolve-memoization regression tripwire) against budgets set from
+the measured gate numbers with headroom.
+
 ## Fixture format
 
 The current analysis fixture runner lives in `tests/test_fixtures.rs`.

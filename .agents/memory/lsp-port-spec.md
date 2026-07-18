@@ -230,22 +230,20 @@ cancellation model: worker refreshes to a fresh db handle at every job
 start when its token was cancelled (a flip is consumed by the in-flight
 query it killed) — see §12.
 
-REMAINING:
-1. Port the rest of test_lsp coverage (~60 more tests in the legacy
-   file): out-of-bounds safety per feature, references/rename behaviors,
-   completion contexts + snippets assertions, inlay viewport, signature
-   label offsets against a label-offset client, semantic-token payloads,
-   config reload live (watched-files event → refresh), did_close disk
-   reread, untitled documents, stub/.Rtypes + NAMESPACE buffer serving,
-   dependency-affecting save → refresh request, pull-client refresh,
-   breaking-one-file independence, coherence-panic death test.
-2. Close §11 product gaps (globalVariables, duplicate-binding related
-   notes, stub-loader problems + @masked validation, richer document
-   symbols with kinds/hierarchy).
-3. Memory re-measure ~700K LoC; witnesses as CI-checkable artifacts;
-   flip workspace default-members to crates/roughly; update
-   architecture.md/structure.md/testing.md for the cutover; decision
-   record for Phase 3 completion.
+REMAINING (everything else in this file is DONE and documented in
+architecture.md/structure.md/testing.md + the Phase 3 decision record):
+1. Per-diagnostic related locations: duplicate top-level binding
+   warnings with "the earlier/later binding is here" notes need a
+   related-location model on semantics::Diagnostic, emission in the
+   package-interface layer, and rendering on both surfaces (CLI notes +
+   LSP relatedInformation). The only §11 gap still open.
+2. Legacy-parity polish, not gate-blocking: hover "defined at" line and
+   the `debug = true` hover sections; a deterministic test for cancelled
+   pull diagnostics; richer symbol hierarchy (S4/R6 children).
+3. Scale re-measure beyond the 507K-line corpus if a ~700K corpus is
+   assembled; Phase 4 (multi-core, statement-cost keystrokes, error-
+   message polish, final legacy deletion incl. fixture-data migration
+   out of legacy trees + archived final parity report).
 
 ## 11. Known product gaps found while porting the CLI contract (close before Phase 3 completes)
 

@@ -1,133 +1,74 @@
 ---
 title: Structure
-description: The file structure of the analysis and engine crates
+description: The file structure of the syntax, semantics, ide, format, and roughly crates
 ---
 
-This document is the authoritative file structure for the analysis code. Two crates are involved: `analysis` holds the computational phases and the from-scratch checker, and `engine` holds the generic memoized-query core plus the R query bodies that drive incremental analysis (see [Architecture](/architecture)).
+This document is the authoritative file structure for Roughly's code. The
+crate graph and phase boundaries live in [Architecture](/architecture); this
+page records the file split and the role of each file. The `*-legacy` crates
+keep their own (frozen) layout and are not documented here.
 
-Keep it focused on the file split and the role of each file.
+## `syntax` crate (`src/syntax.rs` is the root)
 
-## `analysis` crate
+- `lexer.rs` — the hand lexer, including `#:` annotation regions as
+  structured trivia
+- `parser.rs` — the recursive-descent/Pratt parser onto rowan green trees,
+  including the annotation type grammar and statement-anchored recovery
+- `kind.rs` — `SyntaxKind`: every token and node kind, with display names
+- `ast.rs` — typed AST views (`Option`-returning accessors over the raw tree)
+- `reparse.rs` — statement-splice incremental reparse (an optimization; parse
+  correctness never depends on it)
+- `testing.rs` — the fixture harness (`.test` format, `ROUGHLY_BLESS`,
+  `FIXTURE_FILTER`, duplicate-id rejection) shared by every fixture suite
 
-- `analysis.rs`
-  - the `Analysis` document store (parsed documents, edit/reparse)
-  - `run_full`, the clean from-scratch checker retained as the differential oracle and the command-line path
-  - package-level phase wiring (`resolve_package`, `typecheck`) as from-scratch passes
-  - `check`, `lint`, `lower` entry points
+## `semantics` crate (`src/semantics.rs` is the root)
 
-- `document.rs`
-  - parsed document type
-  - document edit and reparse mechanics
+- `semantics.rs` — the salsa database, inputs (`SourceFile`, `ProjectFiles`,
+  typing-mode directives), the item tree with insertion-stable identities,
+  per-item syntax anchoring, the package interface (`global_scheme` fixpoint),
+  and item-span queries
+- `hir.rs` — per-item HIR: expressions with item-relative ranges, lowering
+  from the syntax tree
+- `naming.rs` — the mutable-slot variable model: scopes, reaching-write flow,
+  captures, data-masked evaluation recognition, unused outputs
+- `types.rs` — interned types (`Ty`/`TyKind`), schemes, constraints, union
+  normalization
+- `infer.rs` — the inference table: union-find entries, unification, the
+  directional compatibility relation, memoized deep resolution
+- `check.rs` — the inference walk per item: environment undo-log, calls and
+  overload probing, control flow, annotations enforcement, strict origins
+- `annotations.rs` — lowering `#:` annotation nodes onto interned types;
+  block-form rules
+- `stubs.rs` — the `.Rtypes` corpus: parsing, the assembled library
+  (schemes, nominals, masked verbs, namespace exports), and loader-problem
+  reporting
+- `lints.rs` — the style lints and their configuration types
+- `diagnostics.rs` — the diagnostics edge (parse-stage and full per-file
+  sets, strict rendering) and the one user-facing `TypeRenderer`
 
-- `hir.rs`
-  - HIR data structures
-  - stable ids
-  - file-local semantic representation
+## `ide` crate (`src/ide.rs`, single file)
 
-- `ide.rs`
-  - the IDE feature result types
-  - the `IdeDatabase` fact-provider trait and its implementation for `Analysis`
-  - the public IDE entry points
+All eight feature families in one module over `semantics` queries: hover, the
+shared occurrence engine behind definition/references/rename, inlay hints,
+signature help, completion (with the shared smart-case matcher), code
+actions, document/workspace symbols, annotation-type and S4 navigation.
 
-- `ide/generic.rs`
-  - the interactive features (hover, completion, definition, references, rename, inlay hints, signature help) written once over `&dyn IdeDatabase`, so the identical orchestration runs on the from-scratch oracle and on the engine-backed view
+## `format` crate (`src/format.rs`, single file)
 
-- `type_syntax.rs`
-  - typing-comment and type-declaration parsing
-  - surface-type rendering
-  - type-notation lexing (one pass shared by editor highlighting and by re-lexing a `#:` annotation's document text to map a cursor to the type token under it, for hover/goto/error-range narrowing)
+The preserving formatter over the syntax tree, plus its configuration types.
 
-- `types.rs`
-  - core type representation shared by inference and checking
-  - inference variables, constraints, quantified variables, surface types, and type schemes
+## `roughly` crate (`src/roughly.rs` is the root)
 
-- `lower.rs`
-  - syntax-to-HIR lowering
-
-- `naming.rs`
-  - scopes, variable slots, use-site resolution, and the reaching-write flow analysis
-    (definite-assignment warnings and the unused dead-store check)
-  - `resolve_document_locally` (file-local naming) and package-global resolution
-
-- `typecheck.rs` (+ `typecheck/`)
-  - the root holds the shared types (`InferenceState`, `Binding`, `InferenceError`, `ModuleCheck`,
-    the type-definition environment), the module/expression entry points, assignment and function
-    inference, and interface extraction; the clusters below live in submodules
-  - `typecheck/annotations.rs` — annotation application: harvesting `#:` schemes, applying
-    checked and trusting annotations, lowering surface types with type-parameter substitutions,
-    and nominal-representation projection
-  - `typecheck/operators.rs` — the irreducible builtin kernel: arithmetic with R's shape/atomic
-    promotion, comparison with the flexible-operand scalar claim, `:`, unary forms, `&&`/`||`,
-    `c()`, `switch`, `list()`, and the `[` / `[[` / `$` indexing forms
-  - `typecheck/calls.rs` — call checking: R's argument matcher (name-aware, positional, and
-    rest-parameter matching), ordered overload probing, the callback-forwarding probe, and the
-    argument compatibility check
-  - `typecheck/control.rs` — control-flow checking: `if` with guard narrowing (type guards and
-    the `missing()` supplied-state guard), divergence detection, and the `for`/`while`/`repeat`
-    loops driving the environment's fixed point
-  - `typecheck/environment.rs` — the variable-slot environment: bind/lookup, undo-logged entry
-    writes, branch joins, captured-write notes, and the loop fixed point
-  - `typecheck/unify.rs` — the unification core: variable allocation (fresh and rigid), the
-    snapshot / rollback / commit machinery probes ride on, constraint raising, resolution,
-    `unify` and its structural cases, directional `check_compatibility`, scheme instantiation and
-    generalization, and function-type unification
-  - `typecheck/operand.rs` — free-standing helpers behind the core: operand classification and
-    numeric promotion for the builtin operators, comparison-family shapes, guard-refinement
-    filtering, and the small pure `CoreType` transformations around unification and scheme import
-
-- `stub.rs` + `stdlib.rs` + `stubs/*.Rtypes`
-  - `stub.rs` parses the declaration-only stub format (`name : <type-expr>` lines, reusing the type-expression parser)
-  - `stdlib.rs` loads the standard-library stubs and folds project overrides over them
-  - `stubs/base.Rtypes`, `stubs/stats.Rtypes`, `stubs/utils.Rtypes`, `stubs/methods.Rtypes` are declaration-only stub files, harvested into type schemes by the loader
-
-- `diagnostic.rs`
-  - structured diagnostics
-  - diagnostic rendering
-
-- `interner.rs`
-  - interned symbol storage
-
-- `lint.rs`
-  - file-local non-semantic lint diagnostics
-  - style and surface checks over parsed trees
-
-- `text.rs`
-  - source-text position and range types
-  - rope-based text helpers
-
-- `tree.rs`
-  - parser construction
-  - rope-to-tree parsing
-  - tree-sitter navigation
-  - `kind` and `field` ids
-
-## `engine` crate
-
-- `engine.rs`
-  - the generic red-green memoized-query core: revision clock, type-erased slots, runtime dependency recording, red-green validation with value-equality cutoff, input tombstones, and the accidental-cycle guard
-  - no R knowledge and no dependency on `analysis`
-
-- `queries.rs`
-  - the R query bodies (`parse` → `lower` → `local_naming` → `package_symbol_index` → `defining_item` → `global_scheme` → `typecheck` → `diagnostics`, plus lint and the re-export interface fixed-point), each calling the corresponding `analysis` phase function
-
-- `ide_view.rs`
-  - `EngineIde`, the engine-backed implementation of `analysis`'s `IdeDatabase` trait, so the shared IDE features run over engine query results
-
-## Deferred split
-
-- the scheme-expressible standard library lives in `stub.rs` + `stdlib.rs` + `stubs/*.Rtypes`; only the irreducible builtin kernel (operators and core constructors) remains in `typecheck.rs`
-- interface extraction stays inside `typecheck.rs`'s root; the other planned typecheck seams are done (see the `typecheck/` submodules above)
-
-## Role of this document
-
-Use this document for:
-
-- the crate file split
-- the intended responsibility of each file
-- which splits are intentionally deferred
-
-Do not use this document for:
-
-- a changelog
-- a task tracker
-- detailed phase semantics
+- `main.rs` — the CLI surface and exit-code contract (0 clean, 1 findings,
+  2 usage/configuration/IO errors)
+- `cli.rs` — `check` (project assembly, rendering, NAMESPACE and stub-
+  override reports) and `fmt` implementations
+- `server.rs` — the LSP server: frontend/worker threading, document sync,
+  push/pull diagnostics, all feature endpoints, semantic tokens, stub and
+  NAMESPACE buffers
+- `config.rs` — `roughly.toml` discovery and parsing
+- `diagnostics.rs` — the shared diagnostics assembly (config gating, strict
+  escalation, suppression comments) used by both the server and the CLI
+- `namespace.rs` — NAMESPACE import parsing and validation
+- `position.rs` — the line index: byte offsets ↔ line/column in bytes or
+  UTF-16 code units

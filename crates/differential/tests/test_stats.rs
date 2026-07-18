@@ -118,6 +118,66 @@ fn stats_new_stack() {
     drop(retained);
 }
 
+/// The perf and memory witnesses as CI-checkable assertions (not prose): the
+/// budgets come from the measured gate numbers with headroom — wall 40 µs per
+/// line (measured ~25), resident 2 KiB per line (measured ~1.0), and resolve
+/// steps 20 per line (measured ~8; the memoization regression tripwire).
+/// Run wherever the corpus exists:
+///
+/// ```text
+/// cargo test -p differential --release --test test_stats -- --ignored stats_witness
+/// ```
+#[test]
+#[ignore = "witness; needs the fetched corpus and a release build"]
+fn stats_witness() {
+    use semantics::{DocumentKind, ProjectFiles, RootDatabase, SourceFile};
+
+    let packages = corpus_packages();
+    assert!(!packages.is_empty(), "run scripts/fetch-corpus.sh first");
+
+    let mut total_lines = 0usize;
+    let start = Instant::now();
+    let mut retained = Vec::new();
+    for sources in &packages {
+        let db = RootDatabase::default();
+        semantics::stubs::install_shipped_stubs(&db);
+        let files: Vec<SourceFile> = sources
+            .iter()
+            .map(|source| {
+                total_lines += source.lines().count();
+                SourceFile::new(&db, source.clone(), DocumentKind::Package)
+            })
+            .collect();
+        ProjectFiles::new(&db, files.clone());
+        for &file in &files {
+            let _ = semantics::diagnostics::file_diagnostics(&db, file);
+            let _ = semantics::diagnostics::strict_diagnostics(&db, file);
+        }
+        retained.push((db, files));
+    }
+    let elapsed = start.elapsed();
+
+    let microseconds_per_line = elapsed.as_secs_f64() * 1e6 / total_lines.max(1) as f64;
+    assert!(
+        microseconds_per_line <= 40.0,
+        "cold-pass wall budget exceeded: {microseconds_per_line:.1} µs/line over {total_lines} lines"
+    );
+    let resolve_steps = semantics::infer::RESOLVE_CALLS.load(std::sync::atomic::Ordering::Relaxed);
+    let steps_per_line = resolve_steps as f64 / total_lines.max(1) as f64;
+    assert!(
+        steps_per_line <= 20.0,
+        "resolve-step budget exceeded (memoization regression): {steps_per_line:.1} steps/line"
+    );
+    if let Some(resident_kb) = proc_status_kb("VmRSS") {
+        let bytes_per_line = resident_kb as f64 * 1024.0 / total_lines.max(1) as f64;
+        assert!(
+            bytes_per_line <= 2048.0,
+            "resident-set budget exceeded: {bytes_per_line:.0} bytes/line"
+        );
+    }
+    drop(retained);
+}
+
 #[test]
 #[ignore = "measurement instrument; needs the fetched corpus and a release build"]
 fn stats_legacy_stack() {
