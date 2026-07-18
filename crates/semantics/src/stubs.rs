@@ -142,6 +142,174 @@ pub fn stubs<'db>(db: &'db dyn Db) -> Option<&'db StubLibrary<'db>> {
     StubSources::try_get(db).map(|sources| stub_library(db, sources))
 }
 
+/// One declaration the stub loader would drop: its zero-based line and the
+/// reason. The editor's `.Rtypes` buffer diagnostics and `roughly check`'s
+/// override report both render from this list, so the wording stays
+/// identical everywhere.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StubProblem {
+    pub line: usize,
+    pub message: String,
+}
+
+/// Everything the loader would drop from one stub source, ordered by line.
+/// The nominal vocabulary is the installed corpus's plus this source's own
+/// `@type` declarations — the source may be an unsaved editor buffer whose
+/// declarations are not installed yet.
+pub fn stub_source_problems(db: &dyn Db, text: &str) -> Vec<StubProblem> {
+    let mut known_nominals: FxHashSet<String> = stubs(db)
+        .map(|library| library.nominals.iter().cloned().collect())
+        .unwrap_or_default();
+    for raw_line in text.lines() {
+        let content = strip_comment(raw_line).trim();
+        if let Some(rest) = content.strip_prefix("@type") {
+            let name = rest.trim();
+            if !name.is_empty() {
+                known_nominals.insert(name.to_owned());
+            }
+        }
+    }
+
+    let mut problems = Vec::new();
+    for (line, raw_line) in text.lines().enumerate() {
+        let content = strip_comment(raw_line).trim();
+        if content.is_empty() {
+            continue;
+        }
+        if let Some(rest) = content.strip_prefix("@type") {
+            if rest.trim().is_empty() {
+                problems.push(StubProblem {
+                    line,
+                    message: "expected a type name after `@type`.".to_owned(),
+                });
+            }
+            continue;
+        }
+        let Some(separator) = top_level_colon(content) else {
+            problems.push(StubProblem {
+                line,
+                message: "this line is not a declaration (`name : TYPE`).".to_owned(),
+            });
+            continue;
+        };
+        let name = content[..separator].trim();
+        let mut type_text = content[separator + 1..].trim();
+        if name.is_empty() || !is_stub_name(name) {
+            problems.push(StubProblem {
+                line,
+                message: format!("`{name}` is not a valid declaration name."),
+            });
+            continue;
+        }
+        if type_text.is_empty() {
+            problems.push(StubProblem {
+                line,
+                message: format!("expected a type after `{name} :`."),
+            });
+            continue;
+        }
+        let mut masked = false;
+        if let Some(rest) = type_text.strip_prefix("@masked") {
+            type_text = rest.trim_start();
+            masked = true;
+        }
+        let Some(scheme) = lower_type_text(db, type_text) else {
+            problems.push(StubProblem {
+                line,
+                message: format!(
+                    "this declaration does not load: `{type_text}` is not a valid type."
+                ),
+            });
+            continue;
+        };
+        if masked
+            && !matches!(
+                scheme.body.kind(db),
+                crate::types::TyKind::Function(function) if function.variadic.is_some()
+            )
+        {
+            problems.push(StubProblem {
+                line,
+                message: format!(
+                    "`@masked` on `{name}` requires a variadic function type — the mask covers \
+                     the arguments the `...` rest parameter absorbs."
+                ),
+            });
+            continue;
+        }
+        let mut unknown = Vec::new();
+        collect_unknown_nominals(db, scheme.body, &known_nominals, &mut unknown);
+        for unknown_name in unknown {
+            problems.push(StubProblem {
+                line,
+                message: format!(
+                    "this declaration does not load: I do not know the type `{unknown_name}`."
+                ),
+            });
+        }
+    }
+    problems
+}
+
+/// Named types the nominal vocabulary does not declare, in first-occurrence
+/// order. Rigid variables (binder-introduced) are not nominals.
+fn collect_unknown_nominals<'db>(
+    db: &'db dyn Db,
+    ty: crate::types::Ty<'db>,
+    known: &FxHashSet<String>,
+    out: &mut Vec<String>,
+) {
+    use crate::types::TyKind;
+    match ty.kind(db) {
+        TyKind::Named(name, arguments) => {
+            let text = name.text(db);
+            if !known.contains(text) && !out.iter().any(|seen| seen == text) {
+                out.push(text.to_owned());
+            }
+            for argument in arguments {
+                collect_unknown_nominals(db, *argument, known, out);
+            }
+        }
+        TyKind::Vector(inner)
+        | TyKind::NamedVector(inner)
+        | TyKind::List(inner)
+        | TyKind::NamedList(inner) => collect_unknown_nominals(db, *inner, known, out),
+        TyKind::Tuple(members) => {
+            for member in members {
+                collect_unknown_nominals(db, *member, known, out);
+            }
+        }
+        TyKind::Record(fields) => {
+            for field in fields {
+                collect_unknown_nominals(db, field.ty, known, out);
+            }
+        }
+        TyKind::Function(function) => {
+            for positional in &function.positional {
+                collect_unknown_nominals(db, *positional, known, out);
+            }
+            for named in &function.named {
+                collect_unknown_nominals(db, named.ty, known, out);
+            }
+            if let Some(rest) = &function.variadic {
+                collect_unknown_nominals(db, rest.element, known, out);
+            }
+            collect_unknown_nominals(db, function.ret, known, out);
+        }
+        TyKind::Union(members) => {
+            for member in members {
+                collect_unknown_nominals(db, *member, known, out);
+            }
+        }
+        TyKind::Any
+        | TyKind::Unknown
+        | TyKind::Null
+        | TyKind::Scalar(_)
+        | TyKind::Var(_)
+        | TyKind::Rigid(_) => {}
+    }
+}
+
 /// Parse one type expression by routing it through the annotation pipeline —
 /// the single type grammar in the system.
 fn lower_type_text<'db>(db: &'db dyn Db, type_text: &str) -> Option<TypeScheme<'db>> {

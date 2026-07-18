@@ -112,8 +112,14 @@ pub fn check(
         // sources win); an unreadable override is an I/O failure because it
         // silently changes what every file below checks against.
         let mut stub_sources = semantics::stubs::shipped_stub_sources();
+        let mut project_stub_files: Vec<(PathBuf, String)> = Vec::new();
         match discover_project_stubs(&root) {
-            Ok(project_stubs) => stub_sources.extend(project_stubs),
+            Ok(project_stubs) => {
+                for stub in project_stubs {
+                    stub_sources.push((stub.stem, stub.text.clone()));
+                    project_stub_files.push((stub.path, stub.text));
+                }
+            }
             Err((path, err)) => {
                 n_failures += 1;
                 error(&format!("failed to read override stub: {}", path.display()));
@@ -123,6 +129,33 @@ pub fn check(
 
         let db = RootDatabase::default();
         semantics::stubs::StubSources::new(&db, stub_sources);
+
+        // A broken override stub silently changes what every file below
+        // checks against, so what the loader drops is reported as findings
+        // before the per-file diagnostics: one whole-line error per dropped
+        // declaration.
+        for (stub_path, stub_text) in &project_stub_files {
+            let stub_index = LineIndex::new(stub_text);
+            for problem in semantics::stubs::stub_source_problems(&db, stub_text) {
+                n_diagnostics += 1;
+                let start = stub_index.line_start(problem.line as u32);
+                let end = start + stub_index.line_length(problem.line as u32, stub_text);
+                let diagnostic = Diagnostic {
+                    range: syntax::TextRange::new(start.into(), end.into()),
+                    severity: Severity::Error,
+                    code: "stub",
+                    message: problem.message,
+                };
+                match output {
+                    OutputFormat::Human => {
+                        render_human_diagnostic(stub_path, stub_text, &stub_index, &diagnostic)
+                    }
+                    OutputFormat::Json => {
+                        render_json_diagnostic(stub_path, &stub_index, &diagnostic)
+                    }
+                }
+            }
+        }
 
         let namespace_path = root.join("NAMESPACE");
         let namespace_source = std::fs::read_to_string(&namespace_path).ok();
@@ -267,9 +300,16 @@ fn collect_r_files(target: &Path) -> Result<Vec<PathBuf>, CommandError> {
         .collect()
 }
 
-/// The project override stubs under `<root>/stubs/*.Rtypes`, as
-/// `(file stem, text)` sources in path order.
-fn discover_project_stubs(root: &Path) -> Result<Vec<(String, String)>, (PathBuf, std::io::Error)> {
+/// One project override stub under `<root>/stubs/`: its path, file stem
+/// (the namespace label), and text.
+struct ProjectStub {
+    path: PathBuf,
+    stem: String,
+    text: String,
+}
+
+/// The project override stubs under `<root>/stubs/*.Rtypes`, in path order.
+fn discover_project_stubs(root: &Path) -> Result<Vec<ProjectStub>, (PathBuf, std::io::Error)> {
     let stubs_dir = root.join("stubs");
     let Ok(entries) = std::fs::read_dir(&stubs_dir) else {
         return Ok(Vec::new());
@@ -291,7 +331,7 @@ fn discover_project_stubs(root: &Path) -> Result<Vec<(String, String)>, (PathBuf
                     .file_stem()
                     .map(|stem| stem.to_string_lossy().into_owned())
                     .unwrap_or_default();
-                sources.push((stem, text));
+                sources.push(ProjectStub { path, stem, text });
             }
             Err(err) => return Err((path, err)),
         }

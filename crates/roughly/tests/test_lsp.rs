@@ -2243,3 +2243,129 @@ async fn annotation_bodies_get_semantic_tokens() {
 
     context.shutdown().await;
 }
+
+//
+// Stub (.Rtypes) buffers: served standalone, never entering the database.
+//
+
+#[tokio::test]
+async fn stub_documents_are_served_with_parse_diagnostics() {
+    let mut context = setup_test(&[]).await;
+    let uri = context
+        .open(
+            "stubs/project.Rtypes",
+            "good_helper : fn(x: double) -> double\nsize : Frobnicate\n",
+        )
+        .await;
+    let published = recv_first_diagnostics(&mut context.diagnostics_receiver, &uri, TIMEOUT).await;
+    assert_eq!(
+        published.diagnostics.len(),
+        1,
+        "{:?}",
+        published.diagnostics
+    );
+    let diagnostic = &published.diagnostics[0];
+    assert!(
+        diagnostic.message.contains("does not load") && diagnostic.message.contains("Frobnicate"),
+        "{:?}",
+        diagnostic
+    );
+    assert_eq!(diagnostic.range.start.line, 1, "whole-line on the bad line");
+
+    // Fixing the declaration republishes clean.
+    context.replace_file_full(&uri, 2, "good_helper : fn(x: double) -> double\n");
+    let published = recv_first_diagnostics(&mut context.diagnostics_receiver, &uri, TIMEOUT).await;
+    assert!(
+        published.diagnostics.is_empty(),
+        "{:?}",
+        published.diagnostics
+    );
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn stub_documents_answer_pull_diagnostics() {
+    let mut context = setup_test_with_pull_diagnostics(&[]).await;
+    let uri = context
+        .open("stubs/project.Rtypes", "size : Frobnicate\n")
+        .await;
+    let report = context.document_diagnostic(&uri, None).await;
+    let DocumentDiagnosticReportResult::Report(DocumentDiagnosticReport::Full(full)) = report
+    else {
+        panic!("expected a full report");
+    };
+    assert_eq!(full.full_document_diagnostic_report.items.len(), 1);
+    assert!(
+        full.full_document_diagnostic_report.items[0]
+            .message
+            .contains("does not load"),
+        "{:?}",
+        full.full_document_diagnostic_report.items
+    );
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn stub_documents_get_semantic_tokens() {
+    let mut context = setup_test(&[]).await;
+    let uri = context
+        .open(
+            "stubs/project.Rtypes",
+            "@type frame\nmake_frame : fn(n: integer) -> frame\n",
+        )
+        .await;
+    drain_diagnostics(&mut context.diagnostics_receiver).await;
+
+    let result = context
+        .server
+        .semantic_tokens_full(async_lsp::lsp_types::SemanticTokensParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .expect("semantic tokens request failed")
+        .expect("expected semantic tokens");
+    let async_lsp::lsp_types::SemanticTokensResult::Tokens(tokens) = result else {
+        panic!("expected a tokens result");
+    };
+    assert!(
+        !tokens.data.is_empty(),
+        "a stub buffer must produce semantic tokens"
+    );
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn stub_type_name_jumps_to_its_type_declaration() {
+    let mut context = setup_test(&[]).await;
+    let uri = context
+        .open(
+            "stubs/project.Rtypes",
+            "@type frame\nmake_frame : fn(n: integer) -> frame\n",
+        )
+        .await;
+    drain_diagnostics(&mut context.diagnostics_receiver).await;
+
+    // The cursor sits on the `frame` return-type reference (line 1, col 32).
+    let result = context
+        .server
+        .definition(GotoDefinitionParams {
+            text_document_position_params: position_params(&uri, 1, 32),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .expect("definition request failed")
+        .expect("expected a definition into the stub file");
+    let GotoDefinitionResponse::Scalar(location) = result else {
+        panic!("expected a scalar definition");
+    };
+    assert_eq!(location.uri, uri);
+    assert_eq!(location.range.start, Position::new(0, 6));
+    assert_eq!(location.range.end, Position::new(0, 11));
+
+    context.shutdown().await;
+}

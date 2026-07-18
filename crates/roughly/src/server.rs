@@ -658,10 +658,11 @@ impl Worker {
         let version = params.text_document.version;
         if Worker::is_stub_document(&path) {
             self.stub_documents
-                .insert(path.clone(), params.text_document.text);
+                .insert(path.clone(), params.text_document.text.clone());
             if !self.supports_pull_diagnostics {
+                let diagnostics = self.stub_diagnostics(&params.text_document.text);
                 let uri = self.document_uri(&path);
-                self.publish(uri, Vec::new(), Some(version));
+                self.publish(uri, diagnostics, Some(version));
             }
             return;
         }
@@ -708,10 +709,11 @@ impl Worker {
 
         if let Some(text) = self.stub_documents.get(&path).cloned() {
             let updated = self.apply_content_changes(text, &params.content_changes);
-            self.stub_documents.insert(path.clone(), updated);
+            self.stub_documents.insert(path.clone(), updated.clone());
             if !self.supports_pull_diagnostics {
+                let diagnostics = self.stub_diagnostics(&updated);
                 let uri = self.document_uri(&path);
-                self.publish(uri, Vec::new(), Some(version));
+                self.publish(uri, diagnostics, Some(version));
             }
             return;
         }
@@ -1060,6 +1062,28 @@ impl Worker {
         }
     }
 
+    /// Whole-line errors for the declarations a `.Rtypes` buffer's loader
+    /// would drop.
+    fn stub_diagnostics(&self, text: &str) -> Vec<lsp_types::Diagnostic> {
+        let index = LineIndex::new(text);
+        semantics::stubs::stub_source_problems(&self.db, text)
+            .into_iter()
+            .map(|problem| {
+                let start = index.line_start(problem.line as u32);
+                let end = start + index.line_length(problem.line as u32, text);
+                self.convert_diagnostic(
+                    text,
+                    Diagnostic {
+                        range: TextRange::new(start.into(), end.into()),
+                        severity: Severity::Error,
+                        code: "stub",
+                        message: problem.message,
+                    },
+                )
+            })
+            .collect()
+    }
+
     fn namespace_diagnostics(&self, text: &str) -> Vec<lsp_types::Diagnostic> {
         let imports = crate::namespace::parse_namespace_imports(text);
         let knows =
@@ -1320,6 +1344,15 @@ impl LanguageServer for ServerState {
             let Some(path) = worker.document_path(&position.text_document.uri) else {
                 return Ok(None);
             };
+            if let Some(stub) = worker.stub_documents.get(&path).cloned() {
+                let offset = worker.to_offset(&stub, position.position);
+                return Ok(stub_type_definition(&stub, offset).map(|range| {
+                    lsp_types::GotoDefinitionResponse::Scalar(lsp_types::Location {
+                        uri: position.text_document.uri.clone(),
+                        range: worker.to_range(&stub, range),
+                    })
+                }));
+            }
             let Some(&file) = worker.files.get(&path) else {
                 return Ok(None);
             };
@@ -1792,6 +1825,15 @@ impl LanguageServer for ServerState {
             let Some(path) = worker.document_path(&params.text_document.uri) else {
                 return Ok(None);
             };
+            if let Some(stub) = worker.stub_documents.get(&path).cloned() {
+                let tokens = stub_semantic_tokens(&stub, worker.encoding);
+                return Ok(Some(lsp_types::SemanticTokensResult::Tokens(
+                    lsp_types::SemanticTokens {
+                        result_id: None,
+                        data: tokens,
+                    },
+                )));
+            }
             let Some(&file) = worker.files.get(&path) else {
                 return Ok(None);
             };
@@ -1814,8 +1856,9 @@ impl LanguageServer for ServerState {
             let Some(path) = worker.document_path(&params.text_document.uri) else {
                 return Ok(empty_full_diagnostic_report());
             };
-            if let Some(_stub) = worker.stub_documents.get(&path) {
-                return Ok(diagnostic_report(Vec::new(), params.previous_result_id));
+            if let Some(stub) = worker.stub_documents.get(&path).cloned() {
+                let diagnostics = worker.stub_diagnostics(&stub);
+                return Ok(diagnostic_report(diagnostics, params.previous_result_id));
             }
             if let Some(namespace) = worker.namespace_documents.get(&path).cloned() {
                 let diagnostics = worker.namespace_diagnostics(&namespace);
@@ -2105,7 +2148,6 @@ fn annotation_semantic_tokens(
     text: &str,
     encoding: PositionEncoding,
 ) -> Vec<lsp_types::SemanticToken> {
-    let index = LineIndex::new(text);
     let parse = semantics::parse(db, file);
     let mut spans: Vec<(TextRange, u32)> = Vec::new();
     for annotation in parse
@@ -2117,39 +2159,126 @@ fn annotation_semantic_tokens(
             let syntax::SyntaxElement::Token(token) = element else {
                 continue;
             };
-            let parent_kind = token.parent().map(|parent| parent.kind());
-            let token_type = match token.kind() {
-                SyntaxKind::IDENT => match parent_kind {
-                    Some(SyntaxKind::TYPE_BINDER) => Some(1),
-                    Some(SyntaxKind::TYPE_FIELD) | Some(SyntaxKind::TYPE_FUNCTION) => Some(2),
-                    Some(SyntaxKind::ANNOTATION_DIRECTIVE) => Some(4),
-                    _ => Some(0),
-                },
-                SyntaxKind::COMMA
-                | SyntaxKind::PIPE
-                | SyntaxKind::COLON
-                | SyntaxKind::L_BRACKET
-                | SyntaxKind::R_BRACKET
-                | SyntaxKind::L_PAREN
-                | SyntaxKind::R_PAREN
-                | SyntaxKind::L_BRACE
-                | SyntaxKind::R_BRACE
-                | SyntaxKind::LESS
-                | SyntaxKind::GREATER
-                | SyntaxKind::DOTS => Some(3),
-                SyntaxKind::AT => Some(4),
-                SyntaxKind::NULL_KW => Some(0),
-                _ => None,
-            };
-            if let Some(token_type) = token_type
+            if let Some(token_type) = classify_annotation_token(&token)
                 && !token.text_range().is_empty()
             {
                 spans.push((token.text_range(), token_type));
             }
         }
     }
-    spans.sort_by_key(|(range, _)| range.start());
+    delta_encode_tokens(spans, text, encoding)
+}
 
+/// The semantic-token class of one token inside an annotation region, per
+/// the advertised legend: type names 0, `<T>` binders 1, field/parameter
+/// names 2, punctuation 3, `@` directives 4.
+fn classify_annotation_token(token: &syntax::SyntaxToken) -> Option<u32> {
+    let parent_kind = token.parent().map(|parent| parent.kind());
+    match token.kind() {
+        SyntaxKind::IDENT => match parent_kind {
+            Some(SyntaxKind::TYPE_BINDER) => Some(1),
+            Some(SyntaxKind::TYPE_FIELD) | Some(SyntaxKind::TYPE_FUNCTION) => Some(2),
+            Some(SyntaxKind::ANNOTATION_DIRECTIVE) => Some(4),
+            _ => Some(0),
+        },
+        SyntaxKind::COMMA
+        | SyntaxKind::PIPE
+        | SyntaxKind::COLON
+        | SyntaxKind::L_BRACKET
+        | SyntaxKind::R_BRACKET
+        | SyntaxKind::L_PAREN
+        | SyntaxKind::R_PAREN
+        | SyntaxKind::L_BRACE
+        | SyntaxKind::R_BRACE
+        | SyntaxKind::LESS
+        | SyntaxKind::GREATER
+        | SyntaxKind::DOTS => Some(3),
+        SyntaxKind::AT => Some(4),
+        SyntaxKind::NULL_KW => Some(0),
+        _ => None,
+    }
+}
+
+/// Tokens for a `.Rtypes` stub buffer: each declaration's type half runs
+/// through the annotation grammar (offset back into the buffer), `@type` and
+/// `@masked` color as directives, and declared type names as types.
+fn stub_semantic_tokens(text: &str, encoding: PositionEncoding) -> Vec<lsp_types::SemanticToken> {
+    let index = LineIndex::new(text);
+    let mut spans: Vec<(TextRange, u32)> = Vec::new();
+    for (line_number, raw_line) in text.lines().enumerate() {
+        let line_start = index.line_start(line_number as u32) as usize;
+        let content = match raw_line.find('#') {
+            Some(at) => &raw_line[..at],
+            None => raw_line,
+        };
+        let trimmed = content.trim_start();
+        let indent = content.len() - trimmed.len();
+        let trimmed = trimmed.trim_end();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let push = |spans: &mut Vec<(TextRange, u32)>, start: usize, len: usize, class: u32| {
+            let absolute = (line_start + start) as u32;
+            spans.push((
+                TextRange::new(absolute.into(), (absolute + len as u32).into()),
+                class,
+            ));
+        };
+        if let Some(rest) = trimmed.strip_prefix("@type") {
+            push(&mut spans, indent, "@type".len(), 4);
+            let name = rest.trim_start();
+            if !name.is_empty() {
+                let name_start = indent + trimmed.len() - name.len();
+                push(&mut spans, name_start, name.len(), 0);
+            }
+            continue;
+        }
+        let Some(colon) = trimmed.find(" :") else {
+            continue;
+        };
+        let mut type_offset = indent + colon + 2;
+        let mut type_text = &trimmed[colon + 2..];
+        let leading = type_text.len() - type_text.trim_start().len();
+        type_offset += leading;
+        type_text = type_text.trim_start();
+        if let Some(rest) = type_text.strip_prefix("@masked") {
+            push(&mut spans, type_offset, "@masked".len(), 4);
+            let after = rest.trim_start();
+            type_offset += type_text.len() - after.len();
+            type_text = after;
+        }
+        if type_text.is_empty() {
+            continue;
+        }
+        // The wrapped parse prefixes "#: " (3 bytes) before the type text.
+        let parse = syntax::parse(&format!("#: {type_text}\n"));
+        for element in parse.syntax_node().descendants_with_tokens() {
+            let syntax::SyntaxElement::Token(token) = element else {
+                continue;
+            };
+            let range = token.text_range();
+            if u32::from(range.start()) < 3 || range.is_empty() {
+                continue;
+            }
+            if let Some(class) = classify_annotation_token(&token) {
+                let start = usize::from(range.start()) - 3;
+                let length = usize::from(range.len());
+                if start + length <= type_text.len() + 1 {
+                    push(&mut spans, type_offset + start, length, class);
+                }
+            }
+        }
+    }
+    delta_encode_tokens(spans, text, encoding)
+}
+
+fn delta_encode_tokens(
+    mut spans: Vec<(TextRange, u32)>,
+    text: &str,
+    encoding: PositionEncoding,
+) -> Vec<lsp_types::SemanticToken> {
+    let index = LineIndex::new(text);
+    spans.sort_by_key(|(range, _)| range.start());
     let mut data = Vec::new();
     let mut previous_line = 0u32;
     let mut previous_start = 0u32;
@@ -2181,4 +2310,41 @@ fn annotation_semantic_tokens(
         previous_start = position.column;
     }
     data
+}
+
+/// Goto for a type name inside a `.Rtypes` buffer: the `@type NAME`
+/// declaration line in the same file (stub files are self-contained).
+fn stub_type_definition(text: &str, offset: TextSize) -> Option<TextRange> {
+    let is_name_char =
+        |character: char| character.is_alphanumeric() || character == '.' || character == '_';
+    let at = usize::from(offset).min(text.len());
+    let start = text[..at]
+        .rfind(|character| !is_name_char(character))
+        .map(|found| found + 1)
+        .unwrap_or(0);
+    let end = text[at..]
+        .find(|character| !is_name_char(character))
+        .map(|found| at + found)
+        .unwrap_or(text.len());
+    if start >= end {
+        return None;
+    }
+    let word = &text[start..end];
+    let index = LineIndex::new(text);
+    for (line_number, raw_line) in text.lines().enumerate() {
+        let trimmed = raw_line.trim_start();
+        if let Some(rest) = trimmed.strip_prefix("@type")
+            && rest.trim() == word
+        {
+            let indent = raw_line.len() - trimmed.len();
+            let name_offset = indent + trimmed.len() - rest.trim_start().len();
+            let line_start = index.line_start(line_number as u32) as usize;
+            let start = (line_start + name_offset) as u32;
+            return Some(TextRange::new(
+                start.into(),
+                (start + word.len() as u32).into(),
+            ));
+        }
+    }
+    None
 }

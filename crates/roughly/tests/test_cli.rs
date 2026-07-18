@@ -270,6 +270,32 @@ fn check_missing_target_exits_two() {
 }
 
 #[test]
+fn check_reports_dropped_override_stub_declarations() {
+    // The loader drops an override declaration it cannot harvest; `check`
+    // must say so instead of silently checking against a corpus the author
+    // did not write.
+    let directory = project(&[
+        ("clean.R", "x <- 1\n"),
+        ("stubs/project.Rtypes", "size : Frobnicate\n"),
+    ]);
+    let output = roughly(directory.path(), &["check", "clean.R"]);
+    let stderr = stderr(&output);
+    assert_eq!(
+        exit_code(&output),
+        1,
+        "a dropped override declaration is a finding: {stderr}"
+    );
+    assert!(
+        stderr.contains("does not load"),
+        "expected the dropped declaration to be reported, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("project.Rtypes:1:1"),
+        "expected a 1-based stub-file position header, got: {stderr}"
+    );
+}
+
+#[test]
 fn check_loads_valid_override_stubs_silently() {
     let directory = project(&[
         ("clean.R", "x <- 1\n"),
@@ -485,6 +511,35 @@ fn data_masked_column_references_do_not_warn() {
         assert!(
             !report.contains(&format!("`{column}`")),
             "masked column `{column}` must not warn:\n{report}"
+        );
+    }
+}
+
+// `utils::globalVariables(c(...))` — the ecosystem-standard escape hatch —
+// declares names as dynamically bound for the whole package:
+// could-not-resolve is suppressed for them everywhere, while undeclared
+// names keep warning.
+#[test]
+fn global_variables_declarations_suppress_unresolved_warnings() {
+    let directory = project(&[
+        (
+            "R/globals.R",
+            "utils::globalVariables(c(\"generated_col\", \"another_col\"))\n",
+        ),
+        (
+            "R/use.R",
+            "f <- function() generated_col + another_col + genuinely_undefined\n",
+        ),
+        ("roughly.toml", "[check]\ntyping = true\n"),
+    ]);
+    let output = roughly(directory.path(), &["check"]);
+    assert_eq!(exit_code(&output), 1);
+    let report = stderr(&output);
+    assert!(report.contains("genuinely_undefined"), "report:\n{report}");
+    for declared in ["generated_col", "another_col"] {
+        assert!(
+            !report.contains(&format!("`{declared}`")),
+            "declared name `{declared}` must not warn:\n{report}"
         );
     }
 }

@@ -124,7 +124,9 @@ pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
         }
         if *file.kind(db) == DocumentKind::Package {
             for (expression, name) in &naming.non_locals {
-                if crate::package_scheme_exists(db, name) || super_globals(db, file).contains(name)
+                if crate::package_scheme_exists(db, name)
+                    || super_globals(db, file).contains(name)
+                    || declared_global_variable(db, name)
                 {
                     continue;
                 }
@@ -185,6 +187,84 @@ fn super_globals(db: &dyn Db, file: SourceFile) -> std::collections::BTreeSet<St
         }
     }
     names
+}
+
+/// Names declared via top-level `globalVariables(c("a", "b"))` /
+/// `utils::globalVariables(...)` calls in one file — the ecosystem-standard
+/// escape hatch for names bound dynamically (non-standard evaluation,
+/// generated bindings). Reads of them resolve nowhere lexically on purpose,
+/// so the unresolved check skips them package-wide. Only direct top-level
+/// calls with literal string arguments are recognized.
+#[salsa::tracked(returns(ref))]
+fn file_global_variable_declarations(
+    db: &dyn Db,
+    file: SourceFile,
+) -> std::collections::BTreeSet<String> {
+    use crate::hir::{ExpressionKind, LiteralKind};
+    let mut declared = std::collections::BTreeSet::new();
+    for item in item_tree(db, file) {
+        let Some(module) = crate::item_hir(db, item) else {
+            continue;
+        };
+        let Some(root) = module.root else {
+            continue;
+        };
+        let ExpressionKind::Call { callee, arguments } = &module.expression(root).kind else {
+            continue;
+        };
+        let is_global_variables = match &module.expression(*callee).kind {
+            ExpressionKind::NameRef(name) => name == "globalVariables",
+            ExpressionKind::Namespace { package, name, .. } => {
+                package.as_deref() == Some("utils") && name.as_deref() == Some("globalVariables")
+            }
+            _ => false,
+        };
+        if !is_global_variables {
+            continue;
+        }
+        let Some(first) = arguments.first().and_then(|argument| argument.value) else {
+            continue;
+        };
+        // A single string, or a `c(...)` of strings — only what is
+        // statically knowable is declared; other entries are skipped.
+        let mut collect = |id| {
+            if let ExpressionKind::Literal(LiteralKind::String(value)) = &module.expression(id).kind
+                && !value.is_empty()
+            {
+                declared.insert(value.clone());
+            }
+        };
+        match &module.expression(first).kind {
+            ExpressionKind::Call {
+                callee: inner,
+                arguments: entries,
+            } if matches!(
+                &module.expression(*inner).kind,
+                ExpressionKind::NameRef(name) if name == "c"
+            ) =>
+            {
+                for entry in entries {
+                    if let Some(value) = entry.value {
+                        collect(value);
+                    }
+                }
+            }
+            _ => {
+                collect(first);
+            }
+        }
+    }
+    declared
+}
+
+/// Whether any package file declares `name` via `globalVariables`.
+fn declared_global_variable(db: &dyn Db, name: &str) -> bool {
+    crate::ProjectFiles::try_get(db).is_some_and(|files| {
+        files
+            .files(db)
+            .iter()
+            .any(|&file| file_global_variable_declarations(db, file).contains(name))
+    })
 }
 
 /// A name as R source spells it: non-syntactic names need backticks (a
