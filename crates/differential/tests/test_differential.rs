@@ -143,19 +143,40 @@ fn new_findings(source: &str, suite: &Suite) -> Vec<Finding> {
 }
 
 /// Whether every legacy finding pairs with a distinct new finding of the same
-/// class and message whose range is equal or contained, with no new findings
-/// left over.
-fn findings_match(legacy: &[Finding], new: &[Finding]) -> bool {
+/// class whose range is equal or contained, with no new findings left over.
+/// Message text is NOT compared — wording is free to improve on the oracle's
+/// (user directive); the oracle pins which findings exist and where. Pairs
+/// whose messages differ land in `wording` for informational review. Exact
+/// (class, range, message) pairs match first so a wording difference never
+/// steals a partner from an exact counterpart.
+fn findings_match(
+    legacy: &[Finding],
+    new: &[Finding],
+    wording: &mut Vec<(String, String)>,
+) -> bool {
     if legacy.len() != new.len() {
         return false;
     }
     let mut used = vec![false; new.len()];
-    'legacy: for (class, start, end, message) in legacy {
+    let mut unpaired = Vec::new();
+    'exact: for (legacy_index, (class, start, end, message)) in legacy.iter().enumerate() {
         for (index, (new_class, new_start, new_end, new_message)) in new.iter().enumerate() {
             let contained = new_start >= start && new_end <= end;
             if !used[index] && new_class == class && new_message == message && contained {
                 used[index] = true;
-                continue 'legacy;
+                continue 'exact;
+            }
+        }
+        unpaired.push(legacy_index);
+    }
+    'relaxed: for legacy_index in unpaired {
+        let (class, start, end, message) = &legacy[legacy_index];
+        for (index, (new_class, new_start, new_end, new_message)) in new.iter().enumerate() {
+            let contained = new_start >= start && new_end <= end;
+            if !used[index] && new_class == class && contained {
+                used[index] = true;
+                wording.push((message.clone(), new_message.clone()));
+                continue 'relaxed;
             }
         }
         return false;
@@ -171,6 +192,7 @@ fn run_suite(suite: &Suite) {
     assert!(!files.is_empty(), "suite not found at {suite_dir:?}");
 
     let mut report = String::new();
+    let mut wording_report = String::new();
     let mut cases = 0usize;
     let mut matching = 0usize;
     let mut accepted = 0usize;
@@ -195,8 +217,16 @@ fn run_suite(suite: &Suite) {
                 continue;
             };
             let new = new_findings(&case.source, suite);
-            if findings_match(&legacy, &new) {
+            let mut wording = Vec::new();
+            if findings_match(&legacy, &new, &mut wording) {
                 matching += 1;
+                for (legacy_message, new_message) in wording {
+                    let _ = writeln!(
+                        wording_report,
+                        "  {}: legacy \"{legacy_message}\" / new \"{new_message}\"",
+                        case.id
+                    );
+                }
                 if accepted_case {
                     stale_acceptances.push(case.id.clone());
                 }
@@ -237,7 +267,10 @@ fn run_suite(suite: &Suite) {
     let report_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../target")
         .join(suite.report);
-    let _ = std::fs::write(&report_path, format!("{summary}\n{report}"));
+    let _ = std::fs::write(
+        &report_path,
+        format!("{summary}\n{report}\n== wording differences (informational) ==\n{wording_report}"),
+    );
     assert!(
         stale_acceptances.is_empty(),
         "cases match but are still allowlisted — remove them from ACCEPTED_DIVERGENCES: {stale_acceptances:?}"
@@ -313,6 +346,8 @@ fn differential_corpus() {
     };
     let mut report = String::new();
     let mut rollup: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    let mut wording_rollup: std::collections::BTreeMap<String, usize> =
+        std::collections::BTreeMap::new();
     let mut files = 0usize;
     let mut matching = 0usize;
     let mut skipped_syntax = 0usize;
@@ -342,8 +377,16 @@ fn differential_corpus() {
             *rollup.entry("new stack PANICKED".to_owned()).or_default() += 1;
             continue;
         };
-        if findings_match(&legacy, &new) {
+        let mut wording = Vec::new();
+        if findings_match(&legacy, &new, &mut wording) {
             matching += 1;
+            for (legacy_message, new_message) in wording {
+                *wording_rollup
+                    .entry(format!(
+                        "legacy \"{legacy_message}\" / new \"{new_message}\""
+                    ))
+                    .or_default() += 1;
+            }
             continue;
         }
         diverging += 1;
@@ -393,13 +436,22 @@ fn differential_corpus() {
         let _ = writeln!(panic_text, "  PANIC: {file}");
     }
     println!("{summary}\n{panic_text}{rollup_text}");
+    let mut wording_text = String::new();
+    let mut ranked_wording: Vec<(usize, &str)> = wording_rollup
+        .iter()
+        .map(|(message, count)| (*count, message.as_str()))
+        .collect();
+    ranked_wording.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(b.1)));
+    for (count, message) in ranked_wording.iter().take(40) {
+        let _ = writeln!(wording_text, "{count:6}  {message}");
+    }
     let report_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../target")
         .join(suite.report);
     let _ = std::fs::write(
         &report_path,
         format!(
-            "{summary}\n== panicking files ==\n{panic_text}\n== divergent-message rollup ==\n{rollup_text}\n== per-file details ==\n{report}"
+            "{summary}\n== panicking files ==\n{panic_text}\n== divergent-message rollup ==\n{rollup_text}\n== wording differences (informational) ==\n{wording_text}\n== per-file details ==\n{report}"
         ),
     );
     assert!(

@@ -44,9 +44,11 @@ suites through **both** stacks — the frozen legacy pipeline as the oracle and 
 parser's errors are required to be better, not identical). The harness mirrors the legacy
 publication rules: scripts are classified by path, type and strict findings honor the per-file
 typing directive over the configured default, and annotation and naming findings are always
-published. Two findings match when class and message are byte-identical and the new range equals
-or lies **inside** the legacy range — strictly tighter ranges are an intended improvement, not a
-divergence. Cases where the oracle itself is wrong are allowlisted in the test with the reason,
+published. Two findings match when their class agrees and the new range equals or lies **inside** the
+legacy range — strictly tighter ranges are an intended improvement, not a divergence. Message
+text is not compared: wording is free to improve on the oracle's (the fixture suites are the
+wording contract), and pairs whose messages differ are listed in an informational "wording
+differences" report section. Cases where the oracle itself is wrong are allowlisted in the test with the reason,
 the harness flags stale allowlist entries, and each suite's test fails on any unexplained
 divergence; the per-case details land in `target/differential-<suite>.txt`.
 
