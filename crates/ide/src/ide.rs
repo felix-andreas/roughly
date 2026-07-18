@@ -48,6 +48,12 @@ pub struct Occurrence {
 }
 
 pub fn hover(db: &dyn Db, file: SourceFile, offset: TextSize) -> Option<Hover> {
+    // A cursor inside a `#:` annotation resolves against the type notation,
+    // not the R expression it decorates.
+    if let Some(cursor) = annotation_type_at(db, file, offset) {
+        return annotation_type_hover(db, file, &cursor);
+    }
+
     let position = position_in_item(db, file, offset)?;
     let expression = position.expression_at()?;
     let check = item_check(db, position.item)?;
@@ -87,6 +93,15 @@ pub fn definition(
                 range: info.range + item_offset,
             })
         }
+        // The LAST declaration wins, matching the project definition table's
+        // fold order.
+        Target::TypeName(name) => type_name_occurrences(db, files, &name)
+            .into_iter()
+            .rfind(|occurrence| occurrence.is_declaration)
+            .map(|occurrence| NavigationTarget {
+                file: occurrence.file,
+                range: occurrence.range,
+            }),
         Target::Global(name) => {
             if let Some(winner) = package_definitions(db, files).get(&name) {
                 let node = item_node(db, *winner)?;
@@ -346,6 +361,18 @@ pub fn completion(
     let text = file.text(db);
     let (context, query) = completion_context(text, offset)?;
 
+    // A cursor inside a `#:` annotation completes type names, not R values.
+    {
+        let parse = semantics::parse(db, file);
+        if parse.syntax_node().descendants().any(|node| {
+            node.kind() == syntax::SyntaxKind::ANNOTATION
+                && node.text_range().start() <= offset
+                && offset <= node.text_range().end()
+        }) {
+            return annotation_completion(db, files, &query);
+        }
+    }
+
     let items = match context {
         CompletionContext::Field => spelled_completions(
             db,
@@ -468,6 +495,280 @@ pub fn document_symbols(db: &dyn Db, file: SourceFile) -> Vec<(String, Navigatio
         symbols.push((name, NavigationTarget { file, range }));
     }
     symbols
+}
+
+/// Workspace symbols: every file's named definitions matched and ranked by
+/// the shared smart-case matcher, capped like completion.
+pub fn workspace_symbols(
+    db: &dyn Db,
+    files: ProjectFiles,
+    query: &str,
+) -> Vec<(String, NavigationTarget)> {
+    let mut symbols: Vec<(MatchScore, String, NavigationTarget)> = Vec::new();
+    for &file in files.files(db) {
+        for (name, target) in document_symbols(db, file) {
+            if let Some(score) = search_match(&name, query) {
+                symbols.push((score, name, target));
+            }
+        }
+    }
+    symbols.sort_by(|left, right| {
+        (left.0, left.1.to_lowercase(), &left.1).cmp(&(right.0, right.1.to_lowercase(), &right.1))
+    });
+    symbols.truncate(COMPLETION_LIMIT);
+    symbols
+        .into_iter()
+        .map(|(_, name, target)| (name, target))
+        .collect()
+}
+
+// ---- annotation type names ----
+
+/// A type-name token under the cursor inside a `#:` annotation.
+struct AnnotationTypeCursor {
+    name: String,
+    range: TextRange,
+}
+
+/// The type-name token at the cursor: a `TYPE_REF`'s identifier, a
+/// `TYPE_APPLY`'s name, or the declared name of an `@type`/`@alias`
+/// directive. Names shadowed by a `<T>` binder in the same annotation are
+/// the binder's, not a project type's.
+fn annotation_type_at(
+    db: &dyn Db,
+    file: SourceFile,
+    offset: TextSize,
+) -> Option<AnnotationTypeCursor> {
+    let parse = semantics::parse(db, file);
+    let root = parse.syntax_node();
+    let annotation = root.descendants().find(|node| {
+        node.kind() == syntax::SyntaxKind::ANNOTATION
+            && node.text_range().start() <= offset
+            && offset <= node.text_range().end()
+    })?;
+
+    let token = annotation
+        .descendants_with_tokens()
+        .filter_map(|element| element.into_token())
+        .find(|token| {
+            token.kind() == syntax::SyntaxKind::IDENT
+                && token.text_range().start() <= offset
+                && offset <= token.text_range().end()
+        })?;
+    let name = token.text().to_string();
+    let range = token.text_range();
+
+    let parent = token.parent()?;
+    let is_type_position = match parent.kind() {
+        syntax::SyntaxKind::TYPE_REF => true,
+        syntax::SyntaxKind::NAME => parent.parent().is_some_and(|grandparent| {
+            matches!(
+                grandparent.kind(),
+                syntax::SyntaxKind::TYPE_APPLY | syntax::SyntaxKind::ANNOTATION_DIRECTIVE
+            ) && (grandparent.kind() != syntax::SyntaxKind::ANNOTATION_DIRECTIVE
+                || matches!(
+                    directive_name(&grandparent).as_deref(),
+                    Some("type" | "alias")
+                ))
+        }),
+        _ => false,
+    };
+    if !is_type_position || binder_names(&annotation).contains(&name) {
+        return None;
+    }
+    Some(AnnotationTypeCursor { name, range })
+}
+
+/// The directive's joined name (`type`, `alias`, `if-unknown`, …): adjacent
+/// name-ish tokens right after the `@`.
+fn directive_name(directive: &syntax::SyntaxNode) -> Option<String> {
+    let mut name = String::new();
+    let mut end: Option<TextSize> = None;
+    for element in directive.children_with_tokens() {
+        let Some(token) = element.as_token() else {
+            break;
+        };
+        match token.kind() {
+            syntax::SyntaxKind::AT => {
+                end = Some(token.text_range().end());
+            }
+            syntax::SyntaxKind::WHITESPACE | syntax::SyntaxKind::NEWLINE => break,
+            // Only tokens touching the previous one join the name
+            // (`@if-unknown` lexes as `if` `-` `unknown`).
+            _ if end.is_some() && Some(token.text_range().start()) == end => {
+                name.push_str(token.text());
+                end = Some(token.text_range().end());
+            }
+            _ => break,
+        }
+    }
+    (!name.is_empty()).then_some(name)
+}
+
+/// The `<T>` binder names declared anywhere in one annotation region.
+fn binder_names(annotation: &syntax::SyntaxNode) -> Vec<String> {
+    annotation
+        .descendants()
+        .filter(|node| node.kind() == syntax::SyntaxKind::TYPE_BINDER)
+        .filter_map(|binder| {
+            binder
+                .descendants_with_tokens()
+                .filter_map(|element| element.into_token())
+                .find(|token| token.kind() == syntax::SyntaxKind::IDENT)
+                .map(|token| token.text().to_string())
+        })
+        .collect()
+}
+
+fn annotation_type_hover(
+    db: &dyn Db,
+    file: SourceFile,
+    cursor: &AnnotationTypeCursor,
+) -> Option<Hover> {
+    // Resolve against the file's own declarations first, then the project's
+    // (matching how the checker's winner table folds files).
+    let definition = semantics::file_type_definitions(db, file)
+        .into_iter()
+        .find(|definition| definition.name.text(db) == cursor.name)?;
+    let mut renderer = TypeRenderer::default();
+    let parameters = if definition.parameters.is_empty() {
+        String::new()
+    } else {
+        let names: Vec<String> = definition
+            .parameters
+            .iter()
+            .map(|parameter| parameter.text(db).to_owned())
+            .collect();
+        format!("<{}>", names.join(", "))
+    };
+    let keyword = if definition.alias { "@alias" } else { "@type" };
+    let line = format!(
+        "{keyword} {}{parameters} {{{}}}",
+        cursor.name,
+        renderer.render(db, definition.body)
+    );
+    Some(Hover {
+        range: cursor.range,
+        lines: vec![line],
+    })
+}
+
+/// Every occurrence of a type name across the project's annotations:
+/// declarations (`@type`/`@alias` names) and uses (`TYPE_REF` identifiers,
+/// `TYPE_APPLY` names), skipping annotations where a binder shadows it.
+fn type_name_occurrences(db: &dyn Db, files: ProjectFiles, name: &str) -> Vec<Occurrence> {
+    let mut result = Vec::new();
+    for &file in files.files(db) {
+        let parse = semantics::parse(db, file);
+        for annotation in parse
+            .syntax_node()
+            .descendants()
+            .filter(|node| node.kind() == syntax::SyntaxKind::ANNOTATION)
+        {
+            let shadowed = binder_names(&annotation)
+                .iter()
+                .any(|binder| binder == name);
+            for node in annotation.descendants() {
+                let (token, is_declaration) = match node.kind() {
+                    syntax::SyntaxKind::TYPE_REF => {
+                        let Some(token) = node
+                            .children_with_tokens()
+                            .filter_map(|element| element.into_token())
+                            .find(|token| token.kind() == syntax::SyntaxKind::IDENT)
+                        else {
+                            continue;
+                        };
+                        (token, false)
+                    }
+                    syntax::SyntaxKind::NAME => {
+                        let Some(parent) = node.parent() else {
+                            continue;
+                        };
+                        let is_declaration = match parent.kind() {
+                            syntax::SyntaxKind::TYPE_APPLY => false,
+                            syntax::SyntaxKind::ANNOTATION_DIRECTIVE => {
+                                if !matches!(
+                                    directive_name(&parent).as_deref(),
+                                    Some("type" | "alias")
+                                ) {
+                                    continue;
+                                }
+                                true
+                            }
+                            _ => continue,
+                        };
+                        let Some(token) = node
+                            .children_with_tokens()
+                            .filter_map(|element| element.into_token())
+                            .find(|token| token.kind() == syntax::SyntaxKind::IDENT)
+                        else {
+                            continue;
+                        };
+                        (token, is_declaration)
+                    }
+                    _ => continue,
+                };
+                if token.text() != name || (shadowed && !is_declaration) {
+                    continue;
+                }
+                result.push(Occurrence {
+                    file,
+                    range: token.text_range(),
+                    is_declaration,
+                });
+            }
+        }
+    }
+    result
+}
+
+/// Type-name completion inside a `#:` annotation: the primitive vocabulary
+/// plus the project's `@type`/`@alias` declarations.
+fn annotation_completion(
+    db: &dyn Db,
+    files: ProjectFiles,
+    query: &str,
+) -> Option<CompletionResult> {
+    const PRIMITIVES: &[&str] = &[
+        "logical",
+        "integer",
+        "double",
+        "complex",
+        "character",
+        "raw",
+        "list",
+        "fn",
+        "Any",
+        "Unknown",
+        "NULL",
+    ];
+    let mut items = Vec::new();
+    for primitive in PRIMITIVES {
+        if search_match(primitive, query).is_some() {
+            items.push(CompletionItem {
+                label: (*primitive).to_owned(),
+                kind: CompletionKind::Keyword,
+                source: CompletionSource::Keyword,
+                detail: None,
+                documentation: None,
+            });
+        }
+    }
+    for (name, definition) in semantics::project_type_definitions(db, files) {
+        let label = name.text(db).to_owned();
+        if search_match(&label, query).is_none() {
+            continue;
+        }
+        let mut renderer = TypeRenderer::default();
+        items.push(CompletionItem {
+            label,
+            kind: CompletionKind::Variable,
+            source: CompletionSource::Global,
+            detail: Some(renderer.render(db, definition.body)),
+            documentation: None,
+        });
+    }
+    finish_completions(items, query)
 }
 
 // ---- completion internals ----
@@ -1024,6 +1325,8 @@ enum Target<'db> {
     /// A project-defined global name: a top-level definition read across
     /// items and files.
     Global(String),
+    /// A `@type`/`@alias` name inside `#:` annotations.
+    TypeName(String),
 }
 
 fn target_at<'db>(
@@ -1032,6 +1335,14 @@ fn target_at<'db>(
     file: SourceFile,
     offset: TextSize,
 ) -> Option<Target<'db>> {
+    if let Some(cursor) = annotation_type_at(db, file, offset) {
+        // Primitive type names have no project declaration to navigate to.
+        let declared = type_name_occurrences(db, files, &cursor.name)
+            .iter()
+            .any(|occurrence| occurrence.is_declaration);
+        return declared.then_some(Target::TypeName(cursor.name));
+    }
+
     let position = position_in_item(db, file, offset)?;
     let naming = item_naming(db, position.item)?;
 
@@ -1100,6 +1411,9 @@ fn occurrences(db: &dyn Db, files: ProjectFiles, target: &Target<'_>) -> Vec<Occ
                     },
                 );
             }
+        }
+        Target::TypeName(name) => {
+            result = type_name_occurrences(db, files, name);
         }
         Target::Global(name) => {
             for &file in files.files(db) {

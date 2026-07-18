@@ -66,6 +66,7 @@ fn sweep(source: &str) {
     }
     let _ = ide::inlay_hints(&db, file, None);
     let _ = ide::document_symbols(&db, file);
+    let _ = ide::workspace_symbols(&db, files, "a");
 }
 
 #[test]

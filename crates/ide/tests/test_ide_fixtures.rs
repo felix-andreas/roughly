@@ -122,6 +122,36 @@ fn render_at(
     }
 }
 
+/// Workspace symbols rank by the shared matcher across every project file.
+#[test]
+fn workspace_symbols_ranked() {
+    let db = RootDatabase::default();
+    semantics::stubs::install_shipped_stubs(&db);
+    let first = SourceFile::new(
+        &db,
+        "alpha_one <- function() 1\nbeta <- 2\n".to_owned(),
+        DocumentKind::Package,
+    );
+    let second = SourceFile::new(
+        &db,
+        "alpha_two <- function() 3\nnot_matching <- 4\n".to_owned(),
+        DocumentKind::Package,
+    );
+    let files = ProjectFiles::new(&db, vec![first, second]);
+
+    let names: Vec<String> = ide::workspace_symbols(&db, files, "alpha")
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect();
+    assert_eq!(names, vec!["alpha_one".to_owned(), "alpha_two".to_owned()]);
+
+    let subsequence: Vec<String> = ide::workspace_symbols(&db, files, "aone")
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect();
+    assert_eq!(subsequence, vec!["alpha_one".to_owned()]);
+}
+
 #[test]
 fn ide_fixtures() {
     let suite = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/ide");

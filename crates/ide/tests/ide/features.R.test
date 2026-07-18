@@ -347,3 +347,105 @@ references: none
 rename: none
 signature: none
 completion (5): function, as.function, is.function, sys.function, match.fun
+
+#==== annotation_types
+#---- goto_type_definition
+#: @type UserId {integer}
+
+#: fn(x: UserId) -> UserId
+f <- function(x) x
+g <- function(id) {
+  #: User$0Id
+  y <- id
+  y
+}
+#++++
+hover 98..104: @type UserId {integer}
+definition 9..15
+references: 9..15*, 36..42, 47..53, 98..104
+rename: 4 edit(s)
+signature: none
+completion (1): UserId
+hint @74: <T> fn(id: T) -> T
+
+#---- hover_alias
+#: @alias Rows {list[integer]}
+
+#: fn(r: Ro$0ws) -> integer
+count <- function(r) 1L
+#++++
+hover 41..45: @alias Rows {list[integer]}
+definition 10..14
+references: 10..14*, 41..45
+rename: 2 edit(s)
+signature: none
+completion (1): Rows
+
+#---- primitive_not_navigable
+#: fn(x: inte$0ger) -> double
+h <- function(x) x / 2
+#++++
+hover: none
+definition: none
+references: none
+rename: none
+signature: none
+completion (1): integer
+
+#---- binder_shadows_project_type
+#: @type T {integer}
+
+#: <T> fn(x: T$0) -> T
+ident <- function(x) x
+#++++
+hover: none
+definition: none
+references: none
+rename: none
+signature: none
+completion (1): T
+
+#---- rename_type_across_annotations
+#: @type Score {double}
+make <- function() {
+  #: Sco$0re
+  s <- 1.5
+  s
+}
+#++++
+hover 50..55: @type Score {double}
+definition 9..14
+references: 9..14*, 50..55
+rename: 2 edit(s)
+signature: none
+completion (1): Score
+hint @59: double
+
+#---- declaration_name_is_target
+#: @type Sco$0re {double}
+use <- function() {
+  #: Score
+  s <- 1.0
+  s
+}
+#++++
+hover 9..14: @type Score {double}
+definition 9..14
+references: 9..14*, 49..54
+rename: 2 edit(s)
+signature: none
+completion (1): Score
+hint @58: double
+
+#---- annotation_completion_types
+#: @type UserId {integer}
+
+#: fn(x: Use$0
+f <- function(x) x
+#++++
+hover: none
+definition: none
+references: none
+rename: none
+signature: none
+completion (1): UserId
