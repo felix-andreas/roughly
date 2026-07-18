@@ -166,6 +166,59 @@ fn check_json_output_maps_warning_severity() {
     assert_eq!(record["severity"], "warning", "got: {record}");
 }
 
+// Two package files overwrite the same top-level binding; each warning
+// carries a note pointing at the sibling binding, on both output surfaces.
+#[test]
+fn check_related_notes_render_on_both_surfaces() {
+    let files = &[("R/a.R", "shared <- 1\n"), ("R/b.R", "shared <- 2\n")];
+
+    let human = roughly(project(files).path(), &["check", "."]);
+    assert_eq!(exit_code(&human), 1, "stderr: {}", stderr(&human));
+    let rendered = stderr(&human);
+    assert!(
+        rendered.contains("= note: the later binding is here. -->")
+            && rendered.contains("= note: the earlier binding is here. -->"),
+        "expected one note per overwrite warning, got: {rendered}"
+    );
+
+    let json = roughly(project(files).path(), &["check", "--output", "json", "."]);
+    assert_eq!(exit_code(&json), 1, "stderr: {}", stderr(&json));
+    let records: Vec<serde_json::Value> = stdout(&json)
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("diagnostic line is not valid JSON"))
+        .collect();
+    let noted = records
+        .iter()
+        .filter_map(|record| record["related"].as_array())
+        .filter(|related| !related.is_empty())
+        .count();
+    assert_eq!(
+        noted, 2,
+        "expected both overwrite warnings to carry related info: {records:?}"
+    );
+    let entry = records
+        .iter()
+        .find_map(|record| record["related"].as_array().and_then(|array| array.first()))
+        .expect("a related entry exists");
+    assert!(
+        entry["path"]
+            .as_str()
+            .is_some_and(|path| path.ends_with(".R")),
+        "related path points at the sibling file: {entry}"
+    );
+    assert_eq!(entry["line"], 1, "related line must be 1-based: {entry}");
+    assert_eq!(
+        entry["column"], 1,
+        "related column must be 1-based: {entry}"
+    );
+    assert!(
+        entry["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("binding is here")),
+        "related message names the sibling binding: {entry}"
+    );
+}
+
 // importFrom naming something a stubbed namespace does not export warns on
 // the NAMESPACE file; spelled-right imports and unknown (unstubbed)
 // namespaces stay quiet.

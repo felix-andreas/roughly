@@ -8,7 +8,11 @@
 - **Performance:** keystroke-to-diagnostics p50 ≤ 30 ms / p95 ≤ 100 ms at 300k LoC; completion p95 ≤ 50 ms; budgets pinned by committed counter witnesses (`crates/engine/tests/test_benchmark.rs`), wall-clock tables on demand (`benchmark_ide_read_latency`, `roughly debug analysis-stats`).
 - **No server-killing input** (no `unwrap` panics on protocol-legal messages).
 
-## Open — semantics
+## Open
+
+- Legacy-parity polish on the new product surface (not gate-blocking): hover "defined at" line and `debug = true` hover debug sections; a deterministic test for cancelled pull diagnostics; S4/R6 symbol hierarchy (children + kinds) in document symbols.
+- Corpus growth to ~700K+ lines (extend the fetch manifest) and a re-run of the `test_stats` instruments at that scale; the `stats_witness` per-line budgets are scale-invariant and already gate CI-with-corpus.
+ — semantics
 
 - **Recursion strict attribution:** recursion is now typed everywhere it soundly can be (local letrec; top-level mutual groups generalize together — decisions.md), and top-level SELF-recursion deliberately keeps the tolerant `Unknown` (tree-fold shapes need recursive types). Open: strict mode records no origin on those deliberately-`Unknown` self-recursive schemes — attribution needs an origin on the binding, identically in both pipelines (differential must stay byte-exact).
 - **Design forks, decide-and-implement (one `decisions.md` entry each):** third constraint kind (two-flexible-operand comparison — the recorded traits tripwire); order-dependent compatibility commits. (NAMESPACE bare-resolution gating: DECIDED — stays ungated; the shipped corpus is R's default-attached search path, gating falls out of the post-beta import model; decisions.md.)

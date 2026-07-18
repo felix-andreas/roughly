@@ -123,6 +123,7 @@ mod tests {
             severity: Severity::Warning,
             code,
             message: "test".to_owned(),
+            related: Vec::new(),
         }
     }
 

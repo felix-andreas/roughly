@@ -145,13 +145,14 @@ pub fn check(
                     severity: Severity::Error,
                     code: "stub",
                     message: problem.message,
+                    related: Vec::new(),
                 };
                 match output {
                     OutputFormat::Human => {
-                        render_human_diagnostic(stub_path, stub_text, &stub_index, &diagnostic)
+                        render_human_diagnostic(stub_path, stub_text, &stub_index, &diagnostic, &[])
                     }
                     OutputFormat::Json => {
-                        render_json_diagnostic(stub_path, &stub_index, &diagnostic)
+                        render_json_diagnostic(stub_path, &stub_index, &diagnostic, &[])
                     }
                 }
             }
@@ -212,6 +213,11 @@ pub fn check(
         }
         ProjectFiles::new(&db, project);
 
+        let path_by_file: std::collections::HashMap<SourceFile, &PathBuf> = checked
+            .iter()
+            .enumerate()
+            .filter_map(|(index, (path, _))| files[index].map(|file| (file, path)))
+            .collect();
         for (index, (path, source)) in checked.iter().enumerate() {
             let file = files[index].expect("every checked file was fed to the project");
             let rendered = document_diagnostics(&db, file, &config);
@@ -222,11 +228,30 @@ pub fn check(
                     continue;
                 }
                 n_diagnostics += 1;
+                // Related ranges live in other documents; they render from
+                // their own document's text.
+                let related: Vec<RelatedNote> = diagnostic
+                    .related
+                    .iter()
+                    .filter_map(|related| {
+                        let related_path = path_by_file.get(&related.file)?;
+                        let related_index = LineIndex::new(related.file.text(&db));
+                        let start = related_index.line_column(related.range.start());
+                        Some(RelatedNote {
+                            path: (*related_path).clone(),
+                            line: start.line,
+                            column: start.column,
+                            message: related.message,
+                        })
+                    })
+                    .collect();
                 match output {
                     OutputFormat::Human => {
-                        render_human_diagnostic(path, source, &index, &diagnostic)
+                        render_human_diagnostic(path, source, &index, &diagnostic, &related)
                     }
-                    OutputFormat::Json => render_json_diagnostic(path, &index, &diagnostic),
+                    OutputFormat::Json => {
+                        render_json_diagnostic(path, &index, &diagnostic, &related)
+                    }
                 }
             }
         }
@@ -260,9 +285,10 @@ pub fn check(
                         namespace_source,
                         &index,
                         &diagnostic,
+                        &[],
                     ),
                     OutputFormat::Json => {
-                        render_json_diagnostic(&namespace_path, &index, &diagnostic)
+                        render_json_diagnostic(&namespace_path, &index, &diagnostic, &[])
                     }
                 }
             }
@@ -339,10 +365,25 @@ fn discover_project_stubs(root: &Path) -> Result<Vec<ProjectStub>, (PathBuf, std
     Ok(sources)
 }
 
+/// One companion location of a diagnostic, resolved for rendering.
+struct RelatedNote {
+    path: PathBuf,
+    line: u32,
+    column: u32,
+    message: &'static str,
+}
+
 /// Renders one diagnostic rustc-style on stderr: the message, a
-/// `--> path:line:column` header, the source line(s), a caret underline.
-/// Rendered lines and columns are 1-based byte positions.
-fn render_human_diagnostic(path: &Path, source: &str, index: &LineIndex, diagnostic: &Diagnostic) {
+/// `--> path:line:column` header, the source line(s), a caret underline, and
+/// one `note:` line per related location. Rendered lines and columns are
+/// 1-based byte positions.
+fn render_human_diagnostic(
+    path: &Path,
+    source: &str,
+    index: &LineIndex,
+    diagnostic: &Diagnostic,
+    related: &[RelatedNote],
+) {
     log(
         match diagnostic.severity {
             Severity::Warning => LogLevel::Warn,
@@ -395,19 +436,48 @@ fn render_human_diagnostic(path: &Path, source: &str, index: &LineIndex, diagnos
             }
         }
     );
+    for note in related {
+        eprintln!(
+            "{}{} {} {} {} {}:{}:{}",
+            " ".repeat(gutter_width),
+            style("=").bold().blue(),
+            style("note:").bold(),
+            note.message,
+            style("-->").bold().blue(),
+            note.path.display(),
+            note.line + 1,
+            note.column + 1,
+        );
+    }
     eprintln!();
 }
 
 /// Renders one diagnostic as a JSON Lines record on stdout for CI use.
 /// Positions are 1-based like the human renderer; the field names are a
 /// documented contract.
-fn render_json_diagnostic(path: &Path, index: &LineIndex, diagnostic: &Diagnostic) {
+fn render_json_diagnostic(
+    path: &Path,
+    index: &LineIndex,
+    diagnostic: &Diagnostic,
+    related: &[RelatedNote],
+) {
     let severity = match diagnostic.severity {
         Severity::Warning => "warning",
         Severity::Error => "error",
     };
     let start = index.line_column(diagnostic.range.start());
     let end = index.line_column(diagnostic.range.end());
+    let related: Vec<serde_json::Value> = related
+        .iter()
+        .map(|note| {
+            serde_json::json!({
+                "path": note.path.display().to_string(),
+                "line": note.line + 1,
+                "column": note.column + 1,
+                "message": note.message,
+            })
+        })
+        .collect();
     let record = serde_json::json!({
         "path": path.display().to_string(),
         "line": start.line + 1,
@@ -417,7 +487,7 @@ fn render_json_diagnostic(path: &Path, index: &LineIndex, diagnostic: &Diagnosti
         "severity": severity,
         "code": diagnostic.code,
         "message": diagnostic.message,
-        "related": [],
+        "related": related,
     });
     println!("{record}");
 }

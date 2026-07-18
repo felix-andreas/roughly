@@ -24,6 +24,18 @@ pub struct Diagnostic {
     pub severity: Severity,
     pub code: &'static str,
     pub message: String,
+    /// Companion locations for findings whose story spans sites (the sibling
+    /// definition an overwrite warning refers to). Rendered as `note:` lines
+    /// by the CLI and as related information over LSP.
+    pub related: Vec<RelatedLocation>,
+}
+
+/// One companion location of a diagnostic, possibly in another file.
+#[derive(Debug, Clone, PartialEq, Eq, salsa::SalsaValue)]
+pub struct RelatedLocation {
+    pub file: SourceFile,
+    pub range: TextRange,
+    pub message: &'static str,
 }
 
 /// The diagnostics that are pure functions of the parse — syntax errors,
@@ -42,6 +54,7 @@ pub fn parse_stage_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic>
             severity: Severity::Error,
             code: "syntax-error",
             message: error.message.clone(),
+            related: Vec::new(),
         });
     }
 
@@ -53,6 +66,7 @@ pub fn parse_stage_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic>
             message: format!(
                 "Unknown typing directive `{value}`. Use `# typing: on`, `# typing: off`, or `# typing: strict`."
             ),
+            related: Vec::new(),
         });
     }
 
@@ -67,6 +81,7 @@ pub fn parse_stage_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic>
                 severity: Severity::Error,
                 code: "annotation",
                 message: format!("invalid semantics: {violation}"),
+                related: Vec::new(),
             });
         }
     }
@@ -104,6 +119,7 @@ pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
                 severity: Severity::Warning,
                 code: "unused",
                 message: format!("`{}` is assigned but never used.", unused.name),
+                related: Vec::new(),
             });
         }
         for (expression, read) in &naming.namespace_reads {
@@ -120,6 +136,7 @@ pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
                 severity: Severity::Warning,
                 code: "unresolved",
                 message,
+                related: Vec::new(),
             });
         }
         if *file.kind(db) == DocumentKind::Package {
@@ -146,6 +163,7 @@ pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
                     message: format!(
                         "I could not resolve `{display}` in this package, its imports, or builtins.{suggestion}"
                     ),
+                    related: Vec::new(),
                 });
             }
         }
@@ -154,8 +172,110 @@ pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
     if *file.kind(db) == DocumentKind::Script {
         diagnostics.extend(script_unused_bindings(db, file));
     }
+    diagnostics.extend(duplicate_binding_diagnostics(db, file));
 
     diagnostics.sort_by_key(|diagnostic| (diagnostic.range.start(), diagnostic.range.end()));
+    diagnostics
+}
+
+/// The named top-level definition sites of one package file, in item order:
+/// each name with its binding-name range (file-absolute).
+#[salsa::tracked(returns(ref))]
+fn top_level_name_sites(db: &dyn Db, file: SourceFile) -> Vec<(String, TextRange)> {
+    let mut sites = Vec::new();
+    for item in item_tree(db, file) {
+        if !matches!(
+            *item.kind(db),
+            crate::ItemKind::Function | crate::ItemKind::Value
+        ) {
+            continue;
+        }
+        let Some(name) = item.name(db).clone() else {
+            continue;
+        };
+        let Some(node) = crate::item_node(db, item) else {
+            continue;
+        };
+        let range = node
+            .descendants()
+            .find(|child| {
+                child.kind() == syntax::SyntaxKind::NAME && child.text().to_string() == name
+            })
+            .map(|child| child.text_range())
+            .unwrap_or_else(|| TextRange::empty(node.text_range().start()));
+        sites.push((name, range));
+    }
+    sites
+}
+
+/// Warnings for a package name defined at top level more than once: per-site
+/// winner semantics make every earlier binding dead, so each site warns, with
+/// a note pointing at its nearest neighbouring definition. Occurrence order
+/// is project order — `ProjectFiles` lists package documents first in
+/// workspace path order — then item order within a file.
+fn duplicate_binding_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
+    if *file.kind(db) != DocumentKind::Package {
+        return Vec::new();
+    }
+    let Some(files) = crate::ProjectFiles::try_get(db) else {
+        return Vec::new();
+    };
+    let mut occurrences: std::collections::BTreeMap<&str, Vec<(SourceFile, TextRange)>> =
+        std::collections::BTreeMap::new();
+    for &project_file in files.files(db) {
+        if *project_file.kind(db) != DocumentKind::Package {
+            continue;
+        }
+        for (name, range) in top_level_name_sites(db, project_file) {
+            occurrences
+                .entry(name.as_str())
+                .or_default()
+                .push((project_file, *range));
+        }
+    }
+    let mut diagnostics = Vec::new();
+    for (name, sites) in occurrences {
+        if sites.len() < 2 {
+            continue;
+        }
+        for (index, &(site_file, range)) in sites.iter().enumerate() {
+            if site_file != file {
+                continue;
+            }
+            if index > 0 {
+                let (earlier_file, earlier_range) = sites[index - 1];
+                diagnostics.push(Diagnostic {
+                    range,
+                    severity: Severity::Warning,
+                    code: "duplicate",
+                    message: format!(
+                        "Top-level binding `{name}` overwrites an earlier top-level binding in this package."
+                    ),
+                    related: vec![RelatedLocation {
+                        file: earlier_file,
+                        range: earlier_range,
+                        message: "the earlier binding is here.",
+                    }],
+                });
+            }
+            if index + 1 < sites.len() {
+                let (later_file, later_range) = sites[index + 1];
+                diagnostics.push(Diagnostic {
+                    range,
+                    severity: Severity::Warning,
+                    code: "duplicate",
+                    message: format!(
+                        "Top-level binding `{name}` is overwritten by a later top-level binding in this package."
+                    ),
+                    related: vec![RelatedLocation {
+                        file: later_file,
+                        range: later_range,
+                        message: "the later binding is here.",
+                    }],
+                });
+            }
+        }
+    }
     diagnostics
 }
 
@@ -432,6 +552,7 @@ fn script_unused_bindings(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
             severity: Severity::Warning,
             code: "unused",
             message: format!("`{name}` is assigned but never used."),
+            related: Vec::new(),
         })
         .collect()
 }
@@ -506,6 +627,7 @@ pub fn strict_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
                 severity: Severity::Error,
                 code: "strict",
                 message,
+                related: Vec::new(),
             });
         }
     }
@@ -531,6 +653,7 @@ fn render_type_error(db: &dyn Db, range: TextRange, error: &TypeError<'_>) -> Di
         severity: Severity::Error,
         code: "type-mismatch",
         message,
+        related: Vec::new(),
     }
 }
 

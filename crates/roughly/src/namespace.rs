@@ -113,6 +113,7 @@ pub fn namespace_import_problems(
                 severity: Severity::Warning,
                 code: "unresolved",
                 message: format!("`{name}` is not exported by `{}`.", import.namespace),
+                related: Vec::new(),
             })
         })
         .collect()
@@ -151,6 +152,7 @@ pub fn unused_import_diagnostics(
                     "imported name `{name}` from `{}` is never used.",
                     import.namespace
                 ),
+                related: Vec::new(),
             })
         })
         .collect()

@@ -72,6 +72,7 @@ pub fn lint_file(db: &dyn Db, file: SourceFile, config: &LintConfig) -> Vec<Diag
                     severity: severity.clone(),
                     code: "unused-parameter",
                     message: format!("parameter `{}` is never used.", unused.name),
+                    related: Vec::new(),
                 });
             }
         }
@@ -178,6 +179,7 @@ fn binary_lints(
                 severity: Severity::Warning,
                 code: "naming-style",
                 message,
+                related: Vec::new(),
             });
         }
     }
@@ -233,6 +235,7 @@ fn parameter_name_lint(
             severity: Severity::Warning,
             code: "naming-style",
             message,
+            related: Vec::new(),
         });
     }
 }
@@ -275,6 +278,7 @@ fn push_lint(
         severity,
         code,
         message: message.into(),
+        related: Vec::new(),
     });
 }
 

@@ -1044,6 +1044,20 @@ impl Worker {
             "unused" | "unused-parameter" | "unused-import"
         )
         .then(|| vec![lsp_types::DiagnosticTag::UNNECESSARY]);
+        let related_information: Vec<lsp_types::DiagnosticRelatedInformation> = diagnostic
+            .related
+            .iter()
+            .filter_map(|related| {
+                let path = self.path_of(related.file)?;
+                Some(lsp_types::DiagnosticRelatedInformation {
+                    location: lsp_types::Location {
+                        uri: self.document_uri(path),
+                        range: self.to_range_in(related.file, related.range),
+                    },
+                    message: related.message.to_owned(),
+                })
+            })
+            .collect();
         lsp_types::Diagnostic {
             range: self.to_range(text, diagnostic.range),
             severity: Some(match diagnostic.severity {
@@ -1056,7 +1070,7 @@ impl Worker {
             code_description: None,
             source: Some("roughly".into()),
             message: diagnostic.message,
-            related_information: None,
+            related_information: (!related_information.is_empty()).then_some(related_information),
             tags,
             data: None,
         }
@@ -1078,6 +1092,7 @@ impl Worker {
                         severity: Severity::Error,
                         code: "stub",
                         message: problem.message,
+                        related: Vec::new(),
                     },
                 )
             })
