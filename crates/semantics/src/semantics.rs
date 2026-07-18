@@ -481,14 +481,29 @@ fn item_check_initial<'db>(
 }
 
 fn item_check_recover<'db>(
-    _db: &'db dyn Db,
-    _cycle: &salsa::Cycle,
-    _last_provisional: &Option<check::ItemCheck<'db>>,
+    db: &'db dyn Db,
+    cycle: &salsa::Cycle,
+    last_provisional: &Option<check::ItemCheck<'db>>,
     value: Option<check::ItemCheck<'db>>,
     _item: Item<'db>,
 ) -> Option<check::ItemCheck<'db>> {
-    // Convergence is decided at the `global_scheme` edge; the check value
-    // simply follows the iteration.
+    if &value == last_provisional {
+        return value;
+    }
+    // `item_check` — not `global_scheme` — is the head salsa iterates when a
+    // definition's check reads its own exported scheme (the re-entered query
+    // drives the cycle), so the round cap must live here too. A value still
+    // changing at the cap is non-converging — a self-referential definition
+    // whose type grows a level per round (`x <- list(v = x)`), or an
+    // oscillation — so the exported scheme pins to the sound refusal. The
+    // pinned value is a fixed point one round later: re-execution under an
+    // `Unknown` self-scheme reproduces itself.
+    if cycle.iteration() >= SCHEME_ROUND_CAP {
+        return value.map(|check| check::ItemCheck {
+            scheme: Some(types::TypeScheme::monomorphic(types::unknown(db))),
+            ..check
+        });
+    }
     value
 }
 

@@ -21,7 +21,7 @@ use crate::hir::{
 use crate::infer::{Entry, InferenceTable, UnifyError};
 use crate::naming::{BindingId, ItemNaming};
 use crate::types::{
-    Atomic, Constraint, FunctionType, Name, Ty, TyKind, TypeScheme, scalar, union_of,
+    Atomic, Constraint, FunctionType, Name, Ty, TyKind, TypeScheme, scalar, union_of, unknown,
 };
 use rustc_hash::FxHashMap;
 use syntax::TextRange;
@@ -310,11 +310,131 @@ pub fn check_item_with_annotation<'db>(
         .iter()
         .map(|(&id, &ty)| (id, context.table.resolve(context.db, ty)))
         .collect();
+    // Inference variables are table-scoped: a scheme crossing the item
+    // boundary must never carry one (a foreign table cannot resolve it), so
+    // residual monomorphic variables — kept raw inside the item to tie use
+    // sites together — erase to `Unknown` at the export edge.
+    let scheme = scheme.map(|scheme| TypeScheme {
+        binders: scheme.binders,
+        body: erase_residual_vars(db, &mut context.table, scheme.body),
+    });
     ItemCheck {
         expression_types,
         errors: context.errors,
         strict_origins: context.strict_origins,
         scheme,
+    }
+}
+
+/// Substitutes every bound inference variable and replaces every still-unbound
+/// one with `Unknown`. Follows variable bindings only — named types stay
+/// unexpanded (an exported `UserId` must display as `UserId`, not its alias
+/// body). The depth cap guards against variable-linked structures nesting
+/// past reason; a closed scheme is required, so past it the type erases.
+fn erase_residual_vars<'db>(
+    db: &'db dyn Db,
+    table: &mut InferenceTable<'db>,
+    ty: Ty<'db>,
+) -> Ty<'db> {
+    erase_residual_vars_at(db, table, ty, 0)
+}
+
+fn erase_residual_vars_at<'db>(
+    db: &'db dyn Db,
+    table: &mut InferenceTable<'db>,
+    ty: Ty<'db>,
+    depth: usize,
+) -> Ty<'db> {
+    const ERASE_DEPTH_LIMIT: usize = 64;
+    if depth >= ERASE_DEPTH_LIMIT {
+        return unknown(db);
+    }
+    let resolved = table.shallow_resolve(db, ty);
+    match resolved.kind(db).clone() {
+        TyKind::Var(_) => unknown(db),
+        TyKind::Vector(inner) => Ty::new(
+            db,
+            TyKind::Vector(erase_residual_vars_at(db, table, inner, depth + 1)),
+        ),
+        TyKind::NamedVector(inner) => Ty::new(
+            db,
+            TyKind::NamedVector(erase_residual_vars_at(db, table, inner, depth + 1)),
+        ),
+        TyKind::List(inner) => Ty::new(
+            db,
+            TyKind::List(erase_residual_vars_at(db, table, inner, depth + 1)),
+        ),
+        TyKind::NamedList(inner) => Ty::new(
+            db,
+            TyKind::NamedList(erase_residual_vars_at(db, table, inner, depth + 1)),
+        ),
+        TyKind::Tuple(items) => Ty::new(
+            db,
+            TyKind::Tuple(
+                items
+                    .iter()
+                    .map(|&item| erase_residual_vars_at(db, table, item, depth + 1))
+                    .collect(),
+            ),
+        ),
+        TyKind::Record(fields) => Ty::new(
+            db,
+            TyKind::Record(
+                fields
+                    .iter()
+                    .map(|field| {
+                        let mut field = field.clone();
+                        field.ty = erase_residual_vars_at(db, table, field.ty, depth + 1);
+                        field
+                    })
+                    .collect(),
+            ),
+        ),
+        TyKind::Function(function) => Ty::new(
+            db,
+            TyKind::Function(FunctionType {
+                positional: function
+                    .positional
+                    .iter()
+                    .map(|&ty| erase_residual_vars_at(db, table, ty, depth + 1))
+                    .collect(),
+                named: function
+                    .named
+                    .iter()
+                    .map(|field| {
+                        let mut field = field.clone();
+                        field.ty = erase_residual_vars_at(db, table, field.ty, depth + 1);
+                        field
+                    })
+                    .collect(),
+                variadic: function.variadic.as_ref().map(|rest| {
+                    let mut rest = rest.clone();
+                    rest.element = erase_residual_vars_at(db, table, rest.element, depth + 1);
+                    rest
+                }),
+                ret: erase_residual_vars_at(db, table, function.ret, depth + 1),
+            }),
+        ),
+        TyKind::Union(members) => union_of(
+            db,
+            members
+                .iter()
+                .map(|&member| erase_residual_vars_at(db, table, member, depth + 1))
+                .collect::<Vec<_>>(),
+        ),
+        TyKind::Named(name, arguments) => Ty::new(
+            db,
+            TyKind::Named(
+                name,
+                arguments
+                    .iter()
+                    .map(|&argument| erase_residual_vars_at(db, table, argument, depth + 1))
+                    .collect(),
+            ),
+        ),
+        TyKind::Any | TyKind::Unknown | TyKind::Null | TyKind::Scalar(_) | TyKind::Rigid(_) => {
+            resolved
+        }
     }
 }
 

@@ -67,3 +67,9 @@ later <- function() 1L
 #++++
 f: fn() -> integer
 later: fn() -> integer
+
+#==== interface
+#---- growing_self_reference_pins_to_unknown
+x <- list(v = 1, w = x)
+#++++
+x: Unknown

@@ -56,3 +56,14 @@ shadowed <- sum(1L, 2L)
 sum: <T: numeric> fn(a: T, b: T) -> T
 shadowed: integer
 28..51 warning[unused] `shadowed` is assigned but never used.
+
+#---- aliased_function_reference_exports_closed
+f <- function(p) p
+g <- f
+h <- function() g()
+#++++
+f: <T> fn(p: T) -> T
+g: fn(p: Unknown) -> Unknown
+h: fn() -> Unknown
+26..45 warning[unused] `h` is assigned but never used.
+42..43 error[type-mismatch] This call passes 0 positional argument(s), but the function accepts 1.

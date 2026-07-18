@@ -56,6 +56,10 @@ const ACCEPTED_DIVERGENCES: &[(&str, &str)] = &[
         "scoping__forward_capture_sees_the_frame_write",
         "legacy flags a frame write that a closure reads later as unresolved and unused",
     ),
+    (
+        "interface__growing_self_reference_pins_to_unknown",
+        "the legacy interface fixed-point panics on a self-referential definition whose type grows each round; the new stack pins the scheme to Unknown at the round cap",
+    ),
 ];
 
 fn legacy_findings(source: &str, suite: &Suite) -> Vec<Finding> {
@@ -176,9 +180,21 @@ fn run_suite(suite: &Suite) {
     for file in &files {
         for case in &file.cases {
             cases += 1;
-            let legacy = legacy_findings(&case.source, suite);
-            let new = new_findings(&case.source, suite);
             let accepted_case = ACCEPTED_DIVERGENCES.iter().any(|(id, _)| *id == case.id);
+            // The oracle itself can crash (its fixed-point panics on some
+            // inputs the rewrite handles); such a case counts as an accepted
+            // divergence when allowlisted, a failure otherwise.
+            let legacy = std::panic::catch_unwind(|| legacy_findings(&case.source, suite));
+            let Ok(legacy) = legacy else {
+                if accepted_case {
+                    accepted += 1;
+                } else {
+                    diverging += 1;
+                    let _ = writeln!(report, "==== {} ====\n  legacy oracle PANICKED", case.id);
+                }
+                continue;
+            };
+            let new = new_findings(&case.source, suite);
             if findings_match(&legacy, &new) {
                 matching += 1;
                 if accepted_case {
@@ -323,9 +339,7 @@ fn differential_corpus() {
         let new = std::panic::catch_unwind(|| new_findings(&source, &suite));
         let Ok(new) = new else {
             panicking.push(relative.display().to_string());
-            *rollup
-                .entry("new stack PANICKED".to_owned())
-                .or_default() += 1;
+            *rollup.entry("new stack PANICKED".to_owned()).or_default() += 1;
             continue;
         };
         if findings_match(&legacy, &new) {
@@ -390,8 +404,7 @@ fn differential_corpus() {
     );
     assert!(
         panicking.is_empty(),
-        "the new stack panicked on {} corpus file(s):\n{panic_text}"
-    ,
+        "the new stack panicked on {} corpus file(s):\n{panic_text}",
         panicking.len()
     );
 }
