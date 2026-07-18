@@ -322,3 +322,153 @@ fn collect_r_files(directory: &Path, paths: &mut Vec<PathBuf>) {
         }
     }
 }
+
+/// The keystroke instrument: warm incremental latency on the largest corpus
+/// package. Each "keystroke" edits one file's text through the salsa setter
+/// (a byte appended inside a function body) and re-renders that file's
+/// diagnostics — the server's per-edit work. Reports p50/p95 against the
+/// quality-bar budgets (p50 ≤ 30 ms, p95 ≤ 100 ms).
+///
+/// ```text
+/// cargo test -p differential --release --test test_stats -- --ignored stats_keystrokes --nocapture
+/// ```
+#[test]
+#[ignore = "measurement instrument; needs the fetched corpus and a release build"]
+fn stats_keystrokes() {
+    use salsa::Setter;
+    use semantics::{DocumentKind, ProjectFiles, RootDatabase, SourceFile};
+
+    let packages = corpus_packages();
+    assert!(!packages.is_empty(), "run scripts/fetch-corpus.sh first");
+    let sources = packages
+        .iter()
+        .max_by_key(|sources| sources.iter().map(String::len).sum::<usize>())
+        .expect("at least one package");
+    let package_lines: usize = sources.iter().map(|source| source.lines().count()).sum();
+
+    let mut db = RootDatabase::default();
+    semantics::stubs::install_shipped_stubs(&db);
+    let files: Vec<SourceFile> = sources
+        .iter()
+        .map(|source| SourceFile::new(&db, source.clone(), DocumentKind::Package))
+        .collect();
+    ProjectFiles::new(&db, files.clone());
+    // Warm everything once (the server's steady state).
+    for &file in &files {
+        let _ = semantics::diagnostics::file_diagnostics(&db, file);
+    }
+
+    // The largest file is the worst case the quality bar cares about.
+    let (edited_index, edited_source) = sources
+        .iter()
+        .enumerate()
+        .max_by_key(|(_, source)| source.len())
+        .expect("at least one file");
+    let edited_file = files[edited_index];
+    let edited_lines = edited_source.lines().count();
+
+    // Append inside the file: a growing comment at the end simulates typing
+    // (each revision differs by one byte; every item's text shifts nothing
+    // before it, so item identity holds).
+    let mut latencies: Vec<std::time::Duration> = Vec::new();
+    let mut text = edited_source.clone();
+    for _ in 0..50 {
+        text.push('#');
+        let start = Instant::now();
+        edited_file.set_text(&mut db).to(text.clone());
+        let _ = semantics::diagnostics::file_diagnostics(&db, edited_file);
+        latencies.push(start.elapsed());
+    }
+    latencies.sort();
+    let p50 = latencies[latencies.len() / 2];
+    let p95 = latencies[latencies.len() * 95 / 100];
+    println!(
+        "keystrokes: package {package_lines} lines, edited file {edited_lines} lines, 50 edits"
+    );
+    println!(
+        "latency: p50 {:.2} ms, p95 {:.2} ms, max {:.2} ms",
+        p50.as_secs_f64() * 1e3,
+        p95.as_secs_f64() * 1e3,
+        latencies.last().expect("nonempty").as_secs_f64() * 1e3,
+    );
+
+    // The raw from-scratch parse of the same text, to attribute the latency:
+    // everything above this is item-tree rebuild plus salsa revalidation.
+    let parse_start = Instant::now();
+    let parses = 20;
+    for _ in 0..parses {
+        let _ = syntax::parse(&text);
+    }
+    println!(
+        "raw parse of the edited file: {:.2} ms",
+        parse_start.elapsed().as_secs_f64() * 1e3 / f64::from(parses)
+    );
+}
+
+/// The multi-core cold pass: within each package's database, files fan out
+/// across threads (storage-handle clones share memos). Compare against
+/// `stats_new_stack`'s sequential wall to see the scaling.
+///
+/// ```text
+/// cargo test -p differential --release --test test_stats -- --ignored stats_new_stack_parallel --nocapture
+/// ```
+#[test]
+#[ignore = "measurement instrument; needs the fetched corpus and a release build"]
+fn stats_new_stack_parallel() {
+    use semantics::{DocumentKind, ProjectFiles, RootDatabase, SourceFile};
+
+    let packages = corpus_packages();
+    assert!(!packages.is_empty(), "run scripts/fetch-corpus.sh first");
+    let workers = std::env::var("STATS_WORKERS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map(std::num::NonZero::get)
+                .unwrap_or(1)
+        });
+
+    let mut total_lines = 0usize;
+    let mut diagnostics = 0usize;
+    let start = Instant::now();
+    let mut retained = Vec::new();
+    for sources in &packages {
+        let db = RootDatabase::default();
+        semantics::stubs::install_shipped_stubs(&db);
+        let files: Vec<SourceFile> = sources
+            .iter()
+            .map(|source| {
+                total_lines += source.lines().count();
+                SourceFile::new(&db, source.clone(), DocumentKind::Package)
+            })
+            .collect();
+        ProjectFiles::new(&db, files.clone());
+
+        let counted = std::sync::atomic::AtomicUsize::new(0);
+        std::thread::scope(|scope| {
+            let chunk_size = files.len().div_ceil(workers).max(1);
+            for chunk in files.chunks(chunk_size) {
+                let db = db.clone();
+                let counted = &counted;
+                scope.spawn(move || {
+                    let mut local = 0usize;
+                    for &file in chunk {
+                        local += semantics::diagnostics::file_diagnostics(&db, file).len();
+                        local += semantics::diagnostics::strict_diagnostics(&db, file).len();
+                    }
+                    counted.fetch_add(local, std::sync::atomic::Ordering::Relaxed);
+                });
+            }
+        });
+        diagnostics += counted.load(std::sync::atomic::Ordering::Relaxed);
+        retained.push((db, files));
+    }
+    let elapsed = start.elapsed();
+    println!("parallel cold pass ({workers} workers): {total_lines} lines, {diagnostics} findings");
+    println!(
+        "wall: {:.2}s ({:.2} us/line)",
+        elapsed.as_secs_f64(),
+        elapsed.as_secs_f64() * 1e6 / total_lines.max(1) as f64
+    );
+    drop(retained);
+}

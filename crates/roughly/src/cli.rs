@@ -218,39 +218,74 @@ pub fn check(
             .enumerate()
             .filter_map(|(index, (path, _))| files[index].map(|file| (file, path)))
             .collect();
+        // The cold pass fans out across cores: salsa storage-handle clones
+        // share memos, so threads compute disjoint files concurrently (the
+        // parallel stress suite gates this). Rendering stays sequential in
+        // discovery order below.
+        let workers = std::thread::available_parallelism()
+            .map(std::num::NonZero::get)
+            .unwrap_or(1)
+            .min(checked.len().max(1));
+        type FileFindings = Vec<(Diagnostic, Vec<RelatedNote>)>;
+        let mut per_file: Vec<FileFindings> = (0..checked.len()).map(|_| Vec::new()).collect();
+        std::thread::scope(|scope| {
+            let mut pending: Vec<(usize, &mut FileFindings)> =
+                per_file.iter_mut().enumerate().collect();
+            let chunk_size = pending.len().div_ceil(workers.max(1)).max(1);
+            let mut chunks = Vec::new();
+            while !pending.is_empty() {
+                let take = chunk_size.min(pending.len());
+                chunks.push(pending.split_off(pending.len() - take));
+            }
+            for chunk in chunks {
+                let db = db.clone();
+                let checked = &checked;
+                let files = &files;
+                let path_by_file = &path_by_file;
+                let config = &config;
+                scope.spawn(move || {
+                    for (index, slot) in chunk {
+                        let (_, source) = &checked[index];
+                        let file = files[index].expect("every checked file was fed to the project");
+                        let rendered = document_diagnostics(&db, file, config);
+                        let rendered = apply_suppressions(rendered, source);
+                        for diagnostic in rendered {
+                            // Related ranges live in other documents; they
+                            // render from their own document's text.
+                            let related: Vec<RelatedNote> = diagnostic
+                                .related
+                                .iter()
+                                .filter_map(|related| {
+                                    let related_path = path_by_file.get(&related.file)?;
+                                    let related_index = LineIndex::new(related.file.text(&db));
+                                    let start = related_index.line_column(related.range.start());
+                                    Some(RelatedNote {
+                                        path: (*related_path).clone(),
+                                        line: start.line,
+                                        column: start.column,
+                                        message: related.message,
+                                    })
+                                })
+                                .collect();
+                            slot.push((diagnostic, related));
+                        }
+                    }
+                });
+            }
+        });
         for (index, (path, source)) in checked.iter().enumerate() {
-            let file = files[index].expect("every checked file was fed to the project");
-            let rendered = document_diagnostics(&db, file, &config);
-            let rendered = apply_suppressions(rendered, source);
-            let index = LineIndex::new(source);
-            for diagnostic in rendered {
+            let line_index = LineIndex::new(source);
+            for (diagnostic, related) in &per_file[index] {
                 if min_severity == MinSeverity::Error && diagnostic.severity != Severity::Error {
                     continue;
                 }
                 n_diagnostics += 1;
-                // Related ranges live in other documents; they render from
-                // their own document's text.
-                let related: Vec<RelatedNote> = diagnostic
-                    .related
-                    .iter()
-                    .filter_map(|related| {
-                        let related_path = path_by_file.get(&related.file)?;
-                        let related_index = LineIndex::new(related.file.text(&db));
-                        let start = related_index.line_column(related.range.start());
-                        Some(RelatedNote {
-                            path: (*related_path).clone(),
-                            line: start.line,
-                            column: start.column,
-                            message: related.message,
-                        })
-                    })
-                    .collect();
                 match output {
                     OutputFormat::Human => {
-                        render_human_diagnostic(path, source, &index, &diagnostic, &related)
+                        render_human_diagnostic(path, source, &line_index, diagnostic, related)
                     }
                     OutputFormat::Json => {
-                        render_json_diagnostic(path, &index, &diagnostic, &related)
+                        render_json_diagnostic(path, &line_index, diagnostic, related)
                     }
                 }
             }

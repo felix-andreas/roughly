@@ -409,6 +409,7 @@ dependencies = [
  "ide",
  "ropey",
  "roughly-legacy",
+ "salsa",
  "semantics",
  "syntax",
 ]

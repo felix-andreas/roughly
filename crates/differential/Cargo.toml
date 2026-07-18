@@ -12,6 +12,7 @@ path = "src/differential.rs"
 [dependencies]
 
 [dev-dependencies]
+salsa.workspace = true
 analysis-legacy = { path = "../analysis-legacy" }
 format = { path = "../format" }
 ide = { path = "../ide" }
