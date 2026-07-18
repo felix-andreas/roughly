@@ -417,6 +417,78 @@ fn compare_case(
             }
         }
 
+        // Completion: label sets. Both stacks rank with the same matcher and
+        // cap, but the pools legitimately differ in breadth (the rewrite
+        // completes annotation type names and namespace exports the oracle
+        // does not), so capped (incomplete) lists compare by overlap: the
+        // shared pool must agree on the top window's intersection. Uncapped
+        // lists compare as exact sets.
+        let legacy_completion: Option<BTreeSet<String>> =
+            analysis::ide::completion(&mut analysis_state, &path, position)
+                .map(|result| {
+                    result
+                        .items
+                        .into_iter()
+                        .map(|item| item.label)
+                        .collect::<BTreeSet<String>>()
+                })
+                .filter(|labels| !labels.is_empty());
+        let new_completion: Option<BTreeSet<String>> = ide::completion(&db, files, file, text_size)
+            .map(|result| {
+                result
+                    .items
+                    .into_iter()
+                    .map(|item| item.label)
+                    .collect::<BTreeSet<String>>()
+            })
+            .filter(|labels| !labels.is_empty());
+        match (&legacy_completion, &new_completion) {
+            (None, None) => {}
+            (Some(legacy), Some(new)) => {
+                let capped = legacy.len() >= analysis::ide::COMPLETION_LIMIT
+                    || new.len() >= ide::COMPLETION_LIMIT;
+                // Accepted supersets: the rewrite's pool is deliberately
+                // richer — the full type vocabulary inside annotations, the
+                // namespace's stub exports after `pkg::`, and an item-wide
+                // local pool (legacy's scope lookup excludes frame-end
+                // boundaries). A completion DEFICIT is always a divergence.
+                let superset = legacy.is_subset(new);
+                let in_namespace = after_namespace_operator(source, offset);
+                let diverges = if capped {
+                    legacy.intersection(new).count() == 0 && !in_namespace
+                } else {
+                    legacy != new && !superset
+                };
+                if diverges {
+                    let legacy_only: Vec<&String> = legacy.difference(new).take(6).collect();
+                    let new_only: Vec<&String> = new.difference(legacy).take(6).collect();
+                    record(
+                        rollup,
+                        &mut divergences,
+                        offset,
+                        "completion set mismatch",
+                        &format!("legacy-only {legacy_only:?} / new-only {new_only:?}"),
+                    );
+                } else if legacy != new {
+                    *rollup
+                        .entry("completion additions (accepted improvement)".to_owned())
+                        .or_default() += 1;
+                }
+            }
+            (Some(legacy), None) => record(
+                rollup,
+                &mut divergences,
+                offset,
+                "completion legacy-only",
+                &format!("{} item(s)", legacy.len()),
+            ),
+            (None, Some(_)) => {
+                *rollup
+                    .entry("completion new-only (accepted improvement)".to_owned())
+                    .or_default() += 1;
+            }
+        }
+
         // Hover: presence + range containment. The rewrite hovering where
         // the oracle does not is strictly more coverage — an accepted
         // improvement counted separately, not a divergence.
@@ -491,6 +563,19 @@ fn record(
 ) {
     *rollup.entry(class.to_owned()).or_default() += 1;
     divergences.push(format!("@{offset} {class}: {detail}"));
+}
+
+/// Whether the identifier being completed at `offset` follows a `::`/`:::`
+/// namespace operator (scanning back over the typed prefix).
+fn after_namespace_operator(source: &str, offset: usize) -> bool {
+    let bytes = source.as_bytes();
+    let mut at = offset.min(source.len());
+    while at > 0
+        && (bytes[at - 1].is_ascii_alphanumeric() || bytes[at - 1] == b'.' || bytes[at - 1] == b'_')
+    {
+        at -= 1;
+    }
+    at >= 2 && &source[at - 2..at] == "::"
 }
 
 /// Whether the byte offset sits inside a `#:` annotation region of the

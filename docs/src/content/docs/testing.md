@@ -73,16 +73,20 @@ allowlisted.
 ### The per-position IDE differential
 
 `cargo test -p differential --test test_ide_differential` runs hover, goto-definition,
-references, rename, and signature help at **every byte position** of every typing-suite case
-through both stacks (plus inlay-hint anchors once per case) and compares targets and ranges —
+references, rename, signature help, and completion at **every byte position** of every
+typing-suite case through both stacks (plus inlay-hint anchors once per case) and compares
+targets, ranges, and label sets —
 never prose, per the wording-freedom doctrine: definitions must agree on presence with the
 rewrite's target equal to or inside one of the oracle's; reference and rename sets must be
 identical; hovers must agree on presence with the rewrite's range equal or inside the
 oracle's; signature help must agree on presence and the active parameter; hint anchors must
-match exactly. Divergence classes accepted by policy are counted separately: the rewrite
-hovering or offering signatures where the oracle does not (strictly more coverage), and the
-rewrite declining references/rename on annotation type tokens with no project declaration
-(primitives, `fn`, binders — the oracle offers spelled-name matches there). Cases where the
+match exactly; completion label sets must match with a completion DEFICIT always a divergence
+(supersets are accepted — the rewrite's pools are deliberately richer: the type vocabulary
+inside annotations, stub namespace exports after `pkg::`, an item-wide local pool). Divergence
+classes accepted by policy are counted separately: the rewrite hovering or offering signatures
+where the oracle does not (strictly more coverage), and the rewrite declining references/rename
+on annotation type tokens with no project declaration (primitives, `fn`, binders — the oracle
+offers spelled-name matches there). Cases where the
 oracle's naming is wrong (forward capture, super-assignment, local mutual recursion) sit on a
 committed allowlist that only accepts pure additions, and adjudicated design differences (the
 rewrite hints only exported-scheme-consistent types) carry their reasons in a second list;

@@ -413,7 +413,7 @@ pub fn completion(
                 && node.text_range().start() <= offset
                 && offset <= node.text_range().end()
         }) {
-            return annotation_completion(db, files, &query);
+            return annotation_completion(db, files, file, &query);
         }
         // A cursor inside a string completes typed record fields when the
         // string subscripts a record (`x[["…"]]`) and is otherwise silent —
@@ -1383,6 +1383,7 @@ fn string_subscript_completion(
 fn annotation_completion(
     db: &dyn Db,
     files: ProjectFiles,
+    file: SourceFile,
     query: &str,
 ) -> Option<CompletionResult> {
     const PRIMITIVES: &[&str] = &[
@@ -1410,8 +1411,20 @@ fn annotation_completion(
             });
         }
     }
-    for (name, definition) in semantics::project_type_definitions(db, files) {
-        let label = name.text(db).to_owned();
+    // The project table covers package files only; a script's own
+    // declarations complete too.
+    let mut definitions: Vec<(String, semantics::annotations::NamedDefinition<'_>)> =
+        semantics::project_type_definitions(db, files)
+            .into_iter()
+            .map(|(name, definition)| (name.text(db).to_owned(), definition))
+            .collect();
+    for definition in semantics::file_type_definitions(db, file) {
+        let label = definition.name.text(db).to_owned();
+        if !definitions.iter().any(|(name, _)| *name == label) {
+            definitions.push((label, definition));
+        }
+    }
+    for (label, definition) in definitions {
         if search_match(&label, query).is_none() {
             continue;
         }
