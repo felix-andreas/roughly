@@ -56,7 +56,21 @@ every corpus `.R` file both parsers accept runs through both pipelines with the 
 policy — files with syntax errors on either side are counted and skipped, since parity is scoped
 to inputs both stacks parse cleanly. Its report (`target/differential-corpus.txt`) leads with a
 frequency rollup of divergent messages, so one gap repeated across hundreds of files reads as one
-line.
+line. Per-file panic guards on both sides keep one crash from killing the sweep: a new-stack
+panic is recorded and fails the test; a legacy (oracle) panic is tolerated per case only when
+allowlisted.
+
+### The semantics fuzz harness
+
+Fuzzing is pipeline-wide and from each stage's first commit, not a parser-only concern.
+`crates/semantics/tests/test_fuzz.rs` runs generated programs (biased toward reference cycles,
+closures, annotations, and typing-mode directives), token soup, and two-file projects through
+the full semantic pipeline, checking on every input: never-panic (salsa fixpoints must
+converge), determinism across fresh databases, diagnostic-range geometry, and **incremental
+equivalence** — output after editing a file through the salsa setter equals a fresh database on
+the edited text, and editing back restores the original. `FUZZ_ITERS` scales the budgets; the
+bounded default runs in `cargo test -p semantics`, and `fuzz_deep` (ignored) carries long runs.
+On a panic the harness prints the generating inputs.
 
 ## Fixture format
 

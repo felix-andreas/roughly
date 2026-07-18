@@ -122,6 +122,7 @@ The recorded decision must state: the previous source of truth, what was duplica
 # Testing strategy
 
 - Prefer fixtures: they are the primary way to validate analysis behavior, they are easy for humans to read in diffs, and they make it easy to create many tests quickly.
+- Fuzzing is pipeline-wide and from day one (user directive): every stage — parsing, lowering, naming, inference, diagnostics, incrementality, formatting, IDE — gets fuzz + property coverage the day it exists, never as a later add-on. A bounded pass belongs in the default test suite; see the fuzzing decision record in `decisions.md`.
 - Prefer adding or tightening fixtures before writing parser-local or engine-local unit tests unless the behavior is genuinely awkward to express as a fixture.
 - Favor fixture renderers that expose semantic facts rather than implementation detail.
 - When adding a new phase or module, add or extend a fixture suite for that phase before relying on ad hoc unit tests.
