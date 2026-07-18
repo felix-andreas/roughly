@@ -261,16 +261,20 @@ pub fn block_form_violation(node: &SyntaxNode) -> Option<&'static str> {
             | (Some(BlockForm::Definition), BlockForm::Definition)
             | (Some(BlockForm::Expanded), BlockForm::Expanded) => {}
             (Some(BlockForm::Compact), BlockForm::Compact) => {
-                return Some("cannot use multiple compact annotations in the same `#:` block.");
+                return Some(
+                    "only one compact annotation fits in a `#:` block — separate the annotations with a blank line so each gets its own block.",
+                );
             }
             (Some(BlockForm::Definition), _) | (_, BlockForm::Definition) => {
                 return Some(
-                    "cannot mix definition and annotation directives in the same `#:` block.",
+                    "`@type` and `@alias` declarations need their own `#:` block — separate them from other annotations with a blank line.",
                 );
             }
             (Some(BlockForm::Compact), BlockForm::Expanded)
             | (Some(BlockForm::Expanded), BlockForm::Compact) => {
-                return Some("cannot mix compact and expanded annotations in the same `#:` block.");
+                return Some(
+                    "a `#:` block uses either one compact annotation or `@param`/`@return` lines, not both — separate the two forms with a blank line.",
+                );
             }
         }
         previous = Some(form);

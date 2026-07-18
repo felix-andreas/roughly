@@ -257,7 +257,12 @@ impl Lexer<'_> {
             if self.peek() == Some('.') && self.peek_second().is_some_and(|c| c.is_ascii_digit()) {
                 self.bump();
                 self.eat_while(|c| c.is_ascii_digit());
-                return DOTDOTI;
+                // Only a bare `..N` is the dot-dot index. R's lexer has no
+                // dot-dot token at all (`..2` is an ordinary symbol resolved
+                // at evaluation), so a longer `..2dge` is one plain name.
+                if !self.peek().is_some_and(is_ident_continue) {
+                    return DOTDOTI;
+                }
             }
         }
         self.eat_while(is_ident_continue);

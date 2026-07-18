@@ -167,7 +167,11 @@ fn collect_r_files(directory: &Path, paths: &mut Vec<PathBuf>) {
         let path = entry.path();
         if path.is_dir() {
             collect_r_files(&path, paths);
-        } else if path.extension().is_some_and(|extension| extension == "R") {
+        } else if path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| matches!(extension, "R" | "r" | "S" | "s" | "q"))
+        {
             paths.push(path);
         }
     }

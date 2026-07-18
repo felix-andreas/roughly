@@ -105,4 +105,4 @@ f <- function() {
 }
 #++++
 f: Unknown
-36..45 error[type-mismatch] indexing with 2 indexes is not supported yet — matrix and data.frame subsetting is not modeled
+36..45 error[type-mismatch] indexing with 2 indexes is not supported yet — Roughly does not model matrix and data.frame subsetting

@@ -27,7 +27,7 @@ empty: list{}
 f <- function() list(1L, b = 2L)
 #++++
 f: Unknown
-16..32 error[type-mismatch] All elements in `list(...)` must be either all named or all unnamed.
+16..32 error[type-mismatch] the elements of a `list(...)` must be either all named or all unnamed
 
 #==== extraction
 #---- tuple_literal_position
@@ -105,7 +105,7 @@ f <- function() {
 }
 #++++
 f: Unknown
-36..45 error[type-mismatch] indexing with 2 indexes is not supported yet — matrix and data.frame subsetting is not modeled
+36..45 error[type-mismatch] indexing with 2 indexes is not supported yet — Roughly does not model matrix and data.frame subsetting
 
 #==== replacement
 #---- known_field_write
@@ -144,4 +144,4 @@ pick: <T, U> fn(m: T, i: U) -> Unknown
 cell <- function(m, k) m[k, , drop = FALSE]
 #++++
 cell: Unknown
-23..43 error[type-mismatch] indexing with 2 indexes is not supported yet — matrix and data.frame subsetting is not modeled
+23..43 error[type-mismatch] indexing with 2 indexes is not supported yet — Roughly does not model matrix and data.frame subsetting

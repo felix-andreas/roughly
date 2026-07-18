@@ -166,6 +166,13 @@ SOURCE_FILE@0..3
   NAME@0..3
     DOTDOTI@0..3 "..1"
 
+#---- dotdot_prefixed_name
+..2dge
+#++++
+SOURCE_FILE@0..6
+  NAME@0..6
+    IDENT@0..6 "..2dge"
+
 #---- underscore_placeholder
 x |> f(y = _)
 #++++

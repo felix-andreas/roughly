@@ -38,6 +38,9 @@ CRAN_PACKAGES=(
   knitr withr fs processx callr crayon digest htmltools httpuv mime
   rmarkdown xfun yaml Rcpp stringi vctrs pillar lifecycle generics backports
   checkmate
+  Matrix MASS mgcv survival lattice nlme Hmisc caret plotly sf raster
+  zoo xts forecast devtools usethis roxygen2 pkgdown httr httr2 xml2
+  rvest dbplyr DBI RSQLite broom future R.utils
 )
 
 TSR_REF="main"
@@ -138,7 +141,8 @@ for pkg in "${CRAN_PACKAGES[@]}"; do
     continue
   fi
   pkg_members="$WORK_DIR/pkg-members.txt"
-  tar tzf "$pkg_tar" | grep -E "^${pkg}/R/[^/]+\.R$" > "$pkg_members" || true
+  # R CMD install accepts .R/.r/.S/.s/.q sources (mgcv ships .r, Hmisc .s).
+  tar tzf "$pkg_tar" | grep -E "^${pkg}/R/[^/]+\.[RrSsQq]$" > "$pkg_members" || true
   if [ ! -s "$pkg_members" ]; then
     echo "    note $pkg has no R/*.R files"
     rm -f "$pkg_tar"
@@ -153,7 +157,7 @@ for pkg in "${CRAN_PACKAGES[@]}"; do
     cp "$pkg_extract/$member" "$CORPUS_DIR/cran/$pkg/$(basename "$member")"
   done < "$pkg_members"
   rm -f "$pkg_tar"
-  count="$(find "$CORPUS_DIR/cran/$pkg" -name '*.R' | wc -l | tr -d ' ')"
+  count="$(find "$CORPUS_DIR/cran/$pkg" -type f | wc -l | tr -d ' ')"
   echo "    fetched $pkg $version ($count R files)"
   CRAN_RESULTS+=("$pkg	$version	ok")
 done
@@ -162,7 +166,7 @@ done
 # Manifest
 # --------------------------------------------------------------------------
 cran_ok="$(printf '%s\n' "${CRAN_RESULTS[@]}" | awk -F'\t' '$3=="ok"' | wc -l | tr -d ' ')"
-total_r_files="$(find "$CORPUS_DIR/r-base" "$CORPUS_DIR/cran" -name '*.R' 2>/dev/null | wc -l | tr -d ' ')"
+total_r_files="$(find "$CORPUS_DIR/r-base" "$CORPUS_DIR/cran" -type f 2>/dev/null | wc -l | tr -d ' ')"
 
 {
   echo "# Roughly parser corpus — pinned inventory"

@@ -80,7 +80,7 @@ pub fn parse_stage_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic>
                 range: node.text_range(),
                 severity: Severity::Error,
                 code: "annotation",
-                message: format!("invalid semantics: {violation}"),
+                message: violation.to_owned(),
                 related: Vec::new(),
             });
         }
@@ -643,10 +643,11 @@ pub fn strict_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
     diagnostics
 }
 
+fn plural<'a>(count: usize, one: &'a str, many: &'a str) -> &'a str {
+    if count == 1 { one } else { many }
+}
+
 fn render_names(names: &[String]) -> String {
-    if names.is_empty() {
-        return "<none>".to_owned();
-    }
     names
         .iter()
         .map(|name| format!("`{name}`"))
@@ -674,19 +675,34 @@ fn render_type_error_message(db: &dyn Db, error: &TypeError<'_>) -> String {
             renderer.render(db, *found)
         ),
         TypeErrorKind::NotAFunction { found } => {
-            format!("this is not a function: `{}`", renderer.render(db, *found))
+            format!(
+                "this has type `{}`, which is not a function — it cannot be called",
+                renderer.render(db, *found)
+            )
         }
         TypeErrorKind::ArityMismatch { expected, found } => format!(
-            "This call passes {found} positional argument(s), but the function accepts {expected}."
+            "this call passes {found} positional {}, but the function only takes {expected}",
+            plural(*found, "argument", "arguments"),
         ),
         TypeErrorKind::NamedArgumentMismatch {
             expected_parameters,
             actual_arguments,
-        } => format!(
-            "This call uses named argument(s) {}, but the function accepts named parameter(s) {}.",
-            render_names(actual_arguments),
-            render_names(expected_parameters)
-        ),
+        } => {
+            let arguments = format!(
+                "this call names {} {}",
+                plural(actual_arguments.len(), "an argument", "arguments"),
+                render_names(actual_arguments),
+            );
+            if expected_parameters.is_empty() {
+                format!("{arguments}, but the function has no named parameters")
+            } else {
+                format!(
+                    "{arguments}, but the function's named {} {}",
+                    plural(expected_parameters.len(), "parameter is", "parameters are"),
+                    render_names(expected_parameters),
+                )
+            }
+        }
         TypeErrorKind::AnnotationParameterMismatch { name } => format!(
             "this annotation names a parameter `{name}`, but the function does not define one — annotation parameter names must match the function's parameter names"
         ),
@@ -721,7 +737,7 @@ fn render_type_error_message(db: &dyn Db, error: &TypeError<'_>) -> String {
             0 => "indexing with an empty index (`x[]`) is not supported yet".to_owned(),
             1 => "indexing with a named index argument is not supported yet".to_owned(),
             count => format!(
-                "indexing with {count} indexes is not supported yet — matrix and data.frame subsetting is not modeled"
+                "indexing with {count} indexes is not supported yet — Roughly does not model matrix and data.frame subsetting"
             ),
         },
         TypeErrorKind::PositionDoesNotExist {
@@ -740,7 +756,7 @@ fn render_type_error_message(db: &dyn Db, error: &TypeError<'_>) -> String {
             renderer.render(db, *found)
         ),
         TypeErrorKind::MixedListElements => {
-            "All elements in `list(...)` must be either all named or all unnamed.".to_owned()
+            "the elements of a `list(...)` must be either all named or all unnamed".to_owned()
         }
         TypeErrorKind::InvalidOperand { expected, found } => {
             let expected_description = match expected {

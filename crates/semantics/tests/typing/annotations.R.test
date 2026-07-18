@@ -64,7 +64,7 @@ f: fn(x: integer) -> character
 n <- 1L
 #++++
 n: integer
-0..50 error[annotation] invalid semantics: cannot mix definition and annotation directives in the same `#:` block.
+0..50 error[annotation] `@type` and `@alias` declarations need their own `#:` block — separate them from other annotations with a blank line.
 
 #---- definition_mixed_with_expanded_is_refused
 #: @type Person {list{name: character}}
@@ -73,7 +73,7 @@ n: integer
 make <- function(count) list(name = "a")
 #++++
 make: <T> fn(count: T) -> list{name: character}
-0..85 error[annotation] invalid semantics: cannot mix definition and annotation directives in the same `#:` block.
+0..85 error[annotation] `@type` and `@alias` declarations need their own `#:` block — separate them from other annotations with a blank line.
 
 #---- compact_mixed_with_expanded_is_refused
 #: fn(x: integer) -> integer
@@ -81,7 +81,7 @@ make: <T> fn(count: T) -> list{name: character}
 f <- function(x) x
 #++++
 f: <T> fn(x: T) -> T
-0..49 error[annotation] invalid semantics: cannot mix compact and expanded annotations in the same `#:` block.
+0..49 error[annotation] a `#:` block uses either one compact annotation or `@param`/`@return` lines, not both — separate the two forms with a blank line.
 
 #---- multiple_compact_annotations_are_refused
 #: integer
@@ -89,4 +89,4 @@ f: <T> fn(x: T) -> T
 n <- 1L
 #++++
 n: integer
-0..20 error[annotation] invalid semantics: cannot use multiple compact annotations in the same `#:` block.
+0..20 error[annotation] only one compact annotation fits in a `#:` block — separate the annotations with a blank line so each gets its own block.

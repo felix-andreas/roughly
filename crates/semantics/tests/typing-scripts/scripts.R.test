@@ -66,4 +66,4 @@ f: <T> fn(p: T) -> T
 g: fn(p: Unknown) -> Unknown
 h: Unknown
 26..45 warning[unused] `h` is assigned but never used.
-42..43 error[type-mismatch] This call passes 0 positional argument(s), but the function accepts 1.
+42..43 error[type-mismatch] this call passes 0 positional arguments, but the function only takes 1
