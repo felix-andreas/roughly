@@ -110,6 +110,8 @@ pub struct Argument {
 pub struct Parameter {
     pub name: String,
     pub default: Option<ExprId>,
+    /// The parameter NAME's range (the binding site — not the default), so
+    /// navigation and rename target the name alone.
     pub range: TextRange,
 }
 
@@ -640,10 +642,14 @@ impl Lowering {
                 let default = Self::child_expressions(parameter)
                     .next()
                     .map(|node| self.lower_expression(&node));
+                let range = parameter
+                    .first_token()
+                    .map(|token| token.text_range())
+                    .unwrap_or_else(|| parameter.text_range());
                 Parameter {
                     name,
                     default,
-                    range: parameter.text_range(),
+                    range,
                 }
             })
             .collect()

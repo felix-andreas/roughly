@@ -14,6 +14,7 @@ path = "src/differential.rs"
 [dev-dependencies]
 analysis-legacy = { path = "../analysis-legacy" }
 format = { path = "../format" }
+ide = { path = "../ide" }
 ropey.workspace = true
 roughly-legacy = { path = "../roughly-legacy" }
 semantics = { path = "../semantics" }

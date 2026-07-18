@@ -53,13 +53,23 @@ pub fn hover(db: &dyn Db, file: SourceFile, offset: TextSize) -> Option<Hover> {
     if let Some(cursor) = annotation_type_at(db, file, offset) {
         return annotation_type_hover(db, file, &cursor);
     }
+    // Elsewhere inside a `@type`/`@alias` block (the `@`, the keyword, the
+    // braces), the whole declaration hovers.
+    if let Some(hover) = annotation_definition_hover(db, file, offset) {
+        return Some(hover);
+    }
 
     let position = position_in_item(db, file, offset)?;
-    let expression = position.expression_at()?;
     let check = item_check(db, position.item)?;
-    let ty = *check.expression_types.get(&expression)?;
-
     let hir = item_hir(db, position.item)?;
+    // The smallest containing expression with a recorded type: write targets
+    // and operators record none, so the hover widens to the enclosing typed
+    // expression instead of going silent.
+    let (expression, ty) = position
+        .expressions_at()
+        .into_iter()
+        .find_map(|id| check.expression_types.get(&id).map(|ty| (id, *ty)))?;
+
     let mut renderer = TypeRenderer::default();
     let line = match &hir.expression(expression).kind {
         ExpressionKind::NameRef(name) => {
@@ -68,11 +78,24 @@ pub fn hover(db: &dyn Db, file: SourceFile, offset: TextSize) -> Option<Hover> {
         _ => renderer.render(db, ty),
     };
 
-    let range = hir.expression(expression).range + position.item_offset;
+    // Expression nodes may swallow trailing trivia; the hover highlight must
+    // stop at the significant end.
+    let range = trim_trailing_trivia(
+        file.text(db),
+        hir.expression(expression).range + position.item_offset,
+    );
     Some(Hover {
         range,
         lines: vec![line],
     })
+}
+
+/// Shrinks a range's end past any trailing whitespace/newlines it swallowed.
+fn trim_trailing_trivia(text: &str, range: TextRange) -> TextRange {
+    let start = usize::from(range.start()).min(text.len());
+    let end = usize::from(range.end()).min(text.len());
+    let trimmed = text[start..end].trim_end().len();
+    TextRange::new(range.start(), TextSize::from((start + trimmed) as u32))
 }
 
 /// Goto-definition: a slot goes to its first write; a global goes to the
@@ -528,12 +551,15 @@ pub fn workspace_symbols(
 struct AnnotationTypeCursor {
     name: String,
     range: TextRange,
+    /// Whether the token can resolve to a project `@type`/`@alias`
+    /// declaration: binder-shadowed names, binder declarations, and `fn`
+    /// cannot — they still hover, showing themselves.
+    navigable: bool,
 }
 
 /// The type-name token at the cursor: a `TYPE_REF`'s identifier, a
-/// `TYPE_APPLY`'s name, or the declared name of an `@type`/`@alias`
-/// directive. Names shadowed by a `<T>` binder in the same annotation are
-/// the binder's, not a project type's.
+/// `TYPE_APPLY`'s name, the declared name of an `@type`/`@alias` directive,
+/// a `<T>` binder name, or the `fn` keyword of a function type.
 fn annotation_type_at(
     db: &dyn Db,
     file: SourceFile,
@@ -551,32 +577,67 @@ fn annotation_type_at(
         .descendants_with_tokens()
         .filter_map(|element| element.into_token())
         .find(|token| {
-            token.kind() == syntax::SyntaxKind::IDENT
-                && token.text_range().start() <= offset
+            matches!(
+                token.kind(),
+                syntax::SyntaxKind::IDENT | syntax::SyntaxKind::NULL_KW
+            ) && token.text_range().start() <= offset
                 && offset <= token.text_range().end()
         })?;
     let name = token.text().to_string();
     let range = token.text_range();
 
     let parent = token.parent()?;
-    let is_type_position = match parent.kind() {
-        syntax::SyntaxKind::TYPE_REF => true,
-        syntax::SyntaxKind::NAME => parent.parent().is_some_and(|grandparent| {
-            matches!(
-                grandparent.kind(),
-                syntax::SyntaxKind::TYPE_APPLY | syntax::SyntaxKind::ANNOTATION_DIRECTIVE
-            ) && (grandparent.kind() != syntax::SyntaxKind::ANNOTATION_DIRECTIVE
-                || matches!(
-                    directive_name(&grandparent).as_deref(),
-                    Some("type" | "alias")
-                ))
-        }),
-        _ => false,
+    let (is_type_position, resolvable) = match parent.kind() {
+        syntax::SyntaxKind::TYPE_REF => (true, token.kind() == syntax::SyntaxKind::IDENT),
+        syntax::SyntaxKind::NAME => match parent.parent().map(|grandparent| grandparent.kind()) {
+            Some(syntax::SyntaxKind::TYPE_APPLY) => (true, true),
+            Some(syntax::SyntaxKind::ANNOTATION_DIRECTIVE) => (
+                parent.parent().is_some_and(|grandparent| {
+                    matches!(
+                        directive_name(&grandparent).as_deref(),
+                        Some("type" | "alias")
+                    )
+                }),
+                true,
+            ),
+            // Structural keywords (`fn`, `list`, a `<T>` binder) hover as
+            // themselves.
+            Some(other) if type_kind(other) => (true, false),
+            _ => (false, false),
+        },
+        // `NULL` and other bare tokens directly inside a type node.
+        other if type_kind(other) => (true, false),
+        _ => (false, false),
     };
-    if !is_type_position || binder_names(&annotation).contains(&name) {
+    if !is_type_position {
         return None;
     }
-    Some(AnnotationTypeCursor { name, range })
+    let navigable = resolvable && !binder_names(&annotation).contains(&name);
+    Some(AnnotationTypeCursor {
+        name,
+        range,
+        navigable,
+    })
+}
+
+/// Whether a node kind belongs to the annotation type grammar.
+fn type_kind(kind: syntax::SyntaxKind) -> bool {
+    matches!(
+        kind,
+        syntax::SyntaxKind::TYPE_REF
+            | syntax::SyntaxKind::TYPE_APPLY
+            | syntax::SyntaxKind::TYPE_VECTOR
+            | syntax::SyntaxKind::TYPE_UNION
+            | syntax::SyntaxKind::TYPE_FUNCTION
+            | syntax::SyntaxKind::TYPE_RECORD
+            | syntax::SyntaxKind::TYPE_TUPLE
+            | syntax::SyntaxKind::TYPE_LIST
+            | syntax::SyntaxKind::TYPE_PAREN
+            | syntax::SyntaxKind::TYPE_BINDER_LIST
+            | syntax::SyntaxKind::TYPE_BINDER
+            | syntax::SyntaxKind::TYPE_PARAMETER_LIST
+            | syntax::SyntaxKind::TYPE_ARG_LIST
+    )
 }
 
 /// The directive's joined name (`type`, `alias`, `if-unknown`, …): adjacent
@@ -625,32 +686,91 @@ fn annotation_type_hover(
     file: SourceFile,
     cursor: &AnnotationTypeCursor,
 ) -> Option<Hover> {
-    // Resolve against the file's own declarations first, then the project's
-    // (matching how the checker's winner table folds files).
-    let definition = semantics::file_type_definitions(db, file)
-        .into_iter()
-        .find(|definition| definition.name.text(db) == cursor.name)?;
-    let mut renderer = TypeRenderer::default();
-    let parameters = if definition.parameters.is_empty() {
-        String::new()
-    } else {
-        let names: Vec<String> = definition
-            .parameters
-            .iter()
-            .map(|parameter| parameter.text(db).to_owned())
-            .collect();
-        format!("<{}>", names.join(", "))
+    // Resolve against the file's own declarations (matching how the
+    // checker's winner table folds files). A builtin or undeclared name has
+    // no definition to expand — show the name itself, confirming what the
+    // cursor is on.
+    let definition = cursor
+        .navigable
+        .then(|| {
+            semantics::file_type_definitions(db, file)
+                .into_iter()
+                .find(|definition| definition.name.text(db) == cursor.name)
+        })
+        .flatten();
+    let line = match definition {
+        Some(definition) => {
+            let mut renderer = TypeRenderer::default();
+            let parameters = if definition.parameters.is_empty() {
+                String::new()
+            } else {
+                let names: Vec<String> = definition
+                    .parameters
+                    .iter()
+                    .map(|parameter| parameter.text(db).to_owned())
+                    .collect();
+                format!("<{}>", names.join(", "))
+            };
+            let keyword = if definition.alias { "@alias" } else { "@type" };
+            format!(
+                "{keyword} {}{parameters} {{{}}}",
+                cursor.name,
+                renderer.render(db, definition.body)
+            )
+        }
+        None => cursor.name.clone(),
     };
-    let keyword = if definition.alias { "@alias" } else { "@type" };
-    let line = format!(
-        "{keyword} {}{parameters} {{{}}}",
-        cursor.name,
-        renderer.render(db, definition.body)
-    );
     Some(Hover {
         range: cursor.range,
         lines: vec![line],
     })
+}
+
+/// The declaration summary for a cursor anywhere inside an `@type`/`@alias`
+/// declaration (the `@`, the keyword, the braces), spanning the
+/// declaration's own lines — a stitched block may hold several.
+fn annotation_definition_hover(db: &dyn Db, file: SourceFile, offset: TextSize) -> Option<Hover> {
+    let parse = semantics::parse(db, file);
+    let root = parse.syntax_node();
+    let annotation = root.descendants().find(|node| {
+        node.kind() == syntax::SyntaxKind::ANNOTATION
+            && node.text_range().start() <= offset
+            && offset <= node.text_range().end()
+    })?;
+    for directive in annotation.descendants().filter(|node| {
+        node.kind() == syntax::SyntaxKind::ANNOTATION_DIRECTIVE
+            && matches!(directive_name(node).as_deref(), Some("type" | "alias"))
+    }) {
+        // The declaration's display range starts at its line's `#:` marker.
+        let start = annotation
+            .descendants_with_tokens()
+            .filter_map(|element| element.into_token())
+            .filter(|token| {
+                token.kind() == syntax::SyntaxKind::ANNOTATION_MARKER
+                    && token.text_range().start() <= directive.text_range().start()
+            })
+            .map(|token| token.text_range().start())
+            .last()
+            .unwrap_or_else(|| directive.text_range().start());
+        let range = TextRange::new(start, directive.text_range().end());
+        if !(range.start() <= offset && offset <= range.end()) {
+            continue;
+        }
+        let Some(name) = directive
+            .children()
+            .find(|child| child.kind() == syntax::SyntaxKind::NAME)
+            .map(|name| name.text().to_string())
+        else {
+            continue;
+        };
+        let cursor = AnnotationTypeCursor {
+            name,
+            range,
+            navigable: true,
+        };
+        return annotation_type_hover(db, file, &cursor);
+    }
+    None
 }
 
 /// Every occurrence of a type name across the project's annotations:
@@ -1337,9 +1457,10 @@ fn target_at<'db>(
 ) -> Option<Target<'db>> {
     if let Some(cursor) = annotation_type_at(db, file, offset) {
         // Primitive type names have no project declaration to navigate to.
-        let declared = type_name_occurrences(db, files, &cursor.name)
-            .iter()
-            .any(|occurrence| occurrence.is_declaration);
+        let declared = cursor.navigable
+            && type_name_occurrences(db, files, &cursor.name)
+                .iter()
+                .any(|occurrence| occurrence.is_declaration);
         return declared.then_some(Target::TypeName(cursor.name));
     }
 
@@ -1537,30 +1658,33 @@ struct PositionedItem<'db> {
 }
 
 impl PositionedItem<'_> {
-    /// The smallest HIR expression whose range contains the cursor —
+    /// The HIR expressions whose range contains the cursor, smallest first —
     /// end-inclusive, so a cursor sitting immediately after a name still hits
     /// it (the editor convention). Name references win ties.
-    fn expression_at(&self) -> Option<ExprId> {
-        let hir = item_hir(self.db, self.item)?;
-        let mut best: Option<(TextSize, bool, ExprId)> = None;
+    fn expressions_at(&self) -> Vec<ExprId> {
+        let Some(hir) = item_hir(self.db, self.item) else {
+            return Vec::new();
+        };
+        let mut containing: Vec<(TextSize, bool, ExprId)> = Vec::new();
         for (index, expression) in hir.expressions.iter().enumerate() {
             let range = expression.range;
             if range.is_empty() || !(range.start() <= self.relative && self.relative <= range.end())
             {
                 continue;
             }
-            let key = (
+            containing.push((
                 range.len(),
                 !matches!(expression.kind, ExpressionKind::NameRef(_)),
-            );
-            if best
-                .as_ref()
-                .is_none_or(|(width, not_name, _)| key < (*width, *not_name))
-            {
-                best = Some((key.0, key.1, ExprId(index as u32)));
-            }
+                ExprId(index as u32),
+            ));
         }
-        best.map(|(_, _, expression)| expression)
+        containing.sort_by_key(|(width, not_name, id)| (*width, *not_name, id.0));
+        containing.into_iter().map(|(_, _, id)| id).collect()
+    }
+
+    /// The smallest containing expression.
+    fn expression_at(&self) -> Option<ExprId> {
+        self.expressions_at().into_iter().next()
     }
 }
 

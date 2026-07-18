@@ -385,7 +385,7 @@ completion (1): Rows
 #: fn(x: inte$0ger) -> double
 h <- function(x) x / 2
 #++++
-hover: none
+hover 9..16: integer
 definition: none
 references: none
 rename: none
@@ -398,7 +398,7 @@ completion (1): integer
 #: <T> fn(x: T$0) -> T
 ident <- function(x) x
 #++++
-hover: none
+hover 35..36: T
 definition: none
 references: none
 rename: none
@@ -443,7 +443,7 @@ hint @58: double
 #: fn(x: Use$0
 f <- function(x) x
 #++++
-hover: none
+hover 36..39: Use
 definition: none
 references: none
 rename: none
