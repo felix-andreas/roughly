@@ -269,10 +269,21 @@ pub fn inlay_hints(db: &dyn Db, file: SourceFile, viewport: Option<TextRange>) -
     hints
 }
 
+/// The signature list of the call under the cursor. Most calls carry exactly
+/// one entry; a call whose callee committed a candidate of a stub overload
+/// set lists every declared candidate so the editor can page through them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignatureHelp {
+    pub signatures: Vec<SignatureData>,
+    /// Index into `signatures` of the committed overload (0 for
+    /// single-signature calls).
+    pub active_signature: usize,
+}
+
 /// A rendered call signature: the label, each parameter's byte span inside
 /// it, and the parameter the cursor's argument targets.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SignatureHelp {
+pub struct SignatureData {
     pub label: String,
     pub parameters: Vec<TextRange>,
     pub active_parameter: Option<usize>,
@@ -307,32 +318,103 @@ pub fn signature_help(db: &dyn Db, file: SourceFile, offset: TextSize) -> Option
         .collect();
     calls.sort_by_key(|(range, id)| (range.len(), range.start(), id.0));
 
-    let (function, arguments) = calls.iter().find_map(|(_, id)| {
+    let (callee, function, arguments) = calls.iter().find_map(|(_, id)| {
         let ExpressionKind::Call { callee, arguments } = &hir.expression(*id).kind else {
             return None;
         };
         let callee_ty = *check.expression_types.get(callee)?;
         match callee_ty.kind(db) {
-            TyKind::Function(function) => Some((function.clone(), arguments)),
+            TyKind::Function(function) => Some((*callee, function.clone(), arguments)),
             _ => None,
         }
     })?;
     let function = &function;
 
-    let rendered = render_signature(db, function);
+    // A call that committed one candidate of a stub overload set lists the
+    // whole declared set with the committed candidate active — the single
+    // checked callee type would otherwise show one signature and hide the
+    // alternatives the name actually offers.
+    if let Some(&selected) = check.selected_overloads.get(&callee)
+        && let Some(name) = callee_name(&hir, callee)
+        && let Some(schemes) = semantics::stubs::stubs(db)
+            .and_then(|library| library.schemes.get(&name))
+            .filter(|schemes| schemes.len() > 1)
+    {
+        let signatures: Vec<SignatureData> = schemes
+            .iter()
+            .map(|scheme| overload_signature(db, scheme, arguments, &hir, position.relative))
+            .collect();
+        return Some(SignatureHelp {
+            active_signature: selected.min(signatures.len().saturating_sub(1)),
+            signatures,
+        });
+    }
+
+    let mut renderer = TypeRenderer::default();
+    let (label, parameters) = render_signature(db, &mut renderer, String::new(), function);
     let active_parameter = active_parameter(
         db,
         function,
-        rendered.1.len(),
+        parameters.len(),
         arguments,
         &hir,
         position.relative,
     );
     Some(SignatureHelp {
-        label: rendered.0,
-        parameters: rendered.1,
-        active_parameter,
+        signatures: vec![SignatureData {
+            label,
+            parameters,
+            active_parameter,
+        }],
+        active_signature: 0,
     })
+}
+
+/// The callee's referenced name, when the callee is a name (`sum(...)`,
+/// `base::sum(...)`).
+fn callee_name(hir: &semantics::hir::Module, callee: ExprId) -> Option<String> {
+    match &hir.expression(callee).kind {
+        ExpressionKind::NameRef(name) => Some(name.clone()),
+        ExpressionKind::Namespace { name, .. } => name.clone(),
+        _ => None,
+    }
+}
+
+/// One overload candidate rendered for the signature list. The scheme's own
+/// binders drive the label's `<T: atomic>` prefix; a non-function declaration
+/// (possible in a hand-written override set) still occupies its slot so the
+/// committed index stays aligned with the declared set.
+fn overload_signature(
+    db: &dyn Db,
+    scheme: &TypeScheme<'_>,
+    arguments: &[Argument],
+    hir: &semantics::hir::Module,
+    position: TextSize,
+) -> SignatureData {
+    let mut renderer = TypeRenderer::default();
+    match scheme.body.kind(db) {
+        TyKind::Function(function) => {
+            let mut prefix = renderer
+                .render_binder_prefix(&scheme.binders)
+                .unwrap_or_default();
+            if !prefix.is_empty() {
+                prefix.push(' ');
+            }
+            let (label, parameters) = render_signature(db, &mut renderer, prefix, function);
+            let active_parameter =
+                active_parameter(db, function, parameters.len(), arguments, hir, position);
+            SignatureData {
+                label,
+                parameters,
+                active_parameter,
+            }
+        }
+        _ => SignatureData {
+            label: renderer.render_scheme(db, scheme),
+            parameters: Vec::new(),
+            active_parameter: None,
+        },
+    }
 }
 
 /// The candidate cap; the result marks itself incomplete past it so clients
@@ -1806,8 +1888,12 @@ fn substring_under_case(candidate: &str, query: &str, case_sensitive: bool) -> b
 /// The signature label with each parameter's byte span. `...` renders at its
 /// formal position (after the variadic's preceding named parameters), so
 /// span indexes line up with `active_parameter`'s display translation.
-fn render_signature(db: &dyn Db, function: &FunctionType<'_>) -> (String, Vec<TextRange>) {
-    let mut renderer = TypeRenderer::default();
+fn render_signature<'db>(
+    db: &'db dyn Db,
+    renderer: &mut TypeRenderer<'db>,
+    prefix: String,
+    function: &FunctionType<'db>,
+) -> (String, Vec<TextRange>) {
     let mut parts: Vec<String> = Vec::new();
     for ty in &function.positional {
         parts.push(renderer.render(db, *ty));
@@ -1825,7 +1911,8 @@ fn render_signature(db: &dyn Db, function: &FunctionType<'_>) -> (String, Vec<Te
         parts.insert(at, format!("...: {}", renderer.render(db, rest.element)));
     }
 
-    let mut label = String::from("fn(");
+    let mut label = prefix;
+    label.push_str("fn(");
     let mut parameters = Vec::new();
     for (index, part) in parts.iter().enumerate() {
         if index > 0 {

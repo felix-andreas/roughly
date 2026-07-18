@@ -622,11 +622,20 @@ impl<'db> TypeRenderer<'db> {
     }
 
     pub fn render_scheme(&mut self, db: &'db dyn Db, scheme: &TypeScheme<'db>) -> String {
-        if scheme.binders.is_empty() {
-            return self.render(db, scheme.body);
+        match self.render_binder_prefix(&scheme.binders) {
+            Some(prefix) => format!("{prefix} {}", self.render(db, scheme.body)),
+            None => self.render(db, scheme.body),
         }
-        let binders: Vec<String> = scheme
-            .binders
+    }
+
+    /// The `<T, U: numeric>` binder prefix of a scheme, registering each
+    /// binder's display name so the body rendered afterwards through the same
+    /// renderer reuses them. `None` for an empty binder list.
+    pub fn render_binder_prefix(&mut self, binders: &[(Name<'db>, Constraint)]) -> Option<String> {
+        if binders.is_empty() {
+            return None;
+        }
+        let binders: Vec<String> = binders
             .iter()
             .map(|(name, constraint)| {
                 let rendered = self.variable_name(RenderedVar::Rigid(*name));
@@ -638,7 +647,7 @@ impl<'db> TypeRenderer<'db> {
                 }
             })
             .collect();
-        format!("<{}> {}", binders.join(", "), self.render(db, scheme.body))
+        Some(format!("<{}>", binders.join(", ")))
     }
 
     fn render_function(&mut self, db: &'db dyn Db, function: &FunctionType<'db>) -> String {

@@ -196,11 +196,9 @@ impl<'db> InferenceTable<'db> {
         }
 
         let (resolved, clean) = match ty.kind(db) {
-            TyKind::Any
-            | TyKind::Unknown
-            | TyKind::Null
-            | TyKind::Scalar(_)
-            | TyKind::Rigid(_) => (ty, true),
+            TyKind::Any | TyKind::Unknown | TyKind::Null | TyKind::Scalar(_) | TyKind::Rigid(_) => {
+                (ty, true)
+            }
             TyKind::Var(_) => unreachable!("handled above"),
             TyKind::Vector(element) => {
                 let (element, clean) = self.resolve_rec(db, *element, visiting);

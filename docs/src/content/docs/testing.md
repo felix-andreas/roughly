@@ -79,7 +79,8 @@ targets, ranges, and label sets —
 never prose, per the wording-freedom doctrine: definitions must agree on presence with the
 rewrite's target equal to or inside one of the oracle's; reference and rename sets must be
 identical; hovers must agree on presence with the rewrite's range equal or inside the
-oracle's; signature help must agree on presence and the active parameter; hint anchors must
+oracle's; signature help must agree on presence, the signature-set size, the committed
+overload index, and the active signature's active parameter; hint anchors must
 match exactly; completion label sets must match with a completion DEFICIT always a divergence
 (supersets are accepted — the rewrite's pools are deliberately richer: the type vocabulary
 inside annotations, stub namespace exports after `pkg::`, an item-wide local pool). Divergence

@@ -352,6 +352,46 @@ action: Add inferred type annotations for the whole file
 completion: none
 hint @1: fn() -> character
 
+#---- overload_set_lists_candidates
+h <- function() sum(1L, $02L)
+#++++
+hover 24..26: integer
+definition: none
+references: none
+rename: none
+signature: fn(...: integer[] | logical[], [na.rm]: logical) -> integer (active)
+parameters: [...: integer[] | logical[]] | [na.rm]: logical
+signature: fn(...: double[], [na.rm]: logical) -> double
+parameters: [...: double[]] | [na.rm]: logical
+signature: fn(...: Any, [na.rm]: logical) -> Any
+parameters: [...: Any] | [na.rm]: logical
+action: Add inferred type annotation for `h`
+  edit 0..0 -> "#: fn() -> integer\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: fn() -> integer\n"
+completion (128+): break, else, FALSE, for, function, if, in, Inf
+hint @1: fn() -> integer
+
+#---- overload_second_candidate_active
+h <- function() sum(1.5, $02.5)
+#++++
+hover 25..28: double
+definition: none
+references: none
+rename: none
+signature: fn(...: integer[] | logical[], [na.rm]: logical) -> integer
+parameters: [...: integer[] | logical[]] | [na.rm]: logical
+signature: fn(...: double[], [na.rm]: logical) -> double (active)
+parameters: [...: double[]] | [na.rm]: logical
+signature: fn(...: Any, [na.rm]: logical) -> Any
+parameters: [...: Any] | [na.rm]: logical
+action: Add inferred type annotation for `h`
+  edit 0..0 -> "#: fn() -> double\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: fn() -> double\n"
+completion (128+): break, else, FALSE, for, function, if, in, Inf
+hint @1: fn() -> double
+
 #==== hints
 #---- plain_bindings
 count <- 1L

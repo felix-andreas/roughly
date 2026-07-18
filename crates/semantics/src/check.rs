@@ -142,6 +142,11 @@ pub struct ItemCheck<'db> {
     /// The generalized scheme of the item's top-level binding value, when the
     /// item is a definition.
     pub scheme: Option<TypeScheme<'db>>,
+    /// The committed candidate of each call whose callee resolved through a
+    /// stub overload set, keyed by the callee expression, as an index into
+    /// the declared set. Absent when no candidate matched. Signature help
+    /// lists the whole declared set with the committed candidate active.
+    pub selected_overloads: FxHashMap<ExprId, usize>,
 }
 
 /// One `Unknown` origin: where an undetermined type was first introduced
@@ -190,7 +195,8 @@ pub fn check_item<'db>(db: &'db dyn Db, module: &Module, naming: &ItemNaming) ->
 
 /// Full-check executions since process start — a plain instrument for perf
 /// witnesses (fixpoint re-runs make executions exceed item counts).
-pub static CHECK_EXECUTIONS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+pub static CHECK_EXECUTIONS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
 
 pub fn check_item_with_annotation<'db>(
     db: &'db dyn Db,
@@ -214,6 +220,7 @@ pub fn check_item_with_annotation<'db>(
         scheme_arena: Vec::new(),
         rigid_constraints: FxHashMap::default(),
         recorded: FxHashMap::default(),
+        selected_overloads: FxHashMap::default(),
         errors: Vec::new(),
         strict_origins: Vec::new(),
         overload_probe_depth: 0,
@@ -345,6 +352,7 @@ pub fn check_item_with_annotation<'db>(
         errors,
         strict_origins: context.strict_origins,
         scheme,
+        selected_overloads: context.selected_overloads,
     }
 }
 
@@ -528,6 +536,7 @@ struct Checker<'db, 'a> {
     /// Declared constraints of in-scope rigid binders (`<T: numeric>`).
     rigid_constraints: FxHashMap<Name<'db>, Constraint>,
     recorded: FxHashMap<ExprId, Ty<'db>>,
+    selected_overloads: FxHashMap<ExprId, usize>,
     errors: Vec<TypeError<'db>>,
     strict_origins: Vec<StrictOrigin>,
     /// Non-zero while a strict overload-selection round probes a candidate:
@@ -2812,10 +2821,21 @@ impl<'db> Checker<'db, '_> {
                 .ty
                 .is_some_and(|ty| self.table.contains_unbound_var(self.db, ty))
         });
+        let declared_count = schemes.len();
         let probed: Vec<TypeScheme<'db>> = if has_unresolved_argument {
             vec![schemes.last().cloned()?]
         } else {
             schemes
+        };
+        // Maps a probe index back into the declared set: the unresolved-
+        // argument fallback probes only the final declaration, so its one
+        // candidate is the set's last index.
+        let declared_index = |probe_index: usize| {
+            if has_unresolved_argument {
+                declared_count - 1
+            } else {
+                probe_index
+            }
         };
 
         // Selection runs strict first, then (only if nothing matched and a
@@ -2833,7 +2853,7 @@ impl<'db> Checker<'db, '_> {
 
         let mut first_error: Option<TypeError<'db>> = None;
         for &courtesy in rounds {
-            for scheme in &probed {
+            for (probe_index, scheme) in probed.iter().enumerate() {
                 let snapshot = self.table.snapshot();
                 let instantiated = self.instantiate(scheme);
                 let resolved = self.table.shallow_resolve(self.db, instantiated);
@@ -2852,6 +2872,8 @@ impl<'db> Checker<'db, '_> {
                 match outcome {
                     Ok(()) => {
                         self.recorded.insert(callee, resolved);
+                        self.selected_overloads
+                            .insert(callee, declared_index(probe_index));
                         return Some(function.ret);
                     }
                     Err(error) => {
@@ -2880,6 +2902,10 @@ impl<'db> Checker<'db, '_> {
         };
         self.errors.push(error);
         self.recorded.insert(callee, self.unknown());
+        // A capture-discovery re-pass overwrites recorded state in place; a
+        // call that committed on the first pass but fails on the re-pass
+        // must not keep the stale commitment.
+        self.selected_overloads.remove(&callee);
         Some(self.unknown())
     }
 

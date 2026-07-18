@@ -380,16 +380,28 @@ fn compare_case(
             }
         }
 
-        // Signature help: presence and the active parameter index (labels
-        // are prose — not compared).
+        // Signature help: presence, the signature-set size, the committed
+        // overload index, and the active signature's active parameter index
+        // (labels are prose — not compared).
         let legacy_signature = analysis::ide::signature_help(&mut analysis_state, &path, position)
-            .and_then(|help| {
+            .map(|help| {
+                (
+                    help.signatures.len(),
+                    help.active_signature,
+                    help.signatures
+                        .get(help.active_signature)
+                        .and_then(|signature| signature.active_parameter),
+                )
+            });
+        let new_signature = ide::signature_help(&db, file, text_size).map(|help| {
+            (
+                help.signatures.len(),
+                help.active_signature,
                 help.signatures
                     .get(help.active_signature)
-                    .map(|signature| signature.active_parameter)
-            });
-        let new_signature =
-            ide::signature_help(&db, file, text_size).map(|help| help.active_parameter);
+                    .and_then(|signature| signature.active_parameter),
+            )
+        });
         match (&legacy_signature, &new_signature) {
             (None, None) => {}
             (Some(legacy), Some(new)) => {
@@ -398,7 +410,7 @@ fn compare_case(
                         rollup,
                         &mut divergences,
                         offset,
-                        "signature active-parameter mismatch",
+                        "signature mismatch",
                         &format!("legacy {legacy:?} / new {new:?}"),
                     );
                 }

@@ -92,21 +92,30 @@ fn render_at(
     }
     match ide::signature_help(db, file, offset) {
         Some(help) => {
-            output.push_str(&format!("signature: {}\n", help.label));
-            let parameters: Vec<String> = help
-                .parameters
-                .iter()
-                .enumerate()
-                .map(|(index, span)| {
-                    let text = &help.label[usize::from(span.start())..usize::from(span.end())];
-                    if Some(index) == help.active_parameter {
-                        format!("[{text}]")
+            for (signature_index, signature) in help.signatures.iter().enumerate() {
+                let marker =
+                    if help.signatures.len() > 1 && signature_index == help.active_signature {
+                        " (active)"
                     } else {
-                        text.to_owned()
-                    }
-                })
-                .collect();
-            output.push_str(&format!("parameters: {}\n", parameters.join(" | ")));
+                        ""
+                    };
+                output.push_str(&format!("signature: {}{marker}\n", signature.label));
+                let parameters: Vec<String> = signature
+                    .parameters
+                    .iter()
+                    .enumerate()
+                    .map(|(index, span)| {
+                        let text =
+                            &signature.label[usize::from(span.start())..usize::from(span.end())];
+                        if Some(index) == signature.active_parameter {
+                            format!("[{text}]")
+                        } else {
+                            text.to_owned()
+                        }
+                    })
+                    .collect();
+                output.push_str(&format!("parameters: {}\n", parameters.join(" | ")));
+            }
         }
         None => output.push_str("signature: none\n"),
     }
