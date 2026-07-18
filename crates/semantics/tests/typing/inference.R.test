@@ -58,7 +58,7 @@ f <- function() {
   add1("txt")
 }
 #++++
-f: <T: numeric> fn() -> T
+f: Unknown
 54..59 error[type-mismatch] expected a numeric value (`integer` or `double`), found `character`
 
 #---- forward_read_is_tolerant

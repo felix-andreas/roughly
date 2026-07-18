@@ -9,21 +9,21 @@ id: <T> fn(x: T) -> T
 #: fn(x: integer) -> character
 f <- function(x) x
 #++++
-f: fn(x: integer) -> character
+f: Unknown
 48..49 error[type-mismatch] expected `character`, found `integer`
 
 #---- parameter_name_mismatch
 #: fn(x: integer) -> integer
 f <- function(y) 1L
 #++++
-f: fn(x: integer) -> integer
+f: Unknown
 34..48 error[type-mismatch] this annotation names a parameter `x`, but the function does not define one — annotation parameter names must match the function's parameter names
 
 #---- rigid_refuses_undeclared_bound
 #: <T> fn(x: T) -> T
 bad <- function(x) x + 1L
 #++++
-bad: <T> fn(x: T) -> T
+bad: Unknown
 40..41 error[type-mismatch] expected a numeric value (`integer` or `double`), found `T`
 
 #---- declared_numeric_bound_admits_arithmetic
@@ -47,7 +47,7 @@ n <- 1L
 bad <- 2L
 #++++
 n: integer
-bad: character
+bad: Unknown
 39..41 error[type-mismatch] expected `character`, found `integer`
 
 #==== trusted

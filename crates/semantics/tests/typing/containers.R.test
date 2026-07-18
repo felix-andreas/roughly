@@ -26,7 +26,7 @@ empty: list{}
 #---- mixed_list_is_refused
 f <- function() list(1L, b = 2L)
 #++++
-f: fn() -> Unknown
+f: Unknown
 16..32 error[type-mismatch] All elements in `list(...)` must be either all named or all unnamed.
 
 #==== extraction
@@ -77,7 +77,7 @@ f <- function() {
   x[[3L]]
 }
 #++++
-f: fn() -> Unknown
+f: Unknown
 41..48 error[type-mismatch] position 3 does not exist in `list{integer, character}`
 
 #---- field_does_not_exist
@@ -86,7 +86,7 @@ f <- function() {
   p$oops
 }
 #++++
-f: fn() -> Unknown
+f: Unknown
 40..46 error[type-mismatch] field `oops` does not exist in `list{a: integer}`
 
 #---- dollar_on_atomic_vector
@@ -95,7 +95,7 @@ f <- function() {
   v$a
 }
 #++++
-f: fn() -> Unknown
+f: Unknown
 37..40 error[type-mismatch] R's `$` operator is invalid on atomic vectors; this value is `integer[named]` — extract an element with `[[` instead.
 
 #---- matrix_indexing_unsupported
@@ -104,7 +104,7 @@ f <- function() {
   x[1L, 2L]
 }
 #++++
-f: fn() -> Unknown
+f: Unknown
 36..45 error[type-mismatch] indexing with 2 indexes is not supported yet — matrix and data.frame subsetting is not modeled
 
 #==== replacement

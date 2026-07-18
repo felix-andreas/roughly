@@ -16,7 +16,7 @@ f: fn(flag: logical) -> integer | NULL
 #---- condition_must_be_scalar_logical
 f <- function() if (1L) 2L
 #++++
-f: fn() -> integer | NULL
+f: Unknown
 20..22 error[type-mismatch] expected `logical`, found `integer`
 
 #==== returns
@@ -90,7 +90,7 @@ f <- function() {
   for (i in g) i
 }
 #++++
-f: fn() -> NULL
+f: Unknown
 51..52 error[type-mismatch] this `for` sequence is `fn() -> integer`, which cannot be iterated — expected a vector or list.
 
 #---- repeat_applies_exit_state

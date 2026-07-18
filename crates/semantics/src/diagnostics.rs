@@ -113,7 +113,8 @@ pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
         }
         if *file.kind(db) == DocumentKind::Package {
             for (expression, name) in &naming.non_locals {
-                if crate::package_scheme_exists(db, name) {
+                if crate::package_scheme_exists(db, name) || super_globals(db, file).contains(name)
+                {
                     continue;
                 }
                 let expression_range = module.expression(*expression).range;
@@ -121,6 +122,7 @@ pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
                     expression_range.start() + offset,
                     expression_range.end() + offset,
                 );
+                let display = display_name(name);
                 let suggestion = unresolved_suggestion(db, name)
                     .map(|nearest| format!(" Did you mean `{nearest}`?"))
                     .unwrap_or_default();
@@ -129,7 +131,7 @@ pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
                     severity: Severity::Warning,
                     code: "unresolved",
                     message: format!(
-                        "I could not resolve `{name}` in this package, its imports, or builtins.{suggestion}"
+                        "I could not resolve `{display}` in this package, its imports, or builtins.{suggestion}"
                     ),
                 });
             }
@@ -158,6 +160,33 @@ fn namespace_read_message(db: &dyn Db, read: &crate::naming::NamespaceRead) -> O
                 None
             }
         }
+    }
+}
+
+/// Names written by `<<-` with no enclosing binding anywhere in the file: R
+/// creates them in the global environment, so reads of them resolve.
+#[salsa::tracked(returns(ref))]
+fn super_globals(db: &dyn Db, file: SourceFile) -> std::collections::BTreeSet<String> {
+    let mut names = std::collections::BTreeSet::new();
+    for item in item_tree(db, file) {
+        if let Some(naming) = crate::item_naming(db, item) {
+            names.extend(naming.super_globals.iter().cloned());
+        }
+    }
+    names
+}
+
+/// A name as R source spells it: non-syntactic names need backticks (a
+/// leading dot must not be followed by a digit — `.2way` is not syntactic).
+fn display_name(name: &str) -> String {
+    let mut characters = name.chars();
+    let syntactic = matches!(characters.next(), Some(first) if first.is_alphabetic() || first == '.')
+        && characters.all(|c| c.is_alphanumeric() || c == '.' || c == '_')
+        && !(name.starts_with('.') && name[1..].chars().next().is_some_and(|c| c.is_ascii_digit()));
+    if syntactic {
+        name.to_owned()
+    } else {
+        format!("`{name}`")
     }
 }
 

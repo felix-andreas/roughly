@@ -90,6 +90,9 @@ pub struct ItemNaming {
     pub masked_subsets: BTreeSet<ExprId>,
     /// Qualified reads, skipping quieted (opaque-construct) contexts.
     pub namespace_reads: BTreeMap<ExprId, NamespaceRead>,
+    /// Names written by `<<-` with no enclosing binding: R creates them in
+    /// the global environment, so they resolve package-wide.
+    pub super_globals: BTreeSet<String>,
 }
 
 /// Resolve one item's HIR. The item's own top-level assignment target (if any)
@@ -651,6 +654,7 @@ impl Context<'_> {
                             None => {
                                 if self.emit {
                                     self.naming.non_locals.insert(target, name.clone());
+                                    self.naming.super_globals.insert(name.clone());
                                 }
                             }
                         }
@@ -688,7 +692,110 @@ impl Context<'_> {
             }
             // Replacement forms (`attr(x, "a") <- v`, `x$field <- v`) read
             // their target as a value and write through a replacement
-            // function; resolve the innards as reads.
+            // function. Inside a frame, R rebinds the base name in the
+            // current scope (`x[i] <- v` is `x <- \`[<-\`(x, i, v)`), so the
+            // base is a write, not an unresolved read; everything else in
+            // the target resolves as reads. At the top level the base stays
+            // a read — a package-level replacement on an undefined name is a
+            // reportable unresolved reference.
+            _ => {
+                let base = self.replacement_base(target);
+                match base {
+                    Some((base_expression, name, range)) if self.current_function_depth() > 0 => {
+                        let existing = self
+                            .scopes
+                            .iter()
+                            .rev()
+                            .find_map(|scope| scope.slots.get(&name).copied());
+                        // R evaluates `x[i] <- v` as `x <- \`[<-\`(x, i, v)`:
+                        // a read of the current value first (keeping earlier
+                        // writes used), then a rebind. An undefined base
+                        // binds fresh without an unresolved report.
+                        let slot = match existing {
+                            Some(slot) => {
+                                self.resolve(base_expression);
+                                slot
+                            }
+                            None => {
+                                let slot = self.mint_binding(&name, range, BindingKind::Local);
+                                self.scopes
+                                    .last_mut()
+                                    .expect("scope stack is never empty")
+                                    .slots
+                                    .insert(name.clone(), slot);
+                                slot
+                            }
+                        };
+                        self.naming.resolutions.insert(base_expression, slot);
+                        self.record_write_site(
+                            assignment,
+                            base_expression,
+                            &name,
+                            range,
+                            slot,
+                            false,
+                        );
+                        self.resolve_replacement_subscripts(target, base_expression);
+                    }
+                    _ => self.resolve(target),
+                }
+            }
+        }
+    }
+
+    /// The base `NameRef` at the bottom of a replacement target chain
+    /// (`x` in `attr(x$f, "a")[i] <- v`).
+    fn replacement_base(&self, target: ExprId) -> Option<(ExprId, String, TextRange)> {
+        let expression = self.module.expression(target);
+        match &expression.kind {
+            ExpressionKind::NameRef(name) => Some((target, name.clone(), expression.range)),
+            ExpressionKind::Field { target: inner, .. }
+            | ExpressionKind::Index { target: inner, .. } => self.replacement_base(*inner),
+            ExpressionKind::Call { arguments, .. } => arguments
+                .first()
+                .and_then(|argument| argument.value)
+                .and_then(|value| self.replacement_base(value)),
+            _ => None,
+        }
+    }
+
+    /// Resolves everything in a replacement target except the (already
+    /// written) base name: indexes, field payloads, further call arguments.
+    fn resolve_replacement_subscripts(&mut self, target: ExprId, base: ExprId) {
+        if target == base {
+            return;
+        }
+        let expression = self.module.expression(target).clone();
+        match &expression.kind {
+            ExpressionKind::Field { target: inner, .. } => {
+                self.resolve_replacement_subscripts(*inner, base);
+            }
+            ExpressionKind::Index {
+                target: inner,
+                arguments,
+                ..
+            } => {
+                self.resolve_replacement_subscripts(*inner, base);
+                for argument in arguments {
+                    if let Some(value) = argument.value {
+                        self.resolve(value);
+                    }
+                }
+            }
+            ExpressionKind::Call { callee, arguments } => {
+                self.resolve(*callee);
+                let mut arguments = arguments.iter();
+                if let Some(first) = arguments.next()
+                    && let Some(value) = first.value
+                {
+                    self.resolve_replacement_subscripts(value, base);
+                }
+                for argument in arguments {
+                    if let Some(value) = argument.value {
+                        self.resolve(value);
+                    }
+                }
+            }
             _ => self.resolve(target),
         }
     }

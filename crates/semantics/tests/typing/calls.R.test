@@ -24,7 +24,7 @@ f: fn() -> integer[]
 #---- stub_argument_mismatch
 f <- function(x) grepl(1L, x)
 #++++
-f: <T> fn(x: T) -> logical
+f: Unknown
 23..25 error[type-mismatch] expected `character`, found `integer`
 
 #---- namespace_access
@@ -47,7 +47,7 @@ f <- function() {
   g(z = 1)
 }
 #++++
-f: <T> fn() -> T
+f: Unknown
 41..49 error[type-mismatch] This call uses named argument(s) `z`, but the function accepts named parameter(s) `x`.
 
 #---- surplus_positional
@@ -56,7 +56,7 @@ f <- function() {
   g(1, 2)
 }
 #++++
-f: fn() -> double
+f: Unknown
 41..42 error[type-mismatch] This call passes 2 positional argument(s), but the function accepts 1.
 
 #---- missing_required
@@ -65,7 +65,7 @@ f <- function() {
   g(1L)
 }
 #++++
-f: fn() -> integer
+f: Unknown
 44..45 error[type-mismatch] This call passes 1 positional argument(s), but the function accepts 2.
 
 #---- defaulted_formal_may_stay_unfilled
@@ -115,7 +115,7 @@ f <- function() {
   lapply(words, function(a, b) a)
 }
 #++++
-f: <T> fn() -> list[T]
+f: Unknown
 64..80 error[type-mismatch] expected `fn(character) -> T`, found `fn(a: U, b: V) -> U`
 
 #---- missing_tested_formal_is_optional

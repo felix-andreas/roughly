@@ -104,5 +104,5 @@ f <- function() {
   x[1L, 2L]
 }
 #++++
-f: fn() -> Unknown
+f: Unknown
 36..45 error[type-mismatch] indexing with 2 indexes is not supported yet — matrix and data.frame subsetting is not modeled

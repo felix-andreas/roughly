@@ -23,7 +23,7 @@ first: fn(p: Pair<integer>) -> integer
 #: A
 value <- 1L
 #++++
-value: integer
+value: Unknown
 22..33 error[type-mismatch] Type alias `A` expands in a cycle.
 
 #---- alias_mutual_cycle_used
@@ -33,7 +33,7 @@ value: integer
 #: A
 value <- 1L
 #++++
-value: integer
+value: Unknown
 38..49 error[type-mismatch] Type alias `A` expands in a cycle.
 
 #==== nominals
@@ -55,7 +55,7 @@ name_of <- function(p) p$name
 imposter <- function() name_of(list(name = "eve", age = 1L))
 #++++
 name_of: fn(p: Person) -> character
-imposter: fn() -> character
+imposter: Unknown
 146..174 error[type-mismatch] expected `Person`, found `list{name: character, age: integer}`
 
 #---- new_checks_the_representation
@@ -64,7 +64,7 @@ imposter: fn() -> character
 #: @new Person
 broken <- list(name = 42L, age = 36L)
 #++++
-broken: Person
+broken: Unknown
 80..107 error[type-mismatch] expected `list{name: character, age: integer}`, found `list{name: integer, age: integer}`
 
 #---- generic_nominal_fully_applied
@@ -92,7 +92,7 @@ mixed <- function() keep(imperial)
 height: Meters
 keep: fn(m: Meters) -> Meters
 imperial: Feet
-mixed: fn() -> Meters
+mixed: Unknown
 181..189 error[type-mismatch] expected `Meters`, found `Feet`
 
 #---- arithmetic_projects_to_the_representation
@@ -101,5 +101,5 @@ mixed: fn() -> Meters
 #: fn(m: Meters) -> Meters
 double_it <- function(m) m * 2
 #++++
-double_it: fn(m: Meters) -> Meters
+double_it: Unknown
 78..83 error[type-mismatch] expected `Meters`, found `double`

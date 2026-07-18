@@ -310,17 +310,29 @@ pub fn check_item_with_annotation<'db>(
         .iter()
         .map(|(&id, &ty)| (id, context.table.resolve(context.db, ty)))
         .collect();
-    // Inference variables are table-scoped: a scheme crossing the item
-    // boundary must never carry one (a foreign table cannot resolve it), so
-    // residual monomorphic variables — kept raw inside the item to tie use
-    // sites together — erase to `Unknown` at the export edge.
-    let scheme = scheme.map(|scheme| TypeScheme {
-        binders: scheme.binders,
-        body: erase_residual_vars(db, &mut context.table, scheme.body),
-    });
+    // One reported error per item, and a failed item exports `Unknown`: a
+    // type error means the inferred shape is not trustworthy, so downstream
+    // items must not check against it (they would cascade), and everything
+    // after the first failure inside the item is itself suspect. Inference
+    // still runs to completion internally — expression types stay available
+    // for IDE surfaces — only the report and the export are cut.
+    let mut errors = context.errors;
+    let scheme = if errors.is_empty() {
+        // Inference variables are table-scoped: a scheme crossing the item
+        // boundary must never carry one (a foreign table cannot resolve it),
+        // so residual monomorphic variables — kept raw inside the item to
+        // tie use sites together — erase to `Unknown` at the export edge.
+        scheme.map(|scheme| TypeScheme {
+            binders: scheme.binders,
+            body: erase_residual_vars(db, &mut context.table, scheme.body),
+        })
+    } else {
+        errors.truncate(1);
+        scheme.map(|_| TypeScheme::monomorphic(unknown(db)))
+    };
     ItemCheck {
         expression_types,
-        errors: context.errors,
+        errors,
         strict_origins: context.strict_origins,
         scheme,
     }
