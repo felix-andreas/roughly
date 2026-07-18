@@ -3,7 +3,7 @@ use {
     indoc::indoc,
     regex::{Captures, Regex},
     ropey::Rope,
-    roughly::{
+    roughly_legacy::{
         format::{Config, FormatError, LineEnding, format},
         tree,
     },

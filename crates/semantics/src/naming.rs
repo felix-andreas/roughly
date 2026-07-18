@@ -22,7 +22,7 @@
 //! the unused-parameter lint.
 
 use crate::hir::{Argument, AssignSpelling, ExprId, ExpressionKind, Module, UnaryOperator};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::{BTreeMap, BTreeSet};
 use syntax::TextRange;
 
@@ -102,8 +102,20 @@ pub struct ItemNaming {
 /// Resolve one item's HIR. The item's own top-level assignment target (if any)
 /// becomes a `TopLevel` binding; everything below follows the slot model.
 pub fn resolve_item(module: &Module) -> ItemNaming {
+    resolve_item_with_masked_verbs(module, &FxHashSet::default())
+}
+
+/// Like [`resolve_item`], with the stub corpus's `@masked` verb names: a call
+/// to one of them (bare or `pkg::name`, unless locally shadowed) evaluates
+/// every argument after the data in the data's frame, so those reads stay
+/// quiet like the base masking family's.
+pub fn resolve_item_with_masked_verbs(
+    module: &Module,
+    masked_verbs: &FxHashSet<String>,
+) -> ItemNaming {
     let mut context = Context {
         module,
+        masked_verbs,
         next_binding: 0,
         scopes: vec![Scope::new(ScopeKind::TopLevel)],
         bindings_by_site: FxHashMap::default(),
@@ -170,6 +182,8 @@ struct AssignmentWrite {
 
 struct Context<'a> {
     module: &'a Module,
+    /// Stub-declared `@masked` verb names (dplyr-style data-masking `...`).
+    masked_verbs: &'a FxHashSet<String>,
     next_binding: u32,
     scopes: Vec<Scope>,
     /// Loop re-walks must mint no new ids: one binding per (site, name).
@@ -299,11 +313,18 @@ impl Context<'_> {
                 // The base masking family evaluates every argument after the
                 // data inside the data's frame; a locally defined function of
                 // the same name masks nothing.
-                let masking_family = matches!(
-                    &self.module.expression(*callee).kind,
-                    ExpressionKind::NameRef(name)
-                        if matches!(name.as_str(), "with" | "within" | "subset" | "transform")
-                ) && !self.naming.resolutions.contains_key(callee);
+                let masking_family = match &self.module.expression(*callee).kind {
+                    ExpressionKind::NameRef(name) => {
+                        (matches!(name.as_str(), "with" | "within" | "subset" | "transform")
+                            || self.masked_verbs.contains(name))
+                            && !self.naming.resolutions.contains_key(callee)
+                    }
+                    // Namespace access cannot be shadowed by a local binding.
+                    ExpressionKind::Namespace {
+                        name: Some(name), ..
+                    } => self.masked_verbs.contains(name),
+                    _ => false,
+                };
                 if masking_family {
                     let mut argument_iter = arguments.iter();
                     if let Some(data) = argument_iter.next()

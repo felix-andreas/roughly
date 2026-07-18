@@ -1,0 +1,172 @@
+//! The final diagnostic set for one file: every class the analysis computes,
+//! gated by config exactly the same way for the language server's publish
+//! path and `roughly check`, so the two surfaces can never drift.
+
+use crate::config::{CheckConfig, Config};
+use semantics::diagnostics::{Diagnostic, Severity, file_diagnostics, strict_diagnostics};
+use semantics::lints::lint_file;
+use semantics::{Db, SourceFile, TypingMode, file_typing_mode};
+
+/// The published diagnostics of `file` under `config`, in position order.
+/// Suppression comments are the caller's step (applied against the source
+/// text it holds).
+pub fn document_diagnostics(db: &dyn Db, file: SourceFile, config: &Config) -> Vec<Diagnostic> {
+    let (typing_enabled, strict_enabled) = effective_typing(db, file, config.check);
+    let mut rendered: Vec<Diagnostic> = file_diagnostics(db, file)
+        .into_iter()
+        .filter(|diagnostic| match diagnostic.code {
+            "unused" => config.check.unused,
+            "type-mismatch" => typing_enabled,
+            _ => true,
+        })
+        .collect();
+    rendered.extend(lint_file(db, file, &config.lint));
+    if strict_enabled {
+        rendered.extend(strict_diagnostics(db, file));
+        for diagnostic in &mut rendered {
+            if diagnostic.code == "unresolved" {
+                diagnostic.severity = Severity::Error;
+            }
+        }
+    }
+    rendered.sort_by_key(|diagnostic| (diagnostic.range.start(), diagnostic.range.end()));
+    rendered
+}
+
+/// The cheap per-file classes that are pure functions of the parse — syntax,
+/// naming, annotations, and lints — published immediately on an edit so
+/// typing never waits on type checking. Must be a faithful subset of
+/// [`document_diagnostics`] for identical text: the settled wave only adds
+/// findings, never moves or removes one (hence strict escalation applies
+/// here too).
+pub fn first_wave_diagnostics(db: &dyn Db, file: SourceFile, config: &Config) -> Vec<Diagnostic> {
+    let (_, strict_enabled) = effective_typing(db, file, config.check);
+    let mut rendered: Vec<Diagnostic> = file_diagnostics(db, file)
+        .into_iter()
+        .filter(|diagnostic| match diagnostic.code {
+            "unused" => config.check.unused,
+            "type-mismatch" => false,
+            _ => true,
+        })
+        .collect();
+    rendered.extend(lint_file(db, file, &config.lint));
+    if strict_enabled {
+        for diagnostic in &mut rendered {
+            if diagnostic.code == "unresolved" {
+                diagnostic.severity = Severity::Error;
+            }
+        }
+    }
+    rendered.sort_by_key(|diagnostic| (diagnostic.range.start(), diagnostic.range.end()));
+    rendered
+}
+
+/// The effective (typing, strict) publication gates: a per-file directive
+/// (`# typing: off|on|strict` or `#: @strict`) overrides the configured
+/// default.
+pub fn effective_typing(db: &dyn Db, file: SourceFile, check: CheckConfig) -> (bool, bool) {
+    match file_typing_mode(db, file) {
+        Some(TypingMode::Off) => (false, false),
+        Some(TypingMode::On) => (true, false),
+        Some(TypingMode::Strict) => (true, true),
+        None => (check.typing, check.strict),
+    }
+}
+
+/// Applies `# roughly: allow(code, ...)` suppression comments: a diagnostic
+/// is dropped when a suppression naming its code (or `all`) sits on the
+/// diagnostic's own line (a trailing comment) or on the line directly above
+/// it. Applied at assembly, after severity decisions, so a suppressed
+/// escalated error is dropped like any other diagnostic.
+pub fn apply_suppressions(diagnostics: Vec<Diagnostic>, source: &str) -> Vec<Diagnostic> {
+    if !source.contains("roughly:") {
+        return diagnostics;
+    }
+    let mut allowed_by_line: Vec<(usize, Vec<String>)> = Vec::new();
+    for (line_index, line) in source.lines().enumerate() {
+        let Some(comment_start) = line.find('#') else {
+            continue;
+        };
+        let comment = line[comment_start..].trim_start_matches('#').trim();
+        let Some(rest) = comment.strip_prefix("roughly:") else {
+            continue;
+        };
+        let Some(arguments) = rest
+            .trim()
+            .strip_prefix("allow(")
+            .and_then(|rest| rest.split_once(')'))
+            .map(|(inside, _)| inside)
+        else {
+            continue;
+        };
+        let codes: Vec<String> = arguments
+            .split(',')
+            .map(|code| code.trim().to_owned())
+            .filter(|code| !code.is_empty())
+            .collect();
+        if !codes.is_empty() {
+            allowed_by_line.push((line_index, codes));
+        }
+    }
+    if allowed_by_line.is_empty() {
+        return diagnostics;
+    }
+    let index = crate::position::LineIndex::new(source);
+    diagnostics
+        .into_iter()
+        .filter(|diagnostic| {
+            let line = index.line_column(diagnostic.range.start()).line as usize;
+            !allowed_by_line
+                .iter()
+                .filter(|(allowed_line, _)| {
+                    *allowed_line == line || Some(*allowed_line) == line.checked_sub(1)
+                })
+                .flat_map(|(_, codes)| codes)
+                .any(|code| code == "all" || code == diagnostic.code)
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::apply_suppressions;
+    use semantics::diagnostics::{Diagnostic, Severity};
+    use syntax::{TextRange, TextSize};
+
+    fn diagnostic(offset: u32, code: &'static str) -> Diagnostic {
+        Diagnostic {
+            range: TextRange::new(TextSize::from(offset), TextSize::from(offset + 1)),
+            severity: Severity::Warning,
+            code,
+            message: "test".to_owned(),
+        }
+    }
+
+    #[test]
+    fn trailing_and_line_above_suppressions_apply() {
+        let source = "x <- T # roughly: allow(boolean-shorthand)\n# roughly: allow(unused)\ny <- 1\nz <- 1\n";
+        let kept = apply_suppressions(
+            vec![
+                diagnostic(5, "boolean-shorthand"),
+                diagnostic(69, "unused"),
+                diagnostic(76, "unused"),
+            ],
+            source,
+        );
+        assert_eq!(kept.len(), 1);
+        assert_eq!(u32::from(kept[0].range.start()), 76);
+    }
+
+    #[test]
+    fn all_wildcard_suppresses_every_code() {
+        let source = "x = T # roughly: allow(all)\n";
+        let kept = apply_suppressions(
+            vec![
+                diagnostic(0, "assignment-operator"),
+                diagnostic(4, "boolean-shorthand"),
+            ],
+            source,
+        );
+        assert!(kept.is_empty(), "{kept:?}");
+    }
+}

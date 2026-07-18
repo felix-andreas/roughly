@@ -231,7 +231,13 @@ pub fn item_hir<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<hir::Module> {
 #[salsa::tracked(returns(clone))]
 pub fn item_naming<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<naming::ItemNaming> {
     let module = item_hir(db, item)?;
-    Some(naming::resolve_item(&module))
+    let masked_verbs = stubs::stubs(db)
+        .map(|library| library.masked.clone())
+        .unwrap_or_default();
+    Some(naming::resolve_item_with_masked_verbs(
+        &module,
+        &masked_verbs,
+    ))
 }
 
 /// Names the checker recognizes structurally rather than through the stub

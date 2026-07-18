@@ -94,7 +94,7 @@ fn spawn_server_with_experimental_features(
     server_cwd: &Path,
     experimental_features: &[&str],
 ) -> tokio::process::Child {
-    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_roughly"));
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_roughly-legacy"));
     command.arg("server");
     if !experimental_features.is_empty() {
         command.arg("--experimental-features");

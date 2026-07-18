@@ -29,7 +29,7 @@ fn point_to_text_position(point: Point) -> TextPosition {
 // adapted from https://doc.rust-lang.org/stable/nightly-rustc/src/clippy_utils/str_utils.rs.html
 
 /// ```
-/// use roughly::utils::to_camel_case;
+/// use roughly_legacy::utils::to_camel_case;
 /// assert_eq!(to_camel_case("foo_bar"), "fooBar");
 /// assert_eq!(to_camel_case("fooXY"), "fooXY");
 /// assert_eq!(to_camel_case("foo_x_y"), "fooXY");
@@ -58,7 +58,7 @@ pub fn to_camel_case(name: &str) -> String {
 }
 
 /// ```
-/// use roughly::utils::to_snake_case;
+/// use roughly_legacy::utils::to_snake_case;
 /// assert_eq!(to_snake_case("fooBar"), "foo_bar");
 /// assert_eq!(to_snake_case("fooXY"), "foo_x_y");
 /// assert_eq!(to_snake_case("foo_bar"), "foo_bar");

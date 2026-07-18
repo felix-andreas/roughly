@@ -584,6 +584,7 @@ dependencies = [
 name = "format"
 version = "0.2.8-alpha"
 dependencies = [
+ "serde",
  "syntax",
 ]
 
@@ -1356,6 +1357,29 @@ checksum = "93411e420bcd1a75ddd1dc3caf18c23155eda2c090631a85af21ba19e97093b5"
 dependencies = [
  "smallvec",
  "str_indices",
+]
+
+[[package]]
+name = "roughly"
+version = "0.2.8-alpha"
+dependencies = [
+ "clap",
+ "console",
+ "format",
+ "ide",
+ "ignore",
+ "indoc",
+ "semantics",
+ "serde",
+ "serde_json",
+ "similar",
+ "syntax",
+ "tempfile",
+ "thiserror",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "tracing-tree",
 ]
 
 [[package]]

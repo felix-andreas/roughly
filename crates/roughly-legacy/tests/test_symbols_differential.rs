@@ -1,4 +1,4 @@
-//! Symbols differential. Document and workspace symbols are purely structural — `roughly::symbols` runs
+//! Symbols differential. Document and workspace symbols are purely structural — `roughly_legacy::symbols` runs
 //! `index::index` over a document's tree+rope and never touches the analysis pipeline — so the only thing
 //! the engine path must preserve is that it serves the *same* document trees and the *same*
 //! package-document set as `analysis`. This asserts exactly
@@ -12,7 +12,7 @@ use {
         ide_view::PathTable,
         queries::{Config, FileId, Key, RoughlyQueries, source_input},
     },
-    roughly::{
+    roughly_legacy::{
         index::{self, Item},
         lsp_types::{Position, Range},
         symbols,

@@ -14,15 +14,14 @@ readme = "README.md"
 keywords = ["r", "language-server", "lsp", "formatter", "linter"]
 categories = ["development-tools", "command-line-utilities"]
 
-# Package renamed for the greenfield rewrite; lib and bin targets keep their original names
-# (`use roughly::`, the shipped `roughly` binary) so the frozen stack needs no source churn.
-# The new `crates/roughly` takes the bin name back at the Phase 3 cutover.
+# Frozen legacy stack: the Phase 3 cutover moved the `roughly` lib and bin names to the new
+# `crates/roughly`; this crate keeps building under the `-legacy` names as oracle + benchmark.
 [lib]
-name = "roughly"
+name = "roughly_legacy"
 path = "src/lib.rs"
 
 [[bin]]
-name = "roughly"
+name = "roughly-legacy"
 path = "src/main.rs"
 
 [dependencies]

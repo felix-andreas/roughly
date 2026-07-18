@@ -10,6 +10,7 @@ publish = false
 path = "src/format.rs"
 
 [dependencies]
+serde = { workspace = true, features = ["derive"] }
 syntax = { path = "../syntax" }
 
 [dev-dependencies]

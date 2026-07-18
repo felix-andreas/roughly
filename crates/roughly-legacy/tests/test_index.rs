@@ -1,7 +1,7 @@
 use {
     indoc::indoc,
     ropey::Rope,
-    roughly::{
+    roughly_legacy::{
         index::{self, Item, ItemInfo},
         tree,
     },

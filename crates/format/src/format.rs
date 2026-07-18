@@ -13,7 +13,8 @@
 
 use syntax::{SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken, TextRange};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Config {
     pub indent_width: usize,
     pub line_ending: LineEnding,
@@ -28,7 +29,8 @@ impl Default for Config {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum LineEnding {
     Auto,
     Lf,

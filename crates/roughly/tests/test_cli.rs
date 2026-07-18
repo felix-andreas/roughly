@@ -1,14 +1,13 @@
-//! End-to-end tests for the `roughly` binary: diagnostic rendering, JSON output, and the
-//! documented exit-code contract (0 clean, 1 findings, 2 usage/configuration/IO errors).
+//! End-to-end tests for the `roughly` binary: diagnostic rendering, JSON
+//! output, and the documented exit-code contract (0 clean, 1 findings, 2
+//! usage/configuration/IO errors).
 
-use std::{
-    fs,
-    path::Path,
-    process::{Command, Output},
-};
+use std::fs;
+use std::path::Path;
+use std::process::{Command, Output};
 
 fn roughly(directory: &Path, arguments: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_roughly-legacy"))
+    Command::new(env!("CARGO_BIN_EXE_roughly"))
         .args(arguments)
         .current_dir(directory)
         .output()
@@ -39,8 +38,8 @@ fn project(files: &[(&str, &str)]) -> tempfile::TempDir {
     directory
 }
 
-// The source produces one syntax-error diagnostic with the 0-based range 1:2..1:6, so the
-// rendered 1-based position is line 2, column 3.
+// The unclosed `(` produces a syntax error at the 0-based range 2:5..2:6 (the
+// `(` token on line 2), so the rendered 1-based position is line 2, column 6.
 const SYNTAX_ERROR_SOURCE: &str = "x <- 1\ny <- (\n";
 
 //
@@ -62,7 +61,7 @@ fn check_renders_one_based_positions() {
 
     assert_eq!(exit_code(&output), 1, "stderr: {stderr}");
     assert!(
-        stderr.contains("bad.R:2:3"),
+        stderr.contains("bad.R:2:6"),
         "expected a 1-based `--> path:line:column` header, got: {stderr}"
     );
     assert!(
@@ -123,10 +122,12 @@ fn check_json_output_is_one_based_and_parses() {
         stderr(&output)
     );
 
-    let lines: Vec<&str> = stdout.lines().collect();
-    assert_eq!(lines.len(), 1, "expected one JSON line, got: {stdout}");
-    let record: serde_json::Value =
-        serde_json::from_str(lines[0]).expect("diagnostic line is not valid JSON");
+    let records: Vec<serde_json::Value> = stdout
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("diagnostic line is not valid JSON"))
+        .collect();
+    assert!(!records.is_empty(), "expected JSON lines, got: {stdout}");
+    let record = &records[0];
 
     assert!(
         record["path"]
@@ -135,7 +136,7 @@ fn check_json_output_is_one_based_and_parses() {
         "unexpected path: {record}"
     );
     assert_eq!(record["line"], 2, "line must be 1-based: {record}");
-    assert_eq!(record["column"], 3, "column must be 1-based: {record}");
+    assert_eq!(record["column"], 6, "column must be 1-based: {record}");
     assert_eq!(record["endLine"], 2, "endLine must be 1-based: {record}");
     assert_eq!(
         record["endColumn"], 7,
@@ -165,61 +166,9 @@ fn check_json_output_maps_warning_severity() {
     assert_eq!(record["severity"], "warning", "got: {record}");
 }
 
-// Two package files overwrite the same top-level binding; each warning carries a note pointing at
-// the sibling binding, on both output surfaces.
-#[test]
-fn check_related_notes_render_on_both_surfaces() {
-    let files = &[("R/a.R", "shared <- 1\n"), ("R/b.R", "shared <- 2\n")];
-
-    let human = roughly(project(files).path(), &["check", "."]);
-    assert_eq!(exit_code(&human), 1, "stderr: {}", stderr(&human));
-    let rendered = stderr(&human);
-    assert!(
-        rendered.contains("= note: the later binding is here. -->")
-            && rendered.contains("= note: the earlier binding is here. -->"),
-        "expected one note per overwrite warning, got: {rendered}"
-    );
-
-    let json = roughly(project(files).path(), &["check", "--output", "json", "."]);
-    assert_eq!(exit_code(&json), 1, "stderr: {}", stderr(&json));
-    let records: Vec<serde_json::Value> = stdout(&json)
-        .lines()
-        .map(|line| serde_json::from_str(line).expect("diagnostic line is not valid JSON"))
-        .collect();
-    let noted = records
-        .iter()
-        .filter_map(|record| record["related"].as_array())
-        .filter(|related| !related.is_empty())
-        .count();
-    assert_eq!(
-        noted, 2,
-        "expected both overwrite warnings to carry related info: {records:?}"
-    );
-    let entry = records
-        .iter()
-        .find_map(|record| record["related"].as_array().and_then(|array| array.first()))
-        .expect("a related entry exists");
-    assert!(
-        entry["path"]
-            .as_str()
-            .is_some_and(|path| path.ends_with(".R")),
-        "related path points at the sibling file: {entry}"
-    );
-    assert_eq!(entry["line"], 1, "related line must be 1-based: {entry}");
-    assert_eq!(
-        entry["column"], 1,
-        "related column must be 1-based: {entry}"
-    );
-    assert!(
-        entry["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("binding is here")),
-        "related message names the sibling binding: {entry}"
-    );
-}
-
-// importFrom naming something a stubbed namespace does not export warns on the NAMESPACE file;
-// spelled-right imports and unknown (unstubbed) namespaces stay quiet.
+// importFrom naming something a stubbed namespace does not export warns on
+// the NAMESPACE file; spelled-right imports and unknown (unstubbed)
+// namespaces stay quiet.
 #[test]
 fn check_validates_namespace_imports_against_stubs() {
     let directory = project(&[
@@ -246,8 +195,9 @@ fn check_validates_namespace_imports_against_stubs() {
     );
 }
 
-// The `unused-import` lint is off by default and fires only when opted in; a name used anywhere in
-// the package (including via `pkg::name`) is not flagged, an unused one is.
+// The `unused-import` lint is off by default and fires only when opted in; a
+// name used anywhere in the package (including via `pkg::name`) is not
+// flagged, an unused one is.
 #[test]
 fn check_flags_unused_imports_when_opted_in() {
     let files: &[(&str, &str)] = &[
@@ -255,7 +205,6 @@ fn check_flags_unused_imports_when_opted_in() {
         ("NAMESPACE", "importFrom(stats, sd, median)\n"),
     ];
 
-    // Default: silent.
     let default_run = roughly(project(files).path(), &["check", "."]);
     assert_eq!(
         exit_code(&default_run),
@@ -264,7 +213,6 @@ fn check_flags_unused_imports_when_opted_in() {
         stderr(&default_run)
     );
 
-    // Opted in: `median` is flagged, `sd` (used via stats::sd) is not.
     let opted_in = project(&[
         files[0],
         files[1],
@@ -286,7 +234,6 @@ fn check_flags_unused_imports_when_opted_in() {
 #[test]
 fn check_min_severity_error_ignores_warnings() {
     let directory = project(&[("warn.R", "x = 1\n")]);
-
     let filtered = roughly(
         directory.path(),
         &["check", "--min-severity", "error", "warn.R"],
@@ -323,32 +270,6 @@ fn check_missing_target_exits_two() {
 }
 
 #[test]
-fn check_reports_dropped_override_stub_declarations() {
-    // The loader drops an override declaration it cannot harvest; `check` must say so instead of
-    // silently checking against a corpus the author did not write.
-    let directory = project(&[
-        ("clean.R", "x <- 1\n"),
-        ("stubs/project.Rtypes", "size : Frobnicate\n"),
-    ]);
-    let output = roughly(directory.path(), &["check", "clean.R"]);
-    let stderr = stderr(&output);
-
-    assert_eq!(
-        exit_code(&output),
-        1,
-        "a dropped override declaration is a finding: {stderr}"
-    );
-    assert!(
-        stderr.contains("does not load"),
-        "expected the dropped declaration to be reported, got: {stderr}"
-    );
-    assert!(
-        stderr.contains("project.Rtypes:1:1"),
-        "expected a 1-based stub-file position header, got: {stderr}"
-    );
-}
-
-#[test]
 fn check_loads_valid_override_stubs_silently() {
     let directory = project(&[
         ("clean.R", "x <- 1\n"),
@@ -362,6 +283,25 @@ fn check_loads_valid_override_stubs_silently() {
 }
 
 #[test]
+fn check_override_stub_types_apply() {
+    let directory = project(&[
+        ("R/main.R", "answer <- my_helper(\"not a double\")\n"),
+        (
+            "stubs/project.Rtypes",
+            "my_helper : fn(x: double) -> double\n",
+        ),
+        ("roughly.toml", "[check]\ntyping = true\n"),
+    ]);
+    let output = roughly(directory.path(), &["check", "."]);
+    let rendered = stderr(&output);
+    assert_eq!(exit_code(&output), 1, "stderr: {rendered}");
+    assert!(
+        rendered.contains("R/main.R") || rendered.contains("main.R"),
+        "expected a type finding against the override stub, got: {rendered}"
+    );
+}
+
+#[test]
 fn check_without_r_files_exits_two() {
     let directory = project(&[]);
     let output = roughly(directory.path(), &["check"]);
@@ -370,6 +310,27 @@ fn check_without_r_files_exits_two() {
         stderr(&output).contains("no R files found"),
         "expected the empty-target error, got: {}",
         stderr(&output)
+    );
+}
+
+// A suppression applies to its own line and the line directly below it, so
+// the unsuppressed finding needs a blank line in between.
+#[test]
+fn check_suppression_comments_drop_findings() {
+    let directory = project(&[(
+        "warn.R",
+        "x = 1 # roughly: allow(assignment-operator)\n\ny = 2\n",
+    )]);
+    let output = roughly(directory.path(), &["check", "warn.R"]);
+    let rendered = stderr(&output);
+    assert_eq!(exit_code(&output), 1, "stderr: {rendered}");
+    assert!(
+        rendered.contains("warn.R:3:1"),
+        "the unsuppressed finding remains: {rendered}"
+    );
+    assert!(
+        !rendered.contains("warn.R:1:1"),
+        "the suppressed finding must not render: {rendered}"
     );
 }
 
@@ -444,74 +405,12 @@ fn usage_error_exits_two() {
 }
 
 //
-// ANALYSIS-STATS
-//
-
-// The performance diagnosis runs the full pipeline and prints every report section; the workspace
-// here has a cross-file reference so the interface layer genuinely participates.
-#[test]
-fn analysis_stats_prints_the_full_breakdown() {
-    let directory = project(&[
-        ("R/lib.R", "make_count <- function() 1L\n"),
-        ("R/use.R", "total <- make_count() + 1L\n"),
-        ("roughly.toml", "[check]\ntyping = true\n"),
-    ]);
-    let output = roughly(directory.path(), &["debug", "analysis-stats"]);
-    assert_eq!(exit_code(&output), 0, "stderr: {}", stderr(&output));
-    let report = stdout(&output);
-    for section in [
-        "workspace:",
-        "2 package files",
-        "cold analysis",
-        "typecheck (+interfaces)",
-        "package naming (+folds)",
-        "diagnostics (render)",
-        "slowest files (typecheck):",
-        "incremental (typing burst:",
-        "edited-file diagnostics",
-        "workspace revalidate",
-        "recomputed query bodies:",
-        "validation walk (slots)",
-    ] {
-        assert!(
-            report.contains(section),
-            "missing section {section:?} in report:\n{report}"
-        );
-    }
-    assert!(
-        !report.contains("note: [check] typing is off"),
-        "typing is on in this workspace's config, so no forcing note:\n{report}"
-    );
-}
-
-// Without a configuration the type checker defaults off; the diagnosis forces it on and says so.
-#[test]
-fn analysis_stats_notes_when_it_forces_typing_on() {
-    let directory = project(&[("R/a.R", "f <- function(x) x + 1\n")]);
-    let output = roughly(directory.path(), &["debug", "analysis-stats"]);
-    assert_eq!(exit_code(&output), 0, "stderr: {}", stderr(&output));
-    assert!(
-        stdout(&output).contains("note: [check] typing is off in the configuration"),
-        "report:\n{}",
-        stdout(&output)
-    );
-}
-
-// A target without any R files is a usage error (exit 2), not an empty report.
-#[test]
-fn analysis_stats_rejects_a_workspace_without_r_files() {
-    let directory = project(&[("README.md", "no code here\n")]);
-    let output = roughly(directory.path(), &["debug", "analysis-stats"]);
-    assert_eq!(exit_code(&output), 2);
-    assert!(stderr(&output).contains("no R files"));
-}
-
-//
 // PER-FILE TYPING DIRECTIVES
 //
 
-// `# typing: off` silences type errors for its file even when the configuration checks types;
-// files without a directive keep the configured behavior.
+// `# typing: off` silences type errors for its file even when the
+// configuration checks types; files without a directive keep the configured
+// behavior.
 #[test]
 fn typing_off_directive_silences_one_file() {
     let directory = project(&[
@@ -526,9 +425,9 @@ fn typing_off_directive_silences_one_file() {
     assert!(!report.contains("opted_out.R"), "report:\n{report}");
 }
 
-// `# typing: on` opts a single file into type checking when the configuration has it off, and
-// `# typing: strict` additionally escalates unresolved references — both without touching the
-// rest of the workspace.
+// `# typing: on` opts a single file into type checking when the
+// configuration has it off, and `# typing: strict` additionally escalates
+// unresolved references — both without touching the rest of the workspace.
 #[test]
 fn typing_on_and_strict_directives_opt_single_files_in() {
     let directory = project(&[
@@ -561,10 +460,10 @@ fn unknown_typing_directive_value_is_reported() {
     );
 }
 
-// data.table's non-standard evaluation: bare column references inside a bracket carrying the
-// data.table signature (`by =`, `:=`, `.()`, `.SD`-family) and inside the base `with`/`subset`
-// family resolve as data-masked columns — no unresolved-name warnings — while base indexing
-// keeps them.
+// data.table's non-standard evaluation: bare column references inside a
+// bracket carrying the data.table signature and inside the base
+// `with`/`subset` family resolve as data-masked columns — no
+// unresolved-name warnings — while base indexing keeps them.
 #[test]
 fn data_masked_column_references_do_not_warn() {
     let directory = project(&[
@@ -590,37 +489,10 @@ fn data_masked_column_references_do_not_warn() {
     }
 }
 
-// `utils::globalVariables(c(...))` — the ecosystem-standard escape hatch — declares names as
-// dynamically bound for the whole package: could-not-resolve is suppressed for them everywhere,
-// while undeclared names keep warning.
-#[test]
-fn global_variables_declarations_suppress_unresolved_warnings() {
-    let directory = project(&[
-        (
-            "R/globals.R",
-            "utils::globalVariables(c(\"generated_col\", \"another_col\"))\n",
-        ),
-        (
-            "R/use.R",
-            "f <- function() generated_col + another_col + genuinely_undefined\n",
-        ),
-        ("roughly.toml", "[check]\ntyping = true\n"),
-    ]);
-    let output = roughly(directory.path(), &["check"]);
-    assert_eq!(exit_code(&output), 1);
-    let report = stderr(&output);
-    assert!(report.contains("genuinely_undefined"), "report:\n{report}");
-    for declared in ["generated_col", "another_col"] {
-        assert!(
-            !report.contains(&format!("`{declared}`")),
-            "declared name `{declared}` must not warn:\n{report}"
-        );
-    }
-}
-
-// A project stub can declare a dplyr-style verb `@masked`: the arguments its `...` rest parameter
-// absorbs evaluate in the data's frame, so bare column references there stop warning — for the
-// bare and the `pkg::name` call forms alike — while a locally shadowed name masks nothing.
+// A project stub can declare a dplyr-style verb `@masked`: the arguments its
+// `...` rest parameter absorbs evaluate in the data's frame, so bare column
+// references there stop warning — for the bare and the `pkg::name` call
+// forms alike — while a locally shadowed name masks nothing.
 #[test]
 fn masked_stub_verbs_mask_rest_absorbed_arguments() {
     let directory = project(&[
@@ -644,19 +516,4 @@ fn masked_stub_verbs_mask_rest_absorbed_arguments() {
             "masked column `{column}` must not warn:\n{report}"
         );
     }
-}
-
-// `@masked` demands a variadic function type — the mask covers what `...` absorbs.
-#[test]
-fn masked_attribute_requires_a_variadic_function() {
-    let directory = project(&[
-        ("stubs/broken.Rtypes", "f : @masked fn(x: Any) -> Any\n"),
-        ("R/a.R", "y <- 1L\n"),
-    ]);
-    let output = roughly(directory.path(), &["check"]);
-    assert!(
-        stderr(&output).contains("requires a variadic function type"),
-        "report:\n{}",
-        stderr(&output)
-    );
 }

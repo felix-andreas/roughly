@@ -29,7 +29,7 @@ fn format_differential_corpus() {
         "no corpus files under {corpus_root:?} — run scripts/fetch-corpus.sh first"
     );
 
-    let mut parser = roughly::tree::new_parser();
+    let mut parser = roughly_legacy::tree::new_parser();
     let mut report = String::new();
     let mut rollup: BTreeMap<String, usize> = BTreeMap::new();
     let mut files = 0usize;
@@ -46,10 +46,13 @@ fn format_differential_corpus() {
         };
         let relative = path.strip_prefix(&corpus_root).unwrap_or(path);
 
-        let tree = roughly::tree::parse(&mut parser, &source, None);
+        let tree = roughly_legacy::tree::parse(&mut parser, &source, None);
         let rope = Rope::from_str(&source);
-        let legacy =
-            roughly::format::format(tree.root_node(), &rope, roughly::format::Config::default());
+        let legacy = roughly_legacy::format::format(
+            tree.root_node(),
+            &rope,
+            roughly_legacy::format::Config::default(),
+        );
 
         // A panic on one file (a bug to fix) must not kill the whole triage
         // run: record the file and keep sweeping.
