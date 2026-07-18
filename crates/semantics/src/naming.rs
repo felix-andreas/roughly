@@ -76,10 +76,6 @@ pub struct ItemNaming {
     pub maybe_undefined: BTreeSet<ExprId>,
     /// Reads no lexical slot resolves — package globals, stubs, or unresolved.
     pub non_locals: BTreeMap<ExprId, String>,
-    /// The first occurrence of each non-local name per function frame: the
-    /// only occurrences the unresolved check reports (repeats of one unknown
-    /// name inside a frame are the same finding, not new ones).
-    pub reported_non_locals: BTreeSet<ExprId>,
     /// The subset of `non_locals` read from inside a nested function: the
     /// read happens when the function is *called*, after the enclosing frame
     /// finished executing.
@@ -112,7 +108,6 @@ pub fn resolve_item(module: &Module) -> ItemNaming {
         write_by_expression: FxHashMap::default(),
         emit: true,
         quiet_depth: 0,
-        frame_non_locals: vec![BTreeSet::new()],
         naming: ItemNaming::default(),
     };
     if let Some(root) = module.root {
@@ -183,9 +178,6 @@ struct Context<'a> {
     /// Non-zero inside an unsupported operator's operands: reads resolve but
     /// unresolved names stay quiet.
     quiet_depth: u32,
-    /// Per function frame, the non-local names already seen there (the
-    /// dedupe set behind `reported_non_locals`).
-    frame_non_locals: Vec<BTreeSet<String>>,
     naming: ItemNaming,
 }
 
@@ -221,15 +213,6 @@ impl Context<'_> {
             .unwrap_or(0)
     }
 
-    /// Marks `name` seen as a non-local in the current frame; true only for
-    /// the first occurrence (the one the unresolved check reports).
-    fn record_frame_non_local(&mut self, name: &str) -> bool {
-        self.frame_non_locals
-            .last_mut()
-            .expect("frame stack is never empty")
-            .insert(name.to_owned())
-    }
-
     fn record_write(&mut self, slot: BindingId, reach: Reach) {
         let set = self.flow.entry(slot).or_default();
         set.clear();
@@ -253,9 +236,23 @@ impl Context<'_> {
                 target,
                 value,
             } => {
-                // Value first: `x <- x + 1` reads the previous state.
-                self.resolve(*value);
-                self.resolve_assignment_target(id, *target, *spelling);
+                // Value first: `x <- x + 1` reads the previous state. A
+                // replacement-form target instead resolves first — its base
+                // binds before the value is examined, so the value's reads
+                // of the same name land on the fresh binding
+                // (`self$i <- self$i + 1` reports `self` once, at the
+                // target).
+                let name_target = matches!(
+                    self.module.expression(*target).kind,
+                    ExpressionKind::NameRef(_)
+                );
+                if name_target {
+                    self.resolve(*value);
+                    self.resolve_assignment_target(id, *target, *spelling);
+                } else {
+                    self.resolve_assignment_target(id, *target, *spelling);
+                    self.resolve(*value);
+                }
             }
             ExpressionKind::Unary { operand, operator } => {
                 // A formula quotes its operand: names inside are model syntax.
@@ -354,7 +351,6 @@ impl Context<'_> {
             }
             ExpressionKind::Function { parameters, body } => {
                 self.scopes.push(Scope::new(ScopeKind::Function));
-                self.frame_non_locals.push(BTreeSet::new());
                 let saved_flow = std::mem::take(&mut self.flow);
                 let parameters = parameters.clone();
                 for parameter in &parameters {
@@ -375,7 +371,6 @@ impl Context<'_> {
                 }
                 self.resolve(*body);
                 self.scopes.pop();
-                self.frame_non_locals.pop();
                 self.flow = saved_flow;
             }
             ExpressionKind::If {
@@ -630,9 +625,6 @@ impl Context<'_> {
             None => {
                 if self.emit && self.quiet_depth == 0 {
                     self.naming.non_locals.insert(id, name.to_owned());
-                    if self.record_frame_non_local(name) {
-                        self.naming.reported_non_locals.insert(id);
-                    }
                     if self.current_function_depth() > 0 {
                         self.naming.deferred_non_locals.insert(id);
                     }
@@ -676,7 +668,6 @@ impl Context<'_> {
                             None => {
                                 if self.emit {
                                     self.naming.non_locals.insert(target, name.clone());
-                                    self.record_frame_non_local(name);
                                     self.naming.super_globals.insert(name.clone());
                                 }
                             }
@@ -713,9 +704,100 @@ impl Context<'_> {
                     }
                 }
             }
-            // Replacement forms (`attr(x, "a") <- v`, `x$field <- v`) read
-            // their target as a value and write through a replacement
-            // function; resolve the innards as reads.
+            // Replacement forms (`attr(x, "a") <- v`, `x$field <- v`)
+            // read their target's base as a value — an unresolved base is a
+            // reportable read — and then rebind it in the current scope
+            // (R evaluates `x[i] <- v` as `x <- \`[<-\`(x, i, v)`), so
+            // occurrences after the first write resolve silently.
+            _ => match self.replacement_base(target) {
+                Some((base_expression, name, range)) => {
+                    self.resolve(base_expression);
+                    let scope_kind = self.scopes.last().expect("scope stack is never empty").kind;
+                    let kind = match scope_kind {
+                        ScopeKind::TopLevel => BindingKind::TopLevel,
+                        ScopeKind::Function | ScopeKind::Local => BindingKind::Local,
+                    };
+                    let current = self
+                        .scopes
+                        .last()
+                        .expect("scope stack is never empty")
+                        .slots
+                        .get(&name)
+                        .copied();
+                    let slot = match current {
+                        Some(slot) => slot,
+                        None => {
+                            let slot = self.mint_binding(&name, range, kind);
+                            self.scopes
+                                .last_mut()
+                                .expect("scope stack is never empty")
+                                .slots
+                                .insert(name.clone(), slot);
+                            slot
+                        }
+                    };
+                    self.naming.resolutions.insert(base_expression, slot);
+                    self.record_write_site(assignment, base_expression, &name, range, slot, false);
+                    self.resolve_replacement_subscripts(target, base_expression);
+                }
+                None => self.resolve(target),
+            },
+        }
+    }
+
+    /// The base `NameRef` at the bottom of a replacement target chain
+    /// (`x` in `attr(x$f, "a")[i] <- v`).
+    fn replacement_base(&self, target: ExprId) -> Option<(ExprId, String, TextRange)> {
+        let expression = self.module.expression(target);
+        match &expression.kind {
+            ExpressionKind::NameRef(name) => Some((target, name.clone(), expression.range)),
+            ExpressionKind::Field { target: inner, .. }
+            | ExpressionKind::Index { target: inner, .. } => self.replacement_base(*inner),
+            ExpressionKind::Call { arguments, .. } => arguments
+                .first()
+                .and_then(|argument| argument.value)
+                .and_then(|value| self.replacement_base(value)),
+            _ => None,
+        }
+    }
+
+    /// Resolves everything in a replacement target except the (already
+    /// handled) base name: indexes, further call arguments, callees.
+    fn resolve_replacement_subscripts(&mut self, target: ExprId, base: ExprId) {
+        if target == base {
+            return;
+        }
+        let expression = self.module.expression(target).clone();
+        match &expression.kind {
+            ExpressionKind::Field { target: inner, .. } => {
+                self.resolve_replacement_subscripts(*inner, base);
+            }
+            ExpressionKind::Index {
+                target: inner,
+                arguments,
+                ..
+            } => {
+                self.resolve_replacement_subscripts(*inner, base);
+                for argument in arguments {
+                    if let Some(value) = argument.value {
+                        self.resolve(value);
+                    }
+                }
+            }
+            ExpressionKind::Call { callee, arguments } => {
+                self.resolve(*callee);
+                let mut arguments = arguments.iter();
+                if let Some(first) = arguments.next()
+                    && let Some(value) = first.value
+                {
+                    self.resolve_replacement_subscripts(value, base);
+                }
+                for argument in arguments {
+                    if let Some(value) = argument.value {
+                        self.resolve(value);
+                    }
+                }
+            }
             _ => self.resolve(target),
         }
     }

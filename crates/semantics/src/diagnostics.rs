@@ -113,9 +113,7 @@ pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
         }
         if *file.kind(db) == DocumentKind::Package {
             for (expression, name) in &naming.non_locals {
-                if !naming.reported_non_locals.contains(expression)
-                    || crate::package_scheme_exists(db, name)
-                    || super_globals(db, file).contains(name)
+                if crate::package_scheme_exists(db, name) || super_globals(db, file).contains(name)
                 {
                     continue;
                 }
