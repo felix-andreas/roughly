@@ -59,7 +59,8 @@ fn sweep(source: &str) {
             "non-deterministic hover in {source:?} at {offset:?}"
         );
         let _ = ide::definition(&db, files, file, offset);
-        let _ = ide::references(&db, file, offset);
+        let _ = ide::references(&db, files, file, offset, true);
+        let _ = ide::rename(&db, files, file, offset);
     }
     let _ = ide::document_symbols(&db, file);
 }
