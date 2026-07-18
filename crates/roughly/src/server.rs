@@ -1711,15 +1711,22 @@ impl LanguageServer for ServerState {
             #[allow(deprecated)]
             let symbols: Vec<lsp_types::DocumentSymbol> = symbols
                 .into_iter()
-                .filter(|(name, _)| !name.is_empty())
-                .map(|(name, target)| lsp_types::DocumentSymbol {
-                    name,
-                    detail: None,
-                    kind: lsp_types::SymbolKind::VARIABLE,
+                .filter(|symbol| !symbol.name.is_empty())
+                .map(|symbol| lsp_types::DocumentSymbol {
+                    name: symbol.name,
+                    detail: symbol.detail.map(str::to_owned),
+                    kind: match symbol.kind {
+                        ide::DocumentSymbolKind::Function => lsp_types::SymbolKind::FUNCTION,
+                        ide::DocumentSymbolKind::Value => lsp_types::SymbolKind::VARIABLE,
+                        ide::DocumentSymbolKind::TypeDefinition => lsp_types::SymbolKind::STRUCT,
+                        ide::DocumentSymbolKind::AliasDefinition => {
+                            lsp_types::SymbolKind::INTERFACE
+                        }
+                    },
                     tags: None,
                     deprecated: None,
-                    range: worker.to_range(&text, target.range),
-                    selection_range: worker.to_range(&text, target.range),
+                    range: worker.to_range(&text, symbol.range),
+                    selection_range: worker.to_range(&text, symbol.selection),
                     children: None,
                 })
                 .collect();
@@ -1851,7 +1858,13 @@ fn convert_completion_item(item: ide::CompletionItem, snippets: bool) -> lsp_typ
         ..Default::default()
     };
     if snippets && item.kind == ide::CompletionKind::Function {
-        converted.insert_text = Some(format!("{}($0)", item.label));
+        // A known zero-argument signature drops the cursor past the parens;
+        // everything else (arguments or unknown) drops it between them.
+        converted.insert_text = Some(if item.takes_arguments == Some(false) {
+            format!("{}()$0", item.label)
+        } else {
+            format!("{}($0)", item.label)
+        });
         converted.insert_text_format = Some(lsp_types::InsertTextFormat::SNIPPET);
         converted.command = Some(lsp_types::Command {
             title: "trigger parameter hints".to_owned(),

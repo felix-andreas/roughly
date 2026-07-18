@@ -26,10 +26,13 @@ pub struct Diagnostic {
     pub message: String,
 }
 
-/// All diagnostics of one file: syntax errors, naming findings, and type
-/// errors, in position order.
+/// The diagnostics that are pure functions of the parse — syntax errors,
+/// typing-directive errors, and `#:` block-form refusals. A host's fast
+/// publication wave serves exactly these (plus lints) so typing never waits
+/// on naming or type checking; [`file_diagnostics`] starts from the same set,
+/// keeping the fast wave a faithful subset of the settled one.
 #[salsa::tracked(returns(clone))]
-pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
+pub fn parse_stage_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
     let parsed = parse(db, file);
@@ -67,6 +70,14 @@ pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
             });
         }
     }
+    diagnostics
+}
+
+/// All diagnostics of one file: syntax errors, naming findings, and type
+/// errors, in position order.
+#[salsa::tracked(returns(clone))]
+pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
+    let mut diagnostics = parse_stage_diagnostics(db, file);
 
     for item in item_tree(db, file) {
         let Some(offset) = item_offset(db, item) else {

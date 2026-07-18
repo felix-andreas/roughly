@@ -33,30 +33,14 @@ pub fn document_diagnostics(db: &dyn Db, file: SourceFile, config: &Config) -> V
     rendered
 }
 
-/// The cheap per-file classes that are pure functions of the parse — syntax,
-/// naming, annotations, and lints — published immediately on an edit so
-/// typing never waits on type checking. Must be a faithful subset of
+/// The cheap per-file classes that are pure functions of the parse — syntax
+/// errors, annotation problems, and lints — published immediately on an edit
+/// so typing never waits on naming or type checking. A faithful subset of
 /// [`document_diagnostics`] for identical text: the settled wave only adds
-/// findings, never moves or removes one (hence strict escalation applies
-/// here too).
+/// findings, never moves or removes one.
 pub fn first_wave_diagnostics(db: &dyn Db, file: SourceFile, config: &Config) -> Vec<Diagnostic> {
-    let (_, strict_enabled) = effective_typing(db, file, config.check);
-    let mut rendered: Vec<Diagnostic> = file_diagnostics(db, file)
-        .into_iter()
-        .filter(|diagnostic| match diagnostic.code {
-            "unused" => config.check.unused,
-            "type-mismatch" => false,
-            _ => true,
-        })
-        .collect();
+    let mut rendered = semantics::diagnostics::parse_stage_diagnostics(db, file);
     rendered.extend(lint_file(db, file, &config.lint));
-    if strict_enabled {
-        for diagnostic in &mut rendered {
-            if diagnostic.code == "unresolved" {
-                diagnostic.severity = Severity::Error;
-            }
-        }
-    }
     rendered.sort_by_key(|diagnostic| (diagnostic.range.start(), diagnostic.range.end()));
     rendered
 }

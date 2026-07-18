@@ -448,6 +448,22 @@ pub struct CompletionItem {
     /// The rendered scheme for standard-library entries.
     pub detail: Option<String>,
     pub documentation: Option<String>,
+    /// For functions with a known signature: whether it declares any
+    /// parameter. Drives the editor's call-snippet cursor placement.
+    pub takes_arguments: Option<bool>,
+}
+
+/// Whether a scheme is a function that declares at least one parameter;
+/// `None` for non-functions.
+fn scheme_takes_arguments(db: &dyn Db, scheme: &TypeScheme<'_>) -> Option<bool> {
+    match scheme.body.kind(db) {
+        TyKind::Function(function) => Some(
+            !function.positional.is_empty()
+                || !function.named.is_empty()
+                || function.variadic.is_some(),
+        ),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -539,6 +555,7 @@ pub fn completion(
                         source: CompletionSource::Keyword,
                         detail: None,
                         documentation: None,
+                        takes_arguments: None,
                     });
                 }
             }
@@ -556,6 +573,7 @@ pub fn completion(
                             source: CompletionSource::Local,
                             detail: None,
                             documentation: None,
+                            takes_arguments: None,
                         });
                     }
                 }
@@ -571,12 +589,15 @@ pub fn completion(
                         continue;
                     };
                     if search_match(&name, &query).is_some() {
+                        let takes_arguments =
+                            scheme_takes_arguments(db, &semantics::global_scheme(db, item));
                         items.push(CompletionItem {
                             label: name,
                             kind,
                             source: CompletionSource::Global,
                             detail: None,
                             documentation: None,
+                            takes_arguments,
                         });
                     }
                 }
@@ -608,6 +629,7 @@ pub fn completion(
                         detail: Some(renderer.render_scheme(db, scheme)),
                         documentation: namespace
                             .map(|namespace| format!("From the `{namespace}` package.")),
+                        takes_arguments: scheme_takes_arguments(db, scheme),
                     });
                 }
             }
@@ -869,23 +891,91 @@ pub fn type_definition(
         })
 }
 
-/// Document symbols: the file's named top-level definitions with their
-/// absolute name ranges, in source order.
-pub fn document_symbols(db: &dyn Db, file: SourceFile) -> Vec<(String, NavigationTarget)> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DocumentSymbolKind {
+    Function,
+    Value,
+    /// A `#: @type` declaration.
+    TypeDefinition,
+    /// A `#: @alias` declaration.
+    AliasDefinition,
+}
+
+/// One outline entry: the whole construct's range plus the name's own range
+/// (the editor highlights the selection range when jumping).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocumentSymbol {
+    pub name: String,
+    pub kind: DocumentSymbolKind,
+    /// The `@type` / `@alias` spelling for type declarations.
+    pub detail: Option<&'static str>,
+    pub range: TextRange,
+    pub selection: TextRange,
+}
+
+/// Document symbols: the file's named top-level definitions plus its
+/// `@type`/`@alias` declarations (invisible to the item tree — they live in
+/// `#:` comments), in source order.
+pub fn document_symbols(db: &dyn Db, file: SourceFile) -> Vec<DocumentSymbol> {
     let mut symbols = Vec::new();
     for item in item_tree(db, file) {
-        if !matches!(*item.kind(db), ItemKind::Function | ItemKind::Value) {
-            continue;
-        }
+        let kind = match *item.kind(db) {
+            ItemKind::Function => DocumentSymbolKind::Function,
+            ItemKind::Value => DocumentSymbolKind::Value,
+            ItemKind::Statement => continue,
+        };
         let Some(name) = item.name(db).clone() else {
             continue;
         };
         let Some(node) = item_node(db, item) else {
             continue;
         };
-        let range = definition_name_range(&node).unwrap_or_else(|| node.text_range());
-        symbols.push((name, NavigationTarget { file, range }));
+        let range = node.text_range();
+        let selection = definition_name_range(&node).unwrap_or(range);
+        symbols.push(DocumentSymbol {
+            name,
+            kind,
+            detail: None,
+            range,
+            selection,
+        });
     }
+    let parse = semantics::parse(db, file);
+    for annotation in parse
+        .syntax_node()
+        .descendants()
+        .filter(|node| node.kind() == syntax::SyntaxKind::ANNOTATION)
+    {
+        for directive in annotation
+            .descendants()
+            .filter(|node| node.kind() == syntax::SyntaxKind::ANNOTATION_DIRECTIVE)
+        {
+            let (kind, detail) = match directive_name(&directive).as_deref() {
+                Some("type") => (DocumentSymbolKind::TypeDefinition, "@type"),
+                Some("alias") => (DocumentSymbolKind::AliasDefinition, "@alias"),
+                _ => continue,
+            };
+            let Some(name_token) = directive
+                .children()
+                .find(|child| child.kind() == syntax::SyntaxKind::NAME)
+                .and_then(|name| {
+                    name.children_with_tokens()
+                        .filter_map(|element| element.into_token())
+                        .find(|token| token.kind() == syntax::SyntaxKind::IDENT)
+                })
+            else {
+                continue;
+            };
+            symbols.push(DocumentSymbol {
+                name: name_token.text().to_owned(),
+                kind,
+                detail: Some(detail),
+                range: directive.text_range(),
+                selection: name_token.text_range(),
+            });
+        }
+    }
+    symbols.sort_by_key(|symbol| (symbol.range.start(), symbol.range.end()));
     symbols
 }
 
@@ -898,9 +988,16 @@ pub fn workspace_symbols(
 ) -> Vec<(String, NavigationTarget)> {
     let mut symbols: Vec<(MatchScore, String, NavigationTarget)> = Vec::new();
     for &file in files.files(db) {
-        for (name, target) in document_symbols(db, file) {
-            if let Some(score) = search_match(&name, query) {
-                symbols.push((score, name, target));
+        for symbol in document_symbols(db, file) {
+            if let Some(score) = search_match(&symbol.name, query) {
+                symbols.push((
+                    score,
+                    symbol.name,
+                    NavigationTarget {
+                        file,
+                        range: symbol.selection,
+                    },
+                ));
             }
         }
     }
@@ -1455,6 +1552,7 @@ fn string_subscript_completion(
             source: CompletionSource::Field,
             detail: Some(renderer.render(db, field.ty)),
             documentation: None,
+            takes_arguments: None,
         })
         .collect();
     finish_completions(items, query)
@@ -1490,6 +1588,7 @@ fn annotation_completion(
                 source: CompletionSource::Keyword,
                 detail: None,
                 documentation: None,
+                takes_arguments: None,
             });
         }
     }
@@ -1517,6 +1616,7 @@ fn annotation_completion(
             source: CompletionSource::Global,
             detail: Some(renderer.render(db, definition.body)),
             documentation: None,
+            takes_arguments: None,
         });
     }
     finish_completions(items, query)
@@ -1635,6 +1735,7 @@ fn spelled_completions(
             source,
             detail: None,
             documentation: None,
+            takes_arguments: None,
         })
         .collect()
 }
@@ -1684,6 +1785,7 @@ fn dollar_completions(
                     source: CompletionSource::Field,
                     detail: Some(renderer.render(db, field.ty)),
                     documentation: None,
+                    takes_arguments: None,
                 })
                 .filter(|item| search_match(&item.label, query).is_some())
                 .collect::<Vec<_>>(),
@@ -1717,22 +1819,25 @@ fn namespace_completions(
             .filter(|name| search_match(name, query).is_some())
             .map(|name| {
                 let mut renderer = TypeRenderer::default();
-                let (kind, detail) = match library.schemes.get(name).and_then(|s| s.first()) {
-                    Some(scheme) => (
-                        match scheme.body.kind(db) {
-                            TyKind::Function(_) => CompletionKind::Function,
-                            _ => CompletionKind::Variable,
-                        },
-                        Some(renderer.render_scheme(db, scheme)),
-                    ),
-                    None => (CompletionKind::Variable, None),
-                };
+                let (kind, detail, takes_arguments) =
+                    match library.schemes.get(name).and_then(|s| s.first()) {
+                        Some(scheme) => (
+                            match scheme.body.kind(db) {
+                                TyKind::Function(_) => CompletionKind::Function,
+                                _ => CompletionKind::Variable,
+                            },
+                            Some(renderer.render_scheme(db, scheme)),
+                            scheme_takes_arguments(db, scheme),
+                        ),
+                        None => (CompletionKind::Variable, None, None),
+                    };
                 CompletionItem {
                     label: name.clone(),
                     kind,
                     source: CompletionSource::Stdlib,
                     detail,
                     documentation: None,
+                    takes_arguments,
                 }
             })
             .collect();
