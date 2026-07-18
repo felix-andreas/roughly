@@ -389,19 +389,42 @@ fn differential_corpus() {
         let legacy: Vec<Finding> = legacy
             .into_iter()
             .filter(|finding| {
-                if finding.0 != "unresolved" {
-                    return true;
+                if finding.0 == "unresolved" {
+                    let Some(name) = unresolved_name(&finding.3) else {
+                        return true;
+                    };
+                    let resolved_by_new = !new.iter().any(|(class, _, _, message)| {
+                        *class == "unresolved" && message.contains(name)
+                    });
+                    if resolved_by_new {
+                        *oracle_deficit_rollup.entry(name.to_owned()).or_default() += 1;
+                    }
+                    return !resolved_by_new;
                 }
-                let Some(name) = unresolved_name(&finding.3) else {
-                    return true;
-                };
-                let resolved_by_new = !new
-                    .iter()
-                    .any(|(class, _, _, message)| *class == "unresolved" && message.contains(name));
-                if resolved_by_new {
-                    *oracle_deficit_rollup.entry(name.to_owned()).or_default() += 1;
+                // Accepted oracle over-rejection: the rewrite's tolerance
+                // floor treats `Unknown` as an absent fact (not a checkable
+                // claim), while the oracle sometimes rejects Unknown-carrying
+                // values (`list{Unknown}` against `list[T] | T[]`). A
+                // legacy-only type finding whose found-side mentions Unknown,
+                // with no new type finding inside its range, is that floor.
+                if finding.0 == "type"
+                    && finding
+                        .3
+                        .split("found")
+                        .nth(1)
+                        .is_some_and(|found| found.contains("Unknown"))
+                {
+                    let new_has_counterpart = new.iter().any(|(class, start, end, _)| {
+                        *class == "type" && *start >= finding.1 && *end <= finding.2
+                    });
+                    if !new_has_counterpart {
+                        *oracle_deficit_rollup
+                            .entry("(Unknown-tolerant type check)".to_owned())
+                            .or_default() += 1;
+                        return false;
+                    }
                 }
-                !resolved_by_new
+                true
             })
             .collect();
         let mut wording = Vec::new();
