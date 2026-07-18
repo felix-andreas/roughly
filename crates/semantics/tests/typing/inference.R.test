@@ -24,6 +24,13 @@ positive <- function(x) x > 0L
 #++++
 positive: <T: numeric> fn(x: T) -> logical
 
+#---- two_flexible_comparison_stays_unconstrained
+cmp <- function(a, b) a < b
+mixed <- cmp(1L, "s")
+#++++
+cmp: <T, U> fn(a: T, b: U) -> logical
+mixed: logical
+
 #---- values
 n <- 1L
 s <- "hi"

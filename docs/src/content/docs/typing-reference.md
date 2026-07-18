@@ -951,6 +951,15 @@ Compatibility treats a union on the two sides differently:
   - a union is compatible with any wider union: `integer | NULL` is compatible with `integer | character | NULL`
   - a union is **not** compatible with a plain member type: `integer | character` is not compatible with `integer`, and `T | NULL` is not compatible with plain `T`
 - member checks are attempted in member order, and a failed member attempt leaks no inference bindings into the next attempt
+- a **flexible argument** (an inference variable — an unannotated parameter or a not-yet-pinned
+  local) checked against an expected union binds to the **whole union** at that first use, exactly
+  as unification would bind it. Uses commit in program order: a later use requiring a different
+  type reports its error at that *later* site, against the already-committed union. When two
+  union-typed contracts share only some members (`integer | character` at one call, then
+  `logical | character` at the next), the checker does not compute the intersection — annotate the
+  value with the intended member type to satisfy both. Intersection constraints are deliberately
+  out of scope (see the traits question in the design notes); first-use commitment keeps checking
+  deterministic in program order, the same order R evaluates
 
 ### Union unification
 
@@ -1438,6 +1447,13 @@ Examples:
   - `character`
   - `logical`
 - both operands must belong to the same family; comparing across families is a type error
+- a **flexible operand** (an inference variable — an unannotated parameter) is constrained to the
+  numeric family when the other operand is concretely numeric, and left unconstrained otherwise —
+  including when **both** operands are flexible: `function(a, b) a < b` infers as
+  `<T, U> fn(a: T, b: U) -> logical`, and a cross-family call of such a function is accepted. There
+  is deliberately no "comparable" constraint kind: R's comparison coerces across atomic families at
+  runtime (`1 < "2"` is legal R), so tying flexible operands to each other or to a family would
+  reject legal programs; the same-family rule applies only where both families are concretely known
 - `complex` and `raw` operands are not supported
 - map-like vectors participate via compatibility with array-like vectors
 - result:

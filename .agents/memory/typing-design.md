@@ -34,7 +34,7 @@ Forward-looking design space for Roughly's type system: questions that are **not
 
 **Question.** A general capability mechanism (numeric, atomic-element, comparable, `+`-overloadable/S3) that could subsume the ad-hoc constraint kinds and overload sets.
 
-**Notes.** Two base constraint kinds (numeric, atomic-element; plus their meet, scalar-numeric) and stub overload sets exist; if a third *independent* constraint kind or user-facing overloading pressure appears, that is the tripwire to design traits properly instead of accreting. Keep overload sets and constraints shaped so a trait system can absorb them (constraints already quantify in schemes; overloads are per-name lists).
+**Notes.** Two base constraint kinds (numeric, atomic-element; plus their meet, scalar-numeric) and stub overload sets exist; if a third *independent* constraint kind or user-facing overloading pressure appears, that is the tripwire to design traits properly instead of accreting. Keep overload sets and constraints shaped so a trait system can absorb them (constraints already quantify in schemes; overloads are per-name lists). Two candidate pressures were examined and deliberately did NOT trip the wire (decisions.md): a "comparable" kind for two-flexible comparisons (nearly vacuous — R compares across atomic families), and intersection constraints for union-commitment conflicts (first-use commitment + annotation is the spec). The wire stays armed.
 
 ## 5. Variadic inference bridging
 

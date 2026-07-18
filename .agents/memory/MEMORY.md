@@ -24,6 +24,7 @@ Companion documents (kept separate only because they are larger in scope): `back
 
 ## Mid-term
 
+- **Design forks resolved without new machinery** (decisions.md): two-flexible comparison stays unconstrained (`<T, U> fn(a: T, b: U) -> logical` — R compares across atomic families, so a "comparable" constraint would reject legal programs), and union compatibility commits a flexible argument to the whole union at first use in program order (the later conflicting site is blamed; annotation is the intersection escape hatch). The traits tripwire stays armed; both rules are now explicit in the typing reference with fixture coverage.
 - **User direction (standing): drive autonomously toward best-possible shape; empty `backlog.md` §Open; work continuously.** The beta phase program is complete; `backlog.md` holds the open work (semantics, editor polish, structure/perf, website) and the one-line shipped ledger.
 - **Open type-system design questions** live in `typing-design.md`: tags/discriminated-union `match` (post-beta, user direction), S3 dispatch, data.frame/matrix modeling, traits (tripwire: a third constraint kind), variadic `...` body semantics, NAMESPACE/import model, the recursion design (local + mutual-group typing landed; self-recursion deliberately tolerant; strict attribution open).
 - Audit habit: treat "landed" claims in old notes with suspicion; the verified state is `backlog.md` + the fixture suites.

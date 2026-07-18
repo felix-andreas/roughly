@@ -585,3 +585,33 @@ Chosen shape (in `crates/semantics/src/semantics.rs`):
 - `item_check` **adopts** the canonical scheme as a member's exported scheme (single source of truth: export, hover, and every downstream reader see the fixpoint value, not the one-hop-ahead re-derivation the item's own check just computed), and `global_scheme` reads `item_check` only. The salsa cycle recovery stays as a backstop for reference edges the static graph cannot see.
 
 Impact: correctness — forward, reverse, and phase-pre-forced forcing render identical diagnostics (regression test `cyclic_group_answers_are_forcing_order_independent` in `crates/semantics/tests/test_parallel.rs`; the corpus instruments now agree at 64835 findings for both forcing shapes), and the growing-self-reference pin stays `Unknown`; simplicity — the fixpoint is an ordinary tracked query over an explicit graph instead of emergent salsa cycle-head dynamics; performance — the sequential corpus pass *improved* 12.7s → 10.1s (canonical rounds replace salsa's per-head cycle re-iteration), while keystrokes in a 53K-line package pay ~3ms more per edit (~8%; the once-per-revision validation walk of `interface_sccs`, whose dependency surface is every item's naming — narrowing that surface to a per-item read-name projection is the known lever if it ever matters); incremental analysis — the graph derives from naming only, so edits that leave every member's read-set unchanged backdate `interface_sccs` and the group fixpoint re-runs only when a member's check output changes.
+
+# Decision record: no third constraint kind — two-flexible comparisons stay unconstrained
+
+**Status:** decided and ratified (agent-owned decision under the delegated ownership mandate). This resolves the recorded design fork on two-flexible-operand comparisons without tripping the traits tripwire.
+
+Question: `function(a, b) a < b` — should comparing two flexible operands constrain them (to each other, or to a new "comparable" constraint kind covering numeric/`character`/`logical`)?
+
+Decision: **no.** Two flexible comparison operands stay fully unconstrained — the function infers as `<T, U> fn(a: T, b: U) -> logical` and cross-family calls are accepted. A flexible operand is still constrained to numeric when its partner is concretely numeric (existing rule), and two concretely-known families must still match.
+
+Rationale:
+- R's runtime comparison coerces across atomic families (`1 < "2"` is legal, character-compares `"1" < "2"`), so any constraint tying flexible operands to a family or to each other rejects legal programs the checker cannot prove wrong.
+- A "comparable" constraint would be the third independent constraint kind — the recorded traits tripwire. Comparisons alone do not justify designing traits: the constraint would be nearly vacuous (every atomic family is comparable), buying almost no precision for real machinery cost.
+- The same-family error on two *concrete* operands stays: that case is decidable and catches real bugs (`x < "10"`).
+
+Impact: correctness — ratifies existing behavior (fixture `two_flexible_comparison_stays_unconstrained`; both differentials green, so the oracle agrees); simplicity — no new machinery, the traits tripwire stays armed; the typing reference now states the flexible-operand comparison rules explicitly.
+
+# Decision record: union compatibility commits a flexible argument at first use, in program order
+
+**Status:** decided and ratified (agent-owned decision under the delegated ownership mandate). This resolves the recorded design fork on order-dependent compatibility commits.
+
+Question: a flexible argument checked against a union-typed parameter binds to the whole union (`f(v)` with `f : fn(x: integer | character)` pins `v := integer | character`). A later use of `v` against a different union (`g : fn(x: logical | character)`) then errors even though the intersection (`character`) would satisfy both. Should commits be made order-free (constraint collection + intersection solving), or is first-use commitment the spec?
+
+Decision: **first-use commitment is the spec.** A flexible argument checked against an expected union binds to the whole union at that use, exactly as unification would; uses commit in program order; a later conflicting use reports at its own site against the committed type. The fix for a genuine intersection case is an explicit annotation with the intended member type.
+
+Rationale:
+- Program-order commitment is how the checker already treats every other type (`x <- 1L` then `x <- "s"`-style first-use-binds is standard HM); making unions special would demand intersection constraints — a new constraint former squarely on the traits frontier, deliberately out of scope.
+- The order-dependence is bounded and predictable: it never changes *whether* an inconsistent pair of contracts errors (some site always reports); it only decides *which* site is blamed — the later use, which is also where a reader's attention should go.
+- Program order is the order R evaluates, so the blamed site matches the first call that would misbehave at runtime under the committed reading.
+
+Impact: correctness — ratifies existing behavior (fixtures `flexible_argument_commits_to_the_union_at_first_use` / `union_commit_blames_the_later_conflicting_use` pin both orders; differentials green — the oracle agrees); simplicity — no constraint-solving machinery; the typing reference's union-compatibility section now states the commitment rule and its annotation escape hatch.
