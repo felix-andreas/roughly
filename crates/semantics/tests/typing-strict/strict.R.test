@@ -106,3 +106,34 @@ f <- function() {
 #++++
 f: Unknown
 36..45 error[type-mismatch] indexing with 2 indexes is not supported yet — Roughly does not model matrix and data.frame subsetting
+
+#==== recursion
+#---- self_recursion_is_attributed
+fact <- function(n) if (n <= 1L) 1L else n * fact(n - 1L)
+#++++
+fact: fn(n: integer) -> integer
+
+#---- mutual_recursion_is_attributed_per_binding
+even <- function(n) if (n == 0L) TRUE else odd(n - 1L)
+odd <- function(n) if (n == 0L) FALSE else even(n - 1L)
+#++++
+even: <T: numeric> fn(n: T) -> logical
+odd: <T: numeric> fn(n: T) -> logical
+
+#---- annotated_recursion_has_no_origin
+#: fn(n: integer) -> integer
+fact <- function(n) if (n <= 1L) 1L else n * fact(n - 1L)
+#++++
+fact: fn(n: integer) -> integer
+
+#---- growing_recursion_is_attributed
+x <- list(v = 1, w = x)
+#++++
+x: Unknown
+21..22 error[strict] strict mode: could not determine the type of `x`; it has no known type
+
+#---- pure_self_call_is_attributed
+f <- function() f()
+#++++
+f: fn() -> Unknown
+0..19 error[strict] strict mode: could not determine the full type of `f`; it is defined recursively — add a type annotation

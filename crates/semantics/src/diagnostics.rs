@@ -606,10 +606,10 @@ pub fn strict_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
             }
         }
         for origin in &check.strict_origins {
-            // A loop-widened origin is about the named variable, never about
-            // the expression the loop happens to be the value of.
+            // A loop-widened or recursive origin is about the named binding,
+            // never about the expression it happens to be the value of.
             let assignment_target = match &origin.kind {
-                StrictOriginKind::LoopWidened(_) => None,
+                StrictOriginKind::LoopWidened(_) | StrictOriginKind::RecursiveUnknown(_) => None,
                 _ => assignment_targets.get(&origin.expression),
             };
             let message = if let Some(name) = assignment_target {
@@ -627,6 +627,9 @@ pub fn strict_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
                     ),
                     StrictOriginKind::LoopWidened(name) => format!(
                         "strict mode: could not determine the type of `{name}`; its type does not stabilize across loop iterations — add a type annotation"
+                    ),
+                    StrictOriginKind::RecursiveUnknown(name) => format!(
+                        "strict mode: could not determine the full type of `{name}`; it is defined recursively — add a type annotation"
                     ),
                 }
             };

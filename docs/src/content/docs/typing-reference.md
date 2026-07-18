@@ -1551,15 +1551,19 @@ Examples:
   `fn(integer) -> integer`, and a call violating the recursively-inferred signature is an error.
   Recursion is monomorphic: the recursive uses share one instantiation (no polymorphic
   recursion). Mutual recursion between two *local* closures is out of letrec's per-binding reach —
-  the earlier closure's reference to the later name stays a loud unresolved reference. At the
-  package top level, a **mutually recursive group** (two or more definitions referencing each
-  other) is inferred as one letrec group and generalized together after the whole file — the pair
-  `is_even`/`is_odd` exports `<T: numeric> fn(n: T) -> logical`. A **self-recursive** top-level
-  function deliberately keeps the interface fixed point's `Unknown` return instead: heterogeneous
-  self-recursion — the idiomatic tree fold, whose parameter would need the recursive type
-  `T = double | list[T]` — is untypeable in this system, and pinning the parameter through the
-  recursive call would manufacture call-site false positives; the `Unknown` is gradual tolerance,
-  and unannotated consumers flow through it
+  the forward reference resolves (captures see later frame writes) but stays `Unknown`-tolerant
+  rather than precisely typed. At the package top level, self-recursive definitions and **mutually
+  recursive groups** resolve through the interface fixed point: every member starts at `Unknown`
+  and re-derives each round until the schemes converge. Simple recursion converges to its precise
+  type — a top-level `fact <- function(n) if (n <= 1L) 1L else n * fact(n - 1L)` exports
+  `fn(n: integer) -> integer`, and the pair `is_even`/`is_odd` exports
+  `<T: numeric> fn(n: T) -> logical`. Heterogeneous self-reference whose type grows each round —
+  the idiomatic tree fold, whose parameter would need the recursive type `T = double | list[T]` —
+  cannot converge in a system without recursive types, and the fixed point pins such a group to
+  `Unknown` at its round cap. A cycle can also converge *with* `Unknown` embedded (a pure
+  self-call `f <- function() f()` settles at `fn() -> Unknown`). Either way the `Unknown` is
+  gradual tolerance — unannotated consumers flow through it — and strict mode attributes it (see
+  `What strict mode flags`); an explicit annotation on the binding closes the cycle exactly
 
 Examples:
 
@@ -2106,7 +2110,14 @@ The origin sites are:
   (`Unknown` enters the lattice here);
 - **a name reference whose resolved type is `Unknown` because the referenced binding has no known
   type** — for example a base-environment or library binding that has not been given a type yet.
-  This composes with library typing (see below).
+  This composes with library typing (see below);
+- **a recursive definition the interface fixed point could not fully type** — a definition in a
+  reference cycle whose body raises no other origin but whose exported scheme still carries
+  `Unknown` (`f <- function() f()` exports `fn() -> Unknown`): the cycle itself is the source, so
+  the whole binding is attributed once — "could not determine the full type of `f`; it is defined
+  recursively — add a type annotation". A cycle that instead *pins* to `Unknown` at the fixed
+  point's round cap surfaces through the ordinary undetermined-reference origin at its recursive
+  read.
 
 The following are explicitly **not** strict origins:
 

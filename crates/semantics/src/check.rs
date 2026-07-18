@@ -168,6 +168,10 @@ pub enum StrictOriginKind {
     UndeterminedReference(String),
     /// A variable widened to `Unknown` at the loop fixed-point cap.
     LoopWidened(String),
+    /// A recursive definition whose exported scheme still carries `Unknown`
+    /// although its body checked clean: the reference cycle itself is the
+    /// only possible source, so the binding is attributed as a whole.
+    RecursiveUnknown(String),
 }
 
 /// Resolver for names that are not item-local: package globals and the stdlib

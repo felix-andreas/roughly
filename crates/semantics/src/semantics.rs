@@ -719,6 +719,23 @@ pub fn item_check<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<check::ItemCh
         && let Some(&group) = interface_sccs(db, files).membership.get(&item)
     {
         check.scheme = scc_schemes(db, files, group).get(&item).cloned();
+        // A member whose body checked clean but whose exported scheme still
+        // carries `Unknown` owes that `Unknown` to the reference cycle itself
+        // — nothing inside the body attributes it, so strict mode marks the
+        // whole binding.
+        if check.errors.is_empty()
+            && check.strict_origins.is_empty()
+            && let Some(scheme) = &check.scheme
+            && types::contains_unknown(db, scheme.body)
+            && let Some(root) = module.root
+            && let Some(name) = item.name(db).clone()
+        {
+            check.strict_origins.push(check::StrictOrigin {
+                expression: root,
+                range: module.expression(root).range,
+                kind: check::StrictOriginKind::RecursiveUnknown(name),
+            });
+        }
     }
     Some(check)
 }

@@ -139,6 +139,41 @@ impl<'db> TypeScheme<'db> {
     }
 }
 
+/// Whether a type contains `Unknown` anywhere in its structure. Named types
+/// are opaque here — their representation is a separate declaration, not part
+/// of this value's structure.
+pub fn contains_unknown(db: &dyn Db, ty: Ty<'_>) -> bool {
+    match ty.kind(db) {
+        TyKind::Unknown => true,
+        TyKind::Any | TyKind::Null | TyKind::Scalar(_) | TyKind::Var(_) | TyKind::Rigid(_) => false,
+        TyKind::Vector(inner)
+        | TyKind::NamedVector(inner)
+        | TyKind::List(inner)
+        | TyKind::NamedList(inner) => contains_unknown(db, *inner),
+        TyKind::Tuple(items) => items.iter().any(|&item| contains_unknown(db, item)),
+        TyKind::Record(fields) => fields.iter().any(|field| contains_unknown(db, field.ty)),
+        TyKind::Function(function) => {
+            function
+                .positional
+                .iter()
+                .any(|&parameter| contains_unknown(db, parameter))
+                || function
+                    .named
+                    .iter()
+                    .any(|field| contains_unknown(db, field.ty))
+                || function
+                    .variadic
+                    .as_ref()
+                    .is_some_and(|rest| contains_unknown(db, rest.element))
+                || contains_unknown(db, function.ret)
+        }
+        TyKind::Union(members) => members.iter().any(|&member| contains_unknown(db, member)),
+        TyKind::Named(_, arguments) => arguments
+            .iter()
+            .any(|&argument| contains_unknown(db, argument)),
+    }
+}
+
 pub fn any(db: &dyn Db) -> Ty<'_> {
     Ty::new(db, TyKind::Any)
 }

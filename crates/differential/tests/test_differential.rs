@@ -60,12 +60,27 @@ const ACCEPTED_DIVERGENCES: &[(&str, &str)] = &[
         "interface__growing_self_reference_pins_to_unknown",
         "the legacy interface fixed-point panics on a self-referential definition whose type grows each round; the new stack pins the scheme to Unknown at the round cap",
     ),
+    (
+        "recursion__growing_recursion_is_attributed",
+        "the legacy interface fixed-point panics on a self-referential definition whose type grows each round; the new stack pins to Unknown and reports the undetermined read under strict mode",
+    ),
+    (
+        "recursion__annotated_recursion_has_no_origin",
+        "legacy leaves a recursive call's result Unknown even under a declared annotation and then fails its own declared-return check; the new fixpoint types the recursive call through the declaration",
+    ),
+    (
+        "recursion__pure_self_call_is_attributed",
+        "legacy records no strict origin on a recursive binding whose Unknown comes from the reference cycle itself; the new stack attributes the whole binding",
+    ),
 ];
 
 /// Allowlist entries justified by an oracle PANIC (a `debug_assert` in the
 /// legacy fixed-point): testable only in debug builds — release compiles the
 /// assert out and the case may then match, which is not staleness.
-const ORACLE_PANIC_CASES: &[&str] = &["interface__growing_self_reference_pins_to_unknown"];
+const ORACLE_PANIC_CASES: &[&str] = &[
+    "interface__growing_self_reference_pins_to_unknown",
+    "recursion__growing_recursion_is_attributed",
+];
 
 fn legacy_findings(source: &str, suite: &Suite) -> Vec<Finding> {
     let mut analysis_state = Analysis::new(
