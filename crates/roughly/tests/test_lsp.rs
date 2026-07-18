@@ -72,10 +72,11 @@ fn build_test_client(
     })
 }
 
-fn spawn_server(server_cwd: &Path) -> tokio::process::Child {
+fn spawn_server(server_cwd: &Path, envs: &[(&str, &str)]) -> tokio::process::Child {
     tokio::process::Command::new(env!("CARGO_BIN_EXE_roughly"))
         .arg("server")
         .current_dir(server_cwd)
+        .envs(envs.iter().copied())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -206,6 +207,15 @@ async fn setup_test_inner(
     initial_files: &[(&str, &str)],
     capabilities: ClientCapabilities,
 ) -> TestContext {
+    setup_test_with_env(create_r_directory, initial_files, capabilities, &[]).await
+}
+
+async fn setup_test_with_env(
+    create_r_directory: bool,
+    initial_files: &[(&str, &str)],
+    capabilities: ClientCapabilities,
+    envs: &[(&str, &str)],
+) -> TestContext {
     let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
     // The server process runs with the temp ROOT as its cwd while the client
     // announces the `workspace` subdirectory as the workspace root, so every
@@ -230,7 +240,7 @@ async fn setup_test_inner(
     let (mainloop, mut server) =
         build_test_client(diagnostics_sender, refresh_sender, messages_sender);
 
-    let mut child = spawn_server(&server_cwd);
+    let mut child = spawn_server(&server_cwd, envs);
     let stdout = child.stdout.take().expect("missing stdout").compat();
     let stdin = child.stdin.take().expect("missing stdin").compat_write();
     let mainloop_handle = tokio::spawn(async move {
@@ -2025,7 +2035,7 @@ async fn ancestor_config_governs_a_workspace_without_its_own() {
     let (messages_sender, messages_receiver) = mpsc::unbounded_channel();
     let (mainloop, mut server) =
         build_test_client(diagnostics_sender, refresh_sender, messages_sender);
-    let mut child = spawn_server(temp_dir.path());
+    let mut child = spawn_server(temp_dir.path(), &[]);
     let stdout = child.stdout.take().expect("missing stdout").compat();
     let stdin = child.stdin.take().expect("missing stdin").compat_write();
     let mainloop_handle = tokio::spawn(async move {
@@ -2366,6 +2376,230 @@ async fn stub_type_name_jumps_to_its_type_declaration() {
     assert_eq!(location.uri, uri);
     assert_eq!(location.range.start, Position::new(0, 6));
     assert_eq!(location.range.end, Position::new(0, 11));
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn hover_shows_definition_summaries() {
+    let mut context = setup_test(&[]).await;
+    let uri = context
+        .open(
+            "R/hover.R",
+            "count <- 1L\nuse <- function() {\n  value <- count + 1\n  value + print(value)\n}\n",
+        )
+        .await;
+    let _ = recv_diagnostics(&mut context.diagnostics_receiver, &uri, TIMEOUT).await;
+
+    let hover_markdown = |context: &mut TestContext, line: u32, character: u32| {
+        let params = HoverParams {
+            text_document_position_params: position_params(&uri, line, character),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        };
+        let mut server = context.server.clone();
+        async move {
+            let hover = server
+                .hover(params)
+                .await
+                .expect("hover failed")
+                .expect("expected a hover");
+            let HoverContents::Markup(markup) = hover.contents else {
+                panic!("expected markdown hover");
+            };
+            markup.value
+        }
+    };
+
+    // A read of the file's own top-level binding is a package global.
+    let global = hover_markdown(&mut context, 2, 12).await;
+    assert!(
+        global.contains("Package global, defined at `R/hover.R:1:1`"),
+        "{global}"
+    );
+
+    // A local read points at its defining write.
+    let local = hover_markdown(&mut context, 3, 3).await;
+    assert!(
+        local.contains("Local variable, defined at `R/hover.R:3:3`"),
+        "{local}"
+    );
+
+    // A stub name reports its declaring namespace.
+    let stub = hover_markdown(&mut context, 3, 11).await;
+    assert!(stub.contains("From the `base` package."), "{stub}");
+
+    // Debug sections stay hidden without the config flag.
+    assert!(!global.contains("### Debug"), "{global}");
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn debug_config_adds_hover_debug_sections() {
+    let mut context = setup_test(&[("roughly.toml", "debug = true\n")]).await;
+    let uri = context
+        .open("R/debug.R", "count <- 1L\nuse <- count\n")
+        .await;
+    let _ = recv_diagnostics(&mut context.diagnostics_receiver, &uri, TIMEOUT).await;
+
+    let hover = context
+        .server
+        .hover(HoverParams {
+            text_document_position_params: position_params(&uri, 1, 8),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("hover failed")
+        .expect("expected a hover");
+    let HoverContents::Markup(markup) = hover.contents else {
+        panic!("expected markdown hover");
+    };
+    for marker in ["### Debug", "**Lowering**", "**Naming**", "**Parsing**"] {
+        assert!(markup.value.contains(marker), "{}", markup.value);
+    }
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn document_symbols_nest_s4_and_r6_declarations() {
+    let mut context = setup_test(&[]).await;
+    let uri = context
+        .open(
+            "R/classes.R",
+            "setClass(\"Person\", representation(name = \"character\"))\n\
+             Account <- R6Class(\"Account\",\n\
+             \x20 public = list(\n\
+             \x20   balance = 0,\n\
+             \x20   deposit = function(amount) invisible(self)\n\
+             \x20 )\n\
+             )\n",
+        )
+        .await;
+    drain_diagnostics(&mut context.diagnostics_receiver).await;
+
+    let result = context
+        .server
+        .document_symbol(DocumentSymbolParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .expect("document_symbol request failed")
+        .expect("expected document symbols");
+    let DocumentSymbolResponse::Nested(symbols) = result else {
+        panic!("expected nested symbols");
+    };
+
+    let person = symbols
+        .iter()
+        .find(|symbol| symbol.name == "Person")
+        .expect("setClass declaration in the outline");
+    assert_eq!(person.kind, SymbolKind::CLASS);
+
+    let account = symbols
+        .iter()
+        .find(|symbol| symbol.name == "Account")
+        .expect("R6 class in the outline");
+    assert_eq!(account.kind, SymbolKind::CLASS);
+    let members = account.children.as_ref().expect("R6 members nest");
+    let balance = members
+        .iter()
+        .find(|member| member.name == "balance")
+        .expect("field member");
+    assert_eq!(balance.kind, SymbolKind::FIELD);
+    let deposit = members
+        .iter()
+        .find(|member| member.name == "deposit")
+        .expect("method member");
+    assert_eq!(deposit.kind, SymbolKind::METHOD);
+    assert_eq!(deposit.detail.as_deref(), Some("fn(amount)"));
+
+    context.shutdown().await;
+}
+
+/// The cancelled-pull contract, made deterministic by the server's
+/// fault-injection seam: the pull announces itself through the marker file
+/// and holds, the edit is sent only after the marker appears — so its
+/// cancellation flip provably lands while the pull is in flight — and the
+/// response must be the retryable SERVER_CANCELLED error, with an immediate
+/// re-pull succeeding on the edited content.
+#[tokio::test]
+async fn cancelled_pull_is_retryable_and_recovers() {
+    let capabilities = ClientCapabilities {
+        text_document: Some(TextDocumentClientCapabilities {
+            diagnostic: Some(DiagnosticClientCapabilities::default()),
+            ..TextDocumentClientCapabilities::default()
+        }),
+        ..ClientCapabilities::default()
+    };
+    let marker_dir = tempfile::tempdir().expect("marker dir");
+    let marker = marker_dir.path().join("pull.marker");
+    let marker_text = marker.to_str().expect("utf-8 marker path").to_owned();
+    let mut context = setup_test_with_env(
+        true,
+        &[],
+        capabilities,
+        &[
+            ("ROUGHLY_TEST_DELAY_PULL_MS", "1000"),
+            ("ROUGHLY_TEST_PULL_MARKER", &marker_text),
+        ],
+    )
+    .await;
+    let uri = context.open("R/cancel.R", "x = 1\n").await;
+
+    // The request is written first (socket sends are eager); the edit waits
+    // for the marker, so it always hits the held pull.
+    let pending = context
+        .server
+        .document_diagnostic(DocumentDiagnosticParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            identifier: Some("roughly".into()),
+            previous_result_id: None,
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        });
+    tokio::time::timeout(TIMEOUT, async {
+        while !marker.exists() {
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+    })
+    .await
+    .expect("the server never started holding the pull");
+    context.replace_file_full(&uri, 2, "y = 2\n");
+
+    let result = pending.await;
+    let Err(async_lsp::Error::Response(error)) = result else {
+        panic!("expected the cancelled-pull error, got {result:?}");
+    };
+    assert_eq!(
+        error.code,
+        async_lsp::ErrorCode::SERVER_CANCELLED,
+        "{error:?}"
+    );
+    let data = error.data.as_ref().expect("cancellation data");
+    assert_eq!(
+        data.get("retriggerRequest")
+            .and_then(|value| value.as_bool()),
+        Some(true),
+        "{data:?}"
+    );
+
+    // The retry lands on the edited content.
+    let report = context.document_diagnostic(&uri, None).await;
+    let DocumentDiagnosticReportResult::Report(DocumentDiagnosticReport::Full(full)) = report
+    else {
+        panic!("expected a full report on retry");
+    };
+    let messages: Vec<&str> = full
+        .full_document_diagnostic_report
+        .items
+        .iter()
+        .map(|item| item.message.as_str())
+        .collect();
+    assert!(
+        messages.iter().any(|message| message.contains("<-")),
+        "expected the assignment-operator lint on the edited text: {messages:?}"
+    );
 
     context.shutdown().await;
 }

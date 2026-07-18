@@ -94,20 +94,23 @@ configuration change instead — every lint's level can be set project-wide in
 
 ### Opt-in Checks
 
-Three further checks are available but off by default; enable them in `roughly.toml`:
+Three further checks are controlled by the `[check]` section of `roughly.toml`. The unused check
+is on by default; the other two are opt-in:
 
 ```toml
 [check]
-typing = true   # report type errors and function-call argument mismatches
-unused = true   # report assignments whose value is never read
-strict = true   # report expressions whose type the checker could not determine
+typing = true    # report type errors and function-call argument mismatches (default: false)
+unused = false   # opt out of unused-assignment warnings (default: true)
+strict = true    # report expressions whose type the checker could not determine (default: false)
 ```
 
-- **Unused assignments** (diagnostic code `unused`): Flags assignments whose value is never read
-  on any control-flow path — an unread variable, or a dead store overwritten before every read.
-  Conditional updates and loop accumulators that a later read observes are *not* flagged. Function
-  parameters, `for`-loop variables, top-level (package-visible) bindings, and names starting with
-  `.` or `_` are never reported.
+- **Unused assignments** (diagnostic code `unused`, on by default): Flags assignments whose value
+  is never read on any control-flow path — an unread variable, or a dead store overwritten before
+  every read. In standalone scripts this includes top-level bindings no later statement or nested
+  function reads. Conditional updates and loop accumulators that a later read observes are *not*
+  flagged. Function parameters, `for`-loop variables, package top-level (package-visible)
+  bindings, names starting with `.` or `_`, and bindings inside a syntax-error region are never
+  reported.
 - **Type checking**: Reports type errors and argument mismatches from Roughly's static type
   checker. Type *inference* is always on (it powers editor features); this setting controls whether
   `roughly check` surfaces type-error diagnostics. See the [Typing guide](/typing).

@@ -41,6 +41,21 @@ pub fn namespace_known(db: &dyn Db, package: &str) -> Option<bool> {
     stubs(db).map(|library| library.exports_by_namespace.contains_key(package))
 }
 
+/// The namespace whose declaration of `name` currently wins: sources are in
+/// precedence order (later replaces earlier), so the last declaring namespace
+/// owns the name.
+pub fn declaring_namespace<'db>(db: &'db dyn Db, name: &str) -> Option<&'db str> {
+    let sources = StubSources::try_get(db)?;
+    let library = stub_library(db, sources);
+    sources.sources(db).iter().rev().find_map(|(namespace, _)| {
+        library
+            .exports_by_namespace
+            .get(namespace)
+            .is_some_and(|names| names.contains(name))
+            .then_some(namespace.as_str())
+    })
+}
+
 /// Whether `package` declares `name` (any declaration form, overloads and
 /// nominals included).
 pub fn namespace_exports(db: &dyn Db, package: &str, name: &str) -> bool {

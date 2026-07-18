@@ -646,6 +646,57 @@ impl Worker {
             .map(|(path, _)| path)
     }
 
+    /// The hover's definition summary line: where the hovered name is
+    /// defined, with a workspace-relative `path:line:column` location.
+    fn render_hover_definition(&self, definition: &ide::HoverDefinition) -> Option<String> {
+        match definition {
+            ide::HoverDefinition::Local {
+                target,
+                maybe_undefined,
+            } => {
+                let location = self.render_source_location(target)?;
+                let mut summary = format!("Local variable, defined at `{location}`");
+                if *maybe_undefined {
+                    summary.push_str("\n\n_May be undefined on some paths._");
+                }
+                Some(summary)
+            }
+            ide::HoverDefinition::Global { target } => {
+                let location = self.render_source_location(target)?;
+                Some(format!("Package global, defined at `{location}`"))
+            }
+            ide::HoverDefinition::Stub {
+                namespace,
+                overloads,
+            } => Some(if *overloads > 1 {
+                format!(
+                    "From the `{namespace}` package (+{} overloads).",
+                    overloads - 1
+                )
+            } else {
+                format!("From the `{namespace}` package.")
+            }),
+        }
+    }
+
+    /// `R/main.R:2:1`-style location: workspace-relative path, 1-based line
+    /// and column.
+    fn render_source_location(&self, target: &ide::NavigationTarget) -> Option<String> {
+        let path = self.path_of(target.file)?;
+        let display = path
+            .strip_prefix(&self.workspace_root)
+            .unwrap_or(path)
+            .display();
+        let text = self.text(target.file);
+        let index = LineIndex::new(&text);
+        let position = index.line_column(target.range.start());
+        Some(format!(
+            "{display}:{}:{}",
+            position.line + 1,
+            position.column + 1
+        ))
+    }
+
     //
     // Document sync
     //
@@ -1335,17 +1386,47 @@ impl LanguageServer for ServerState {
             let Some(&file) = worker.files.get(&path) else {
                 return Ok(None);
             };
+            let Some(files) = ProjectFiles::try_get(&worker.db) else {
+                return Ok(None);
+            };
             let text = worker.text(file);
             let offset = worker.to_offset(&text, position.position);
             let hover = worker
-                .cancellable(|worker| ide::hover(&worker.db, file, offset))
+                .cancellable(|worker| ide::hover(&worker.db, files, file, offset))
                 .unwrap_or_default();
-            Ok(hover.map(|hover| lsp_types::Hover {
-                contents: lsp_types::HoverContents::Markup(lsp_types::MarkupContent {
-                    kind: lsp_types::MarkupKind::Markdown,
-                    value: format!("```r\n{}\n```", hover.lines.join("\n")),
-                }),
-                range: Some(worker.to_range(&text, hover.range)),
+            let debug = if worker.config.debug {
+                worker
+                    .cancellable(|worker| ide::hover_debug(&worker.db, file, offset))
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+            Ok(hover.map(|hover| {
+                let mut value = format!("```r\n{}\n```", hover.lines.join("\n"));
+                if let Some(summary) = hover
+                    .definition
+                    .as_ref()
+                    .and_then(|definition| worker.render_hover_definition(definition))
+                {
+                    value.push_str("\n\n");
+                    value.push_str(&summary);
+                }
+                if !debug.is_empty() {
+                    value.push_str("\n\n---\n\n### Debug");
+                    for section in &debug {
+                        value.push_str(&format!(
+                            "\n\n**{}**\n\n```\n{}\n```",
+                            section.title, section.body
+                        ));
+                    }
+                }
+                lsp_types::Hover {
+                    contents: lsp_types::HoverContents::Markup(lsp_types::MarkupContent {
+                        kind: lsp_types::MarkupKind::Markdown,
+                        value,
+                    }),
+                    range: Some(worker.to_range(&text, hover.range)),
+                }
             }))
         })
     }
@@ -1756,27 +1837,9 @@ impl LanguageServer for ServerState {
             let symbols = worker
                 .cancellable(|worker| ide::document_symbols(&worker.db, file))
                 .unwrap_or_default();
-            #[allow(deprecated)]
             let symbols: Vec<lsp_types::DocumentSymbol> = symbols
                 .into_iter()
-                .filter(|symbol| !symbol.name.is_empty())
-                .map(|symbol| lsp_types::DocumentSymbol {
-                    name: symbol.name,
-                    detail: symbol.detail.map(str::to_owned),
-                    kind: match symbol.kind {
-                        ide::DocumentSymbolKind::Function => lsp_types::SymbolKind::FUNCTION,
-                        ide::DocumentSymbolKind::Value => lsp_types::SymbolKind::VARIABLE,
-                        ide::DocumentSymbolKind::TypeDefinition => lsp_types::SymbolKind::STRUCT,
-                        ide::DocumentSymbolKind::AliasDefinition => {
-                            lsp_types::SymbolKind::INTERFACE
-                        }
-                    },
-                    tags: None,
-                    deprecated: None,
-                    range: worker.to_range(&text, symbol.range),
-                    selection_range: worker.to_range(&text, symbol.selection),
-                    children: None,
-                })
+                .filter_map(|symbol| to_lsp_document_symbol(worker, &text, symbol))
                 .collect();
             Ok(Some(lsp_types::DocumentSymbolResponse::Nested(symbols)))
         })
@@ -1797,16 +1860,16 @@ impl LanguageServer for ServerState {
             #[allow(deprecated)]
             let symbols: Vec<lsp_types::SymbolInformation> = symbols
                 .into_iter()
-                .filter_map(|(name, target)| {
-                    let path = worker.path_of(target.file)?;
+                .filter_map(|symbol| {
+                    let path = worker.path_of(symbol.target.file)?;
                     Some(lsp_types::SymbolInformation {
-                        name,
-                        kind: lsp_types::SymbolKind::VARIABLE,
+                        name: symbol.name,
+                        kind: lsp_document_symbol_kind(symbol.kind),
                         tags: None,
                         deprecated: None,
                         location: lsp_types::Location {
                             uri: worker.document_uri(path),
-                            range: worker.to_range_in(target.file, target.range),
+                            range: worker.to_range_in(symbol.target.file, symbol.target.range),
                         },
                         container_name: None,
                     })
@@ -1883,6 +1946,25 @@ impl LanguageServer for ServerState {
                 // A pull may legitimately target an untracked document.
                 return Ok(empty_full_diagnostic_report());
             }
+            // Fault injection for the cancelled-pull test: announce the
+            // in-flight pull through the marker file, then hold until the
+            // edit's cancellation flip lands (bounded by the configured
+            // delay). The marker lets the test order its edit strictly after
+            // the pull has started — the flip provably targets this pull's
+            // token, not one a queued job would refresh away.
+            if let Some(delay) = std::env::var("ROUGHLY_TEST_DELAY_PULL_MS")
+                .ok()
+                .and_then(|value| value.parse::<u64>().ok())
+            {
+                if let Ok(marker) = std::env::var("ROUGHLY_TEST_PULL_MARKER") {
+                    std::fs::write(&marker, b"pulling")
+                        .expect("the cancelled-pull test marker must be writable");
+                }
+                let deadline = std::time::Instant::now() + std::time::Duration::from_millis(delay);
+                while !worker.current_token.is_cancelled() && std::time::Instant::now() < deadline {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+            }
             match worker.cancellable(|worker| worker.settled_diagnostics(&path)) {
                 Ok(Some(diagnostics)) => {
                     Ok(diagnostic_report(diagnostics, params.previous_result_id))
@@ -1893,6 +1975,52 @@ impl LanguageServer for ServerState {
                 Err(_) => Err(diagnostics_cancelled_error()),
             }
         })
+    }
+}
+
+/// Recursive outline conversion; entries with empty names are dropped (the
+/// protocol forbids them).
+#[allow(deprecated)] // `deprecated` is a required field of `DocumentSymbol`
+fn to_lsp_document_symbol(
+    worker: &Worker,
+    text: &str,
+    symbol: ide::DocumentSymbol,
+) -> Option<lsp_types::DocumentSymbol> {
+    if symbol.name.is_empty() {
+        return None;
+    }
+    let children: Vec<lsp_types::DocumentSymbol> = symbol
+        .children
+        .into_iter()
+        .filter_map(|child| to_lsp_document_symbol(worker, text, child))
+        .collect();
+    Some(lsp_types::DocumentSymbol {
+        name: symbol.name,
+        detail: symbol.detail,
+        kind: lsp_document_symbol_kind(symbol.kind),
+        tags: None,
+        deprecated: None,
+        range: worker.to_range(text, symbol.range),
+        selection_range: worker.to_range(text, symbol.selection),
+        children: (!children.is_empty()).then_some(children),
+    })
+}
+
+fn lsp_document_symbol_kind(kind: ide::DocumentSymbolKind) -> lsp_types::SymbolKind {
+    match kind {
+        ide::DocumentSymbolKind::Function => lsp_types::SymbolKind::FUNCTION,
+        ide::DocumentSymbolKind::Value => lsp_types::SymbolKind::VARIABLE,
+        ide::DocumentSymbolKind::TypeDefinition => lsp_types::SymbolKind::STRUCT,
+        ide::DocumentSymbolKind::AliasDefinition | ide::DocumentSymbolKind::S4Generic => {
+            lsp_types::SymbolKind::INTERFACE
+        }
+        ide::DocumentSymbolKind::S4Class | ide::DocumentSymbolKind::R6Class => {
+            lsp_types::SymbolKind::CLASS
+        }
+        ide::DocumentSymbolKind::S4Method | ide::DocumentSymbolKind::R6Method => {
+            lsp_types::SymbolKind::METHOD
+        }
+        ide::DocumentSymbolKind::R6Field => lsp_types::SymbolKind::FIELD,
     }
 }
 

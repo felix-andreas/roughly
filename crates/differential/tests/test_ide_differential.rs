@@ -506,7 +506,7 @@ fn compare_case(
         // improvement counted separately, not a divergence.
         let legacy_hover = analysis::ide::hover(&mut analysis_state, &path, position)
             .and_then(|info| range_to_bytes(&line_starts, source, info.range));
-        let new_hover = ide::hover(&db, file, text_size).map(|hover| {
+        let new_hover = ide::hover(&db, files, file, text_size).map(|hover| {
             (
                 usize::from(hover.range.start()),
                 usize::from(hover.range.end()),

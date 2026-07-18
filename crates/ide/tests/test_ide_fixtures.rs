@@ -42,7 +42,7 @@ fn render_at(
     offset: TextSize,
     output: &mut String,
 ) {
-    match ide::hover(db, file, offset) {
+    match ide::hover(db, files, file, offset) {
         Some(hover) => {
             for line in &hover.lines {
                 output.push_str(&format!(
@@ -50,6 +50,33 @@ fn render_at(
                     u32::from(hover.range.start()),
                     u32::from(hover.range.end()),
                 ));
+            }
+            match hover.definition {
+                Some(ide::HoverDefinition::Local {
+                    target,
+                    maybe_undefined,
+                }) => output.push_str(&format!(
+                    "hover-definition: local {}..{}{}\n",
+                    u32::from(target.range.start()),
+                    u32::from(target.range.end()),
+                    if maybe_undefined {
+                        " (maybe undefined)"
+                    } else {
+                        ""
+                    },
+                )),
+                Some(ide::HoverDefinition::Global { target }) => output.push_str(&format!(
+                    "hover-definition: global {}..{}\n",
+                    u32::from(target.range.start()),
+                    u32::from(target.range.end()),
+                )),
+                Some(ide::HoverDefinition::Stub {
+                    namespace,
+                    overloads,
+                }) => output.push_str(&format!(
+                    "hover-definition: package {namespace} ({overloads} declaration(s))\n"
+                )),
+                None => {}
             }
         }
         None => output.push_str("hover: none\n"),
@@ -168,15 +195,93 @@ fn workspace_symbols_ranked() {
 
     let names: Vec<String> = ide::workspace_symbols(&db, files, "alpha")
         .into_iter()
-        .map(|(name, _)| name)
+        .map(|symbol| symbol.name)
         .collect();
     assert_eq!(names, vec!["alpha_one".to_owned(), "alpha_two".to_owned()]);
 
     let subsequence: Vec<String> = ide::workspace_symbols(&db, files, "aone")
         .into_iter()
-        .map(|(name, _)| name)
+        .map(|symbol| symbol.name)
         .collect();
     assert_eq!(subsequence, vec!["alpha_one".to_owned()]);
+}
+
+/// S4 declarations and R6 classes outline with their own kinds; R6 members
+/// nest as children (methods for function values, fields otherwise, active
+/// bindings as fields).
+#[test]
+fn document_symbols_expose_s4_and_r6_hierarchy() {
+    let db = RootDatabase::default();
+    semantics::stubs::install_shipped_stubs(&db);
+    let source = "\
+setClass(\"Person\", representation(name = \"character\"))
+setGeneric(\"greet\", function(object) standardGeneric(\"greet\"))
+setMethod(\"greet\", \"Person\", function(object) object@name)
+Account <- R6Class(\"Account\",
+  public = list(
+    balance = 0,
+    deposit = function(amount) invisible(self)
+  ),
+  private = list(audit = function() NULL),
+  active = list(status = function() \"open\")
+)
+plain <- function(x, ...) x
+";
+    let file = SourceFile::new(&db, source.to_owned(), DocumentKind::Package);
+    ProjectFiles::new(&db, vec![file]);
+
+    let symbols = ide::document_symbols(&db, file);
+    let rendered: Vec<String> = symbols
+        .iter()
+        .map(|symbol| {
+            format!(
+                "{} ({:?}{})",
+                symbol.name,
+                symbol.kind,
+                symbol
+                    .detail
+                    .as_deref()
+                    .map(|detail| format!(", {detail}"))
+                    .unwrap_or_default()
+            )
+        })
+        .collect();
+    assert_eq!(
+        rendered,
+        vec![
+            "Person (S4Class)",
+            "greet (S4Generic)",
+            "greet (S4Method, Person)",
+            "Account (R6Class)",
+            "plain (Function, fn(x, ...))",
+        ],
+        "{symbols:#?}"
+    );
+
+    let account = &symbols[3];
+    let members: Vec<String> = account
+        .children
+        .iter()
+        .map(|child| format!("{} ({:?})", child.name, child.kind))
+        .collect();
+    assert_eq!(
+        members,
+        vec![
+            "balance (R6Field)",
+            "deposit (R6Method)",
+            "audit (R6Method)",
+            "status (R6Field)",
+        ],
+        "{account:#?}"
+    );
+
+    // R6 members are reachable through workspace symbols.
+    let files = semantics::ProjectFiles::try_get(&db).expect("project files installed");
+    let deposit: Vec<String> = ide::workspace_symbols(&db, files, "deposit")
+        .into_iter()
+        .map(|symbol| symbol.name)
+        .collect();
+    assert_eq!(deposit, vec!["deposit".to_owned()]);
 }
 
 #[test]

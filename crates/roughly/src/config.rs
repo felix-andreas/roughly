@@ -22,16 +22,27 @@ pub struct Config {
 
 /// Which diagnostic classes are published. Every class is computed on demand
 /// for IDE features regardless; these gate only what is reported.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct CheckConfig {
-    /// Surface unused-local-binding warnings.
+    /// Surface unused-local-binding warnings (on by default; `unused = false`
+    /// under `[check]` opts out).
     pub unused: bool,
     /// Surface type-error diagnostics.
     pub typing: bool,
     /// Surface strict-mode diagnostics (each site originating a genuine
     /// `Unknown`), and escalate unresolved-name findings to errors.
     pub strict: bool,
+}
+
+impl Default for CheckConfig {
+    fn default() -> CheckConfig {
+        CheckConfig {
+            unused: true,
+            typing: false,
+            strict: false,
+        }
+    }
 }
 
 impl Config {
@@ -313,9 +324,15 @@ mod tests {
         assert_eq!(config.format.indent_width, 2);
         assert_eq!(config.format.line_ending, LineEnding::Auto);
         assert_eq!(config.lint.naming_style, None);
-        assert!(!config.check.unused);
+        assert!(config.check.unused, "unused warnings are on by default");
         assert!(!config.check.typing);
         assert!(!config.debug);
+    }
+
+    #[test]
+    fn unused_can_be_opted_out() {
+        let config = parse("[check]\nunused = false\n");
+        assert!(!config.check.unused);
     }
 
     #[test]

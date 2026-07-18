@@ -40,7 +40,7 @@ fn project(files: &[(&str, &str)]) -> tempfile::TempDir {
 
 // The unclosed `(` produces a syntax error at the 0-based range 2:5..2:6 (the
 // `(` token on line 2), so the rendered 1-based position is line 2, column 6.
-const SYNTAX_ERROR_SOURCE: &str = "x <- 1\ny <- (\n";
+const SYNTAX_ERROR_SOURCE: &str = "print(1)\ny <- (\n";
 
 //
 // CHECK
@@ -48,7 +48,7 @@ const SYNTAX_ERROR_SOURCE: &str = "x <- 1\ny <- (\n";
 
 #[test]
 fn check_clean_file_exits_zero() {
-    let directory = project(&[("clean.R", "x <- 1\n")]);
+    let directory = project(&[("clean.R", "x <- 1\nprint(x)\n")]);
     let output = roughly(directory.path(), &["check", "clean.R"]);
     assert_eq!(exit_code(&output), 0, "stderr: {}", stderr(&output));
 }
@@ -69,7 +69,7 @@ fn check_renders_one_based_positions() {
         "expected a 1-based gutter line number, got: {stderr}"
     );
     assert!(
-        !stderr.contains("x <- 1"),
+        !stderr.contains("print(1)"),
         "expected only the diagnostic's own line in the snippet, got: {stderr}"
     );
 }
@@ -157,7 +157,7 @@ fn check_json_output_is_one_based_and_parses() {
 
 #[test]
 fn check_json_output_maps_warning_severity() {
-    let directory = project(&[("warn.R", "x = 1\n")]);
+    let directory = project(&[("warn.R", "x = 1\nprint(x)\n")]);
     let output = roughly(directory.path(), &["check", "--output", "json", "warn.R"]);
 
     assert_eq!(exit_code(&output), 1);
@@ -351,7 +351,7 @@ fn check_reports_dropped_override_stub_declarations() {
 #[test]
 fn check_loads_valid_override_stubs_silently() {
     let directory = project(&[
-        ("clean.R", "x <- 1\n"),
+        ("clean.R", "x <- 1\nprint(x)\n"),
         (
             "stubs/project.Rtypes",
             "my_helper : fn(x: double) -> double\n",
@@ -398,7 +398,7 @@ fn check_without_r_files_exits_two() {
 fn check_suppression_comments_drop_findings() {
     let directory = project(&[(
         "warn.R",
-        "x = 1 # roughly: allow(assignment-operator)\n\ny = 2\n",
+        "x = 1 # roughly: allow(assignment-operator, unused)\n\ny = 2\n",
     )]);
     let output = roughly(directory.path(), &["check", "warn.R"]);
     let rendered = stderr(&output);

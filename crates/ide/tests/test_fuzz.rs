@@ -52,12 +52,13 @@ fn sweep(source: &str) {
     let files = ProjectFiles::new(&db, vec![file]);
     for offset in 0..=source.len() {
         let offset = TextSize::from(offset as u32);
-        let hover = ide::hover(&db, file, offset);
+        let hover = ide::hover(&db, files, file, offset);
         assert_eq!(
             hover,
-            ide::hover(&db, file, offset),
+            ide::hover(&db, files, file, offset),
             "non-deterministic hover in {source:?} at {offset:?}"
         );
+        let _ = ide::hover_debug(&db, file, offset);
         let _ = ide::definition(&db, files, file, offset);
         let _ = ide::references(&db, files, file, offset, true);
         let _ = ide::rename(&db, files, file, offset);

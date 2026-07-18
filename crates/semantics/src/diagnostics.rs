@@ -496,30 +496,38 @@ fn edit_distance_within(
 /// reads the name at all (a deferred read runs after the frame is built, so
 /// it keeps every write to the name observable — the captured-slot rule).
 fn script_unused_bindings(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
+    // A broken statement reports its syntax error and nothing else, so a
+    // definer inside an R-grammar error region never warns as unused.
+    let error_ranges: Vec<TextRange> = crate::parse(db, file)
+        .errors()
+        .iter()
+        .filter(|error| !error.in_annotation)
+        .map(|error| error.range)
+        .collect();
     let mut definers: Vec<(usize, String, TextRange, bool)> = Vec::new();
-    let mut items = Vec::new();
-    for item in item_tree(db, file) {
-        if !matches!(
-            *item.kind(db),
-            crate::ItemKind::Function | crate::ItemKind::Value
-        ) {
-            continue;
-        }
-        items.push(item);
-    }
+    // Every item participates as a reader — a bare `print(x)` statement keeps
+    // `x` alive — while only named definitions register as definers.
     let mut reads: Vec<(usize, String, bool)> = Vec::new();
-    for (index, &item) in items.iter().enumerate() {
+    for (index, item) in item_tree(db, file).into_iter().enumerate() {
         let Some(naming) = crate::item_naming(db, item) else {
             continue;
         };
-        if let Some(name) = item.name(db).clone()
+        if matches!(
+            *item.kind(db),
+            crate::ItemKind::Function | crate::ItemKind::Value
+        ) && let Some(name) = item.name(db).clone()
             && let Some(offset) = item_offset(db, item)
             && let Some(module) = crate::item_hir(db, item)
             && let Some(root) = module.root
         {
             let root_range = module.expression(root).range;
             let range = TextRange::new(root_range.start() + offset, root_range.end() + offset);
-            definers.push((index, name, range, false));
+            let broken = error_ranges
+                .iter()
+                .any(|error| error.start() <= range.end() && range.start() <= error.end());
+            if !broken {
+                definers.push((index, name, range, false));
+            }
         }
         for (expression, name) in &naming.non_locals {
             let deferred = naming.deferred_non_locals.contains(expression);

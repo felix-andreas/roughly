@@ -21,6 +21,7 @@ f <- function() {
 }
 #++++
 hover 33..38: value: double
+hover-definition: local 20..25
 definition 20..25
 references: 20..25*, 33..38
 rename: 2 edit(s)
@@ -40,6 +41,7 @@ f <- function(count) {
 }
 #++++
 hover 25..30: count: T
+hover-definition: local 14..19
 definition 14..19
 references: 14..19*, 25..30
 rename: 2 edit(s)
@@ -56,6 +58,7 @@ double <- function(x) x + x
 g <- function() dou$0ble(2)
 #++++
 hover 44..50: double: fn(x: double) -> double
+hover-definition: global 0..6
 definition 0..6
 references: 0..6*, 44..50
 rename: 2 edit(s)
@@ -78,6 +81,7 @@ f <- function() {
 }
 #++++
 hover 33..38: total: double
+hover-definition: local 20..25
 definition 20..25
 references: 20..25*, 33..38
 rename: 2 edit(s)
@@ -96,6 +100,7 @@ helper <- function(x) x
 caller <- function() hel$0per(1)
 #++++
 hover 45..51: helper: fn(x: double) -> double
+hover-definition: global 0..6
 definition 0..6
 references: 0..6*, 45..51
 rename: 2 edit(s)
@@ -119,6 +124,7 @@ f <- function() {
 }
 #++++
 hover 34..35: n: double
+hover-definition: local 20..21
 definition 20..21
 references: 20..21*, 29..30*, 34..35, 42..43
 rename: 4 edit(s)
@@ -142,6 +148,7 @@ f <- function(count) {
 }
 #++++
 hover 25..30: count: T
+hover-definition: local 14..19
 definition 14..19
 references: 14..19*, 25..30
 rename: 2 edit(s)
@@ -159,6 +166,7 @@ caller <- function() helper$0(1)
 also <- function() helper(2)
 #++++
 hover 45..51: helper: fn(x: double) -> double
+hover-definition: global 0..6
 definition 0..6
 references: 0..6*, 45..51, 74..80
 rename: 3 edit(s)
@@ -180,6 +188,7 @@ hel$0per <- function(x) x
 caller <- function() helper(1)
 #++++
 hover 0..6: helper: fn(x: T) -> T
+hover-definition: global 0..6
 definition 0..6
 references: 0..6*, 45..51
 rename: 2 edit(s)
@@ -197,6 +206,7 @@ hint @30: fn() -> double
 f <- function() pri$0nt(1)
 #++++
 hover 16..21: print: fn(x: double, [digits]: Any, [quote]: logical, [right]: logical, [max]: Any, [width]: Any, [n]: Any, [na.print]: Any, [row.names]: Any, ...: Any) -> double
+hover-definition: package base (1 declaration(s))
 definition: none
 references: none
 rename: none
@@ -217,6 +227,7 @@ g <- function() {
 }
 #++++
 hover 58..64: helper: double
+hover-definition: local 44..50
 definition 44..50
 references: 44..50*, 58..64
 rename: 2 edit(s)
@@ -240,6 +251,7 @@ f <- function() {
 }
 #++++
 hover 33..38: value: double
+hover-definition: local 20..25
 definition 20..25
 references: 20..25*, 33..38, 41..46
 rename: 3 edit(s)
@@ -634,6 +646,7 @@ uid <- 1L
 touch <- function() u$0id
 #++++
 hover 72..75: uid: UserId
+hover-definition: global 42..45
 definition 42..45
 references: 42..45*, 72..75
 rename: 2 edit(s)
@@ -667,6 +680,7 @@ f <- function() {
 }
 #++++
 hover 20..24: dead: double
+hover-definition: local 20..24
 definition 20..24
 references: 20..24*
 rename: 1 edit(s)
@@ -690,6 +704,7 @@ hint @24: double
 cou$0nt <- 1L
 #++++
 hover 0..5: count: integer
+hover-definition: global 0..5
 definition 0..5
 references: 0..5*
 rename: 1 edit(s)

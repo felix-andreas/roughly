@@ -32,7 +32,9 @@ marked ⚠️ are planned but not yet available.
 
 - **Editing**
   - Hover — the inferred type or full signature of any name (multi-line for long signatures),
-    with its origin package for standard-library names and an overload count where one applies
+    with where the name is defined (a `path:line:column` link for locals and package globals, the
+    origin package for standard-library names, with an overload count where one applies); the
+    top-level `debug = true` config adds internal lowering/naming/parsing sections
   - Completion for local and global variables
   - Completion for standard-library names, with their typed signatures as detail
   - Function completions insert a call snippet (`name(│)`, or `name()│` for zero-argument
@@ -58,11 +60,11 @@ marked ⚠️ are planned but not yet available.
   - Unresolved names — a name nothing defines, an unknown `pkg::` namespace, or a name a package
     does not export, with "did you mean" typo hints (errors under
     [strict mode](/typing-reference#strict-mode))
-  - Unused local variables — *opt-in via `[check] unused = true`*
+  - Unused local variables — *on by default; opt out via `[check] unused = false`*
   - Type errors and function-call argument mismatches — *opt-in via `[check] typing = true`*
 
-Type *inference* runs by default and powers hover and inlay hints with no configuration. The two
-opt-in diagnostics above only control what `roughly check` reports. See the
+Type *inference* runs by default and powers hover and inlay hints with no configuration. The
+`[check]` switches above only control what `roughly check` reports. See the
 [Typing guide](/typing) for the inference model — structural and nominal types, function
 types, unions, and generics with bounds, all written in [`#:` comments](/typing).
 

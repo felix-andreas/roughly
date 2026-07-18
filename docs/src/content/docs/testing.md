@@ -146,6 +146,14 @@ configs, failure keeps the previous config, the config-file diagnostic), every f
 endpoint including UTF-16/UTF-8 range correctness with BMP and non-BMP content and
 out-of-bounds safety, semantic tokens for `#:` bodies, and `.Rtypes`/NAMESPACE buffer serving.
 
+The cancelled-pull test is deterministic through a fault-injection seam: with the
+`ROUGHLY_TEST_DELAY_PULL_MS` environment variable set, the server announces each diagnostics pull
+by creating the `ROUGHLY_TEST_PULL_MARKER` file and then holds the pull (until the cancellation
+token flips, bounded by the delay) before computing. The test sends its `didChange` only after the
+marker appears, so the edit's flip provably lands while the pull is in flight — the retryable
+`SERVER_CANCELLED` response, and the successful retry after it, can be asserted without
+sleeping-and-hoping. The variables exist only for this test; production runs never set them.
+
 ### The perf and memory witnesses
 
 `crates/differential/tests/test_stats.rs` (ignored; needs the fetched corpus and a release

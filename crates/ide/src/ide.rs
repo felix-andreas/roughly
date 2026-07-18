@@ -22,12 +22,38 @@ use semantics::{
 };
 use syntax::{TextRange, TextSize};
 
-/// A hover result: the hovered expression's absolute range and the rendered
-/// lines.
+/// A hover result: the hovered expression's absolute range, the rendered
+/// type lines, and — for a variable use — where the name is defined.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hover {
     pub range: TextRange,
     pub lines: Vec<String>,
+    pub definition: Option<HoverDefinition>,
+}
+
+/// Where a hovered name is defined. Location rendering (paths, line:column)
+/// happens in the host, which owns the file-to-path mapping.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HoverDefinition {
+    /// A slot inside the item: a local assignment, parameter, or loop
+    /// variable. `maybe_undefined` marks reads not dominated by a write.
+    Local {
+        target: NavigationTarget,
+        maybe_undefined: bool,
+    },
+    /// A project top-level definition (the name's winner).
+    Global { target: NavigationTarget },
+    /// A stdlib stub name: its declaring namespace and how many overload
+    /// candidates the corpus declares for it.
+    Stub { namespace: String, overloads: usize },
+}
+
+/// One phase's internal facts for the hovered position, shown by hosts under
+/// a debug flag.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DebugSection {
+    pub title: &'static str,
+    pub body: String,
 }
 
 /// A navigation target: a file and an absolute range inside it.
@@ -47,7 +73,12 @@ pub struct Occurrence {
     pub is_declaration: bool,
 }
 
-pub fn hover(db: &dyn Db, file: SourceFile, offset: TextSize) -> Option<Hover> {
+pub fn hover(
+    db: &dyn Db,
+    files: ProjectFiles,
+    file: SourceFile,
+    offset: TextSize,
+) -> Option<Hover> {
     // A cursor inside a `#:` annotation resolves against the type notation,
     // not the R expression it decorates.
     if let Some(cursor) = annotation_type_at(db, file, offset) {
@@ -71,11 +102,12 @@ pub fn hover(db: &dyn Db, file: SourceFile, offset: TextSize) -> Option<Hover> {
         .find_map(|id| check.expression_types.get(&id).map(|ty| (id, *ty)))?;
 
     let mut renderer = TypeRenderer::default();
-    let line = match &hir.expression(expression).kind {
-        ExpressionKind::NameRef(name) => {
-            format!("{name}: {}", renderer.render(db, ty))
-        }
-        _ => renderer.render(db, ty),
+    let (line, definition) = match &hir.expression(expression).kind {
+        ExpressionKind::NameRef(name) => (
+            format!("{name}: {}", renderer.render(db, ty)),
+            hover_definition(db, files, position.item, expression, name),
+        ),
+        _ => (renderer.render(db, ty), None),
     };
 
     // Expression nodes may swallow trailing trivia; the hover highlight must
@@ -87,7 +119,146 @@ pub fn hover(db: &dyn Db, file: SourceFile, offset: TextSize) -> Option<Hover> {
     Some(Hover {
         range,
         lines: vec![line],
+        definition,
     })
+}
+
+/// Where the hovered name-use is defined: a slot's binding site, the global
+/// name's winner declaration, or a stub's declaring namespace.
+fn hover_definition<'db>(
+    db: &'db dyn Db,
+    files: ProjectFiles,
+    item: Item<'db>,
+    expression: ExprId,
+    name: &str,
+) -> Option<HoverDefinition> {
+    let naming = item_naming(db, item)?;
+    if let Some(binding) = naming.resolutions.get(&expression) {
+        let info = naming.bindings.get(binding)?;
+        // The item's own top-level binding IS the global definition.
+        if info.kind == BindingKind::TopLevel {
+            return global_hover_definition(db, files, &info.name, Some(item));
+        }
+        let item_offset = item_node(db, item)?.text_range().start();
+        return Some(HoverDefinition::Local {
+            target: NavigationTarget {
+                file: *item.file(db),
+                range: info.range + item_offset,
+            },
+            maybe_undefined: naming.maybe_undefined.contains(&expression),
+        });
+    }
+    if naming.non_locals.get(&expression).is_some() {
+        if let Some(definition) = global_hover_definition(db, files, name, None) {
+            return Some(definition);
+        }
+        let namespace = semantics::stubs::declaring_namespace(db, name)?;
+        let overloads = semantics::stubs::stubs(db)?
+            .schemes
+            .get(name)
+            .map_or(0, Vec::len);
+        return Some(HoverDefinition::Stub {
+            namespace: namespace.to_owned(),
+            overloads,
+        });
+    }
+    None
+}
+
+/// The global definition site of `name`: the package winner, the first
+/// declaring item across the project, or — for a top-level read of the
+/// defining item itself — that item.
+fn global_hover_definition(
+    db: &dyn Db,
+    files: ProjectFiles,
+    name: &str,
+    own_item: Option<Item<'_>>,
+) -> Option<HoverDefinition> {
+    let declaring = package_definitions(db, files)
+        .get(name)
+        .copied()
+        .or_else(|| {
+            files.files(db).iter().find_map(|&file| {
+                item_tree(db, file).into_iter().find(|item| {
+                    matches!(*item.kind(db), ItemKind::Function | ItemKind::Value)
+                        && item.name(db).as_deref() == Some(name)
+                })
+            })
+        })
+        .or(own_item)?;
+    let node = item_node(db, declaring)?;
+    let range = definition_name_range(&node).unwrap_or_else(|| node.text_range());
+    Some(HoverDefinition::Global {
+        target: NavigationTarget {
+            file: *declaring.file(db),
+            range,
+        },
+    })
+}
+
+/// Per-phase internal facts at the cursor, for hosts with debug hover
+/// enabled: the lowered HIR expression, its naming resolution, and the
+/// syntax-node chain under the cursor.
+pub fn hover_debug(db: &dyn Db, file: SourceFile, offset: TextSize) -> Vec<DebugSection> {
+    let mut sections = Vec::new();
+    if let Some(position) = position_in_item(db, file, offset)
+        && let Some(hir) = item_hir(db, position.item)
+        && let Some(expression) = position.expressions_at().into_iter().next()
+    {
+        sections.push(DebugSection {
+            title: "Lowering",
+            body: format!("{:#?}", hir.expression(expression)),
+        });
+        if let Some(naming) = item_naming(db, position.item) {
+            let resolution = if let Some(binding) = naming.resolutions.get(&expression) {
+                match naming.bindings.get(binding) {
+                    Some(info) => format!(
+                        "slot `{}` ({:?}, declared at {}..{})",
+                        info.name,
+                        info.kind,
+                        u32::from(info.range.start()),
+                        u32::from(info.range.end()),
+                    ),
+                    None => "slot (missing binding info)".to_owned(),
+                }
+            } else if let Some(name) = naming.non_locals.get(&expression) {
+                format!("non-local `{name}`")
+            } else {
+                "no resolution recorded".to_owned()
+            };
+            sections.push(DebugSection {
+                title: "Naming",
+                body: resolution,
+            });
+        }
+    }
+    let parse = semantics::parse(db, file);
+    let root = parse.syntax_node();
+    if let Some(token) = root
+        .token_at_offset(offset)
+        .right_biased()
+        .or_else(|| root.token_at_offset(offset).left_biased())
+    {
+        let mut chain = vec![format!(
+            "{:?}@{}..{}",
+            token.kind(),
+            u32::from(token.text_range().start()),
+            u32::from(token.text_range().end()),
+        )];
+        for ancestor in std::iter::successors(token.parent(), syntax::SyntaxNode::parent) {
+            chain.push(format!(
+                "{:?}@{}..{}",
+                ancestor.kind(),
+                u32::from(ancestor.text_range().start()),
+                u32::from(ancestor.text_range().end()),
+            ));
+        }
+        sections.push(DebugSection {
+            title: "Parsing",
+            body: chain.join("\n"),
+        });
+    }
+    sections
 }
 
 /// Shrinks a range's end past any trailing whitespace/newlines it swallowed.
@@ -899,6 +1070,18 @@ pub enum DocumentSymbolKind {
     TypeDefinition,
     /// A `#: @alias` declaration.
     AliasDefinition,
+    /// Declared by `setClass`.
+    S4Class,
+    /// Declared by `setGeneric`.
+    S4Generic,
+    /// Declared by `setMethod`; the signature classes render as the detail.
+    S4Method,
+    /// An `R6Class(...)` definition; its members are the children.
+    R6Class,
+    /// A function-valued `public`/`private` R6 member.
+    R6Method,
+    /// A non-function R6 member, or an `active` binding.
+    R6Field,
 }
 
 /// One outline entry: the whole construct's range plus the name's own range
@@ -907,38 +1090,80 @@ pub enum DocumentSymbolKind {
 pub struct DocumentSymbol {
     pub name: String,
     pub kind: DocumentSymbolKind,
-    /// The `@type` / `@alias` spelling for type declarations.
-    pub detail: Option<&'static str>,
+    /// `fn(parameters)` for functions, the `@type`/`@alias` spelling for
+    /// type declarations, the signature classes for S4 methods.
+    pub detail: Option<String>,
     pub range: TextRange,
     pub selection: TextRange,
+    /// R6 class members; empty for every other kind.
+    pub children: Vec<DocumentSymbol>,
 }
 
-/// Document symbols: the file's named top-level definitions plus its
+/// Document symbols: the file's named top-level definitions (S4/R6
+/// declarations recognized structurally, R6 members as children) plus its
 /// `@type`/`@alias` declarations (invisible to the item tree — they live in
 /// `#:` comments), in source order.
 pub fn document_symbols(db: &dyn Db, file: SourceFile) -> Vec<DocumentSymbol> {
     let mut symbols = Vec::new();
     for item in item_tree(db, file) {
-        let kind = match *item.kind(db) {
-            ItemKind::Function => DocumentSymbolKind::Function,
-            ItemKind::Value => DocumentSymbolKind::Value,
-            ItemKind::Statement => continue,
-        };
-        let Some(name) = item.name(db).clone() else {
-            continue;
-        };
         let Some(node) = item_node(db, item) else {
             continue;
         };
         let range = node.text_range();
-        let selection = definition_name_range(&node).unwrap_or(range);
-        symbols.push(DocumentSymbol {
-            name,
-            kind,
-            detail: None,
-            range,
-            selection,
-        });
+        match *item.kind(db) {
+            ItemKind::Function | ItemKind::Value => {
+                let Some(name) = item.name(db).clone() else {
+                    continue;
+                };
+                let selection = definition_name_range(&node).unwrap_or(range);
+                // An assigned S4/R6 construction (the call is the assigned
+                // value, a direct child of the assignment) keeps the assigned
+                // name but takes the construct's kind, detail, and members.
+                let construct = node
+                    .children()
+                    .find(|child| child.kind() == syntax::SyntaxKind::CALL_EXPR)
+                    .and_then(|call| classify_symbol_call(&call));
+                let (kind, detail, children) = match construct {
+                    Some(construct) => (construct.kind, construct.detail, construct.children),
+                    None => {
+                        let kind = match *item.kind(db) {
+                            ItemKind::Function => DocumentSymbolKind::Function,
+                            _ => DocumentSymbolKind::Value,
+                        };
+                        (kind, function_detail(&node), Vec::new())
+                    }
+                };
+                symbols.push(DocumentSymbol {
+                    name,
+                    kind,
+                    detail,
+                    range,
+                    selection,
+                    children,
+                });
+            }
+            // A bare `setClass(...)`-style statement names itself through its
+            // string argument.
+            ItemKind::Statement => {
+                if node.kind() != syntax::SyntaxKind::CALL_EXPR {
+                    continue;
+                }
+                let Some(construct) = classify_symbol_call(&node) else {
+                    continue;
+                };
+                let Some((name, selection)) = construct.name else {
+                    continue;
+                };
+                symbols.push(DocumentSymbol {
+                    name,
+                    kind: construct.kind,
+                    detail: construct.detail,
+                    range,
+                    selection,
+                    children: construct.children,
+                });
+            }
+        }
     }
     let parse = semantics::parse(db, file);
     for annotation in parse
@@ -969,9 +1194,10 @@ pub fn document_symbols(db: &dyn Db, file: SourceFile) -> Vec<DocumentSymbol> {
             symbols.push(DocumentSymbol {
                 name: name_token.text().to_owned(),
                 kind,
-                detail: Some(detail),
+                detail: Some(detail.to_owned()),
                 range: directive.text_range(),
                 selection: name_token.text_range(),
+                children: Vec::new(),
             });
         }
     }
@@ -979,36 +1205,217 @@ pub fn document_symbols(db: &dyn Db, file: SourceFile) -> Vec<DocumentSymbol> {
     symbols
 }
 
-/// Workspace symbols: every file's named definitions matched and ranked by
-/// the shared smart-case matcher, capped like completion.
-pub fn workspace_symbols(
-    db: &dyn Db,
-    files: ProjectFiles,
-    query: &str,
-) -> Vec<(String, NavigationTarget)> {
-    let mut symbols: Vec<(MatchScore, String, NavigationTarget)> = Vec::new();
+/// A recognized S4/R6 construction call's outline contribution. `name` is
+/// the construct's own string-literal name (with its selection range) for
+/// bare statements; assigned constructions keep the assigned name instead.
+struct SymbolCall {
+    kind: DocumentSymbolKind,
+    name: Option<(String, TextRange)>,
+    detail: Option<String>,
+    children: Vec<DocumentSymbol>,
+}
+
+fn classify_symbol_call(call: &syntax::SyntaxNode) -> Option<SymbolCall> {
+    let callee = s4_callee_name(call)?;
+    let arguments = call
+        .children()
+        .find(|child| child.kind() == syntax::SyntaxKind::ARGUMENT_LIST)?;
+    match callee.as_str() {
+        "setClass" => Some(SymbolCall {
+            kind: DocumentSymbolKind::S4Class,
+            name: string_argument_content(s4_argument(&arguments, "Class", 0)),
+            detail: None,
+            children: Vec::new(),
+        }),
+        "setGeneric" => Some(SymbolCall {
+            kind: DocumentSymbolKind::S4Generic,
+            name: string_argument_content(s4_argument(&arguments, "name", 0)),
+            detail: None,
+            children: Vec::new(),
+        }),
+        "setMethod" => {
+            let signature = s4_argument(&arguments, "signature", 1)
+                .map(|signature| {
+                    let classes: Vec<String> = s4_signature_strings(&signature)
+                        .into_iter()
+                        .filter_map(|class| string_argument_content(Some(class)))
+                        .map(|(name, _)| name)
+                        .collect();
+                    if classes.is_empty() {
+                        "Unknown".to_owned()
+                    } else {
+                        classes.join(", ")
+                    }
+                })
+                .unwrap_or_else(|| "Unknown".to_owned());
+            Some(SymbolCall {
+                kind: DocumentSymbolKind::S4Method,
+                name: string_argument_content(s4_argument(&arguments, "f", 0)),
+                detail: Some(signature),
+                children: Vec::new(),
+            })
+        }
+        "R6Class" => Some(SymbolCall {
+            kind: DocumentSymbolKind::R6Class,
+            name: string_argument_content(s4_argument(&arguments, "classname", 0)),
+            detail: None,
+            children: r6_members(&arguments),
+        }),
+        _ => None,
+    }
+}
+
+/// The members of an `R6Class` call's `public`/`private`/`active` lists:
+/// function values are methods (fields for `active` bindings), everything
+/// else a field.
+fn r6_members(arguments: &syntax::SyntaxNode) -> Vec<DocumentSymbol> {
+    let mut members = Vec::new();
+    for (field, position) in [("public", 1), ("private", 2), ("active", 3)] {
+        let Some(list) = s4_argument(arguments, field, position) else {
+            continue;
+        };
+        if list.kind() != syntax::SyntaxKind::CALL_EXPR {
+            continue;
+        }
+        let Some(list_arguments) = list
+            .children()
+            .find(|child| child.kind() == syntax::SyntaxKind::ARGUMENT_LIST)
+        else {
+            continue;
+        };
+        for member in list_arguments
+            .children()
+            .filter(|child| child.kind() == syntax::SyntaxKind::ARGUMENT)
+        {
+            let Some(name) = member
+                .children()
+                .find(|child| child.kind() == syntax::SyntaxKind::NAME)
+            else {
+                continue;
+            };
+            let value = member
+                .children()
+                .find(|child| child.kind() != syntax::SyntaxKind::NAME);
+            let is_function = value
+                .as_ref()
+                .is_some_and(|value| value.kind() == syntax::SyntaxKind::FUNCTION_DEF);
+            let kind = if is_function && field != "active" {
+                DocumentSymbolKind::R6Method
+            } else {
+                DocumentSymbolKind::R6Field
+            };
+            let detail = value
+                .as_ref()
+                .filter(|_| is_function)
+                .and_then(function_detail);
+            members.push(DocumentSymbol {
+                name: name.text().to_string(),
+                kind,
+                detail,
+                range: member.text_range(),
+                selection: name.text_range(),
+                children: Vec::new(),
+            });
+        }
+    }
+    members
+}
+
+/// `fn(parameter, ...)` from the first function definition inside `node`.
+fn function_detail(node: &syntax::SyntaxNode) -> Option<String> {
+    let function = if node.kind() == syntax::SyntaxKind::FUNCTION_DEF {
+        node.clone()
+    } else {
+        node.descendants()
+            .find(|child| child.kind() == syntax::SyntaxKind::FUNCTION_DEF)?
+    };
+    let parameters = function
+        .children()
+        .find(|child| child.kind() == syntax::SyntaxKind::PARAMETER_LIST)?;
+    let names: Vec<String> = parameters
+        .children()
+        .filter(|child| child.kind() == syntax::SyntaxKind::PARAMETER)
+        .filter_map(|parameter| {
+            parameter
+                .children_with_tokens()
+                .filter_map(|element| element.into_token())
+                .find(|token| {
+                    matches!(
+                        token.kind(),
+                        syntax::SyntaxKind::IDENT | syntax::SyntaxKind::DOTS
+                    )
+                })
+                .map(|token| token.text().to_owned())
+        })
+        .collect();
+    Some(format!("fn({})", names.join(", ")))
+}
+
+/// The content text and range (inside the quotes) of a string-literal node.
+fn string_argument_content(node: Option<syntax::SyntaxNode>) -> Option<(String, TextRange)> {
+    let token = node?
+        .children_with_tokens()
+        .filter_map(|element| element.into_token())
+        .find(|token| token.kind() == syntax::SyntaxKind::STRING)?;
+    let text = token.text();
+    if text.len() < 2 || !(text.starts_with('"') || text.starts_with('\'')) {
+        return None;
+    }
+    let name = text[1..text.len() - 1].to_string();
+    if name.is_empty() {
+        return None;
+    }
+    let range = token.text_range();
+    Some((
+        name,
+        TextRange::new(
+            range.start() + TextSize::from(1),
+            range.end() - TextSize::from(1),
+        ),
+    ))
+}
+
+/// One workspace-symbol match.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceSymbol {
+    pub name: String,
+    pub kind: DocumentSymbolKind,
+    pub target: NavigationTarget,
+}
+
+/// Workspace symbols: every file's named definitions (R6 members included)
+/// matched and ranked by the shared smart-case matcher, capped like
+/// completion.
+pub fn workspace_symbols(db: &dyn Db, files: ProjectFiles, query: &str) -> Vec<WorkspaceSymbol> {
+    let mut symbols: Vec<(MatchScore, WorkspaceSymbol)> = Vec::new();
     for &file in files.files(db) {
         for symbol in document_symbols(db, file) {
-            if let Some(score) = search_match(&symbol.name, query) {
-                symbols.push((
-                    score,
-                    symbol.name,
-                    NavigationTarget {
-                        file,
-                        range: symbol.selection,
-                    },
-                ));
+            for entry in std::iter::once(&symbol).chain(&symbol.children) {
+                if let Some(score) = search_match(&entry.name, query) {
+                    symbols.push((
+                        score,
+                        WorkspaceSymbol {
+                            name: entry.name.clone(),
+                            kind: entry.kind,
+                            target: NavigationTarget {
+                                file,
+                                range: entry.selection,
+                            },
+                        },
+                    ));
+                }
             }
         }
     }
-    symbols.sort_by(|left, right| {
-        (left.0, left.1.to_lowercase(), &left.1).cmp(&(right.0, right.1.to_lowercase(), &right.1))
+    symbols.sort_by(|(left_score, left), (right_score, right)| {
+        (left_score, left.name.to_lowercase(), &left.name).cmp(&(
+            right_score,
+            right.name.to_lowercase(),
+            &right.name,
+        ))
     });
     symbols.truncate(COMPLETION_LIMIT);
-    symbols
-        .into_iter()
-        .map(|(_, name, target)| (name, target))
-        .collect()
+    symbols.into_iter().map(|(_, symbol)| symbol).collect()
 }
 
 // ---- annotation type names ----
@@ -1247,33 +1654,14 @@ fn push_s4_string(
     is_declaration: bool,
     out: &mut Vec<S4Occurrence>,
 ) {
-    let Some(node) = node else {
-        return;
-    };
-    let Some(token) = node
-        .children_with_tokens()
-        .filter_map(|element| element.into_token())
-        .find(|token| token.kind() == syntax::SyntaxKind::STRING)
-    else {
-        return;
-    };
     // The content between plain quotes; raw strings never carry S4 names.
-    let text = token.text();
-    if text.len() < 2 || !(text.starts_with('"') || text.starts_with('\'')) {
+    let Some((name, range)) = string_argument_content(node) else {
         return;
-    }
-    let name = text[1..text.len() - 1].to_string();
-    if name.is_empty() {
-        return;
-    }
-    let range = token.text_range();
+    };
     out.push(S4Occurrence {
         name,
         kind,
-        range: TextRange::new(
-            range.start() + TextSize::from(1),
-            range.end() - TextSize::from(1),
-        ),
+        range,
         is_declaration,
     });
 }
@@ -1381,6 +1769,7 @@ fn annotation_type_hover(
     Some(Hover {
         range: cursor.range,
         lines: vec![line],
+        definition: None,
     })
 }
 
