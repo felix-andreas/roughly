@@ -112,7 +112,12 @@ pub enum TypeErrorKind<'db> {
     NotIterable {
         found: Ty<'db>,
     },
-    InfiniteType,
+    /// The occurs check refused a binding: the variable appears inside the
+    /// type it would be bound to.
+    InfiniteType {
+        variable: Ty<'db>,
+        container: Ty<'db>,
+    },
 }
 
 /// What an operator position accepts, for error wording.
@@ -799,7 +804,10 @@ impl<'db> Checker<'db, '_> {
                 expected: self.table.resolve(self.db, expected),
                 found: self.table.resolve(self.db, found),
             },
-            UnifyError::Occurs(..) => TypeErrorKind::InfiniteType,
+            UnifyError::Occurs(variable, container) => TypeErrorKind::InfiniteType {
+                variable: Ty::new(self.db, TyKind::Var(variable)),
+                container: self.table.resolve(self.db, container),
+            },
             UnifyError::ConstraintRejected(constraint, found) => {
                 TypeErrorKind::ConstraintViolation {
                     constraint,

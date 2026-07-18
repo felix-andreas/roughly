@@ -73,3 +73,9 @@ later: fn() -> integer
 x <- list(v = 1, w = x)
 #++++
 x: Unknown
+
+#---- occurs_check_names_the_infinite_type
+f <- function(g) g(g)
+#++++
+f: Unknown
+17..21 error[type-mismatch] I cannot construct an infinite type: T occurs inside `fn(T) -> U`.

@@ -542,7 +542,14 @@ fn render_type_error_message(db: &dyn Db, error: &TypeError<'_>) -> String {
             }
             message
         }
-        TypeErrorKind::InfiniteType => "this would create an infinite type".to_owned(),
+        TypeErrorKind::InfiniteType {
+            variable,
+            container,
+        } => format!(
+            "I cannot construct an infinite type: {} occurs inside `{}`.",
+            renderer.render(db, *variable),
+            renderer.render(db, *container)
+        ),
     }
 }
 
