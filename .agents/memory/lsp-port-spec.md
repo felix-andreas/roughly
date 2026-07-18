@@ -221,18 +221,31 @@ lists would-change files exit 1, --diff prints diffs.
 
 ## 10. Port order (remaining)
 
-1. crates/roughly skeleton: Cargo.toml ([[bin]] roughly; legacy bin
-   renamed away in the SAME commit), main.rs, config.rs, position.rs
-   (line index over String), diagnostics assembly + suppressions.
-2. CLI check/fmt vs new stack + test_cli port.
-3. server.rs per this spec on salsa clone-handle cancellation +
-   test_lsp port (the Phase 3 gate battery: UTF-16 incl. non-BMP,
-   latest-edit-wins, coherence-panic death, watched files, config
-   reload + toml-span config diagnostics, semantic tokens incl. #:
-   coloring, suppression comments, signature label offsets, pull
-   diagnostics incl. result-id/unchanged/cancel-retry semantics,
-   two-wave push, burst settling, per-file independence).
-4. Memory re-measure ~700K LoC; witnesses as CI-checkable artifacts.
+DONE: skeleton + CLI + test_cli (25 tests) + server.rs (full feature
+surface per §1-§7) + test_lsp core (18 tests: capabilities, encodings
+incl. non-BMP hover ranges, push waves, burst settling, pull result-id
+semantics + unchanged reports, push suppression, formatting + refusal,
+goto, workspace-root-from-client, malformed-config fallback). The
+cancellation model: worker refreshes to a fresh db handle at every job
+start when its token was cancelled (a flip is consumed by the in-flight
+query it killed) — see §12.
+
+REMAINING:
+1. Port the rest of test_lsp coverage (~60 more tests in the legacy
+   file): out-of-bounds safety per feature, references/rename behaviors,
+   completion contexts + snippets assertions, inlay viewport, signature
+   label offsets against a label-offset client, semantic-token payloads,
+   config reload live (watched-files event → refresh), did_close disk
+   reread, untitled documents, stub/.Rtypes + NAMESPACE buffer serving,
+   dependency-affecting save → refresh request, pull-client refresh,
+   breaking-one-file independence, coherence-panic death test.
+2. Close §11 product gaps (globalVariables, duplicate-binding related
+   notes, stub-loader problems + @masked validation, richer document
+   symbols with kinds/hierarchy).
+3. Memory re-measure ~700K LoC; witnesses as CI-checkable artifacts;
+   flip workspace default-members to crates/roughly; update
+   architecture.md/structure.md/testing.md for the cutover; decision
+   record for Phase 3 completion.
 
 ## 11. Known product gaps found while porting the CLI contract (close before Phase 3 completes)
 
