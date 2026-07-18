@@ -1,0 +1,65 @@
+#==== hover
+#---- literal_type
+x <- 1$0L
+#++++
+hover 5..7: integer
+definition: none
+references: none
+
+#---- local_read
+f <- function() {
+  value <- 2
+  val$0ue + 1
+}
+#++++
+hover 33..38: value: double
+definition 20..25
+references: 20..25, 33..38
+
+#---- parameter_read
+f <- function(count) {
+  cou$0nt * 2
+}
+#++++
+hover 25..30: count: T
+definition 14..19
+references: 25..30
+
+#---- function_name
+double <- function(x) x + x
+g <- function() dou$0ble(2)
+#++++
+hover 44..50: double: fn(x: double) -> double
+definition 0..6
+references: none
+
+#==== definition
+#---- local_slot
+f <- function() {
+  total <- 1
+  tot$0al
+}
+#++++
+hover 33..38: total: double
+definition 20..25
+references: 20..25, 33..38
+
+#---- cross_item_global
+helper <- function(x) x
+caller <- function() hel$0per(1)
+#++++
+hover 45..51: helper: fn(x: double) -> double
+definition 0..6
+references: none
+
+#==== references
+#---- slot_reads_and_writes
+f <- function() {
+  n <- 1
+  n <- n$0 + 1
+  n
+}
+#++++
+hover 34..35: n: double
+definition 20..21
+references: 20..21, 29..30, 34..35, 42..43

@@ -38,6 +38,10 @@ expectations and `FIXTURE_FILTER=group__case` runs one case. Suites:
   each case's source formats to the expected block, and the runner re-formats the output to
   assert idempotence on every case; a case whose expectation is a refusal renders the
   structured `FormatError`
+- `crates/ide/tests/ide` — IDE feature fixtures: the case source carries one `$0` cursor
+  marker (stripped before analysis) and the expectation renders each feature's result at
+  that position (hover line with its absolute range, definition target range, reference
+  ranges)
 
 ### The cross-stack differential gate
 

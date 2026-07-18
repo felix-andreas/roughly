@@ -142,9 +142,15 @@ pub fn item_syntax<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<ItemSyntax> 
     resolve_item_node(db, item).map(|node| ItemSyntax(node.green().into()))
 }
 
-/// The item's current red node inside the FILE tree (absolute offsets) — the
-/// rendering edge uses this to re-anchor item-relative spans; everything else
-/// must go through the position-independent `item_syntax`.
+/// The item's current red node inside the FILE tree (absolute offsets) — an
+/// EDGE-ONLY view: the rendering edge and position-addressed IDE features use
+/// it to convert between absolute and item-relative offsets. Everything that
+/// computes derived per-item values must go through the position-independent
+/// `item_syntax`, or edits elsewhere in the file stop cutting off.
+pub fn item_node<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<syntax::SyntaxNode> {
+    resolve_item_node(db, item)
+}
+
 pub(crate) fn resolve_item_node<'db>(
     db: &'db dyn Db,
     item: Item<'db>,
