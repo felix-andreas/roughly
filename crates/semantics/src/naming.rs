@@ -785,7 +785,13 @@ impl Context<'_> {
                 }
             }
             ExpressionKind::Call { callee, arguments } => {
+                // The function actually invoked is the `name<-` replacement
+                // form, a different name from the callee as written —
+                // resolution still runs for the IDE, but an unresolved
+                // callee here is not a reportable finding.
+                self.quiet_depth += 1;
                 self.resolve(*callee);
+                self.quiet_depth -= 1;
                 let mut arguments = arguments.iter();
                 if let Some(first) = arguments.next()
                     && let Some(value) = first.value
