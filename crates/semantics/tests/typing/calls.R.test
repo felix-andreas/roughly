@@ -139,3 +139,10 @@ user: <T> fn(w: T) -> Unknown
 helper: fn(r: Unknown) -> Unknown
 66..75 warning[unresolved] I could not resolve `isRestart` in this package, its imports, or builtins.
 85..96 warning[unresolved] I could not resolve `findRestart` in this package, its imports, or builtins.
+
+#---- walrus_outside_masked_brackets_is_an_operator_call
+f <- function(a, b) quo(a := b)
+#++++
+f: <T, U> fn(a: T, b: U) -> Unknown
+20..23 warning[unresolved] I could not resolve `quo` in this package, its imports, or builtins.
+26..28 warning[unresolved] I could not resolve ``:=`` in this package, its imports, or builtins.

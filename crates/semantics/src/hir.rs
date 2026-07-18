@@ -45,8 +45,6 @@ pub enum AssignSpelling {
     Equals,
     /// `<<-` / `->>`
     Super,
-    /// `:=`
-    Walrus,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -501,15 +499,11 @@ impl Lowering {
 
         match operator_token.kind() {
             // Assignments normalize to target/value regardless of spelling.
-            SyntaxKind::LESS_MINUS
-            | SyntaxKind::EQ
-            | SyntaxKind::LESS2_MINUS
-            | SyntaxKind::COLON_EQ => {
+            SyntaxKind::LESS_MINUS | SyntaxKind::EQ | SyntaxKind::LESS2_MINUS => {
                 let spelling = match operator_token.kind() {
                     SyntaxKind::LESS_MINUS => AssignSpelling::Local,
                     SyntaxKind::EQ => AssignSpelling::Equals,
-                    SyntaxKind::LESS2_MINUS => AssignSpelling::Super,
-                    _ => AssignSpelling::Walrus,
+                    _ => AssignSpelling::Super,
                 };
                 let target = self.lower_optional(lhs, range);
                 let value = self.lower_optional(rhs, range);
@@ -518,6 +512,34 @@ impl Lowering {
                         spelling,
                         target,
                         value,
+                    },
+                    range,
+                )
+            }
+            // `:=` binds no variable anywhere in R: it is a call to the
+            // `:=` function (data.table defines it for its brackets, rlang
+            // for quoting), spelled as an operator. The callee sits on the
+            // operator token, so an unresolved `:=` reports exactly there.
+            SyntaxKind::COLON_EQ => {
+                let callee = self.allocate(
+                    ExpressionKind::NameRef(":=".to_owned()),
+                    operator_token.text_range(),
+                );
+                let left = self.lower_optional(lhs, range);
+                let right = self.lower_optional(rhs, range);
+                self.allocate(
+                    ExpressionKind::Call {
+                        callee,
+                        arguments: vec![
+                            Argument {
+                                name: None,
+                                value: Some(left),
+                            },
+                            Argument {
+                                name: None,
+                                value: Some(right),
+                            },
+                        ],
                     },
                     range,
                 )

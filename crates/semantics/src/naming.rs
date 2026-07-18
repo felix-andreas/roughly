@@ -456,10 +456,14 @@ impl Context<'_> {
     fn data_table_marker(&self, id: ExprId) -> bool {
         let kind = &self.module.expression(id).kind;
         match kind {
-            ExpressionKind::Assign {
-                spelling: AssignSpelling::Walrus,
-                ..
-            } => true,
+            ExpressionKind::Call { callee, .. }
+                if matches!(
+                    &self.module.expression(*callee).kind,
+                    ExpressionKind::NameRef(name) if name == ":="
+                ) =>
+            {
+                true
+            }
             ExpressionKind::NameRef(name) => {
                 matches!(
                     name.as_str(),
@@ -639,12 +643,6 @@ impl Context<'_> {
         target: ExprId,
         spelling: AssignSpelling,
     ) {
-        // A masked `:=` assigns a data.table column, not a variable: the
-        // target is a (quiet) column reference, never a binding.
-        if spelling == AssignSpelling::Walrus && self.quiet_depth > 0 {
-            self.resolve(target);
-            return;
-        }
         let target_expression = self.module.expression(target).clone();
         match &target_expression.kind {
             ExpressionKind::NameRef(name) => {
