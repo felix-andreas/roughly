@@ -2988,8 +2988,10 @@ impl<'db> Checker<'db, '_> {
                 union_of(self.db, returns)
             }
             _ => {
+                // The defect is the callee, not the whole call: blame
+                // exactly the expression that is not a function.
                 self.errors.push(TypeError {
-                    range,
+                    range: callee_range,
                     kind: TypeErrorKind::NotAFunction {
                         found: self.table.resolve(self.db, resolved),
                     },
@@ -3575,12 +3577,32 @@ impl<'db> Checker<'db, '_> {
             }
             _ => {}
         }
-        if arguments.len() != 1 || arguments[0].name.is_some() {
+        // Empty index slots do not count (`m[, i]` and `m[k, ]` each have ONE
+        // index); named arguments do (`m[k, , drop = FALSE]` indexes with 2).
+        // A single index among several slots is matrix-style selection —
+        // unmodeled, so it refuses silently (a strict origin) rather than
+        // erroring on one of R's most idiomatic forms.
+        let filled = arguments
+            .iter()
+            .filter(|argument| argument.value.is_some())
+            .count();
+        if filled != 1 {
             self.errors.push(TypeError {
                 range,
                 kind: TypeErrorKind::UnsupportedIndexShape {
-                    index_count: arguments.len(),
+                    index_count: filled,
                 },
+            });
+            return self.unknown();
+        }
+        if arguments.len() != 1 {
+            self.record_strict_origin(id, StrictOriginKind::UnsupportedConstruct);
+            return self.unknown();
+        }
+        if arguments[0].name.is_some() {
+            self.errors.push(TypeError {
+                range,
+                kind: TypeErrorKind::UnsupportedIndexShape { index_count: 1 },
             });
             return self.unknown();
         }

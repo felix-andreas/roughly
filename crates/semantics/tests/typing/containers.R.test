@@ -134,3 +134,14 @@ f <- function() {
 }
 #++++
 f: fn() -> integer[]
+
+#---- matrix_style_single_selection_refuses_silently
+pick <- function(m, i) m[, i]
+#++++
+pick: <T, U> fn(m: T, i: U) -> Unknown
+
+#---- two_filled_indexes_report_the_filled_count
+cell <- function(m, k) m[k, , drop = FALSE]
+#++++
+cell: Unknown
+23..43 error[type-mismatch] indexing with 2 indexes is not supported yet — matrix and data.frame subsetting is not modeled
