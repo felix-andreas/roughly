@@ -2,7 +2,7 @@
 title: Formatter
 description: Documentation for Roughly's R code formatter.
 ---
-<!-- THIS FILE IS GENERATED AUTOMATICALLY.MAKE CHANGES TO tests/format/formatter.template.md INSTEAD -->
+<!-- THIS FILE IS GENERATED AUTOMATICALLY.MAKE CHANGES TO crates/format/tests/formatter.template.md INSTEAD -->
 
 Roughly includes a non-invasive R code formatter that emphasizes readability while respecting the existing structure of your code.
 

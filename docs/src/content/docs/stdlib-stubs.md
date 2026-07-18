@@ -5,7 +5,7 @@ description: The standard-library stub format (.Rtypes declaration files) that t
 
 :::note[Status]
 The standard-library stub format ships. The corpus is ~530 declarations across six declaration-only
-`.Rtypes` stub files under `crates/analysis/stubs/` (`base.Rtypes`, `stats.Rtypes`, `utils.Rtypes`,
+`.Rtypes` stub files under `crates/semantics/stubs/` (`base.Rtypes`, `stats.Rtypes`, `utils.Rtypes`,
 `methods.Rtypes`, `graphics.Rtypes`, `grDevices.Rtypes`), all loaded and bound into the checker as a
 **set-once input** that never invalidates a package edit (see
 [Incremental hygiene](#incremental-hygiene)). Project [overrides](#override-precedence),

@@ -50,7 +50,7 @@ Semantics checks enforce coding conventions and best practices that won't necess
 
 - **`naming-style`**: Enforces consistent naming style (snake_case or camelCase) for variables and function parameters, according to your configuration
 - **`assignment-operator`**: Recommends using `<-` rather than `=` for variable assignment
-- **`missing-comma`** / **`trailing-comma`**: Flags a missing comma between call arguments and an unnecessary trailing comma after the last one
+- **`trailing-comma`**: Flags an unnecessary trailing comma after a call's last argument. (An earlier `missing-comma` lint is retired — the parser now rejects `f(1 2)` with a syntax error, exactly as R does; the config key still parses and is ignored)
 - **`boolean-shorthand`**: Use `TRUE` and `FALSE` over `T` and `F`
 - **`unused-parameter`** *(off by default)*: Flags function parameters no read ever uses. Off
   unless enabled in `roughly.toml` (`[lint] unused-parameter = "warn"`), because R signatures

@@ -1,13 +1,12 @@
 use {
     fixtures::{Fixture, FixtureKind, FixtureRunFile, run_fixture_suite},
     indoc::indoc,
-    regex::{Captures, Regex},
     ropey::Rope,
     roughly_legacy::{
         format::{Config, FormatError, LineEnding, format},
         tree,
     },
-    std::{fs, path::PathBuf},
+    std::path::PathBuf,
 };
 
 #[test]
@@ -41,68 +40,6 @@ fn run_format_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, Str
         path: PathBuf::new(),
         output,
     }]])
-}
-
-#[test]
-fn documentation_examples() {
-    // Formats every code example in the formatter documentation template and renders the result into
-    // `docs/src/content/docs/formatter.md`. The generated docs page is the golden output: run with
-    // `ROUGHLY_BLESS=1` to rewrite it, otherwise the test fails when the page drifts from the
-    // formatter's current behavior.
-    let markdown = fs::read_to_string("tests/format/formatter.template.md").unwrap();
-
-    let regex = Regex::new(r#"(?m)```r\n([\s\S]*?)```"#).unwrap();
-    const BEFORE: &str =
-        "R CODE IN THIS FILE IS FORMATTED AND SAVED TO docs/src/content/docs/formatter.md";
-    const AFTER: &str = "THIS FILE IS GENERATED AUTOMATICALLY.\
-MAKE CHANGES TO tests/format/formatter.template.md INSTEAD";
-
-    let formatted = regex
-        .replace_all(&markdown, |captures: &Captures| {
-            let text = captures.get(1).unwrap().as_str();
-            text.split_once('\n')
-                .and_then(|(first, rest)| first.strip_prefix("#").map(|comment| (comment, rest)))
-                .and_then(|(comment, text)| {
-                    comment
-                        .split_once(":")
-                        .map(|(_name, directive)| (directive.trim(), text))
-                })
-                .map(|(directive, text)| {
-                    if directive == "skip" {
-                        return text.into();
-                    }
-
-                    let code = format_str(text).unwrap();
-                    match directive {
-                        "compare" => {
-                            format!("# Before formatting\n{text}\n# After formatting\n{code}")
-                        }
-                        "format" => code,
-                        _ => panic!(),
-                    }
-                })
-                .map(|content| format!("```r\n{content}```"))
-                .unwrap_or(text.into())
-        })
-        .replace(BEFORE, AFTER);
-
-    let path = "../../docs/src/content/docs/formatter.md";
-    if matches!(std::env::var("ROUGHLY_BLESS").as_deref(), Ok("1")) {
-        // Note: we cannot write the file during a nix build, where the source tree is read-only.
-        if fs::metadata(path).is_ok() {
-            fs::write(path, &formatted).unwrap();
-        }
-        return;
-    }
-
-    // When the generated page is available, assert it matches; under a sandboxed build where the docs
-    // tree is absent there is nothing to compare against.
-    if let Ok(existing) = fs::read_to_string(path) {
-        assert_eq!(
-            existing, formatted,
-            "docs/src/content/docs/formatter.md is out of date; rerun with ROUGHLY_BLESS=1"
-        );
-    }
 }
 
 #[test]

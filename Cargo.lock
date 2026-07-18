@@ -585,6 +585,7 @@ dependencies = [
 name = "format"
 version = "0.2.8-alpha"
 dependencies = [
+ "regex",
  "serde",
  "syntax",
 ]
@@ -1403,7 +1404,6 @@ dependencies = [
  "ignore",
  "indoc",
  "itertools 0.14.0",
- "regex",
  "ropey",
  "serde",
  "serde_json",

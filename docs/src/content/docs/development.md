@@ -8,19 +8,25 @@ codebase.
 
 ## Project layout
 
-Roughly is a Rust workspace. The language tool covered by this documentation lives in three crates
-plus a shared test harness:
+Roughly is a Rust workspace. The shipping language tool is five crates:
 
-- **`crates/roughly`** — the CLI, the LSP server, the formatter, and the linter.
-- **`crates/analysis`** — the analysis phases (parsing, lowering, naming, type checking, lint, IDE
-  logic) plus `run_full`, the from-scratch checker kept as the correctness oracle and the CLI path.
-- **`crates/engine`** — the generic red-green memoized-query core and the R query bodies that drive
-  incremental analysis by running the `analysis` phases as cached queries. This is the incremental
-  backend behind the language server.
-- **`crates/fixtures`** — the shared fixture-test harness used by the test suites.
+- **`crates/syntax`** — the hand-written lexer and recursive-descent parser, producing lossless
+  [rowan](https://crates.io/crates/rowan) syntax trees; `#:` type annotations are first-class
+  grammar, not comment text.
+- **`crates/semantics`** — the [salsa](https://crates.io/crates/salsa)-based analysis core: the item
+  tree, HIR lowering, naming, the Hindley–Milner type checker, stubs, lints, and diagnostics.
+- **`crates/format`** — the non-invasive formatter (depends only on `syntax`).
+- **`crates/ide`** — editor features as pure reads over `semantics`: hover, navigation, rename,
+  completion, signature help, inlay hints, symbols, code actions.
+- **`crates/roughly`** — the product binary: the CLI (`check`, `fmt`) and the LSP server.
 
-The workspace also contains **`crates/rofy`**, a separate experimental R REPL that embeds R through
-`extendr`; it is not part of the language-tool pipeline above.
+The workspace also contains the **frozen legacy stack** (`crates/analysis-legacy`,
+`crates/engine-legacy`, `crates/roughly-legacy`, plus its `crates/fixtures` harness): the previous
+implementation, kept in-tree as the cross-implementation oracle and benchmark baseline for
+`crates/differential`, which runs every fixture suite through both stacks and compares findings. Do
+not extend the legacy stack, and never share or abstract code between the two stacks — data files
+may be duplicated freely instead. **`crates/rofy`** is a separate experimental R REPL embedding R
+through `extendr`; it is not part of the language-tool pipeline.
 
 The analysis design is documented in [Architecture](/architecture) and the file layout in
 [Structure](/structure). The editor extensions live under `editors/` (`code` for VS Code, `zed` for
@@ -29,10 +35,14 @@ Zed).
 ## Build and test
 
 ```sh
-cargo build                                   # build the workspace (or: just build)
-cargo test                                    # run all tests       (or: just test)
-cargo test -p analysis                        # the analysis engine's tests
-cargo test -p roughly --test test_format      # the formatter's fixture tests
+cargo build                                   # the product crate (workspace default member)
+cargo test                                    # the product crate's suites
+cargo test --workspace --exclude rofy --exclude zed_roughly
+                                              # everything: all five crates, the differential,
+                                              # and the frozen legacy stack
+cargo test -p semantics                       # the analysis core's fixture + fuzz suites
+cargo test -p differential                    # the cross-stack differential gate
+cargo test -p format --test test_format_fixtures
 ```
 
 Most behavior is verified with **fixture tests** — human-readable `.test` files rendered to expected
@@ -43,12 +53,15 @@ environment variables matter day to day:
   diff before committing).
 - `FIXTURE_FILTER=group__case` runs a single fixture case.
 
-```sh
-just test-analysis                            # run the analysis fixture suites (via nextest)
-just test-analysis group__case                # filter to fixtures whose name contains this
-```
+The real-world corpus some suites and all measurement instruments use is fetched with
+`scripts/fetch-corpus.sh` (into the gitignored `corpus/`; the resolved inventory is committed as
+`scripts/corpus-manifest.txt`). The performance and memory instruments live in
+`crates/differential/tests/test_stats.rs` and are documented on the [Testing](/testing) page.
 
 To work on this documentation site, run `just docs` (a live preview) or `cd docs && npx astro build`.
+The formatter page (`docs/src/content/docs/formatter.md`) is generated — edit
+`crates/format/tests/formatter.template.md` and re-bless `cargo test -p format --test
+test_format_docs` instead.
 
 ## VS Code Extension Setup
 
@@ -69,108 +82,15 @@ The `launch.json` contains a setting:
 
 For me this led to the issue that the language server wasn't spawned because I had `CodeLLDB` from `nixpkgs` installed.
 
+## Formatting: why the code is imperative
 
-## Formatting
-
-### Comments in expressions
-
-The main challenge in formatting code is handling comments, because they can appear at any location. These expressions are particularly hard to handle:
-
-* if expression
-* for expression
-* repeat statement
-* while expression
-* binary operator
-* extract operator
-
-#### Example of if expressions
-
-For example, in an if expression comments can appear at any location (numerated):
-
-```r
-if
-# 1
-( # open
-  # 2
-  a && b # condition
-  # 3
-) # close
-# 4
-{
-  y
-}
-# 5
-else
-# 6
-{
-  4
-}
-```
-
-With a structured AST, we would typically write our code in a concise functional style:
-
-```rs
-let condition = fmt(field("condition")?);
-let consequence = fmt(field("consequence")?);
-let alternative = fmt(field("alternative")?);
-format!("if({condition}) {{ {consequence} }} else {{ {alternative} }}");
-```
-
-However, due to the arbitrary placement of comments, we must adopt a more imperative style. This approach preserves comments but is somewhat harder to comprehend:
-
-```rs
-let mut out = String::new();
-let mut cursor = node.walk();
-if cursor.goto_first_child() {
-  loop {
-    match cursor.field_name() {
-      None => match child.kind() {
-        "if" => out.push_str("if"),
-        "else" => ...,
-        "comment" => ...,
-        _ => unreachable!(),
-      },
-      Some(field_name) => match field_name {
-        "open" => ...,
-        "condition" => ...,
-        "close" => ...,
-        "consequence" | "alternative" => ...,
-        _ => unreachable!(),
-      },
-    };
-
-    if !cursor.goto_next_sibling() {
-        cursor.goto_parent();
-        break;
-    }
-  }
-};
-out
-```
-
-## Tree-sitter: How to handle required fields
-
-* For formatting we do an initial check if there are no errors, so we can safely assume that all required fields are present
-* For type-checking we should do the same
-* For checks/diagnostics that run while typing (syntax & fast), we cannot make any assumption
-* Same is true for index. It should still be possible to index a file, while there are parse errors
-
-## tree-sitter-r vs R parser
-
-Most earlier divergences are resolved as of `tree-sitter-r` 1.3.0: a parameter with no default
-(`function(parameter =) {}`) is now an error node (matching R's rejection), and a line break after
-`else` (`} else\n{ ... }`) parses cleanly.
-
-One limitation remains around the extract operator with a blank line before its right-hand side
-(`foo$\n\nbar`): the source now parses without an error node, but the `extract_operator` node's `rhs`
-field is left detached (its `end_position` lands on the newline and `rhs` is absent). The formatter
-compensates for this when reconstructing such an expression (see the `extract_operator` handling in
-`crates/roughly/src/format.rs`); a fixture for the blank-line form stays disabled until the grammar
-attaches the right-hand side.
-
-## Linting ideas
-
-* Empty loops: for, while, repeat
+The main challenge in formatting R is comments, which may appear between any two tokens — inside an
+`if` header, between a call and its argument list, after an operator. A concise "format each field"
+style silently drops them, so the formatter walks concrete children token-by-token and makes
+placement decisions at the token level. The same constraint shapes the rowan tree handling: trailing
+comments attach *inside* expression nodes, so closer-placement decisions must look at tokens, never
+whole elements. See `crates/format/src/format.rs` and the formatter fixtures under
+`crates/format/tests/format/`.
 
 ## References
 

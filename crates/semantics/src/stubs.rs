@@ -67,34 +67,16 @@ pub fn namespace_exports(db: &dyn Db, package: &str, name: &str) -> bool {
     })
 }
 
-/// The shipped stdlib corpus (base + default-attached packages), embedded so
-/// the data survives independent of the legacy crate tree.
+/// The shipped stdlib corpus (base + default-attached packages), embedded
+/// from this crate's own `stubs/` directory.
 pub fn shipped_stub_sources() -> Vec<(String, String)> {
     [
-        (
-            "base",
-            include_str!("../../analysis-legacy/stubs/base.Rtypes"),
-        ),
-        (
-            "stats",
-            include_str!("../../analysis-legacy/stubs/stats.Rtypes"),
-        ),
-        (
-            "utils",
-            include_str!("../../analysis-legacy/stubs/utils.Rtypes"),
-        ),
-        (
-            "methods",
-            include_str!("../../analysis-legacy/stubs/methods.Rtypes"),
-        ),
-        (
-            "graphics",
-            include_str!("../../analysis-legacy/stubs/graphics.Rtypes"),
-        ),
-        (
-            "grDevices",
-            include_str!("../../analysis-legacy/stubs/grDevices.Rtypes"),
-        ),
+        ("base", include_str!("../stubs/base.Rtypes")),
+        ("stats", include_str!("../stubs/stats.Rtypes")),
+        ("utils", include_str!("../stubs/utils.Rtypes")),
+        ("methods", include_str!("../stubs/methods.Rtypes")),
+        ("graphics", include_str!("../stubs/graphics.Rtypes")),
+        ("grDevices", include_str!("../stubs/grDevices.Rtypes")),
     ]
     .into_iter()
     .map(|(namespace, text)| (namespace.to_owned(), text.to_owned()))

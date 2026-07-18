@@ -54,9 +54,9 @@ const analysisTabs = [
 ]
 
 const formatterTabs = [
-  { key: 'spacing', label: 'Braces & indentation' },
-  { key: 'pipeline', label: 'Pipelines' },
-  { key: 'normalize', label: 'Alignment' },
+  { key: 'spacing', label: 'Auto-bracing' },
+  { key: 'pipeline', label: 'Spacing' },
+  { key: 'normalize', label: 'Indentation' },
 ]
 
 const year = new Date().getFullYear()
@@ -399,10 +399,11 @@ const year = new Date().getFullYear()
           <p class="eyebrow">ship</p>
           <h2>One consistent style.</h2>
           <p class="lede">
-            Scrappy R reflows into a consistent shape in place — one-line <code>if</code> and
-            <code>for</code> bodies get braced and indented, jammed pipelines break onto aligned
-            steps, and ragged assignments snap into a column. <code>roughly fmt</code> rewrites the
-            whole project (and <code>--diff</code> for CI).
+            Scrappy R reflows into a consistent shape in place — one-line loop bodies get braced
+            and indented, cramped operators and commas get their spaces back, and drifting
+            multi-line indentation snaps to the grid. Deliberate line breaks are respected:
+            <code>roughly fmt</code> never splits a line you chose to keep. It rewrites the whole
+            project (and <code>--diff</code> for CI).
           </p>
         </div>
         <div class="col show-col">
@@ -423,49 +424,49 @@ const year = new Date().getFullYear()
               }
             </div>
             <div class="tab-panels">
-              <!-- Braces & indentation: one-line if/for bodies get braced and indented -->
+              <!-- Auto-bracing: one-line loop bodies get braced and indented -->
               <div role="tabpanel" id="panel-spacing" aria-labelledby="tab-spacing" tabindex="0">
                 <div class="ed">
                   <div class="ed-bar"><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-name">retry.R · roughly fmt</span></div>
                   <div class="ed-body fmt-body">
                     <div class="fmt-stack" aria-hidden="true">
                       <div class="fmt-layer fmt-before">
-                        <div class="fln" style="--i:0"><span class="tok-kw">if</span> <span class="tok-op">(</span><span class="tok-id">attempts</span> <span class="tok-op">&gt;</span> <span class="tok-id">max</span><span class="tok-op">)</span> <span class="tok-fn">stop</span><span class="tok-op">(</span><span class="tok-str">"give up"</span><span class="tok-op">)</span></div>
-                        <div class="fln" style="--i:1"><span class="tok-kw">for</span> <span class="tok-op">(</span><span class="tok-id">i</span> <span class="tok-kw">in</span> <span class="tok-id">seq</span><span class="tok-op">)</span> <span class="tok-fn">log</span><span class="tok-op">(</span><span class="tok-id">i</span><span class="tok-op">)</span></div>
+                        <div class="fln" style="--i:0"><span class="tok-kw">for</span> <span class="tok-op">(</span><span class="tok-id">i</span> <span class="tok-kw">in</span> <span class="tok-id">seq</span><span class="tok-op">)</span> <span class="tok-fn">log</span><span class="tok-op">(</span><span class="tok-id">i</span><span class="tok-op">)</span></div>
+                        <div class="fln" style="--i:1"><span class="tok-kw">while</span> <span class="tok-op">(</span><span class="tok-id">busy</span><span class="tok-op">)</span> <span class="tok-fn">wait</span><span class="tok-op">()</span></div>
                       </div>
                       <div class="fmt-layer fmt-after">
-                        <div class="fln" style="--i:0"><span class="tok-kw">if</span> <span class="tok-op">(</span><span class="tok-id">attempts</span> <span class="tok-op">&gt;</span> <span class="tok-id">max</span><span class="tok-op">)</span> <span class="tok-op">{'{'}</span></div>
-                        <div class="fln" style="--i:1"><span class="tab-in">  </span><span class="tok-fn">stop</span><span class="tok-op">(</span><span class="tok-str">"give up"</span><span class="tok-op">)</span></div>
+                        <div class="fln" style="--i:0"><span class="tok-kw">for</span> <span class="tok-op">(</span><span class="tok-id">i</span> <span class="tok-kw">in</span> <span class="tok-id">seq</span><span class="tok-op">)</span> <span class="tok-op">{'{'}</span></div>
+                        <div class="fln" style="--i:1"><span class="tab-in">  </span><span class="tok-fn">log</span><span class="tok-op">(</span><span class="tok-id">i</span><span class="tok-op">)</span></div>
                         <div class="fln" style="--i:2"><span class="tok-op">{'}'}</span></div>
-                        <div class="fln" style="--i:3"><span class="tok-kw">for</span> <span class="tok-op">(</span><span class="tok-id">i</span> <span class="tok-kw">in</span> <span class="tok-id">seq</span><span class="tok-op">)</span> <span class="tok-op">{'{'}</span></div>
-                        <div class="fln" style="--i:4"><span class="tab-in">  </span><span class="tok-fn">log</span><span class="tok-op">(</span><span class="tok-id">i</span><span class="tok-op">)</span></div>
+                        <div class="fln" style="--i:3"><span class="tok-kw">while</span> <span class="tok-op">(</span><span class="tok-id">busy</span><span class="tok-op">)</span> <span class="tok-op">{'{'}</span></div>
+                        <div class="fln" style="--i:4"><span class="tab-in">  </span><span class="tok-fn">wait</span><span class="tok-op">()</span></div>
                         <div class="fln" style="--i:5"><span class="tok-op">{'}'}</span></div>
                       </div>
                     </div>
-                    <span class="sr-only">Before: if (attempts &gt; max) stop("give up"); for (i in seq) log(i). After: each one-line body is wrapped in braces and indented.</span>
+                    <span class="sr-only">Before: for (i in seq) log(i); while (busy) wait(). After: each one-line loop body is wrapped in braces and indented.</span>
                   </div>
                 </div>
               </div>
-              <!-- Pipelines: a jammed one-liner splits onto indented steps -->
+              <!-- Spacing: jammed operators and commas get their spaces back, lines stay yours -->
               <div role="tabpanel" id="panel-pipeline" aria-labelledby="tab-pipeline" tabindex="0" hidden>
                 <div class="ed">
                   <div class="ed-bar"><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-name">sales.R · roughly fmt</span></div>
                   <div class="ed-body fmt-body">
                     <div class="fmt-stack" aria-hidden="true">
                       <div class="fmt-layer fmt-before">
-                        <div class="fln" style="--i:0"><span class="tok-id">top</span> <span class="tok-op">&lt;-</span> <span class="tok-id">df</span> <span class="tok-op">%&gt;%</span> <span class="tok-fn">filter</span><span class="tok-op">(</span><span class="tok-id">amt</span><span class="tok-op">&gt;</span><span class="tok-num">100</span><span class="tok-op">)</span> <span class="tok-op">%&gt;%</span> <span class="tok-fn">arrange</span><span class="tok-op">(</span><span class="tok-fn">desc</span><span class="tok-op">(</span><span class="tok-id">amt</span><span class="tok-op">))</span></div>
+                        <div class="fln" style="--i:0"><span class="tok-id">top</span><span class="tok-op">&lt;-</span><span class="tok-id">df</span> <span class="tok-op">%&gt;%</span> <span class="tok-fn">filter</span><span class="tok-op">(</span><span class="tok-id">amt</span><span class="tok-op">&gt;</span><span class="tok-num">100</span><span class="tok-op">)</span></div>
+                        <div class="fln" style="--i:1"><span class="tok-id">total</span><span class="tok-op">&lt;-</span><span class="tok-fn">sum</span><span class="tok-op">(</span><span class="tok-id">a</span> <span class="tok-op">,</span><span class="tok-id">b</span><span class="tok-op">,</span><span class="tok-id">c</span><span class="tok-op">)</span></div>
                       </div>
                       <div class="fmt-layer fmt-after">
-                        <div class="fln" style="--i:0"><span class="tok-id">top</span> <span class="tok-op">&lt;-</span> <span class="tok-id">df</span> <span class="tok-op">%&gt;%</span></div>
-                        <div class="fln" style="--i:1"><span class="tab-in">  </span><span class="tok-fn">filter</span><span class="tok-op">(</span><span class="tok-id">amt</span> <span class="tok-op">&gt;</span> <span class="tok-num">100</span><span class="tok-op">)</span> <span class="tok-op">%&gt;%</span></div>
-                        <div class="fln" style="--i:2"><span class="tab-in">  </span><span class="tok-fn">arrange</span><span class="tok-op">(</span><span class="tok-fn">desc</span><span class="tok-op">(</span><span class="tok-id">amt</span><span class="tok-op">))</span></div>
+                        <div class="fln" style="--i:0"><span class="tok-id">top</span> <span class="tok-op">&lt;-</span> <span class="tok-id">df</span> <span class="tok-op">%&gt;%</span> <span class="tok-fn">filter</span><span class="tok-op">(</span><span class="tok-id">amt</span> <span class="tok-op">&gt;</span> <span class="tok-num">100</span><span class="tok-op">)</span></div>
+                        <div class="fln" style="--i:1"><span class="tok-id">total</span> <span class="tok-op">&lt;-</span> <span class="tok-fn">sum</span><span class="tok-op">(</span><span class="tok-id">a</span><span class="tok-op">,</span> <span class="tok-id">b</span><span class="tok-op">,</span> <span class="tok-id">c</span><span class="tok-op">)</span></div>
                       </div>
                     </div>
-                    <span class="sr-only">Before: top &lt;- df %&gt;% filter(amt&gt;100) %&gt;% arrange(desc(amt)). After: each pipe step on its own indented line, with spaced operators.</span>
+                    <span class="sr-only">Before: top&lt;-df %&gt;% filter(amt&gt;100); total&lt;-sum(a ,b,c). After: operators and commas are spaced consistently — the lines themselves stay as written.</span>
                   </div>
                 </div>
               </div>
-              <!-- Alignment: a ragged assignment block snaps to an aligned column -->
+              <!-- Indentation: drifting multi-line indents snap back to the grid -->
               <div role="tabpanel" id="panel-normalize" aria-labelledby="tab-normalize" tabindex="0" hidden>
                 <div class="ed">
                   <div class="ed-bar"><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-name">config.R · roughly fmt</span></div>
@@ -473,20 +474,20 @@ const year = new Date().getFullYear()
                     <div class="fmt-stack" aria-hidden="true">
                       <div class="fmt-layer fmt-before">
                         <div class="fln" style="--i:0"><span class="tok-fn">opts</span> <span class="tok-op">&lt;-</span> <span class="tok-fn">list</span><span class="tok-op">(</span></div>
-                        <div class="fln" style="--i:1"><span class="tab-in"></span><span class="tok-id">host</span><span class="gap" style="--g:1ch"></span><span class="tok-op">=</span> <span class="tok-str">"localhost"</span><span class="tok-op">,</span></div>
-                        <div class="fln" style="--i:2"><span class="tab-in"></span><span class="tok-id">port</span><span class="gap" style="--g:1ch"></span><span class="tok-op">=</span> <span class="tok-num">8080</span><span class="tok-op">,</span></div>
-                        <div class="fln" style="--i:3"><span class="tab-in"></span><span class="tok-id">retries</span><span class="gap" style="--g:1ch"></span><span class="tok-op">=</span> <span class="tok-num">3</span></div>
+                        <div class="fln" style="--i:1"><span class="gap" style="--g:6ch"></span><span class="tok-id">host</span> <span class="tok-op">=</span> <span class="tok-str">"localhost"</span><span class="tok-op">,</span></div>
+                        <div class="fln" style="--i:2"><span class="gap" style="--g:1ch"></span><span class="tok-id">port</span> <span class="tok-op">=</span> <span class="tok-num">8080</span><span class="tok-op">,</span></div>
+                        <div class="fln" style="--i:3"><span class="gap" style="--g:8ch"></span><span class="tok-id">retries</span> <span class="tok-op">=</span> <span class="tok-num">3</span></div>
                         <div class="fln" style="--i:4"><span class="tok-op">)</span></div>
                       </div>
                       <div class="fmt-layer fmt-after">
                         <div class="fln" style="--i:0"><span class="tok-fn">opts</span> <span class="tok-op">&lt;-</span> <span class="tok-fn">list</span><span class="tok-op">(</span></div>
-                        <div class="fln" style="--i:1"><span class="tab-in"></span><span class="tok-id">host</span><span class="gap" style="--g:4ch"></span><span class="tok-op">=</span> <span class="tok-str">"localhost"</span><span class="tok-op">,</span></div>
-                        <div class="fln" style="--i:2"><span class="tab-in"></span><span class="tok-id">port</span><span class="gap" style="--g:4ch"></span><span class="tok-op">=</span> <span class="tok-num">8080</span><span class="tok-op">,</span></div>
-                        <div class="fln" style="--i:3"><span class="tab-in"></span><span class="tok-id">retries</span><span class="gap" style="--g:1ch"></span><span class="tok-op">=</span> <span class="tok-num">3</span></div>
+                        <div class="fln" style="--i:1"><span class="tab-in">  </span><span class="tok-id">host</span> <span class="tok-op">=</span> <span class="tok-str">"localhost"</span><span class="tok-op">,</span></div>
+                        <div class="fln" style="--i:2"><span class="tab-in">  </span><span class="tok-id">port</span> <span class="tok-op">=</span> <span class="tok-num">8080</span><span class="tok-op">,</span></div>
+                        <div class="fln" style="--i:3"><span class="tab-in">  </span><span class="tok-id">retries</span> <span class="tok-op">=</span> <span class="tok-num">3</span></div>
                         <div class="fln" style="--i:4"><span class="tok-op">)</span></div>
                       </div>
                     </div>
-                    <span class="sr-only">Before: a list() with ragged single spaces before each =. After: the = signs align into one column.</span>
+                    <span class="sr-only">Before: a multi-line list() whose lines drift to different indents. After: every line snaps to one two-space indent level.</span>
                   </div>
                 </div>
               </div>

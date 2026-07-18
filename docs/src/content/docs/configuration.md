@@ -49,7 +49,6 @@ strict = false
 [lint]
 assignment-operator = "off"
 boolean-shorthand = "error"
-missing-comma = "warn"
 trailing-comma = "warn"
 unused-parameter = "warn"  # default off: opt in to flag never-used function parameters
 unused-import = "warn"     # default off: opt in to flag never-used NAMESPACE imports
