@@ -226,6 +226,15 @@ impl Formatter<'_> {
         last
     }
 
+    /// Whether the last significant token before `element` (inside `node`) is
+    /// a comment. Element-level `previous` checks miss comments swallowed into
+    /// the previous sibling's subtree, and anything glued after such a comment
+    /// would be commented out.
+    fn after_comment(&self, node: &SyntaxNode, element: &Element) -> bool {
+        self.last_token_before(node, element.text_range().start())
+            .is_some_and(|token| token.kind() == SyntaxKind::COMMENT)
+    }
+
     /// The first significant descendant token starting at or after `offset`.
     fn first_token_after(
         &self,
@@ -619,7 +628,10 @@ impl Formatter<'_> {
                     }
                 }
                 kind if element.as_token().is_some() && is_operator(kind) => {
-                    if Self::is_comment(previous) {
+                    // Token-level: the comment may sit as the previous
+                    // operand's own last token, and gluing the operator after
+                    // it would comment the operator out.
+                    if self.after_comment(node, element) {
                         self.newline(level);
                         self.out.push_str(&self.indent);
                         self.element(element, level + 1, false);
@@ -634,7 +646,7 @@ impl Formatter<'_> {
                 _ => {
                     if !seen_operator {
                         self.element(element, level, false);
-                    } else if break_after_operator || Self::is_comment(previous) {
+                    } else if break_after_operator || self.after_comment(node, element) {
                         self.newline(level);
                         self.out.push_str(&self.indent);
                         self.element(element, level + 1, false);
@@ -652,11 +664,20 @@ impl Formatter<'_> {
 
     fn unary(&mut self, node: &SyntaxNode, level: usize) {
         let elements = Self::elements(node);
+        // `...` also parses as a NAME node; the tilde hugs identifiers only
+        // (`~x` but `~ ...`), so look at the wrapped token.
         let operand_is_name = elements
             .iter()
             .rev()
             .find(|element| element.as_node().is_some())
-            .is_some_and(|operand| operand.kind() == SyntaxKind::NAME);
+            .is_some_and(|operand| {
+                operand.kind() == SyntaxKind::NAME
+                    && operand.as_node().is_some_and(|name| {
+                        name.children_with_tokens()
+                            .filter_map(|child| child.into_token())
+                            .any(|token| token.kind() == SyntaxKind::IDENT)
+                    })
+            });
         let has_space = elements
             .first()
             .is_some_and(|operator| operator.kind() == SyntaxKind::TILDE)
@@ -980,15 +1001,20 @@ impl Formatter<'_> {
         let trailing_space = close_previous_token
             .as_ref()
             .is_none_or(|token| token.kind() == SyntaxKind::COMMA);
-        let hug = close_previous_token.as_ref().is_none_or(|close_previous| {
-            close_previous.kind() != SyntaxKind::COMMENT
-                && arguments.iter().any(|argument| {
-                    let range = self.significant_range(argument);
-                    !range.is_empty()
-                        && self.line(range.start()) == self.line(list_range.start())
-                        && self.line(range.end()) == self.line(close_previous.text_range().end())
-                })
-        });
+        // Hugged layout: some argument begins on the open line and ends on
+        // the closer's line, chaining the lines together. Parameter lists
+        // never hug — a multiline signature always expands one per line.
+        let hug = node.kind() != SyntaxKind::PARAMETER_LIST
+            && close_previous_token.as_ref().is_none_or(|close_previous| {
+                close_previous.kind() != SyntaxKind::COMMENT
+                    && arguments.iter().any(|argument| {
+                        let range = self.significant_range(argument);
+                        !range.is_empty()
+                            && self.line(range.start()) == self.line(list_range.start())
+                            && self.line(range.end())
+                                == self.line(close_previous.text_range().end())
+                    })
+            });
 
         let mut argument_index = 0usize;
         let mut seen_close = false;
@@ -1004,7 +1030,9 @@ impl Formatter<'_> {
                             if !hug && !is_empty {
                                 self.newline(level);
                             }
-                        } else if trailing_space && !is_empty {
+                        } else if trailing_space {
+                            // Also with only empty arguments: `alist(, )`
+                            // keeps the space after its comma.
                             self.space();
                         }
                         seen_close = true;
@@ -1024,15 +1052,9 @@ impl Formatter<'_> {
                     }
                 }
                 SyntaxKind::COMMA => {
-                    // Whether the comma follows a comment is a token-level
-                    // fact: the comment may attach deep inside the previous
-                    // argument's expression node.
-                    let after_comment = self
-                        .last_token_before(node, element.text_range().start())
-                        .is_some_and(|token| token.kind() == SyntaxKind::COMMENT);
                     if is_multiline
                         && !hug
-                        && (after_comment
+                        && (self.after_comment(node, element)
                             || previous.is_none_or(|previous| {
                                 previous.kind() == SyntaxKind::COMMA
                                     || previous.text_range().is_empty()
@@ -1123,7 +1145,8 @@ impl Formatter<'_> {
 
     fn function_definition(&mut self, node: &SyntaxNode, level: usize) {
         let elements = Self::elements(node);
-        let range = node.text_range();
+        // Trailing trivia swallowed into the node must not force multiline.
+        let range = self.significant_range(&SyntaxElement::Node(node.clone()));
         let is_multiline = self.line(range.start()) != self.line(range.end());
         let head = elements.first();
         let body = elements.iter().rev().find(|element| {
@@ -1189,7 +1212,10 @@ impl Formatter<'_> {
 
     fn if_expression(&mut self, node: &SyntaxNode, level: usize, make_multiline: bool) {
         let elements = Self::elements(node);
-        let range = node.text_range();
+        // The node may swallow trailing trivia (an if as the last argument
+        // keeps the newline before the closing paren) — the single/multiline
+        // choice must not see it.
+        let range = self.significant_range(&SyntaxElement::Node(node.clone()));
         let is_multiline = make_multiline || self.line(range.start()) != self.line(range.end());
 
         let open = elements
