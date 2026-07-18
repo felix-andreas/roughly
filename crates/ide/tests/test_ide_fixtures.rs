@@ -83,6 +83,13 @@ fn render_at(
         Some(edits) => output.push_str(&format!("rename: {} edit(s)\n", edits.len())),
         None => output.push_str("rename: none\n"),
     }
+    if let Some(target) = ide::type_definition(db, files, file, offset) {
+        output.push_str(&format!(
+            "type-definition {}..{}\n",
+            u32::from(target.range.start()),
+            u32::from(target.range.end()),
+        ));
+    }
     match ide::signature_help(db, file, offset) {
         Some(help) => {
             output.push_str(&format!("signature: {}\n", help.label));

@@ -125,6 +125,13 @@ pub fn definition(
                 file: occurrence.file,
                 range: occurrence.range,
             }),
+        ref target @ Target::S4 { .. } => occurrences(db, files, target)
+            .into_iter()
+            .find(|occurrence| occurrence.is_declaration)
+            .map(|occurrence| NavigationTarget {
+                file: occurrence.file,
+                range: occurrence.range,
+            }),
         Target::Global(name) => {
             if let Some(winner) = package_definitions(db, files).get(&name) {
                 let node = item_node(db, *winner)?;
@@ -514,6 +521,33 @@ pub fn completion(
     finish_completions(items, &query)
 }
 
+/// Goto type definition: when the expression under the cursor has a named
+/// (nominal or alias) type, the `@type`/`@alias` declaration of that name.
+pub fn type_definition(
+    db: &dyn Db,
+    files: ProjectFiles,
+    file: SourceFile,
+    offset: TextSize,
+) -> Option<NavigationTarget> {
+    let position = position_in_item(db, file, offset)?;
+    let check = item_check(db, position.item)?;
+    let (_, ty) = position
+        .expressions_at()
+        .into_iter()
+        .find_map(|id| check.expression_types.get(&id).map(|ty| (id, *ty)))?;
+    let TyKind::Named(name, _) = ty.kind(db) else {
+        return None;
+    };
+    let name = name.text(db).to_owned();
+    type_name_occurrences(db, files, &name)
+        .into_iter()
+        .rfind(|occurrence| occurrence.is_declaration)
+        .map(|occurrence| NavigationTarget {
+            file: occurrence.file,
+            range: occurrence.range,
+        })
+}
+
 /// Document symbols: the file's named top-level definitions with their
 /// absolute name ranges, in source order.
 pub fn document_symbols(db: &dyn Db, file: SourceFile) -> Vec<(String, NavigationTarget)> {
@@ -632,6 +666,198 @@ fn annotation_type_at(
         range,
         navigable,
     })
+}
+
+// ---- S4 navigation ----
+//
+// S4 class/generic/method names are written as string literals inside
+// `setClass` / `setGeneric` / `setMethod` / `new` calls, invisible to the
+// naming analysis, so they are recovered structurally from the tree — one
+// recognizer shared by goto-definition, references, and rename.
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum S4Kind {
+    /// Declared by `setClass`, referenced by `setMethod` signatures and `new`.
+    Class,
+    /// Declared by `setGeneric`, referenced by `setMethod`'s function name.
+    Generic,
+}
+
+struct S4Occurrence {
+    name: String,
+    kind: S4Kind,
+    /// The string CONTENT range (inside the quotes), absolute.
+    range: TextRange,
+    is_declaration: bool,
+}
+
+/// Every S4 name occurrence in one file, in tree order.
+fn s4_occurrences_in(db: &dyn Db, file: SourceFile) -> Vec<S4Occurrence> {
+    let parse = semantics::parse(db, file);
+    let mut occurrences = Vec::new();
+    for call in parse
+        .syntax_node()
+        .descendants()
+        .filter(|node| node.kind() == syntax::SyntaxKind::CALL_EXPR)
+    {
+        let Some(callee) = s4_callee_name(&call) else {
+            continue;
+        };
+        let Some(arguments) = call
+            .children()
+            .find(|child| child.kind() == syntax::SyntaxKind::ARGUMENT_LIST)
+        else {
+            continue;
+        };
+        match callee.as_str() {
+            "setClass" => push_s4_string(
+                s4_argument(&arguments, "Class", 0),
+                S4Kind::Class,
+                true,
+                &mut occurrences,
+            ),
+            "setGeneric" => push_s4_string(
+                s4_argument(&arguments, "name", 0),
+                S4Kind::Generic,
+                true,
+                &mut occurrences,
+            ),
+            "setMethod" => {
+                push_s4_string(
+                    s4_argument(&arguments, "f", 0),
+                    S4Kind::Generic,
+                    false,
+                    &mut occurrences,
+                );
+                // The signature is a class name or a `c(...)` of class names.
+                if let Some(signature) = s4_argument(&arguments, "signature", 1) {
+                    for class_string in s4_signature_strings(&signature) {
+                        push_s4_string(Some(class_string), S4Kind::Class, false, &mut occurrences);
+                    }
+                }
+            }
+            "new" => push_s4_string(
+                s4_argument(&arguments, "Class", 0),
+                S4Kind::Class,
+                false,
+                &mut occurrences,
+            ),
+            _ => {}
+        }
+    }
+    occurrences
+}
+
+/// The bare callee name of a call: `f(...)` or `pkg::f(...)`.
+fn s4_callee_name(call: &syntax::SyntaxNode) -> Option<String> {
+    let callee = call.children().next()?;
+    match callee.kind() {
+        syntax::SyntaxKind::NAME => Some(callee.text().to_string()),
+        syntax::SyntaxKind::NAMESPACE_EXPR => callee
+            .children()
+            .filter(|child| child.kind() == syntax::SyntaxKind::NAME)
+            .last()
+            .map(|name| name.text().to_string()),
+        _ => None,
+    }
+}
+
+/// Resolves a call argument's value by name, falling back to the positional
+/// slot at `index` when unnamed — R's own argument-matching shape.
+fn s4_argument(
+    arguments: &syntax::SyntaxNode,
+    name: &str,
+    index: usize,
+) -> Option<syntax::SyntaxNode> {
+    let all: Vec<syntax::SyntaxNode> = arguments
+        .children()
+        .filter(|child| child.kind() == syntax::SyntaxKind::ARGUMENT)
+        .collect();
+    for argument in &all {
+        if let Some(argument_name) = argument
+            .children()
+            .find(|child| child.kind() == syntax::SyntaxKind::NAME)
+            && argument_name.text() == name
+        {
+            return argument
+                .children()
+                .find(|child| child.kind() != syntax::SyntaxKind::NAME);
+        }
+    }
+    all.get(index)
+        .filter(|argument| {
+            // Positional: no `name =` tag. A NAME child followed by EQ is
+            // the tag; a bare NAME child is the value itself.
+            !argument
+                .children_with_tokens()
+                .any(|element| element.kind() == syntax::SyntaxKind::EQ)
+        })
+        .and_then(|argument| argument.children().next())
+}
+
+/// The class-name strings of a `setMethod` signature: a single string, or
+/// the string elements of a `c(...)` vector.
+fn s4_signature_strings(signature: &syntax::SyntaxNode) -> Vec<syntax::SyntaxNode> {
+    if is_string_literal(signature) {
+        return vec![signature.clone()];
+    }
+    if signature.kind() == syntax::SyntaxKind::CALL_EXPR
+        && let Some(arguments) = signature
+            .children()
+            .find(|child| child.kind() == syntax::SyntaxKind::ARGUMENT_LIST)
+    {
+        return arguments
+            .children()
+            .filter(|child| child.kind() == syntax::SyntaxKind::ARGUMENT)
+            .filter_map(|argument| argument.children().next())
+            .filter(is_string_literal)
+            .collect();
+    }
+    Vec::new()
+}
+
+fn is_string_literal(node: &syntax::SyntaxNode) -> bool {
+    node.kind() == syntax::SyntaxKind::LITERAL
+        && node
+            .children_with_tokens()
+            .any(|element| element.kind() == syntax::SyntaxKind::STRING)
+}
+
+fn push_s4_string(
+    node: Option<syntax::SyntaxNode>,
+    kind: S4Kind,
+    is_declaration: bool,
+    out: &mut Vec<S4Occurrence>,
+) {
+    let Some(node) = node else {
+        return;
+    };
+    let Some(token) = node
+        .children_with_tokens()
+        .filter_map(|element| element.into_token())
+        .find(|token| token.kind() == syntax::SyntaxKind::STRING)
+    else {
+        return;
+    };
+    // The content between plain quotes; raw strings never carry S4 names.
+    let text = token.text();
+    if text.len() < 2 || !(text.starts_with('"') || text.starts_with('\'')) {
+        return;
+    }
+    let name = text[1..text.len() - 1].to_string();
+    if name.is_empty() {
+        return;
+    }
+    let range = token.text_range();
+    out.push(S4Occurrence {
+        name,
+        kind,
+        range: TextRange::new(
+            range.start() + TextSize::from(1),
+            range.end() - TextSize::from(1),
+        ),
+        is_declaration,
+    });
 }
 
 /// Whether a node kind belongs to the annotation type grammar.
@@ -1469,6 +1695,8 @@ enum Target<'db> {
     Global(String),
     /// A `@type`/`@alias` name inside `#:` annotations.
     TypeName(String),
+    /// An S4 class or generic named in a string literal.
+    S4 { name: String, kind: S4Kind },
 }
 
 fn target_at<'db>(
@@ -1508,6 +1736,17 @@ fn target_at<'db>(
             let defined = global_declaration_exists(db, files, name);
             return defined.then(|| Target::Global(name.clone()));
         }
+    }
+
+    // S4 class/generic names live in string literals, invisible to naming.
+    if let Some(occurrence) = s4_occurrences_in(db, file)
+        .into_iter()
+        .find(|occurrence| occurrence.range.start() <= offset && offset <= occurrence.range.end())
+    {
+        return Some(Target::S4 {
+            name: occurrence.name,
+            kind: occurrence.kind,
+        });
     }
 
     // Parameter names and for-loop variables are declarations without an
@@ -1557,6 +1796,19 @@ fn occurrences(db: &dyn Db, files: ProjectFiles, target: &Target<'_>) -> Vec<Occ
         }
         Target::TypeName(name) => {
             result = type_name_occurrences(db, files, name);
+        }
+        Target::S4 { name, kind } => {
+            for &file in files.files(db) {
+                for occurrence in s4_occurrences_in(db, file) {
+                    if occurrence.name == *name && occurrence.kind == *kind {
+                        result.push(Occurrence {
+                            file,
+                            range: occurrence.range,
+                            is_declaration: occurrence.is_declaration,
+                        });
+                    }
+                }
+            }
         }
         Target::Global(name) => {
             for &file in files.files(db) {

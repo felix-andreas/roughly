@@ -449,3 +449,56 @@ references: none
 rename: none
 signature: none
 completion (1): UserId
+
+#==== s4
+#---- class_declaration_and_references
+setClass("Person", representation(name = "character"))
+p <- new("Per$0son", name = "eve")
+setMethod("show", "Person", function(object) object)
+#++++
+hover 64..72: character
+definition 10..16
+references: 10..16*, 65..71, 107..113
+rename: 3 edit(s)
+signature: none
+completion (3): txtProgressBar, setTxtProgressBar, suppressPackageStartupMessages
+
+#---- generic_from_setmethod
+setGeneric("area", function(shape) standardGeneric("area"))
+setMethod("ar$0ea", "Square", function(shape) 1)
+#++++
+hover 70..76: character
+definition 12..16
+references: 12..16*, 71..75
+rename: 2 edit(s)
+signature: none
+completion (3): args, array, arrows
+
+#---- signature_vector_classes
+setClass("A", representation())
+setMethod("combine", c("A", "B"), function(x) x)
+q <- new("A$0")
+#++++
+hover 90..93: character
+definition 10..11
+references: 10..11*, 56..57, 91..92
+rename: 3 edit(s)
+signature: none
+completion: none
+
+#==== type_definition
+#---- nominal_binding
+#: @type UserId {integer}
+
+#: @new UserId
+uid <- 1L
+touch <- function() u$0id
+#++++
+hover 72..75: uid: UserId
+definition 42..45
+references: 42..45*, 72..75
+rename: 2 edit(s)
+type-definition 9..15
+signature: none
+completion (14): uid, unclass, union, unique, uniroot, unlink, unlist, untar
+hint @57: fn() -> UserId

@@ -62,6 +62,11 @@ const ACCEPTED_DIVERGENCES: &[(&str, &str)] = &[
     ),
 ];
 
+/// Allowlist entries justified by an oracle PANIC (a `debug_assert` in the
+/// legacy fixed-point): testable only in debug builds — release compiles the
+/// assert out and the case may then match, which is not staleness.
+const ORACLE_PANIC_CASES: &[&str] = &["interface__growing_self_reference_pins_to_unknown"];
+
 fn legacy_findings(source: &str, suite: &Suite) -> Vec<Finding> {
     let mut analysis_state = Analysis::new(
         PathBuf::from("/pkg"),
@@ -227,8 +232,11 @@ fn run_suite(suite: &Suite) {
                         case.id
                     );
                 }
-                if accepted_case {
+                let panic_class = ORACLE_PANIC_CASES.contains(&case.id.as_str());
+                if accepted_case && (cfg!(debug_assertions) || !panic_class) {
                     stale_acceptances.push(case.id.clone());
+                } else if accepted_case {
+                    accepted += 1;
                 }
                 continue;
             }
