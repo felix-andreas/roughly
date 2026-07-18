@@ -185,3 +185,9 @@ f <- function() {
 }
 #++++
 f: fn() -> character
+
+#---- unresolved_reference_suggests_the_nearest_stub
+f <- function(x) lenght(x)
+#++++
+f: <T> fn(x: T) -> Unknown
+17..23 warning[unresolved] I could not resolve `lenght` in this package, its imports, or builtins. Did you mean `length`?

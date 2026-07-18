@@ -50,6 +50,14 @@ divergence. Cases where the oracle itself is wrong are allowlisted in the test w
 the harness flags stale allowlist entries, and each suite's test fails on any unexplained
 divergence; the per-case details land in `target/differential-<suite>.txt`.
 
+A fourth, ignored-by-default arm compares the stacks over the real-file corpus
+(`cargo test -p differential -- --ignored differential_corpus`, after `scripts/fetch-corpus.sh`):
+every corpus `.R` file both parsers accept runs through both pipelines with the same matching
+policy — files with syntax errors on either side are counted and skipped, since parity is scoped
+to inputs both stacks parse cleanly. Its report (`target/differential-corpus.txt`) leads with a
+frequency rollup of divergent messages, so one gap repeated across hundreds of files reads as one
+line.
+
 ## Fixture format
 
 The current analysis fixture runner lives in `tests/test_fixtures.rs`.

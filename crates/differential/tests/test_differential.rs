@@ -265,3 +265,191 @@ fn differential_strict() {
         report: "differential-strict.txt",
     });
 }
+
+/// The real-file arm: every corpus `.R` file both parsers accept, compared
+/// with the same matching policy as the fixture suites. Parity is scoped to
+/// inputs both stacks parse cleanly, so files with syntax errors on either
+/// side are counted and skipped. Ignored by default — it needs the fetched
+/// corpus (`scripts/fetch-corpus.sh`) and runs the full legacy pipeline per
+/// file; run with `cargo test -p differential -- --ignored differential_corpus`.
+/// The report leads with a frequency rollup of divergent messages so one
+/// wording gap repeated across hundreds of files reads as one line.
+#[test]
+#[ignore = "needs the fetched corpus; run explicitly with -- --ignored"]
+fn differential_corpus() {
+    let corpus_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus");
+    let mut paths = Vec::new();
+    for directory in ["r-base", "cran"] {
+        collect_r_files(&corpus_root.join(directory), &mut paths);
+    }
+    paths.sort();
+    assert!(
+        !paths.is_empty(),
+        "no corpus files under {corpus_root:?} — run scripts/fetch-corpus.sh first"
+    );
+
+    let suite = Suite {
+        directory: "corpus",
+        document_path: "/pkg/R/case.R",
+        kind: DocumentKind::Package,
+        strict: false,
+        report: "differential-corpus.txt",
+    };
+    let mut report = String::new();
+    let mut rollup: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    let mut files = 0usize;
+    let mut matching = 0usize;
+    let mut skipped_syntax = 0usize;
+    let mut diverging = 0usize;
+    let mut panicking: Vec<String> = Vec::new();
+
+    for path in &paths {
+        let Ok(source) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        let relative = path.strip_prefix(&corpus_root).unwrap_or(path);
+        if !syntax::parse(&source).errors().is_empty() {
+            skipped_syntax += 1;
+            continue;
+        }
+        let (legacy, legacy_syntax_errors) = legacy_findings_and_syntax(&source, &suite);
+        if legacy_syntax_errors {
+            skipped_syntax += 1;
+            continue;
+        }
+        files += 1;
+        // A panic on one file (a bug to fix) must not kill the whole triage
+        // run: record the file and keep sweeping.
+        let new = std::panic::catch_unwind(|| new_findings(&source, &suite));
+        let Ok(new) = new else {
+            panicking.push(relative.display().to_string());
+            *rollup
+                .entry("new stack PANICKED".to_owned())
+                .or_default() += 1;
+            continue;
+        };
+        if findings_match(&legacy, &new) {
+            matching += 1;
+            continue;
+        }
+        diverging += 1;
+        let _ = writeln!(report, "==== {} ====", relative.display());
+        for finding in &legacy {
+            if !new.contains(finding) {
+                *rollup
+                    .entry(format!("legacy only [{}] {}", finding.0, finding.3))
+                    .or_default() += 1;
+                let _ = writeln!(
+                    report,
+                    "  legacy only: {}..{} [{}] {}",
+                    finding.1, finding.2, finding.0, finding.3
+                );
+            }
+        }
+        for finding in &new {
+            if !legacy.contains(finding) {
+                *rollup
+                    .entry(format!("new only    [{}] {}", finding.0, finding.3))
+                    .or_default() += 1;
+                let _ = writeln!(
+                    report,
+                    "  new only:    {}..{} [{}] {}",
+                    finding.1, finding.2, finding.0, finding.3
+                );
+            }
+        }
+    }
+
+    let mut ranked: Vec<(usize, &str)> = rollup
+        .iter()
+        .map(|(message, count)| (*count, message.as_str()))
+        .collect();
+    ranked.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(b.1)));
+    let mut rollup_text = String::new();
+    for (count, message) in ranked.iter().take(60) {
+        let _ = writeln!(rollup_text, "{count:6}  {message}");
+    }
+
+    let summary = format!(
+        "differential corpus: {matching}/{files} accepted files match, {diverging} diverging, {} panicking, {skipped_syntax} skipped for syntax errors\n",
+        panicking.len()
+    );
+    let mut panic_text = String::new();
+    for file in &panicking {
+        let _ = writeln!(panic_text, "  PANIC: {file}");
+    }
+    println!("{summary}\n{panic_text}{rollup_text}");
+    let report_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target")
+        .join(suite.report);
+    let _ = std::fs::write(
+        &report_path,
+        format!(
+            "{summary}\n== panicking files ==\n{panic_text}\n== divergent-message rollup ==\n{rollup_text}\n== per-file details ==\n{report}"
+        ),
+    );
+    assert!(
+        panicking.is_empty(),
+        "the new stack panicked on {} corpus file(s):\n{panic_text}"
+    ,
+        panicking.len()
+    );
+}
+
+fn collect_r_files(directory: &Path, paths: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_r_files(&path, paths);
+        } else if path.extension().is_some_and(|extension| extension == "R") {
+            paths.push(path);
+        }
+    }
+}
+
+/// Legacy findings plus whether the file had any syntax error (out-of-scope
+/// files are skipped rather than compared).
+fn legacy_findings_and_syntax(source: &str, suite: &Suite) -> (Vec<Finding>, bool) {
+    let mut analysis_state = Analysis::new(
+        PathBuf::from("/pkg"),
+        LintConfig::default(),
+        CheckConfig {
+            unused: true,
+            typing: true,
+            strict: suite.strict,
+        },
+    );
+    let Ok(document_id) =
+        analysis_state.add_document_from_source(PathBuf::from(suite.document_path), source)
+    else {
+        return (Vec::new(), true);
+    };
+    analysis::run_full(&mut analysis_state);
+    let mut findings = Vec::new();
+    let mut syntax_errors = false;
+    for diagnostic in analysis_state.document_diagnostics(document_id) {
+        let class = match diagnostic.code {
+            DiagnosticCode::TypeError => "type",
+            DiagnosticCode::AnnotationError => "annotation",
+            DiagnosticCode::Unresolved => "unresolved",
+            DiagnosticCode::Unused => "unused",
+            DiagnosticCode::Strict => "strict",
+            DiagnosticCode::SyntaxError => {
+                syntax_errors = true;
+                continue;
+            }
+            DiagnosticCode::Lint(_) | DiagnosticCode::Naming => continue,
+        };
+        findings.push((
+            class,
+            diagnostic.range.start_byte,
+            diagnostic.range.end_byte,
+            diagnostic.message,
+        ));
+    }
+    findings.sort();
+    (findings, syntax_errors)
+}

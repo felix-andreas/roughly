@@ -121,11 +121,16 @@ pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
                     expression_range.start() + offset,
                     expression_range.end() + offset,
                 );
+                let suggestion = unresolved_suggestion(db, name)
+                    .map(|nearest| format!(" Did you mean `{nearest}`?"))
+                    .unwrap_or_default();
                 diagnostics.push(Diagnostic {
                     range,
                     severity: Severity::Warning,
                     code: "unresolved",
-                    message: format!("could not resolve `{name}`"),
+                    message: format!(
+                        "I could not resolve `{name}` in this package, its imports, or builtins.{suggestion}"
+                    ),
                 });
             }
         }
@@ -154,6 +159,88 @@ fn namespace_read_message(db: &dyn Db, read: &crate::naming::NamespaceRead) -> O
             }
         }
     }
+}
+
+/// The nearest stub name for a typo hint on an unresolved reference.
+fn unresolved_suggestion(db: &dyn Db, name: &str) -> Option<String> {
+    let library = crate::stubs::stubs(db)?;
+    nearest_name(name, library.schemes.keys().map(String::as_str)).map(str::to_owned)
+}
+
+/// The closest candidate within an edit-distance budget scaled to the name's
+/// length (nothing for names shorter than 3 characters); distance ties break
+/// to the lexicographically smallest candidate so the hint is deterministic.
+fn nearest_name<'a>(name: &str, candidates: impl Iterator<Item = &'a str>) -> Option<&'a str> {
+    let name_characters: Vec<char> = name.chars().collect();
+    if name_characters.len() < 3 {
+        return None;
+    }
+    let budget = if name_characters.len() >= 5 { 2 } else { 1 };
+    let mut candidate_characters: Vec<char> = Vec::new();
+    let mut previous: Vec<usize> = Vec::new();
+    let mut current: Vec<usize> = Vec::new();
+    let mut best: Option<(usize, &str)> = None;
+    for candidate in candidates {
+        if candidate == name {
+            continue;
+        }
+        candidate_characters.clear();
+        candidate_characters.extend(candidate.chars());
+        let Some(distance) = edit_distance_within(
+            &name_characters,
+            &candidate_characters,
+            budget,
+            &mut previous,
+            &mut current,
+        ) else {
+            continue;
+        };
+        best = match best {
+            Some((best_distance, best_name))
+                if (best_distance, best_name) <= (distance, candidate) =>
+            {
+                Some((best_distance, best_name))
+            }
+            _ => Some((distance, candidate)),
+        };
+    }
+    best.map(|(_, candidate)| candidate)
+}
+
+/// Levenshtein distance, `None` when it exceeds `budget` (with a length
+/// pre-check and an early bail once a whole DP row exceeds the budget). The
+/// caller lends the two DP rows so a scan over many candidates allocates
+/// nothing per candidate.
+fn edit_distance_within(
+    left: &[char],
+    right: &[char],
+    budget: usize,
+    previous: &mut Vec<usize>,
+    current: &mut Vec<usize>,
+) -> Option<usize> {
+    if left.len().abs_diff(right.len()) > budget {
+        return None;
+    }
+    previous.clear();
+    previous.extend(0..=right.len());
+    current.clear();
+    current.resize(right.len() + 1, 0);
+    for (row, left_character) in left.iter().enumerate() {
+        current[0] = row + 1;
+        let mut row_minimum = current[0];
+        for (column, right_character) in right.iter().enumerate() {
+            let substitution = previous[column] + usize::from(left_character != right_character);
+            current[column + 1] = substitution
+                .min(previous[column + 1] + 1)
+                .min(current[column] + 1);
+            row_minimum = row_minimum.min(current[column + 1]);
+        }
+        if row_minimum > budget {
+            return None;
+        }
+        std::mem::swap(previous, current);
+    }
+    (previous[right.len()] <= budget).then_some(previous[right.len()])
 }
 
 /// A script's top level is one frame executed in order, so its bindings are
