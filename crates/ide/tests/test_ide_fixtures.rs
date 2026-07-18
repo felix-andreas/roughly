@@ -103,6 +103,23 @@ fn render_at(
         }
         None => output.push_str("signature: none\n"),
     }
+    match ide::completion(db, files, file, offset) {
+        Some(result) => {
+            let labels: Vec<String> = result
+                .items
+                .iter()
+                .take(8)
+                .map(|item| item.label.clone())
+                .collect();
+            output.push_str(&format!(
+                "completion ({}{}): {}\n",
+                result.items.len(),
+                if result.is_incomplete { "+" } else { "" },
+                labels.join(", ")
+            ));
+        }
+        None => output.push_str("completion: none\n"),
+    }
 }
 
 #[test]

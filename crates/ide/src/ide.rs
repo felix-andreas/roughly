@@ -276,6 +276,180 @@ pub fn signature_help(db: &dyn Db, file: SourceFile, offset: TextSize) -> Option
     })
 }
 
+/// The candidate cap; the result marks itself incomplete past it so clients
+/// re-query as the prefix narrows instead of filtering a truncated list.
+pub const COMPLETION_LIMIT: usize = 128;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum CompletionKind {
+    Keyword,
+    Variable,
+    Function,
+    Field,
+}
+
+/// Where an item came from; the variant order is the ranking order among
+/// items of equal match quality.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum CompletionSource {
+    Keyword,
+    Local,
+    Global,
+    Stdlib,
+    Field,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompletionItem {
+    pub label: String,
+    pub kind: CompletionKind,
+    pub source: CompletionSource,
+    /// The rendered scheme for standard-library entries.
+    pub detail: Option<String>,
+    pub documentation: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompletionResult {
+    pub items: Vec<CompletionItem>,
+    pub is_incomplete: bool,
+}
+
+const RESERVED_WORDS: &[&str] = &[
+    "if",
+    "else",
+    "repeat",
+    "while",
+    "function",
+    "for",
+    "in",
+    "next",
+    "break",
+    "TRUE",
+    "FALSE",
+    "NULL",
+    "Inf",
+    "NaN",
+    "NA",
+    "NA_integer_",
+    "NA_real_",
+    "NA_complex_",
+    "NA_character_",
+];
+
+pub fn completion(
+    db: &dyn Db,
+    files: ProjectFiles,
+    file: SourceFile,
+    offset: TextSize,
+) -> Option<CompletionResult> {
+    let text = file.text(db);
+    let (context, query) = completion_context(text, offset)?;
+
+    let items = match context {
+        CompletionContext::Field => spelled_completions(
+            db,
+            files,
+            &query,
+            syntax::SyntaxKind::AT_EXPR,
+            CompletionSource::Field,
+        ),
+        CompletionContext::Item => dollar_completions(db, files, file, offset, &query),
+        CompletionContext::Namespace { package } => {
+            namespace_completions(db, files, &package, &query)
+        }
+        CompletionContext::MaybeNamespace => return None,
+        CompletionContext::Default => {
+            let mut items = Vec::new();
+            // Keywords are a small fixed set, prefix-completed: no one
+            // searches for `function` by typing `con`.
+            for keyword in RESERVED_WORDS {
+                if prefix_under_case(keyword, &query, query_is_case_sensitive(&query)) {
+                    items.push(CompletionItem {
+                        label: (*keyword).to_owned(),
+                        kind: CompletionKind::Keyword,
+                        source: CompletionSource::Keyword,
+                        detail: None,
+                        documentation: None,
+                    });
+                }
+            }
+            if let Some(position) = position_in_item(db, file, offset)
+                && let Some(naming) = item_naming(db, position.item)
+            {
+                for info in naming.bindings.values() {
+                    if info.kind == BindingKind::TopLevel {
+                        continue;
+                    }
+                    if search_match(&info.name, &query).is_some() {
+                        items.push(CompletionItem {
+                            label: info.name.clone(),
+                            kind: CompletionKind::Variable,
+                            source: CompletionSource::Local,
+                            detail: None,
+                            documentation: None,
+                        });
+                    }
+                }
+            }
+            for &project_file in files.files(db) {
+                for item in item_tree(db, project_file) {
+                    let kind = match *item.kind(db) {
+                        ItemKind::Function => CompletionKind::Function,
+                        ItemKind::Value => CompletionKind::Variable,
+                        ItemKind::Statement => continue,
+                    };
+                    let Some(name) = item.name(db).clone() else {
+                        continue;
+                    };
+                    if search_match(&name, &query).is_some() {
+                        items.push(CompletionItem {
+                            label: name,
+                            kind,
+                            source: CompletionSource::Global,
+                            detail: None,
+                            documentation: None,
+                        });
+                    }
+                }
+            }
+            // The standard-library corpus, with each stub's scheme as the
+            // detail. A project global of the same name outranks its stub at
+            // the deduplication step, mirroring how resolution shadows.
+            if let Some(library) = semantics::stubs::stubs(db) {
+                for (name, schemes) in &library.schemes {
+                    if search_match(name, &query).is_none() {
+                        continue;
+                    }
+                    let Some(scheme) = schemes.first() else {
+                        continue;
+                    };
+                    let mut renderer = TypeRenderer::default();
+                    let namespace = library
+                        .exports_by_namespace
+                        .iter()
+                        .find(|(_, names)| names.contains(name))
+                        .map(|(namespace, _)| namespace.clone());
+                    items.push(CompletionItem {
+                        label: name.clone(),
+                        kind: match scheme.body.kind(db) {
+                            TyKind::Function(_) => CompletionKind::Function,
+                            _ => CompletionKind::Variable,
+                        },
+                        source: CompletionSource::Stdlib,
+                        detail: Some(renderer.render_scheme(db, scheme)),
+                        documentation: namespace
+                            .map(|namespace| format!("From the `{namespace}` package.")),
+                    });
+                }
+            }
+            items
+        }
+    };
+
+    finish_completions(items, &query)
+}
+
 /// Document symbols: the file's named top-level definitions with their
 /// absolute name ranges, in source order.
 pub fn document_symbols(db: &dyn Db, file: SourceFile) -> Vec<(String, NavigationTarget)> {
@@ -294,6 +468,367 @@ pub fn document_symbols(db: &dyn Db, file: SourceFile) -> Vec<(String, Navigatio
         symbols.push((name, NavigationTarget { file, range }));
     }
     symbols
+}
+
+// ---- completion internals ----
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CompletionContext {
+    Default,
+    /// After `@`: S4 slot names.
+    Field,
+    /// After `$`: record fields of the extracted value.
+    Item,
+    /// After `::` / `:::`: the package's exports.
+    Namespace {
+        package: String,
+    },
+    /// A bare trailing `:` — the range operator or half a `::`; undecided,
+    /// so stay silent.
+    MaybeNamespace,
+}
+
+/// The completion context and query: the identifier chars immediately before
+/// the cursor, and the operator (if any) they follow. Works on raw text so
+/// completion still fires mid-edit inside broken code.
+fn completion_context(text: &str, offset: TextSize) -> Option<(CompletionContext, String)> {
+    let at = usize::from(offset).min(text.len());
+    let line_start = text[..at].rfind('\n').map_or(0, |index| index + 1);
+    let prefix = &text[line_start..at];
+
+    let mut context = CompletionContext::Default;
+    let mut query = String::new();
+    let mut word_start_of_previous: Option<usize> = None;
+    let mut current_word_start = 0usize;
+    let mut previous_char: Option<char> = None;
+    for (index, character) in prefix.char_indices() {
+        if character.is_alphabetic()
+            || character == '.'
+            || character == '_'
+            || (!query.is_empty() && character.is_numeric())
+        {
+            if query.is_empty() {
+                current_word_start = index;
+            }
+            query.push(character);
+            // A name after a single `:` is the range operator's operand
+            // (`1:n`), not a pending namespace access.
+            if context == CompletionContext::MaybeNamespace {
+                context = CompletionContext::Default;
+            }
+        } else {
+            if !query.is_empty() {
+                word_start_of_previous = Some(current_word_start);
+            }
+            context = match character {
+                '@' => CompletionContext::Field,
+                '$' => CompletionContext::Item,
+                ':' => {
+                    if previous_char == Some(':') {
+                        let package = word_start_of_previous
+                            .map(|start| {
+                                prefix[start..]
+                                    .chars()
+                                    .take_while(|c| c.is_alphanumeric() || *c == '.' || *c == '_')
+                                    .collect::<String>()
+                            })
+                            .unwrap_or_default();
+                        CompletionContext::Namespace { package }
+                    } else {
+                        CompletionContext::MaybeNamespace
+                    }
+                }
+                _ => CompletionContext::Default,
+            };
+            query.clear();
+        }
+        previous_char = Some(character);
+    }
+    Some((context, query))
+}
+
+/// Names spelled after the given extract operator anywhere in the project —
+/// the syntactic fallback shared by `@` completion and untyped `$` targets.
+fn spelled_completions(
+    db: &dyn Db,
+    files: ProjectFiles,
+    query: &str,
+    kind: syntax::SyntaxKind,
+    source: CompletionSource,
+) -> Vec<CompletionItem> {
+    let mut labels = std::collections::BTreeSet::new();
+    for &project_file in files.files(db) {
+        let parse = semantics::parse(db, project_file);
+        for node in parse.syntax_node().descendants() {
+            if node.kind() != kind {
+                continue;
+            }
+            // The rhs name: the LAST name child (the lhs is a child
+            // expression node, so a bare NAME child is the field).
+            if let Some(name) = node
+                .children()
+                .filter(|child| child.kind() == syntax::SyntaxKind::NAME)
+                .last()
+            {
+                labels.insert(name.text().to_string());
+            }
+        }
+    }
+    labels
+        .into_iter()
+        .filter(|label| search_match(label, query).is_some())
+        .map(|label| CompletionItem {
+            label,
+            kind: CompletionKind::Field,
+            source,
+            detail: None,
+            documentation: None,
+        })
+        .collect()
+}
+
+/// `$` completion: the record fields of the target's checked type, falling
+/// back to every `$name` spelled in the project when the target's type gives
+/// no fields.
+fn dollar_completions(
+    db: &dyn Db,
+    files: ProjectFiles,
+    file: SourceFile,
+    offset: TextSize,
+    query: &str,
+) -> Vec<CompletionItem> {
+    let typed = (|| {
+        let position = position_in_item(db, file, offset)?;
+        let hir = item_hir(db, position.item)?;
+        let check = item_check(db, position.item)?;
+        // The innermost field access containing the cursor; its target's
+        // record fields are the candidates.
+        let target = hir
+            .expressions
+            .iter()
+            .filter_map(|expression| match &expression.kind {
+                ExpressionKind::Field { target, .. }
+                    if !expression.range.is_empty()
+                        && expression.range.start() <= position.relative
+                        && position.relative <= expression.range.end() =>
+                {
+                    Some((expression.range, *target))
+                }
+                _ => None,
+            })
+            .min_by_key(|(range, _)| range.len())
+            .map(|(_, target)| target)?;
+        let ty = *check.expression_types.get(&target)?;
+        let TyKind::Record(fields) = ty.kind(db) else {
+            return None;
+        };
+        let mut renderer = TypeRenderer::default();
+        Some(
+            fields
+                .iter()
+                .map(|field| CompletionItem {
+                    label: field.name.text(db).to_owned(),
+                    kind: CompletionKind::Field,
+                    source: CompletionSource::Field,
+                    detail: Some(renderer.render(db, field.ty)),
+                    documentation: None,
+                })
+                .filter(|item| search_match(&item.label, query).is_some())
+                .collect::<Vec<_>>(),
+        )
+    })();
+    match typed {
+        Some(items) if !items.is_empty() => items,
+        _ => spelled_completions(
+            db,
+            files,
+            query,
+            syntax::SyntaxKind::DOLLAR_EXPR,
+            CompletionSource::Field,
+        ),
+    }
+}
+
+/// `pkg::` completion: the namespace's declared exports when the stub corpus
+/// knows the package, otherwise every name spelled after `::` in the project.
+fn namespace_completions(
+    db: &dyn Db,
+    files: ProjectFiles,
+    package: &str,
+    query: &str,
+) -> Vec<CompletionItem> {
+    if let Some(library) = semantics::stubs::stubs(db)
+        && let Some(exports) = library.exports_by_namespace.get(package)
+    {
+        let mut items: Vec<CompletionItem> = exports
+            .iter()
+            .filter(|name| search_match(name, query).is_some())
+            .map(|name| {
+                let mut renderer = TypeRenderer::default();
+                let (kind, detail) = match library.schemes.get(name).and_then(|s| s.first()) {
+                    Some(scheme) => (
+                        match scheme.body.kind(db) {
+                            TyKind::Function(_) => CompletionKind::Function,
+                            _ => CompletionKind::Variable,
+                        },
+                        Some(renderer.render_scheme(db, scheme)),
+                    ),
+                    None => (CompletionKind::Variable, None),
+                };
+                CompletionItem {
+                    label: name.clone(),
+                    kind,
+                    source: CompletionSource::Stdlib,
+                    detail,
+                    documentation: None,
+                }
+            })
+            .collect();
+        items.sort_by(|left, right| left.label.cmp(&right.label));
+        return items;
+    }
+    spelled_completions(
+        db,
+        files,
+        query,
+        syntax::SyntaxKind::NAMESPACE_EXPR,
+        CompletionSource::Global,
+    )
+}
+
+/// Dedupe by label, rank by match quality then source/label, cap at
+/// `COMPLETION_LIMIT`.
+fn finish_completions(items: Vec<CompletionItem>, query: &str) -> Option<CompletionResult> {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut deduplicated = Vec::new();
+    for item in items {
+        if seen.insert(item.label.clone()) {
+            deduplicated.push(item);
+        }
+    }
+    deduplicated.sort_by(|left, right| {
+        (
+            search_match(&left.label, query),
+            left.source,
+            left.label.to_lowercase(),
+            left.label.clone(),
+            left.kind,
+        )
+            .cmp(&(
+                search_match(&right.label, query),
+                right.source,
+                right.label.to_lowercase(),
+                right.label.clone(),
+                right.kind,
+            ))
+    });
+    let is_incomplete = deduplicated.len() > COMPLETION_LIMIT;
+    deduplicated.truncate(COMPLETION_LIMIT);
+    (!deduplicated.is_empty()).then_some(CompletionResult {
+        items: deduplicated,
+        is_incomplete,
+    })
+}
+
+// ---- search matching (shared by completion and symbol search) ----
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MatchScore {
+    tier: u8,
+    first_match_index: u32,
+}
+
+const TIER_EXACT: u8 = 0;
+const TIER_PREFIX: u8 = 1;
+const TIER_SUBSTRING: u8 = 2;
+const TIER_SUBSEQUENCE: u8 = 3;
+
+/// Shortest query matched as a subsequence; shorter queries fall back to
+/// prefix matching so one- or two-character inputs do not surface scattered,
+/// low-signal matches (mirrors rust-analyzer).
+const MIN_SUBSEQUENCE_QUERY_LEN: usize = 3;
+
+/// Subsequence matching with smart case: every query character must appear
+/// in the candidate in order; case-insensitive unless the query contains an
+/// uppercase character. An empty query matches everything.
+pub fn search_match(candidate: &str, query: &str) -> Option<MatchScore> {
+    if query.is_empty() {
+        return Some(MatchScore {
+            tier: TIER_PREFIX,
+            first_match_index: 0,
+        });
+    }
+
+    let case_sensitive = query_is_case_sensitive(query);
+    let equal = |left: char, right: char| {
+        if case_sensitive {
+            left == right
+        } else {
+            left.to_lowercase().eq(right.to_lowercase())
+        }
+    };
+
+    let mut query_chars = query.chars().peekable();
+    let mut first_match_index = None;
+    for (index, candidate_char) in candidate.chars().enumerate() {
+        let Some(&query_char) = query_chars.peek() else {
+            break;
+        };
+        if equal(candidate_char, query_char) {
+            if first_match_index.is_none() {
+                first_match_index = Some(index as u32);
+            }
+            query_chars.next();
+        }
+    }
+    if query_chars.peek().is_some() {
+        return None;
+    }
+
+    let tier = if equal_under_case(candidate, query, case_sensitive) {
+        TIER_EXACT
+    } else if prefix_under_case(candidate, query, case_sensitive) {
+        TIER_PREFIX
+    } else if substring_under_case(candidate, query, case_sensitive) {
+        TIER_SUBSTRING
+    } else {
+        TIER_SUBSEQUENCE
+    };
+    if query.chars().count() < MIN_SUBSEQUENCE_QUERY_LEN && tier > TIER_PREFIX {
+        return None;
+    }
+    Some(MatchScore {
+        tier,
+        first_match_index: first_match_index.unwrap_or(0),
+    })
+}
+
+fn query_is_case_sensitive(query: &str) -> bool {
+    query.chars().any(|character| character.is_uppercase())
+}
+
+fn equal_under_case(candidate: &str, query: &str, case_sensitive: bool) -> bool {
+    if case_sensitive {
+        candidate == query
+    } else {
+        candidate.eq_ignore_ascii_case(query)
+    }
+}
+
+fn prefix_under_case(candidate: &str, query: &str, case_sensitive: bool) -> bool {
+    if case_sensitive {
+        candidate.starts_with(query)
+    } else {
+        candidate.to_lowercase().starts_with(&query.to_lowercase())
+    }
+}
+
+fn substring_under_case(candidate: &str, query: &str, case_sensitive: bool) -> bool {
+    if case_sensitive {
+        candidate.contains(query)
+    } else {
+        candidate.to_lowercase().contains(&query.to_lowercase())
+    }
 }
 
 // ---- signature help internals ----
@@ -716,6 +1251,10 @@ impl PositionedItem<'_> {
 }
 
 fn position_in_item(db: &dyn Db, file: SourceFile, offset: TextSize) -> Option<PositionedItem<'_>> {
+    // Strict containment wins; a cursor sitting exactly on an item's end
+    // offset (typing at the end of the last statement) still belongs to it,
+    // unless the next item starts there.
+    let mut touching: Option<PositionedItem<'_>> = None;
     for item in item_tree(db, file) {
         let Some(node) = item_node(db, item) else {
             continue;
@@ -729,8 +1268,16 @@ fn position_in_item(db: &dyn Db, file: SourceFile, offset: TextSize) -> Option<P
                 relative: offset - range.start(),
             });
         }
+        if offset == range.end() && touching.is_none() {
+            touching = Some(PositionedItem {
+                db,
+                item,
+                item_offset: range.start(),
+                relative: offset - range.start(),
+            });
+        }
     }
-    None
+    touching
 }
 
 /// The name node range of a definition item (`name <- ...`), for goto

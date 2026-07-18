@@ -61,7 +61,10 @@ fn sweep(source: &str) {
         let _ = ide::definition(&db, files, file, offset);
         let _ = ide::references(&db, files, file, offset, true);
         let _ = ide::rename(&db, files, file, offset);
+        let _ = ide::signature_help(&db, file, offset);
+        let _ = ide::completion(&db, files, file, offset);
     }
+    let _ = ide::inlay_hints(&db, file, None);
     let _ = ide::document_symbols(&db, file);
 }
 

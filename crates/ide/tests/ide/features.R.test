@@ -7,6 +7,7 @@ definition: none
 references: none
 rename: none
 signature: none
+completion (128+): break, else, FALSE, for, function, if, in, Inf
 hint @1: integer
 
 #---- local_read
@@ -20,6 +21,7 @@ definition 20..25
 references: 20..25*, 33..38
 rename: 2 edit(s)
 signature: none
+completion (9): value, validObject, eval, evalq, setValidity, vapply, available.packages, isVirtualClass
 hint @1: fn() -> double
 hint @25: double
 
@@ -33,6 +35,7 @@ definition 14..19
 references: 14..19*, 25..30
 rename: 2 edit(s)
 signature: none
+completion (5): count, capture.output, colours, colSums, contour
 hint @1: <T: numeric> fn(count: T) -> double
 
 #---- function_name
@@ -45,6 +48,7 @@ references: 0..6*, 44..50
 rename: 2 edit(s)
 signature: fn(x: double) -> double
 parameters: [x: double]
+completion (3): double, as.double, is.double
 hint @6: <T: numeric> fn(x: T) -> T
 hint @29: fn() -> double
 
@@ -60,6 +64,7 @@ definition 20..25
 references: 20..25*, 33..38
 rename: 2 edit(s)
 signature: none
+completion (8): total, textConnection, toString, stopifnot, getOption, getSlots, matplot, capture.output
 hint @1: fn() -> double
 hint @25: double
 
@@ -73,6 +78,7 @@ references: 0..6*, 45..51
 rename: 2 edit(s)
 signature: fn(x: double) -> double
 parameters: [x: double]
+completion (3): helper, help, heat.colors
 hint @6: <T> fn(x: T) -> T
 hint @30: fn() -> double
 
@@ -89,6 +95,7 @@ definition 20..21
 references: 20..21*, 29..30*, 34..35, 42..43
 rename: 4 edit(s)
 signature: none
+completion (26): n, NA, NA_character_, NA_complex_, NA_integer_, NA_real_, NaN, next
 hint @1: fn() -> double
 hint @21: double
 hint @30: double
@@ -103,6 +110,7 @@ definition 14..19
 references: 14..19*, 25..30
 rename: 2 edit(s)
 signature: none
+completion (5): count, capture.output, colours, colSums, contour
 hint @1: <T: numeric> fn(count: T) -> double
 
 #---- global_cross_item
@@ -116,6 +124,7 @@ references: 0..6*, 45..51, 74..80
 rename: 3 edit(s)
 signature: fn(x: double) -> double
 parameters: [x: double]
+completion (1): helper
 hint @6: <T> fn(x: T) -> T
 hint @30: fn() -> double
 hint @59: fn() -> double
@@ -129,6 +138,7 @@ definition 0..6
 references: 0..6*, 45..51
 rename: 2 edit(s)
 signature: none
+completion (3): helper, help, heat.colors
 hint @6: <T> fn(x: T) -> T
 hint @30: fn() -> double
 
@@ -141,6 +151,7 @@ references: none
 rename: none
 signature: fn(x: double, ...: Any, [digits]: Any, [quote]: logical, [right]: logical, [max]: Any, [width]: Any, [n]: Any, [na.print]: Any, [row.names]: Any) -> double
 parameters: [x: double] | ...: Any | [digits]: Any | [quote]: logical | [right]: logical | [max]: Any | [width]: Any | [n]: Any | [na.print]: Any | [row.names]: Any
+completion (9): print, sprintf, is.primitive, dev.print, packageVersion, postscript, predict, representation
 hint @1: fn() -> double
 
 #---- shadowed_local_not_global
@@ -155,6 +166,7 @@ definition 44..50
 references: 44..50*, 58..64
 rename: 2 edit(s)
 signature: none
+completion (3): helper, help, heat.colors
 hint @6: <T> fn(x: T) -> T
 hint @25: fn() -> double
 hint @50: double
@@ -171,6 +183,7 @@ definition 20..25
 references: 20..25*, 33..38, 41..46
 rename: 3 edit(s)
 signature: none
+completion (9): value, validObject, eval, evalq, setValidity, vapply, available.packages, isVirtualClass
 hint @1: fn() -> double
 hint @25: double
 
@@ -184,6 +197,7 @@ definition 25..29
 references: 25..29*, 44..48
 rename: 2 edit(s)
 signature: none
+completion (47): if, in, Inf, item, iconv, identical, identity, ifelse
 hint @1: fn() -> NULL
 
 #==== signature
@@ -197,6 +211,7 @@ references: none
 rename: none
 signature: fn(x: T, [y]: T) -> T
 parameters: [x: T] | [y]: T
+completion (128+): break, else, FALSE, for, function, if, in, Inf
 hint @1: <T: numeric> fn(x: T, [y]: T) -> T
 
 #---- second_after_comma
@@ -209,6 +224,7 @@ references: none
 rename: none
 signature: fn(x: double, [y]: double) -> double
 parameters: x: double | [[y]: double]
+completion (128+): break, else, FALSE, for, function, if, in, Inf
 hint @1: <T: numeric> fn(x: T, [y]: T) -> T
 hint @31: fn() -> double
 
@@ -222,6 +238,7 @@ references: none
 rename: none
 signature: fn(x: T, [y]: T) -> T
 parameters: x: T | [[y]: T]
+completion (128+): break, else, FALSE, for, function, if, in, Inf
 hint @1: <T: numeric> fn(x: T, [y]: T) -> T
 
 #---- stub_with_dots
@@ -233,6 +250,7 @@ references: none
 rename: none
 signature: fn(...: Any, [sep]: character, [collapse]: character | NULL, [recycle0]: logical) -> character
 parameters: [...: Any] | [sep]: character | [collapse]: character | NULL | [recycle0]: logical
+completion (128+): break, else, FALSE, for, function, if, in, Inf
 hint @1: fn() -> character
 
 #---- unknown_name_hits_dots
@@ -244,6 +262,7 @@ references: none
 rename: none
 signature: fn(...: Any, [sep]: character, [collapse]: character | NULL, [recycle0]: logical) -> character
 parameters: ...: Any | [sep]: character | [[collapse]: character | NULL] | [recycle0]: logical
+completion: none
 hint @1: fn() -> character
 
 #==== hints
@@ -271,3 +290,60 @@ mystery <- unknown_call()
 plain <- 3
 #++++
 hint @31: double
+
+#==== completion
+#---- locals_and_keywords
+f <- function(total_count) {
+  tot$0
+}
+#++++
+hover 31..34: tot: Unknown
+definition: none
+references: none
+rename: none
+signature: none
+completion (8): total_count, textConnection, toString, stopifnot, getOption, getSlots, matplot, capture.output
+
+#---- globals_shadow_stubs
+print <- function(x) x
+g <- function() pri$0
+#++++
+hover 39..42: pri: Unknown
+definition: none
+references: none
+rename: none
+signature: none
+completion (9): print, sprintf, is.primitive, dev.print, packageVersion, postscript, predict, representation
+hint @5: <T> fn(x: T) -> T
+
+#---- dollar_typed_fields
+config <- list(alpha = 1, beta = "b")
+use <- function() config$al$0
+#++++
+hover 56..65: Unknown
+definition: none
+references: none
+rename: none
+signature: none
+completion (1): alpha
+hint @6: list{alpha: double, beta: character}
+
+#---- namespace_exports
+h <- function() stats::med$0
+#++++
+hover 16..26: Unknown
+definition: none
+references: none
+rename: none
+signature: none
+completion (1): median
+
+#---- keyword_prefix
+g <- function() fun$0
+#++++
+hover 16..19: fun: Unknown
+definition: none
+references: none
+rename: none
+signature: none
+completion (5): function, as.function, is.function, sys.function, match.fun
