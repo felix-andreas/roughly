@@ -127,3 +127,15 @@ f <- function() {
 }
 #++++
 f: fn() -> integer
+
+#---- unknown_typed_parameter_accepts_anything
+user <- function(w) helper("text")
+helper <- function(r) {
+  if (!isRestart(r)) r <- findRestart(r)
+  r
+}
+#++++
+user: <T> fn(w: T) -> Unknown
+helper: fn(r: Unknown) -> Unknown
+66..75 warning[unresolved] I could not resolve `isRestart` in this package, its imports, or builtins.
+85..96 warning[unresolved] I could not resolve `findRestart` in this package, its imports, or builtins.

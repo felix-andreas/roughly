@@ -175,7 +175,7 @@ f <- function(n) {
   even(n)
 }
 #++++
-f: fn(n: Unknown) -> logical
+f: <T: numeric> fn(n: T) -> logical
 
 #---- forward_capture_sees_the_frame_write
 f <- function() {

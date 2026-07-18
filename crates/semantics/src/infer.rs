@@ -620,7 +620,12 @@ impl<'db> InferenceTable<'db> {
     ) -> bool {
         let actual = self.resolve(db, actual);
         let expected = self.resolve(db, expected);
-        if matches!(actual.kind(db), TyKind::Any) || matches!(expected.kind(db), TyKind::Any) {
+        // The tolerance floor, mirroring `unify`: `Any` is the sanctioned
+        // escape hatch and `Unknown` an absent fact — neither side of an
+        // unknown is a checkable claim, so it is compatible with everything.
+        if matches!(actual.kind(db), TyKind::Any | TyKind::Unknown)
+            || matches!(expected.kind(db), TyKind::Any | TyKind::Unknown)
+        {
             return true;
         }
         if actual == expected {
