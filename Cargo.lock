@@ -577,6 +577,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "format"
+version = "0.2.8-alpha"
+dependencies = [
+ "syntax",
+]
+
+[[package]]
 name = "futures"
 version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
