@@ -168,3 +168,60 @@ fn parallel_cold_prime_matches_sequential() {
         );
     }
 }
+
+/// Cyclic-group answers must not depend on which member is queried first:
+/// forward forcing, reverse forcing, and per-item phase pre-forcing must all
+/// render identical diagnostics. (The canonical per-group fixpoint guarantees
+/// this; before it, the salsa cycle head — the first query to arrive —
+/// decided where the round cap pinned.)
+#[test]
+fn cyclic_group_answers_are_forcing_order_independent() {
+    let cases: Vec<Vec<String>> = vec![
+        // A growing pair: each binding embeds the other, so the group rides
+        // the round cap and every member pins.
+        vec![
+            "a <- list(v = 1, w = b)\nuse_a <- function() a$v + 1\n".to_owned(),
+            "b <- list(v = 2, w = a)\nuse_b <- function() b$v + 1\n".to_owned(),
+        ],
+        // Mutually recursive functions plus a growing accumulator.
+        vec![
+            "f <- function(x) g(x)\nacc <- c(acc, f)\n".to_owned(),
+            "g <- function(x) f(x) + h(x)\nh <- function(x) if (x > 0) g(x - 1) else acc\n"
+                .to_owned(),
+        ],
+        // An oscillating value pair with downstream readers.
+        vec![
+            "p <- if (TRUE) q else 1L\n".to_owned(),
+            "q <- if (TRUE) p else \"s\"\nr <- q\ns <- p\n".to_owned(),
+        ],
+    ];
+    for sources in cases {
+        let build = |forcing: &dyn Fn(&RootDatabase, &[SourceFile])| -> Vec<String> {
+            let db = RootDatabase::default();
+            semantics::stubs::install_shipped_stubs(&db);
+            let files: Vec<SourceFile> = sources
+                .iter()
+                .map(|source| SourceFile::new(&db, source.clone(), DocumentKind::Package))
+                .collect();
+            ProjectFiles::new(&db, files.clone());
+            forcing(&db, &files);
+            all_diagnostics(&db, &files)
+        };
+        let forward = build(&|_, _| {});
+        let reverse = build(&|db, files| {
+            for &file in files.iter().rev() {
+                let _ = file_diagnostics(db, file);
+                let _ = strict_diagnostics(db, file);
+            }
+        });
+        let phased = build(&|db, files| {
+            for &file in files {
+                for item in semantics::item_tree(db, file) {
+                    let _ = semantics::item_check(db, item);
+                }
+            }
+        });
+        assert_eq!(forward, reverse, "reverse forcing changed the answers");
+        assert_eq!(forward, phased, "phase pre-forcing changed the answers");
+    }
+}

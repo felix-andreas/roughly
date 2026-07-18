@@ -440,11 +440,215 @@ pub fn package_definitions<'db>(
     winners
 }
 
-/// The exported scheme of one definition item. Cross-item references route
-/// through this query, so mutually recursive definitions form salsa cycles:
-/// fixpoint iteration starts every member at the tolerant `Unknown` scheme and
-/// iterates to convergence; a non-converging (oscillating) member pins to
-/// `Unknown` at the round cap instead of ever reaching salsa's hard limit.
+/// The interface-reference SCCs of the package's definition items, from the
+/// static name graph: an edge runs from each item to the winner of every
+/// global name its body reads. Only *cyclic* groups are recorded — groups
+/// with several members, or a single member referencing itself — because
+/// those are the ones whose schemes must resolve through one canonical
+/// fixpoint: iterating a cycle from whichever member happened to be queried
+/// first would make the round-cap pins depend on query order.
+#[derive(Debug, Clone, PartialEq, Eq, Default, salsa::SalsaValue)]
+pub struct InterfaceSccs<'db> {
+    /// Cyclic-group id per member item.
+    pub membership: rustc_hash::FxHashMap<Item<'db>, u32>,
+    /// Each cyclic group's members in canonical order (project file order,
+    /// then item order within the file).
+    pub groups: Vec<Vec<Item<'db>>>,
+}
+
+#[salsa::tracked(returns(ref))]
+pub fn interface_sccs<'db>(db: &'db dyn Db, files: ProjectFiles) -> InterfaceSccs<'db> {
+    let winners = package_definitions(db, files);
+    // Nodes in canonical order, with edges item -> referenced winner.
+    let mut nodes: Vec<Item<'db>> = Vec::new();
+    let mut position: rustc_hash::FxHashMap<Item<'db>, usize> = rustc_hash::FxHashMap::default();
+    for &file in files.files(db) {
+        if *file.kind(db) != DocumentKind::Package {
+            continue;
+        }
+        for item in item_tree(db, file) {
+            if !matches!(*item.kind(db), ItemKind::Function | ItemKind::Value)
+                || item.name(db).is_none()
+            {
+                continue;
+            }
+            position.insert(item, nodes.len());
+            nodes.push(item);
+        }
+    }
+    let mut edges: Vec<Vec<usize>> = vec![Vec::new(); nodes.len()];
+    for (index, &item) in nodes.iter().enumerate() {
+        let Some(naming) = item_naming(db, item) else {
+            continue;
+        };
+        for name in naming.non_locals.values() {
+            if let Some(target) = winners.get(name)
+                && let Some(&target_index) = position.get(target)
+            {
+                edges[index].push(target_index);
+            }
+        }
+        for read in naming.namespace_reads.values() {
+            if let Some(name) = &read.name
+                && let Some(target) = winners.get(name)
+                && let Some(&target_index) = position.get(target)
+            {
+                edges[index].push(target_index);
+            }
+        }
+    }
+
+    // Iterative Tarjan (the graph nests as deep as the package is large).
+    let mut result = InterfaceSccs::default();
+    let mut index_of: Vec<Option<u32>> = vec![None; nodes.len()];
+    let mut low: Vec<u32> = vec![0; nodes.len()];
+    let mut on_stack: Vec<bool> = vec![false; nodes.len()];
+    let mut stack: Vec<usize> = Vec::new();
+    let mut next_index = 0u32;
+    for start in 0..nodes.len() {
+        if index_of[start].is_some() {
+            continue;
+        }
+        let mut work: Vec<(usize, usize)> = vec![(start, 0)];
+        while let Some(&mut (node, ref mut edge_cursor)) = work.last_mut() {
+            if *edge_cursor == 0 {
+                index_of[node] = Some(next_index);
+                low[node] = next_index;
+                next_index += 1;
+                stack.push(node);
+                on_stack[node] = true;
+            }
+            if let Some(&target) = edges[node].get(*edge_cursor) {
+                *edge_cursor += 1;
+                match index_of[target] {
+                    None => work.push((target, 0)),
+                    Some(target_index) => {
+                        if on_stack[target] {
+                            low[node] = low[node].min(target_index);
+                        }
+                    }
+                }
+                continue;
+            }
+            work.pop();
+            if let Some(&(parent, _)) = work.last() {
+                low[parent] = low[parent].min(low[node]);
+            }
+            if Some(low[node]) == index_of[node] {
+                let mut members = Vec::new();
+                loop {
+                    let member = stack.pop().expect("tarjan stack holds the component");
+                    on_stack[member] = false;
+                    members.push(member);
+                    if member == node {
+                        break;
+                    }
+                }
+                let cyclic = members.len() > 1 || edges[node].contains(&node);
+                if cyclic {
+                    members.sort_unstable();
+                    let group = result.groups.len() as u32;
+                    let items: Vec<Item<'db>> =
+                        members.iter().map(|&member| nodes[member]).collect();
+                    for &item in &items {
+                        result.membership.insert(item, group);
+                    }
+                    result.groups.push(items);
+                }
+            }
+        }
+    }
+    result
+}
+
+/// The canonical fixpoint of one cyclic interface group, independent of which
+/// member was queried first: every member starts at the tolerant `Unknown`
+/// scheme, each round re-checks every member in canonical order against the
+/// *previous* round's table (one propagation hop per round, so within-round
+/// order cannot matter either), and members still changing at the round cap
+/// pin to `Unknown`. Member checks run directly — never through `item_check`
+/// — so no salsa cycle forms.
+#[salsa::tracked(returns(ref))]
+pub fn scc_schemes<'db>(
+    db: &'db dyn Db,
+    files: ProjectFiles,
+    group: u32,
+) -> rustc_hash::FxHashMap<Item<'db>, types::TypeScheme<'db>> {
+    let sccs = interface_sccs(db, files);
+    let Some(members) = sccs.groups.get(group as usize) else {
+        return rustc_hash::FxHashMap::default();
+    };
+    let winners = package_definitions(db, files);
+    // Only the winner of a name is reachable through reads, so the overlay
+    // carries one entry per member that IS its name's winner.
+    let member_names: Vec<(String, Item<'db>)> = members
+        .iter()
+        .filter_map(|&item| {
+            let name = item.name(db).clone()?;
+            (winners.get(&name) == Some(&item)).then_some((name, item))
+        })
+        .collect();
+
+    let unknown_scheme = types::TypeScheme::monomorphic(types::unknown(db));
+    let mut table: rustc_hash::FxHashMap<String, types::TypeScheme<'db>> = member_names
+        .iter()
+        .map(|(name, _)| (name.clone(), unknown_scheme.clone()))
+        .collect();
+    let mut schemes: rustc_hash::FxHashMap<Item<'db>, types::TypeScheme<'db>> = members
+        .iter()
+        .map(|&item| (item, unknown_scheme.clone()))
+        .collect();
+    for _round in 0..SCHEME_ROUND_CAP {
+        let mut next_schemes = rustc_hash::FxHashMap::default();
+        for &item in members {
+            let scheme =
+                check_member_scheme(db, item, &table).unwrap_or_else(|| unknown_scheme.clone());
+            next_schemes.insert(item, scheme);
+        }
+        let next_table: rustc_hash::FxHashMap<String, types::TypeScheme<'db>> = member_names
+            .iter()
+            .map(|(name, item)| (name.clone(), next_schemes[item].clone()))
+            .collect();
+        let converged = next_schemes == schemes;
+        schemes = next_schemes;
+        table = next_table;
+        if converged {
+            return schemes;
+        }
+    }
+    // Still changing at the cap: sound-by-refusal for every member (the
+    // group's growth or oscillation makes no member's value trustworthy, and
+    // pinning all of them is the only entry-order-free choice).
+    for scheme in schemes.values_mut() {
+        *scheme = unknown_scheme.clone();
+    }
+    schemes
+}
+
+/// One member's exported scheme under the group's current-round table.
+fn check_member_scheme<'db>(
+    db: &'db dyn Db,
+    item: Item<'db>,
+    table: &rustc_hash::FxHashMap<String, types::TypeScheme<'db>>,
+) -> Option<types::TypeScheme<'db>> {
+    let module = item_hir(db, item)?;
+    let naming = item_naming(db, item)?;
+    let annotation = item_annotation_syntax(db, item)
+        .map(|syntax| annotations::lower_annotation(db, &syntax.syntax_node()));
+    let base = SalsaGlobals::for_item(db, item);
+    let globals = SccGlobals {
+        base: &base,
+        members: table,
+    };
+    check::check_item_with_annotation(db, &module, &naming, annotation.as_ref(), Some(&globals))
+        .scheme
+}
+
+/// The exported scheme of one definition item — always `item_check`'s
+/// scheme, which for cyclic-group members is the group's canonical fixpoint
+/// value (adopted inside `item_check`, keeping export and hover one source
+/// of truth). The salsa cycle recovery below stays as a backstop for
+/// reference edges the static graph cannot see.
 #[salsa::tracked(
     returns(clone),
     cycle_fn = global_scheme_recover,
@@ -500,13 +704,23 @@ pub fn item_check<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<check::ItemCh
     let annotation = item_annotation_syntax(db, item)
         .map(|syntax| annotations::lower_annotation(db, &syntax.syntax_node()));
     let globals = SalsaGlobals::for_item(db, item);
-    Some(check::check_item_with_annotation(
+    let mut check = check::check_item_with_annotation(
         db,
         &module,
         &naming,
         annotation.as_ref(),
         Some(&globals),
-    ))
+    );
+    // A cyclic-group member's export is the group's canonical fixpoint value,
+    // not the one-step re-derivation this check just computed (which would
+    // run one propagation hop ahead of what every reader sees).
+    if check.scheme.is_some()
+        && let Some(files) = ProjectFiles::try_get(db)
+        && let Some(&group) = interface_sccs(db, files).membership.get(&item)
+    {
+        check.scheme = scc_schemes(db, files, group).get(&item).cloned();
+    }
+    Some(check)
 }
 
 fn item_check_initial<'db>(
@@ -641,6 +855,37 @@ impl<'db> check::GlobalEnv<'db> for SalsaGlobals<'db> {
             }
         }
         definitions
+    }
+}
+
+/// A cyclic group's view of the world during its canonical fixpoint: member
+/// names resolve from the current round table (never through `global_scheme`,
+/// which would re-enter the group), everything else through the ordinary
+/// salsa-backed resolver.
+struct SccGlobals<'db, 'a> {
+    base: &'a SalsaGlobals<'db>,
+    members: &'a rustc_hash::FxHashMap<String, types::TypeScheme<'db>>,
+}
+
+impl<'db> check::GlobalEnv<'db> for SccGlobals<'db, '_> {
+    fn scheme(&self, name: &str) -> Option<types::TypeScheme<'db>> {
+        self.members
+            .get(name)
+            .cloned()
+            .or_else(|| self.base.scheme(name))
+    }
+
+    fn overloads(&self, name: &str) -> Option<Vec<types::TypeScheme<'db>>> {
+        if self.members.contains_key(name) {
+            return None;
+        }
+        self.base.overloads(name)
+    }
+
+    fn type_definitions(
+        &self,
+    ) -> rustc_hash::FxHashMap<types::Name<'db>, annotations::NamedDefinition<'db>> {
+        self.base.type_definitions()
     }
 }
 
