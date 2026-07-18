@@ -146,3 +146,11 @@ f <- function(a, b) quo(a := b)
 f: <T, U> fn(a: T, b: U) -> Unknown
 20..23 warning[unresolved] I could not resolve `quo` in this package, its imports, or builtins.
 26..28 warning[unresolved] I could not resolve ``:=`` in this package, its imports, or builtins.
+
+#---- any_callee_arguments_are_not_checked
+fail_with <- function(x) stop(paste0("bad: ", class(x)[1]))
+checked <- function(x) paste0("bad: ", class(x)[1])
+#++++
+fail_with: <T> fn(x: T) -> Unknown
+checked: Unknown
+99..110 error[type-mismatch] `[` is not supported on `character`

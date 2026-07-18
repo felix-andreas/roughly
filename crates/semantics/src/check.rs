@@ -2544,6 +2544,21 @@ impl<'db> Checker<'db, '_> {
         }
         let callee_range = self.module.expression(callee).range;
         let callee_ty = self.infer(callee);
+        // A callee typed as literal `Any` is the sanctioned escape hatch
+        // (`stop`, `warning`, `seq` — stubs whose signature is not
+        // expressible yet): the call is uncheckable, so diagnostics from its
+        // argument expressions are noise in a context the checker has
+        // already given up on. Inference still runs — expression types stay
+        // for the IDE — but findings inside the arguments are discarded.
+        let resolved_callee = self.table.shallow_resolve(self.db, callee_ty);
+        if matches!(resolved_callee.kind(self.db), TyKind::Any) {
+            let recorded_errors = self.errors.len();
+            let recorded_origins = self.strict_origins.len();
+            self.infer_call_arguments(range, arguments);
+            self.errors.truncate(recorded_errors);
+            self.strict_origins.truncate(recorded_origins);
+            return self.unknown();
+        }
         let call_arguments = self.infer_call_arguments(range, arguments);
         self.dispatch_call(range, callee_range, callee_ty, &call_arguments)
     }
