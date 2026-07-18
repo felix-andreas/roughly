@@ -12,6 +12,7 @@ pub mod check;
 pub mod diagnostics;
 pub mod hir;
 pub mod infer;
+pub mod lints;
 pub mod naming;
 pub mod stubs;
 pub mod types;

@@ -1,0 +1,70 @@
+#==== assignment-operator
+#---- equals_assignment_warns
+x = 1
+#++++
+0..5 warning[assignment-operator] Use <-, not =, for assignment
+
+#---- arrow_assignment_clean
+x <- 1
+#++++
+clean
+
+#---- named_argument_not_linted
+f <- function(x = 1) x
+y <- list(a = 1)
+#++++
+clean
+
+#==== boolean-shorthand
+#---- t_and_f_warn
+x <- T
+y <- F
+#++++
+5..6 warning[boolean-shorthand] Use TRUE, not T, for Boolean values
+12..13 warning[boolean-shorthand] Use FALSE, not F, for Boolean values
+
+#---- true_false_clean
+x <- TRUE
+y <- FALSE
+#++++
+clean
+
+#---- annotation_type_t_not_linted
+#: <T> fn(x: T) -> T
+f <- function(x) x
+#++++
+clean
+
+#==== trailing-comma
+#---- call_trailing_comma_errors
+f <- function(a, b) a
+f(1, 2,)
+#++++
+28..29 error[trailing-comma] Unexpected comma after last argument
+
+#---- subset_trailing_comma_allowed
+m <- matrix(1)
+m[1,]
+#++++
+clean
+
+#---- nested_call_trailing_comma
+g <- function(x) x
+h <- function(x) x
+g(h(1,))
+#++++
+43..44 error[trailing-comma] Unexpected comma after last argument
+
+#==== levels
+#---- naming_style_off_by_default
+f <- function() {
+  myVar <- 1
+  myVar
+}
+#++++
+clean
+
+#---- unused_parameter_off_by_default
+f <- function(unusedParam) 1
+#++++
+clean

@@ -1,0 +1,55 @@
+#==== naming-style
+#---- camel_variable_in_function_warns
+f <- function() {
+  myVar <- 1
+  myVar
+}
+#++++
+20..30 warning[naming-style] Variable `myVar` should have snake_case name, e.g. my_var
+
+#---- top_level_assignment_not_style_checked
+myVar <- 1
+#++++
+clean
+
+#---- camel_parameter_warns
+f <- function(myParam) myParam
+#++++
+14..21 warning[naming-style] Parameter `myParam` should have snake_case name, e.g. my_param
+
+#---- snake_names_clean
+f <- function(my_param) {
+  my_var <- my_param
+  my_var
+}
+#++++
+clean
+
+#==== unused-parameter
+#---- unread_parameter_warns
+f <- function(count) 1
+#++++
+14..19 warning[unused-parameter] parameter `count` is never used.
+
+#---- read_parameter_clean
+f <- function(count) count + 1
+#++++
+clean
+
+#---- dots_never_reported
+f <- function(...) 1
+#++++
+clean
+
+#---- closure_read_counts
+f <- function(count) {
+  g <- function() count
+  g
+}
+#++++
+clean
+
+#---- default_only_use_is_a_read
+f <- function(a, b = a) b
+#++++
+clean

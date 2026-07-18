@@ -82,6 +82,10 @@ pub struct ItemNaming {
     pub deferred_non_locals: BTreeSet<ExprId>,
     /// Dead stores (surfaced only when the unused check is enabled).
     pub unused_assignments: Vec<UnusedAssignment>,
+    /// Parameters no read resolves to (`...` excluded), for the default-off
+    /// unused-parameter lint: R signatures legitimately carry ignored formals
+    /// (an S3 method must match its generic), so a project opts in.
+    pub unused_parameters: Vec<UnusedAssignment>,
     /// Slots read or super-assigned from inside a function nested below the
     /// slot's frame: every write to them stays observable.
     pub captured_slots: BTreeSet<BindingId>,
@@ -106,6 +110,7 @@ pub fn resolve_item(module: &Module) -> ItemNaming {
         flow: FlowState::new(),
         writes: Vec::new(),
         write_by_expression: FxHashMap::default(),
+        read_parameter_slots: BTreeSet::new(),
         emit: true,
         quiet_depth: 0,
         naming: ItemNaming::default(),
@@ -172,6 +177,9 @@ struct Context<'a> {
     flow: FlowState,
     writes: Vec<AssignmentWrite>,
     write_by_expression: FxHashMap<ExprId, u32>,
+    /// Parameter slots some read resolved to (like write `used` marking,
+    /// monotone and recorded on every walk).
+    read_parameter_slots: BTreeSet<BindingId>,
     /// Diagnostic-bearing sets are recorded only on a loop region's final walk
     /// (used-marking is monotone and always on).
     emit: bool,
@@ -596,6 +604,14 @@ impl Context<'_> {
         match resolved {
             Some((depth, slot)) => {
                 self.naming.resolutions.insert(id, slot);
+                if self
+                    .naming
+                    .bindings
+                    .get(&slot)
+                    .is_some_and(|binding| binding.kind == BindingKind::Parameter)
+                {
+                    self.read_parameter_slots.insert(slot);
+                }
                 // Mark every reaching write used; an unassigned reaching path
                 // makes the read maybe-undefined.
                 if let Some(reaches) = self.flow.get(&slot) {
@@ -842,6 +858,19 @@ impl Context<'_> {
                 self.naming.unused_assignments.push(UnusedAssignment {
                     name: write.name.clone(),
                     range: write.range,
+                });
+            }
+        }
+        for binding in self.naming.bindings.values() {
+            // Dots reads never resolve (`resolve_read` skips `...`/`..1`), so
+            // dots parameters cannot be marked and are exempt instead.
+            if binding.kind == BindingKind::Parameter
+                && binding.name != "..."
+                && !self.read_parameter_slots.contains(&binding.id)
+            {
+                self.naming.unused_parameters.push(UnusedAssignment {
+                    name: binding.name.clone(),
+                    range: binding.range,
                 });
             }
         }
