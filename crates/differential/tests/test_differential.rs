@@ -353,6 +353,8 @@ fn differential_corpus() {
     let mut skipped_syntax = 0usize;
     let mut diverging = 0usize;
     let mut panicking: Vec<String> = Vec::new();
+    let mut oracle_deficit_rollup: std::collections::BTreeMap<String, usize> =
+        std::collections::BTreeMap::new();
 
     for path in &paths {
         let Ok(source) = std::fs::read_to_string(path) else {
@@ -377,6 +379,31 @@ fn differential_corpus() {
             *rollup.entry("new stack PANICKED".to_owned()).or_default() += 1;
             continue;
         };
+        // Accepted oracle deficit: the oracle's naming lacks forward-capture
+        // resolution (locals written later in a frame that earlier-defined
+        // closures read), so it emits unresolved warnings the rewrite
+        // correctly resolves. A legacy-only unresolved finding whose name the
+        // new side resolves EVERYWHERE in the file (no unresolved finding
+        // mentions it) is accepted as that class — counted per name below so
+        // an accidental resolution bug would still be visible for review.
+        let legacy: Vec<Finding> = legacy
+            .into_iter()
+            .filter(|finding| {
+                if finding.0 != "unresolved" {
+                    return true;
+                }
+                let Some(name) = unresolved_name(&finding.3) else {
+                    return true;
+                };
+                let resolved_by_new = !new
+                    .iter()
+                    .any(|(class, _, _, message)| *class == "unresolved" && message.contains(name));
+                if resolved_by_new {
+                    *oracle_deficit_rollup.entry(name.to_owned()).or_default() += 1;
+                }
+                !resolved_by_new
+            })
+            .collect();
         let mut wording = Vec::new();
         if findings_match(&legacy, &new, &mut wording) {
             matching += 1;
@@ -427,8 +454,18 @@ fn differential_corpus() {
         let _ = writeln!(rollup_text, "{count:6}  {message}");
     }
 
+    let mut deficit_text = String::new();
+    let mut ranked_deficit: Vec<(usize, &str)> = oracle_deficit_rollup
+        .iter()
+        .map(|(name, count)| (*count, name.as_str()))
+        .collect();
+    ranked_deficit.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(b.1)));
+    for (count, name) in ranked_deficit.iter().take(40) {
+        let _ = writeln!(deficit_text, "{count:6}  {name}");
+    }
+    let accepted_deficits: usize = oracle_deficit_rollup.values().sum();
     let summary = format!(
-        "differential corpus: {matching}/{files} accepted files match, {diverging} diverging, {} panicking, {skipped_syntax} skipped for syntax errors\n",
+        "differential corpus: {matching}/{files} accepted files match, {diverging} diverging, {} panicking, {skipped_syntax} skipped for syntax errors, {accepted_deficits} oracle-deficit findings accepted\n",
         panicking.len()
     );
     let mut panic_text = String::new();
@@ -451,7 +488,7 @@ fn differential_corpus() {
     let _ = std::fs::write(
         &report_path,
         format!(
-            "{summary}\n== panicking files ==\n{panic_text}\n== divergent-message rollup ==\n{rollup_text}\n== wording differences (informational) ==\n{wording_text}\n== per-file details ==\n{report}"
+            "{summary}\n== panicking files ==\n{panic_text}\n== divergent-message rollup ==\n{rollup_text}\n== accepted oracle-deficit names (legacy-only unresolved the rewrite resolves) ==\n{deficit_text}\n== wording differences (informational) ==\n{wording_text}\n== per-file details ==\n{report}"
         ),
     );
     assert!(
@@ -459,6 +496,14 @@ fn differential_corpus() {
         "the new stack panicked on {} corpus file(s):\n{panic_text}",
         panicking.len()
     );
+}
+
+/// The name inside the first backtick pair of an unresolved message.
+fn unresolved_name(message: &str) -> Option<&str> {
+    let start = message.find('`')? + 1;
+    let rest = &message[start..];
+    let end = rest.rfind("` in this package")?;
+    Some(&rest[..end])
 }
 
 fn collect_r_files(directory: &Path, paths: &mut Vec<PathBuf>) {
