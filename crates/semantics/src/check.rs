@@ -188,6 +188,10 @@ pub fn check_item<'db>(db: &'db dyn Db, module: &Module, naming: &ItemNaming) ->
     check_item_with_annotation(db, module, naming, None, None)
 }
 
+/// Full-check executions since process start — a plain instrument for perf
+/// witnesses (fixpoint re-runs make executions exceed item counts).
+pub static CHECK_EXECUTIONS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 pub fn check_item_with_annotation<'db>(
     db: &'db dyn Db,
     module: &Module,
@@ -195,6 +199,7 @@ pub fn check_item_with_annotation<'db>(
     annotation: Option<&crate::annotations::Annotation<'db>>,
     globals: Option<&dyn GlobalEnv<'db>>,
 ) -> ItemCheck<'db> {
+    CHECK_EXECUTIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let mut table = InferenceTable::default();
     if let Some(globals) = globals {
         table.definitions = globals.type_definitions();

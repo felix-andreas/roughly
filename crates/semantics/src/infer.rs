@@ -53,7 +53,21 @@ pub struct InferenceTable<'db> {
     /// The project's `@type` / `@alias` definitions: aliases expand during
     /// resolution, nominals project to their representation in compatibility.
     pub definitions: FxHashMap<Name<'db>, NamedDefinition<'db>>,
+    /// Per-node resolve memo over the interned type DAG: without it, shared
+    /// subtrees re-resolve once per occurrence and self-referential bindings
+    /// walk an exponential tree. Entries are valid for one binding epoch
+    /// (any bind or rollback clears) and only subtrees whose resolution hit
+    /// no cycle cut are stored.
+    resolve_cache: std::cell::RefCell<(u64, rustc_hash::FxHashMap<Ty<'db>, Ty<'db>>)>,
+    /// Bumped on every binding mutation and rollback; tags `resolve_cache`.
+    epoch: std::cell::Cell<u64>,
 }
+
+/// Inner resolve steps since process start — a cheap standing instrument for
+/// the perf witnesses: the step count must stay near-linear in corpus size,
+/// so a blowup here flags a resolve-memoization regression before wall-clock
+/// does.
+pub static RESOLVE_CALLS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 impl<'db> InferenceTable<'db> {
     pub fn fresh(&mut self, constraint: Constraint) -> InferenceVar {
@@ -78,6 +92,7 @@ impl<'db> InferenceTable<'db> {
     }
 
     pub fn rollback(&mut self, snapshot: Snapshot) {
+        self.epoch.set(self.epoch.get() + 1);
         while self.undo.len() > snapshot.undo {
             let (var, previous) = self.undo.pop().expect("undo length checked");
             if (var.0 as usize) < snapshot.entries {
@@ -88,6 +103,7 @@ impl<'db> InferenceTable<'db> {
     }
 
     fn set(&mut self, var: InferenceVar, entry: Entry<'db>) {
+        self.epoch.set(self.epoch.get() + 1);
         let previous = std::mem::replace(&mut self.entries[var.0 as usize], entry);
         self.undo.push((var, previous));
     }
@@ -131,118 +147,185 @@ impl<'db> InferenceTable<'db> {
     }
 
     /// Deep-resolve: replace every bound variable in the structure and expand
-    /// alias applications. The depth cap is a resource guard against
-    /// self-referential aliases (`@alias A = list[A]`): past it a type stays
-    /// unexpanded rather than recursing on.
+    /// alias applications. Memoized per binding epoch over the interned type
+    /// DAG; self-referential bindings and aliases cut to `Unknown` instead of
+    /// expanding forever (see `resolve_rec`).
     pub fn resolve(&self, db: &'db dyn Db, ty: Ty<'db>) -> Ty<'db> {
-        self.resolve_at(db, ty, 0)
+        {
+            let mut cache = self.resolve_cache.borrow_mut();
+            if cache.0 != self.epoch.get() {
+                cache.0 = self.epoch.get();
+                cache.1.clear();
+            }
+        }
+        let mut visiting = Vec::new();
+        self.resolve_rec(db, ty, &mut visiting).0
     }
 
-    fn resolve_at(&self, db: &'db dyn Db, ty: Ty<'db>, depth: usize) -> Ty<'db> {
-        const RESOLVE_DEPTH_LIMIT: usize = 64;
-        let shallow = self.shallow_resolve(db, ty);
-        if depth >= RESOLVE_DEPTH_LIMIT {
-            return shallow;
+    /// One resolve step over the interned DAG. Returns the resolved type and
+    /// whether the subtree was CLEAN — no cycle cut beneath it — because only
+    /// clean results are position-independent enough to memoize (a node
+    /// containing a variable that is currently being expanded resolves
+    /// differently at top level). Expanding a variable that is already on the
+    /// expansion stack is an infinite type: it cuts to `Unknown`, matching
+    /// the pin-to-Unknown semantics used everywhere self-reference grows.
+    fn resolve_rec(
+        &self,
+        db: &'db dyn Db,
+        ty: Ty<'db>,
+        visiting: &mut Vec<InferenceVar>,
+    ) -> (Ty<'db>, bool) {
+        RESOLVE_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if let TyKind::Var(var) = ty.kind(db) {
+            let root = self.find(*var);
+            let shallow = self.shallow_resolve(db, ty);
+            if let TyKind::Var(_) = shallow.kind(db) {
+                return (shallow, true);
+            }
+            if visiting.contains(&root) {
+                return (Ty::new(db, TyKind::Unknown), false);
+            }
+            visiting.push(root);
+            let resolved = self.resolve_rec(db, shallow, visiting);
+            visiting.pop();
+            return resolved;
         }
-        match shallow.kind(db) {
+
+        if let Some(&hit) = self.resolve_cache.borrow().1.get(&ty) {
+            return (hit, true);
+        }
+
+        let (resolved, clean) = match ty.kind(db) {
             TyKind::Any
             | TyKind::Unknown
             | TyKind::Null
             | TyKind::Scalar(_)
-            | TyKind::Var(_)
-            | TyKind::Rigid(_) => shallow,
+            | TyKind::Rigid(_) => (ty, true),
+            TyKind::Var(_) => unreachable!("handled above"),
             TyKind::Vector(element) => {
-                let element = self.resolve_at(db, *element, depth + 1);
-                Ty::new(db, TyKind::Vector(element))
+                let (element, clean) = self.resolve_rec(db, *element, visiting);
+                (Ty::new(db, TyKind::Vector(element)), clean)
             }
             TyKind::NamedVector(element) => {
-                let element = self.resolve_at(db, *element, depth + 1);
-                Ty::new(db, TyKind::NamedVector(element))
+                let (element, clean) = self.resolve_rec(db, *element, visiting);
+                (Ty::new(db, TyKind::NamedVector(element)), clean)
             }
             TyKind::List(element) => {
-                let element = self.resolve_at(db, *element, depth + 1);
-                Ty::new(db, TyKind::List(element))
+                let (element, clean) = self.resolve_rec(db, *element, visiting);
+                (Ty::new(db, TyKind::List(element)), clean)
             }
             TyKind::NamedList(element) => {
-                let element = self.resolve_at(db, *element, depth + 1);
-                Ty::new(db, TyKind::NamedList(element))
+                let (element, clean) = self.resolve_rec(db, *element, visiting);
+                (Ty::new(db, TyKind::NamedList(element)), clean)
             }
             TyKind::Tuple(items) => {
+                let mut clean = true;
                 let items = items
                     .iter()
-                    .map(|&item| self.resolve_at(db, item, depth + 1))
+                    .map(|&item| {
+                        let (item, item_clean) = self.resolve_rec(db, item, visiting);
+                        clean &= item_clean;
+                        item
+                    })
                     .collect();
-                Ty::new(db, TyKind::Tuple(items))
+                (Ty::new(db, TyKind::Tuple(items)), clean)
             }
             TyKind::Record(fields) => {
+                let mut clean = true;
                 let fields = fields
                     .iter()
                     .map(|field| {
                         let mut field = field.clone();
-                        field.ty = self.resolve_at(db, field.ty, depth + 1);
+                        let (ty, field_clean) = self.resolve_rec(db, field.ty, visiting);
+                        field.ty = ty;
+                        clean &= field_clean;
                         field
                     })
                     .collect();
-                Ty::new(db, TyKind::Record(fields))
+                (Ty::new(db, TyKind::Record(fields)), clean)
             }
             TyKind::Function(function) => {
-                let function = self.resolve_function_at(db, function, depth + 1);
-                Ty::new(db, TyKind::Function(function))
+                let mut clean = true;
+                let mut resolve = |ty: Ty<'db>, visiting: &mut Vec<InferenceVar>| {
+                    let (ty, ty_clean) = self.resolve_rec(db, ty, visiting);
+                    clean &= ty_clean;
+                    ty
+                };
+                let function = FunctionType {
+                    positional: function
+                        .positional
+                        .iter()
+                        .map(|&ty| resolve(ty, visiting))
+                        .collect(),
+                    named: function
+                        .named
+                        .iter()
+                        .map(|field| {
+                            let mut field = field.clone();
+                            field.ty = resolve(field.ty, visiting);
+                            field
+                        })
+                        .collect(),
+                    variadic: function.variadic.as_ref().map(|rest| {
+                        let mut rest = rest.clone();
+                        rest.element = resolve(rest.element, visiting);
+                        rest
+                    }),
+                    ret: resolve(function.ret, visiting),
+                };
+                (Ty::new(db, TyKind::Function(function)), clean)
             }
             TyKind::Union(members) => {
                 // Members can collapse after resolution: re-normalize.
+                let mut clean = true;
                 let members: Vec<Ty<'db>> = members
                     .iter()
-                    .map(|&member| self.resolve_at(db, member, depth + 1))
+                    .map(|&member| {
+                        let (member, member_clean) = self.resolve_rec(db, member, visiting);
+                        clean &= member_clean;
+                        member
+                    })
                     .collect();
-                union_of(db, members)
+                (union_of(db, members), clean)
             }
             TyKind::Named(name, arguments) => {
+                let mut clean = true;
                 let arguments: Vec<Ty<'db>> = arguments
                     .iter()
-                    .map(|&argument| self.resolve_at(db, argument, depth + 1))
+                    .map(|&argument| {
+                        let (argument, argument_clean) = self.resolve_rec(db, argument, visiting);
+                        clean &= argument_clean;
+                        argument
+                    })
                     .collect();
                 // An alias is a transparent shorthand: it expands here and
-                // never survives into unification or compatibility.
+                // never survives into unification or compatibility. A
+                // self-referential alias would re-enter through the SAME
+                // interned application; the expansion depth guard is the
+                // visiting stack's length bound.
                 if let Some(definition) = self.definitions.get(name)
                     && definition.alias
                 {
-                    let expanded = apply_definition(db, definition, &arguments);
-                    return self.resolve_at(db, expanded, depth + 1);
+                    if visiting.len() >= 64 {
+                        (Ty::new(db, TyKind::Named(*name, arguments)), false)
+                    } else {
+                        let expanded = apply_definition(db, definition, &arguments);
+                        // Guard alias self-reference with a sentinel slot on
+                        // the same stack the variable cycle check uses.
+                        visiting.push(InferenceVar(u32::MAX));
+                        let resolved = self.resolve_rec(db, expanded, visiting);
+                        visiting.pop();
+                        (resolved.0, clean && resolved.1)
+                    }
+                } else {
+                    (Ty::new(db, TyKind::Named(*name, arguments)), clean)
                 }
-                Ty::new(db, TyKind::Named(*name, arguments))
             }
+        };
+        if clean {
+            self.resolve_cache.borrow_mut().1.insert(ty, resolved);
         }
-    }
-
-    fn resolve_function_at(
-        &self,
-        db: &'db dyn Db,
-        function: &FunctionType<'db>,
-        depth: usize,
-    ) -> FunctionType<'db> {
-        FunctionType {
-            positional: function
-                .positional
-                .iter()
-                .map(|&ty| self.resolve_at(db, ty, depth))
-                .collect(),
-            named: function
-                .named
-                .iter()
-                .map(|field| {
-                    let mut field = field.clone();
-                    field.ty = self.resolve_at(db, field.ty, depth);
-                    field
-                })
-                .collect(),
-            variadic: function.variadic.as_ref().map(|rest| {
-                let mut rest = rest.clone();
-                rest.element = self.resolve_at(db, rest.element, depth);
-                rest
-            }),
-            ret: self.resolve_at(db, function.ret, depth),
-        }
+        (resolved, clean)
     }
 
     /// A non-alias nominal's representation with its parameters applied;

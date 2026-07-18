@@ -142,6 +142,43 @@ pub fn item_syntax<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<ItemSyntax> 
     resolve_item_node(db, item).map(|node| ItemSyntax(node.green().into()))
 }
 
+/// One item's current absolute span.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, salsa::SalsaValue)]
+pub struct ItemSpan<'db> {
+    pub item: Item<'db>,
+    pub range: syntax::TextRange,
+}
+
+/// Every item's current absolute span, in one memoized walk (the per-item
+/// lookup would otherwise re-classify the whole file per item — quadratic on
+/// statement-heavy scripts).
+#[salsa::tracked(returns(ref))]
+pub fn item_spans<'db>(db: &'db dyn Db, file: SourceFile) -> Vec<ItemSpan<'db>> {
+    let parse = parse(db, file);
+    let root = parse.syntax_node();
+    let mut counts: rustc_hash::FxHashMap<(ItemKind, Option<String>), u32> =
+        rustc_hash::FxHashMap::default();
+    let mut spans = Vec::new();
+    for node in root.children() {
+        if !syntax::ast::is_expression_kind(node.kind()) && node.kind() != syntax::SyntaxKind::ERROR
+        {
+            continue;
+        }
+        let (kind, name) = classify_top_level(&node);
+        let disambiguator = {
+            let counter = counts.entry((kind, name.clone())).or_insert(0);
+            let current = *counter;
+            *counter += 1;
+            current
+        };
+        spans.push(ItemSpan {
+            item: Item::new(db, file, kind, name, None, disambiguator),
+            range: node.text_range(),
+        });
+    }
+    spans
+}
+
 /// The item's current red node inside the FILE tree (absolute offsets) — an
 /// EDGE-ONLY view: the rendering edge and position-addressed IDE features use
 /// it to convert between absolute and item-relative offsets. Everything that
@@ -155,29 +192,16 @@ pub(crate) fn resolve_item_node<'db>(
     db: &'db dyn Db,
     item: Item<'db>,
 ) -> Option<syntax::SyntaxNode> {
-    let parse = parse(db, *item.file(db));
-    let root = parse.syntax_node();
-    let mut counts: rustc_hash::FxHashMap<(ItemKind, Option<String>), u32> =
-        rustc_hash::FxHashMap::default();
-    let target = (
-        *item.kind(db),
-        item.name(db).clone(),
-        *item.disambiguator(db),
-    );
-    for node in root.children() {
-        if !syntax::ast::is_expression_kind(node.kind()) && node.kind() != syntax::SyntaxKind::ERROR
-        {
-            continue;
-        }
-        let (kind, name) = classify_top_level(&node);
-        let counter = counts.entry((kind, name.clone())).or_insert(0);
-        let disambiguator = *counter;
-        *counter += 1;
-        if (kind, name, disambiguator) == target {
-            return Some(node);
-        }
-    }
-    None
+    let file = *item.file(db);
+    let range = item_spans(db, file)
+        .iter()
+        .find(|span| span.item == item)
+        .map(|span| span.range)?;
+    let parse = parse(db, file);
+    parse
+        .syntax_node()
+        .children()
+        .find(|node| node.text_range() == range)
 }
 
 /// A position-independent green subtree; equality is structural.
@@ -369,7 +393,7 @@ pub fn file_type_definitions<'db>(
 
 /// The project-wide type-definition environment: `@type` / `@alias` by name,
 /// later files (and later definitions within one file) winning.
-#[salsa::tracked(returns(clone))]
+#[salsa::tracked(returns(ref))]
 pub fn project_type_definitions<'db>(
     db: &'db dyn Db,
     files: ProjectFiles,
@@ -388,7 +412,7 @@ pub fn project_type_definitions<'db>(
 
 /// The winning definition item per package-exported name: later files (and
 /// later assignments within one file) override earlier ones.
-#[salsa::tracked(returns(clone))]
+#[salsa::tracked(returns(ref))]
 pub fn package_definitions<'db>(
     db: &'db dyn Db,
     files: ProjectFiles,
@@ -516,7 +540,7 @@ fn item_check_recover<'db>(
 /// The salsa-backed cross-item resolver handed to the checker.
 struct SalsaGlobals<'db> {
     db: &'db dyn Db,
-    definitions: Option<rustc_hash::FxHashMap<String, Item<'db>>>,
+    definitions: Option<&'db rustc_hash::FxHashMap<String, Item<'db>>>,
     /// For an item in a script: the script's earlier items, in order. A
     /// script executes top-down, so a binding is visible only after its
     /// assignment and rebinding changes later uses — the nearest earlier
@@ -600,7 +624,7 @@ impl<'db> check::GlobalEnv<'db> for SalsaGlobals<'db> {
         &self,
     ) -> rustc_hash::FxHashMap<types::Name<'db>, annotations::NamedDefinition<'db>> {
         let mut definitions = ProjectFiles::try_get(self.db)
-            .map(|files| project_type_definitions(self.db, files))
+            .map(|files| project_type_definitions(self.db, files).clone())
             .unwrap_or_default();
         // A script's own `@type` / `@alias` declarations are visible to
         // itself (and only to itself), shadowing project-global names.

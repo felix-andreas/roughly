@@ -191,9 +191,16 @@ fn display_name(name: &str) -> String {
 }
 
 /// The nearest stub name for a typo hint on an unresolved reference.
+/// Memoized per name: the same unresolved name recurs across a project and
+/// the candidate scan over the whole stub corpus is the expensive part.
 fn unresolved_suggestion(db: &dyn Db, name: &str) -> Option<String> {
+    typo_suggestion(db, crate::types::Name::new(db, name.to_owned()))
+}
+
+#[salsa::tracked(returns(clone))]
+fn typo_suggestion<'db>(db: &'db dyn Db, name: crate::types::Name<'db>) -> Option<String> {
     let library = crate::stubs::stubs(db)?;
-    nearest_name(name, library.schemes.keys().map(String::as_str)).map(str::to_owned)
+    nearest_name(name.text(db), library.schemes.keys().map(String::as_str)).map(str::to_owned)
 }
 
 /// The closest candidate within an edit-distance budget scaled to the name's
@@ -340,7 +347,10 @@ fn script_unused_bindings(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
 
 /// The absolute byte offset of an item's subtree inside its file.
 fn item_offset(db: &dyn Db, item: Item<'_>) -> Option<syntax::TextSize> {
-    crate::resolve_item_node(db, item).map(|node| node.text_range().start())
+    crate::item_spans(db, *item.file(db))
+        .iter()
+        .find(|span| span.item == item)
+        .map(|span| span.range.start())
 }
 
 /// Strict-mode diagnostics: reports at `Unknown` origins, assembled

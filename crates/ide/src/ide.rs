@@ -1415,8 +1415,8 @@ fn annotation_completion(
     // declarations complete too.
     let mut definitions: Vec<(String, semantics::annotations::NamedDefinition<'_>)> =
         semantics::project_type_definitions(db, files)
-            .into_iter()
-            .map(|(name, definition)| (name.text(db).to_owned(), definition))
+            .iter()
+            .map(|(name, definition)| (name.text(db).to_owned(), definition.clone()))
             .collect();
     for definition in semantics::file_type_definitions(db, file) {
         let label = definition.name.text(db).to_owned();
