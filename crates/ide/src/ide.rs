@@ -415,6 +415,21 @@ pub fn completion(
         }) {
             return annotation_completion(db, files, &query);
         }
+        // A cursor inside a string completes typed record fields when the
+        // string subscripts a record (`x[["…"]]`) and is otherwise silent —
+        // R value names never resolve inside string content.
+        if let Some(string_token) = parse
+            .syntax_node()
+            .descendants_with_tokens()
+            .filter_map(|element| element.into_token())
+            .find(|token| {
+                token.kind() == syntax::SyntaxKind::STRING
+                    && token.text_range().start() < offset
+                    && offset < token.text_range().end()
+            })
+        {
+            return string_subscript_completion(db, file, offset, &string_token);
+        }
     }
 
     let items = match context {
@@ -519,6 +534,230 @@ pub fn completion(
     };
 
     finish_completions(items, &query)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CodeActionKind {
+    /// Replace `@if-unknown` with `@trust` — the directive's one upgrade
+    /// path once the value's type IS determined.
+    IfUnknownToTrust,
+    RemoveUnusedAssignment,
+    /// Prefix the written name with `.` to keep it (dot-names are exempt
+    /// from the unused check).
+    PrefixDot,
+    InsertInferredAnnotation,
+    /// The whole-file source action covering every eligible binding.
+    AddMissingAnnotations,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextEdit {
+    pub range: TextRange,
+    pub replacement: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeAction {
+    pub title: String,
+    pub kind: CodeActionKind,
+    pub edits: Vec<TextEdit>,
+}
+
+/// The static quickfixes and source actions for a document range: rewriting
+/// `@if-unknown` to `@trust`, removing or dot-prefixing an unused
+/// assignment, and inserting an inferred `#:` annotation above an
+/// unannotated binding (the text the inlay hint shows). All edits are
+/// computed eagerly — no resolve round-trip.
+pub fn code_actions(db: &dyn Db, file: SourceFile, viewport: TextRange) -> Vec<CodeAction> {
+    let text = file.text(db);
+    let mut actions = Vec::new();
+
+    let parse = semantics::parse(db, file);
+    for annotation in parse
+        .syntax_node()
+        .descendants()
+        .filter(|node| node.kind() == syntax::SyntaxKind::ANNOTATION)
+    {
+        if !ranges_overlap(annotation.text_range(), viewport) {
+            continue;
+        }
+        for directive in annotation
+            .descendants()
+            .filter(|node| node.kind() == syntax::SyntaxKind::ANNOTATION_DIRECTIVE)
+        {
+            if let Some((name, range)) = directive_name_range(&directive)
+                && name == "if-unknown"
+            {
+                actions.push(CodeAction {
+                    title: "Replace `@if-unknown` with `@trust`".to_owned(),
+                    kind: CodeActionKind::IfUnknownToTrust,
+                    edits: vec![TextEdit {
+                        range,
+                        replacement: "@trust".to_owned(),
+                    }],
+                });
+            }
+        }
+    }
+
+    let mut all_annotation_edits = Vec::new();
+    for item in item_tree(db, file) {
+        let Some(node) = item_node(db, item) else {
+            continue;
+        };
+        let item_offset = node.text_range().start();
+        let Some(naming) = item_naming(db, item) else {
+            continue;
+        };
+        let Some(hir) = item_hir(db, item) else {
+            continue;
+        };
+
+        for unused in &naming.unused_assignments {
+            let target_range = unused.range + item_offset;
+            if !ranges_overlap(target_range, viewport) {
+                continue;
+            }
+            let Some(assign_range) = hir.expressions.iter().find_map(|expression| {
+                let ExpressionKind::Assign { target, .. } = &expression.kind else {
+                    return None;
+                };
+                (hir.expression(*target).range == unused.range || expression.range == unused.range)
+                    .then_some(trim_trailing_trivia(text, expression.range + item_offset))
+            }) else {
+                continue;
+            };
+            actions.push(CodeAction {
+                title: format!("Remove unused assignment of `{}`", unused.name),
+                kind: CodeActionKind::RemoveUnusedAssignment,
+                edits: vec![TextEdit {
+                    range: removal_range(text, assign_range),
+                    replacement: String::new(),
+                }],
+            });
+            actions.push(CodeAction {
+                title: format!("Prefix `{}` with `.` to keep it", unused.name),
+                kind: CodeActionKind::PrefixDot,
+                edits: vec![TextEdit {
+                    range: TextRange::empty(target_range.start()),
+                    replacement: ".".to_owned(),
+                }],
+            });
+        }
+
+        let Some(check) = item_check(db, item) else {
+            continue;
+        };
+        let annotated = item_annotation_syntax(db, item).is_some_and(|annotation| {
+            semantics::annotations::block_form_violation(&annotation.syntax_node()).is_none()
+        });
+        for (index, expression) in hir.expressions.iter().enumerate() {
+            let ExpressionKind::Assign { target, value, .. } = &expression.kind else {
+                continue;
+            };
+            let target_expression = hir.expression(*target);
+            let ExpressionKind::NameRef(name) = &target_expression.kind else {
+                continue;
+            };
+            let id = ExprId(index as u32);
+            let is_root = hir.root == Some(id);
+            if is_root && annotated {
+                continue;
+            }
+            let start = usize::from(expression.range.start() + item_offset);
+            let line_start = text[..start.min(text.len())]
+                .rfind('\n')
+                .map_or(0, |at| at + 1);
+            if !text[line_start..start].trim().is_empty() {
+                continue;
+            }
+
+            let mut renderer = TypeRenderer::default();
+            let rendered = if is_root {
+                let Some(scheme) = &check.scheme else {
+                    continue;
+                };
+                if !scheme_is_hintable(db, scheme) {
+                    continue;
+                }
+                renderer.render_scheme(db, scheme)
+            } else {
+                let Some(ty) = check
+                    .expression_types
+                    .get(&id)
+                    .or_else(|| check.expression_types.get(value))
+                else {
+                    continue;
+                };
+                if !is_hintable(db, *ty, matches!(ty.kind(db), TyKind::Function(_))) {
+                    continue;
+                }
+                renderer.render(db, *ty)
+            };
+            let indentation = &text[line_start..start];
+            let edit = TextEdit {
+                range: TextRange::empty(TextSize::from(line_start as u32)),
+                replacement: format!("{indentation}#: {rendered}\n"),
+            };
+            all_annotation_edits.push(edit.clone());
+            if ranges_overlap(expression.range + item_offset, viewport) {
+                actions.push(CodeAction {
+                    title: format!("Add inferred type annotation for `{name}`"),
+                    kind: CodeActionKind::InsertInferredAnnotation,
+                    edits: vec![edit],
+                });
+            }
+        }
+    }
+    if !all_annotation_edits.is_empty() {
+        actions.push(CodeAction {
+            title: "Add inferred type annotations for the whole file".to_owned(),
+            kind: CodeActionKind::AddMissingAnnotations,
+            edits: all_annotation_edits,
+        });
+    }
+
+    actions
+}
+
+fn ranges_overlap(left: TextRange, right: TextRange) -> bool {
+    left.start() <= right.end() && right.start() <= left.end()
+}
+
+/// The range removing an assignment deletes: the whole line(s) — trailing
+/// newline included — when the assignment is the only content on them,
+/// otherwise exactly the assignment's own range.
+fn removal_range(text: &str, range: TextRange) -> TextRange {
+    let start = usize::from(range.start()).min(text.len());
+    let end = usize::from(range.end()).min(text.len());
+    let line_start = text[..start].rfind('\n').map_or(0, |at| at + 1);
+    let line_end = text[end..].find('\n').map_or(text.len(), |at| end + at);
+    let alone = text[line_start..start].trim().is_empty() && text[end..line_end].trim().is_empty();
+    if !alone {
+        return range;
+    }
+    let with_newline = if line_end < text.len() {
+        line_end + 1
+    } else {
+        line_end
+    };
+    TextRange::new(
+        TextSize::from(line_start as u32),
+        TextSize::from(with_newline as u32),
+    )
+}
+
+/// The `@` + joined directive name span (`@if-unknown` spans the `@` through
+/// `unknown`), for rewrites that replace the directive keyword.
+fn directive_name_range(directive: &syntax::SyntaxNode) -> Option<(String, TextRange)> {
+    let name = directive_name(directive)?;
+    let at = directive
+        .children_with_tokens()
+        .filter_map(|element| element.into_token())
+        .find(|token| token.kind() == syntax::SyntaxKind::AT)?;
+    let start = at.text_range().start();
+    let end = start + TextSize::from(1 + name.len() as u32);
+    Some((name, TextRange::new(start, end)))
 }
 
 /// Goto type definition: when the expression under the cursor has a named
@@ -1080,6 +1319,63 @@ fn type_name_occurrences(db: &dyn Db, files: ProjectFiles, name: &str) -> Vec<Oc
         }
     }
     result
+}
+
+/// Record-field completion inside the string of `x[["…"]]`: the subscripted
+/// value's typed fields matched against the content typed before the cursor.
+fn string_subscript_completion(
+    db: &dyn Db,
+    file: SourceFile,
+    offset: TextSize,
+    string_token: &syntax::SyntaxToken,
+) -> Option<CompletionResult> {
+    let position = position_in_item(db, file, offset)?;
+    let hir = item_hir(db, position.item)?;
+    let check = item_check(db, position.item)?;
+
+    let string_range = string_token.text_range() - position.item_offset;
+    let target = hir
+        .expressions
+        .iter()
+        .filter_map(|expression| match &expression.kind {
+            ExpressionKind::Index {
+                double: true,
+                target,
+                arguments,
+            } if arguments.iter().any(|argument| {
+                argument
+                    .value
+                    .is_some_and(|value| hir.expression(value).range == string_range)
+            }) =>
+            {
+                Some(*target)
+            }
+            _ => None,
+        })
+        .next()?;
+    let ty = *check.expression_types.get(&target)?;
+    let TyKind::Record(fields) = ty.kind(db) else {
+        return None;
+    };
+
+    // The query is the content typed before the cursor, past the open quote.
+    let text = string_token.text();
+    let typed = usize::from(offset - string_token.text_range().start());
+    let query = text.get(1..typed).unwrap_or_default();
+
+    let mut renderer = TypeRenderer::default();
+    let items: Vec<CompletionItem> = fields
+        .iter()
+        .filter(|field| search_match(field.name.text(db), query).is_some())
+        .map(|field| CompletionItem {
+            label: field.name.text(db).to_owned(),
+            kind: CompletionKind::Field,
+            source: CompletionSource::Field,
+            detail: Some(renderer.render(db, field.ty)),
+            documentation: None,
+        })
+        .collect();
+    finish_completions(items, query)
 }
 
 /// Type-name completion inside a `#:` annotation: the primitive vocabulary

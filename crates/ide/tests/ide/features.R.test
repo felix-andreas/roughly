@@ -7,6 +7,10 @@ definition: none
 references: none
 rename: none
 signature: none
+action: Add inferred type annotation for `x`
+  edit 0..0 -> "#: integer\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: integer\n"
 completion (128+): break, else, FALSE, for, function, if, in, Inf
 hint @1: integer
 
@@ -21,6 +25,11 @@ definition 20..25
 references: 20..25*, 33..38
 rename: 2 edit(s)
 signature: none
+action: Add inferred type annotation for `f`
+  edit 0..0 -> "#: fn() -> double\n"
+action: Add inferred type annotations for the whole file
+  edit 18..18 -> "  #: double\n"
+  edit 0..0 -> "#: fn() -> double\n"
 completion (9): value, validObject, eval, evalq, setValidity, vapply, available.packages, isVirtualClass
 hint @1: fn() -> double
 hint @25: double
@@ -35,6 +44,10 @@ definition 14..19
 references: 14..19*, 25..30
 rename: 2 edit(s)
 signature: none
+action: Add inferred type annotation for `f`
+  edit 0..0 -> "#: <T: numeric> fn(count: T) -> double\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: <T: numeric> fn(count: T) -> double\n"
 completion (5): count, capture.output, colours, colSums, contour
 hint @1: <T: numeric> fn(count: T) -> double
 
@@ -48,6 +61,11 @@ references: 0..6*, 44..50
 rename: 2 edit(s)
 signature: fn(x: double) -> double
 parameters: [x: double]
+action: Add inferred type annotation for `g`
+  edit 28..28 -> "#: fn() -> double\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: <T: numeric> fn(x: T) -> T\n"
+  edit 28..28 -> "#: fn() -> double\n"
 completion (3): double, as.double, is.double
 hint @6: <T: numeric> fn(x: T) -> T
 hint @29: fn() -> double
@@ -64,6 +82,11 @@ definition 20..25
 references: 20..25*, 33..38
 rename: 2 edit(s)
 signature: none
+action: Add inferred type annotation for `f`
+  edit 0..0 -> "#: fn() -> double\n"
+action: Add inferred type annotations for the whole file
+  edit 18..18 -> "  #: double\n"
+  edit 0..0 -> "#: fn() -> double\n"
 completion (8): total, textConnection, toString, stopifnot, getOption, getSlots, matplot, capture.output
 hint @1: fn() -> double
 hint @25: double
@@ -78,6 +101,11 @@ references: 0..6*, 45..51
 rename: 2 edit(s)
 signature: fn(x: double) -> double
 parameters: [x: double]
+action: Add inferred type annotation for `caller`
+  edit 24..24 -> "#: fn() -> double\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: <T> fn(x: T) -> T\n"
+  edit 24..24 -> "#: fn() -> double\n"
 completion (3): helper, help, heat.colors
 hint @6: <T> fn(x: T) -> T
 hint @30: fn() -> double
@@ -95,6 +123,14 @@ definition 20..21
 references: 20..21*, 29..30*, 34..35, 42..43
 rename: 4 edit(s)
 signature: none
+action: Add inferred type annotation for `n`
+  edit 27..27 -> "  #: double\n"
+action: Add inferred type annotation for `f`
+  edit 0..0 -> "#: fn() -> double\n"
+action: Add inferred type annotations for the whole file
+  edit 18..18 -> "  #: double\n"
+  edit 27..27 -> "  #: double\n"
+  edit 0..0 -> "#: fn() -> double\n"
 completion (26): n, NA, NA_character_, NA_complex_, NA_integer_, NA_real_, NaN, next
 hint @1: fn() -> double
 hint @21: double
@@ -110,6 +146,10 @@ definition 14..19
 references: 14..19*, 25..30
 rename: 2 edit(s)
 signature: none
+action: Add inferred type annotation for `f`
+  edit 0..0 -> "#: <T: numeric> fn(count: T) -> double\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: <T: numeric> fn(count: T) -> double\n"
 completion (5): count, capture.output, colours, colSums, contour
 hint @1: <T: numeric> fn(count: T) -> double
 
@@ -124,6 +164,12 @@ references: 0..6*, 45..51, 74..80
 rename: 3 edit(s)
 signature: fn(x: double) -> double
 parameters: [x: double]
+action: Add inferred type annotation for `caller`
+  edit 24..24 -> "#: fn() -> double\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: <T> fn(x: T) -> T\n"
+  edit 24..24 -> "#: fn() -> double\n"
+  edit 55..55 -> "#: fn() -> double\n"
 completion (1): helper
 hint @6: <T> fn(x: T) -> T
 hint @30: fn() -> double
@@ -138,6 +184,11 @@ definition 0..6
 references: 0..6*, 45..51
 rename: 2 edit(s)
 signature: none
+action: Add inferred type annotation for `helper`
+  edit 0..0 -> "#: <T> fn(x: T) -> T\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: <T> fn(x: T) -> T\n"
+  edit 24..24 -> "#: fn() -> double\n"
 completion (3): helper, help, heat.colors
 hint @6: <T> fn(x: T) -> T
 hint @30: fn() -> double
@@ -151,6 +202,10 @@ references: none
 rename: none
 signature: fn(x: double, ...: Any, [digits]: Any, [quote]: logical, [right]: logical, [max]: Any, [width]: Any, [n]: Any, [na.print]: Any, [row.names]: Any) -> double
 parameters: [x: double] | ...: Any | [digits]: Any | [quote]: logical | [right]: logical | [max]: Any | [width]: Any | [n]: Any | [na.print]: Any | [row.names]: Any
+action: Add inferred type annotation for `f`
+  edit 0..0 -> "#: fn() -> double\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: fn() -> double\n"
 completion (9): print, sprintf, is.primitive, dev.print, packageVersion, postscript, predict, representation
 hint @1: fn() -> double
 
@@ -166,6 +221,12 @@ definition 44..50
 references: 44..50*, 58..64
 rename: 2 edit(s)
 signature: none
+action: Add inferred type annotation for `g`
+  edit 24..24 -> "#: fn() -> double\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: <T> fn(x: T) -> T\n"
+  edit 42..42 -> "  #: double\n"
+  edit 24..24 -> "#: fn() -> double\n"
 completion (3): helper, help, heat.colors
 hint @6: <T> fn(x: T) -> T
 hint @25: fn() -> double
@@ -183,6 +244,11 @@ definition 20..25
 references: 20..25*, 33..38, 41..46
 rename: 3 edit(s)
 signature: none
+action: Add inferred type annotation for `f`
+  edit 0..0 -> "#: fn() -> double\n"
+action: Add inferred type annotations for the whole file
+  edit 18..18 -> "  #: double\n"
+  edit 0..0 -> "#: fn() -> double\n"
 completion (9): value, validObject, eval, evalq, setValidity, vapply, available.packages, isVirtualClass
 hint @1: fn() -> double
 hint @25: double
@@ -197,6 +263,10 @@ definition 25..29
 references: 25..29*, 44..48
 rename: 2 edit(s)
 signature: none
+action: Add inferred type annotation for `f`
+  edit 0..0 -> "#: fn() -> NULL\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: fn() -> NULL\n"
 completion (47): if, in, Inf, item, iconv, identical, identity, ifelse
 hint @1: fn() -> NULL
 
@@ -211,6 +281,8 @@ references: none
 rename: none
 signature: fn(x: T, [y]: T) -> T
 parameters: [x: T] | [y]: T
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: <T: numeric> fn(x: T, [y]: T) -> T\n"
 completion (128+): break, else, FALSE, for, function, if, in, Inf
 hint @1: <T: numeric> fn(x: T, [y]: T) -> T
 
@@ -224,6 +296,11 @@ references: none
 rename: none
 signature: fn(x: double, [y]: double) -> double
 parameters: x: double | [[y]: double]
+action: Add inferred type annotation for `g`
+  edit 30..30 -> "#: fn() -> double\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: <T: numeric> fn(x: T, [y]: T) -> T\n"
+  edit 30..30 -> "#: fn() -> double\n"
 completion (128+): break, else, FALSE, for, function, if, in, Inf
 hint @1: <T: numeric> fn(x: T, [y]: T) -> T
 hint @31: fn() -> double
@@ -238,6 +315,8 @@ references: none
 rename: none
 signature: fn(x: T, [y]: T) -> T
 parameters: x: T | [[y]: T]
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: <T: numeric> fn(x: T, [y]: T) -> T\n"
 completion (128+): break, else, FALSE, for, function, if, in, Inf
 hint @1: <T: numeric> fn(x: T, [y]: T) -> T
 
@@ -250,6 +329,10 @@ references: none
 rename: none
 signature: fn(...: Any, [sep]: character, [collapse]: character | NULL, [recycle0]: logical) -> character
 parameters: [...: Any] | [sep]: character | [collapse]: character | NULL | [recycle0]: logical
+action: Add inferred type annotation for `h`
+  edit 0..0 -> "#: fn() -> character\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: fn() -> character\n"
 completion (128+): break, else, FALSE, for, function, if, in, Inf
 hint @1: fn() -> character
 
@@ -262,6 +345,10 @@ references: none
 rename: none
 signature: fn(...: Any, [sep]: character, [collapse]: character | NULL, [recycle0]: logical) -> character
 parameters: ...: Any | [sep]: character | [[collapse]: character | NULL] | [recycle0]: logical
+action: Add inferred type annotation for `h`
+  edit 0..0 -> "#: fn() -> character\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: fn() -> character\n"
 completion: none
 hint @1: fn() -> character
 
@@ -313,6 +400,8 @@ definition: none
 references: none
 rename: none
 signature: none
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: <T> fn(x: T) -> T\n"
 completion (9): print, sprintf, is.primitive, dev.print, packageVersion, postscript, predict, representation
 hint @5: <T> fn(x: T) -> T
 
@@ -325,6 +414,8 @@ definition: none
 references: none
 rename: none
 signature: none
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: list{alpha: double, beta: character}\n"
 completion (1): alpha
 hint @6: list{alpha: double, beta: character}
 
@@ -365,6 +456,10 @@ definition 9..15
 references: 9..15*, 36..42, 47..53, 98..104
 rename: 4 edit(s)
 signature: none
+action: Add inferred type annotation for `g`
+  edit 73..73 -> "#: <T> fn(id: T) -> T\n"
+action: Add inferred type annotations for the whole file
+  edit 73..73 -> "#: <T> fn(id: T) -> T\n"
 completion (1): UserId
 hint @74: <T> fn(id: T) -> T
 
@@ -418,6 +513,8 @@ definition 9..14
 references: 9..14*, 50..55
 rename: 2 edit(s)
 signature: none
+action: Add inferred type annotations for the whole file
+  edit 56..56 -> "  #: double\n"
 completion (1): Score
 hint @59: double
 
@@ -434,6 +531,8 @@ definition 9..14
 references: 9..14*, 49..54
 rename: 2 edit(s)
 signature: none
+action: Add inferred type annotations for the whole file
+  edit 55..55 -> "  #: double\n"
 completion (1): Score
 hint @58: double
 
@@ -461,7 +560,7 @@ definition 10..16
 references: 10..16*, 65..71, 107..113
 rename: 3 edit(s)
 signature: none
-completion (3): txtProgressBar, setTxtProgressBar, suppressPackageStartupMessages
+completion: none
 
 #---- generic_from_setmethod
 setGeneric("area", function(shape) standardGeneric("area"))
@@ -472,7 +571,7 @@ definition 12..16
 references: 12..16*, 71..75
 rename: 2 edit(s)
 signature: none
-completion (3): args, array, arrows
+completion: none
 
 #---- signature_vector_classes
 setClass("A", representation())
@@ -500,5 +599,97 @@ references: 42..45*, 72..75
 rename: 2 edit(s)
 type-definition 9..15
 signature: none
+action: Add inferred type annotation for `touch`
+  edit 52..52 -> "#: fn() -> UserId\n"
+action: Add inferred type annotations for the whole file
+  edit 52..52 -> "#: fn() -> UserId\n"
 completion (14): uid, unclass, union, unique, uniroot, unlink, unlist, untar
 hint @57: fn() -> UserId
+
+#==== actions
+#---- if_unknown_to_trust
+#: @if-un$0known integer
+value <- mystery()
+#++++
+hover: none
+definition: none
+references: none
+rename: none
+signature: none
+action: Replace `@if-unknown` with `@trust`
+  edit 3..14 -> "@trust"
+completion (1): Unknown
+
+#---- unused_assignment_fixes
+f <- function() {
+  dead$0 <- 1
+  2
+}
+#++++
+hover 20..24: dead: double
+definition 20..24
+references: 20..24*
+rename: 1 edit(s)
+signature: none
+action: Remove unused assignment of `dead`
+  edit 18..30 -> ""
+action: Prefix `dead` with `.` to keep it
+  edit 20..20 -> "."
+action: Add inferred type annotation for `dead`
+  edit 18..18 -> "  #: double\n"
+action: Add inferred type annotation for `f`
+  edit 0..0 -> "#: fn() -> double\n"
+action: Add inferred type annotations for the whole file
+  edit 18..18 -> "  #: double\n"
+  edit 0..0 -> "#: fn() -> double\n"
+completion (1): dead
+hint @1: fn() -> double
+hint @24: double
+
+#---- insert_inferred_annotation
+cou$0nt <- 1L
+#++++
+hover 0..5: count: integer
+definition 0..5
+references: 0..5*
+rename: 1 edit(s)
+signature: none
+action: Add inferred type annotation for `count`
+  edit 0..0 -> "#: integer\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: integer\n"
+completion (5): count, capture.output, colours, colSums, contour
+hint @5: integer
+
+#---- string_subscript_fields
+config <- list(alpha = 1, beta = "b")
+pick <- function() config[["al$0pha"]]
+#++++
+hover 65..72: character
+definition: none
+references: none
+rename: none
+signature: none
+action: Add inferred type annotation for `pick`
+  edit 38..38 -> "#: fn() -> double\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: list{alpha: double, beta: character}\n"
+  edit 38..38 -> "#: fn() -> double\n"
+completion (1): alpha
+hint @6: list{alpha: double, beta: character}
+hint @42: fn() -> double
+
+#---- plain_string_is_silent
+msg <- "hel$0lo"
+#++++
+hover 7..14: character
+definition: none
+references: none
+rename: none
+signature: none
+action: Add inferred type annotation for `msg`
+  edit 0..0 -> "#: character\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: character\n"
+completion: none
+hint @3: character

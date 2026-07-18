@@ -110,6 +110,17 @@ fn render_at(
         }
         None => output.push_str("signature: none\n"),
     }
+    for action in ide::code_actions(db, file, syntax::TextRange::new(offset, offset)) {
+        output.push_str(&format!("action: {}\n", action.title));
+        for edit in &action.edits {
+            output.push_str(&format!(
+                "  edit {}..{} -> {:?}\n",
+                u32::from(edit.range.start()),
+                u32::from(edit.range.end()),
+                edit.replacement
+            ));
+        }
+    }
     match ide::completion(db, files, file, offset) {
         Some(result) => {
             let labels: Vec<String> = result
