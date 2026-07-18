@@ -141,7 +141,7 @@ foo$
 )$
     bar(a
     )$
-    baz(a, b)$
+    baz(a, b)
 #++++
 foo$
   bar(a)$
@@ -149,7 +149,7 @@ foo$
 
 (foo)$
   bar(a)$
-  baz(a, b)$
+  baz(a, b)
 
 #---- multiline_conditions
 if (any(

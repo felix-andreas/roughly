@@ -55,6 +55,11 @@ pub type SyntaxNodeChildren = rowan::SyntaxNodeChildren<RLanguage>;
 pub struct SyntaxError {
     pub message: String,
     pub range: TextRange,
+    /// Raised by the `#:` annotation type grammar rather than the R grammar.
+    /// Consumers that treat annotation problems more leniently (the formatter
+    /// preserves the block verbatim instead of refusing the file) key on this
+    /// instead of guessing from positions.
+    pub in_annotation: bool,
 }
 
 impl SyntaxError {
@@ -62,6 +67,7 @@ impl SyntaxError {
         SyntaxError {
             message: message.into(),
             range,
+            in_annotation: false,
         }
     }
 }

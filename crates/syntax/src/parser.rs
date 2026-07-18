@@ -34,6 +34,7 @@ pub(crate) fn parse(text: &str) -> Parse {
         errors: lexer_errors,
         groups: vec![0],
         depth: 0,
+        in_annotation: false,
     };
     parser.source_file();
     let green = parser.builder.finish();
@@ -56,6 +57,8 @@ struct Parser<'a> {
     /// the top, closers undo. Newlines are significant iff the top is 0.
     groups: Vec<u32>,
     depth: u32,
+    /// Whether errors are currently raised by the `#:` annotation grammar.
+    in_annotation: bool,
 }
 
 impl Parser<'_> {
@@ -186,11 +189,13 @@ impl Parser<'_> {
 
     fn error_here(&mut self, message: impl Into<String>) {
         let range = self.token_range(self.pos);
-        self.errors.push(SyntaxError::new(message, range));
+        self.error_at(range, message);
     }
 
     fn error_at(&mut self, range: TextRange, message: impl Into<String>) {
-        self.errors.push(SyntaxError::new(message, range));
+        let mut error = SyntaxError::new(message, range);
+        error.in_annotation = self.in_annotation;
+        self.errors.push(error);
     }
 
     /// Describe the current token for an "expected …, found …" message.
@@ -225,6 +230,7 @@ impl Parser<'_> {
     /// type may continue across stitched `#:` lines).
     fn annotation(&mut self) {
         self.start(SyntaxKind::ANNOTATION);
+        self.in_annotation = true;
         let end = self.annotation_region_end(self.pos);
         loop {
             self.ann_trivia(end);
@@ -242,6 +248,7 @@ impl Parser<'_> {
                 self.bump();
             }
         }
+        self.in_annotation = false;
         self.finish();
     }
 
@@ -367,34 +374,12 @@ impl Parser<'_> {
                     break;
                 }
             },
-            "trust" => {
+            "trust" | "new" | "if-unknown" => {
                 self.ann_trivia(end);
                 if self.pos < end {
                     self.ann_type(end, false);
                 } else {
-                    self.error_here("expected a type after `@trust`");
-                }
-            }
-            "new" => {
-                self.ann_trivia(end);
-                if self.pos < end {
-                    self.ann_type(end, false);
-                } else {
-                    self.error_here("expected a type after `@new`");
-                }
-            }
-            "if-unknown" => {
-                self.ann_trivia(end);
-                if self.at(SyntaxKind::L_BRACE) && self.pos < end {
-                    self.bump();
-                    self.ann_trivia(end);
-                    if self.at(SyntaxKind::R_BRACE) && self.pos < end {
-                        self.bump();
-                    } else {
-                        self.error_here("expected `}` in `@if-unknown {}`");
-                    }
-                } else {
-                    self.error_here("expected `{}` after `@if-unknown`");
+                    self.error_here(format!("expected a type after `@{name}`"));
                 }
             }
             "strict" => {

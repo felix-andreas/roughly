@@ -14,8 +14,8 @@
 //! correctness dependency, and the edit-stream fuzzer holds it byte- and
 //! structure-equal to the from-scratch parse.
 
+use crate::Parse;
 use crate::kind::SyntaxKind;
-use crate::{Parse, SyntaxError};
 use rowan::{GreenNode, NodeOrToken, TextRange, TextSize};
 
 /// Reparse after one edit: `deleted` is the replaced range in the OLD text,
@@ -179,20 +179,18 @@ fn try_splice(
         } else if error.range.start() >= old_suffix_start {
             let start = (i64::from(u32::from(error.range.start())) + delta) as u32;
             let end = (i64::from(u32::from(error.range.end())) + delta) as u32;
-            errors.push(SyntaxError::new(
-                error.message.clone(),
-                TextRange::new(TextSize::from(start), TextSize::from(end)),
-            ));
+            let mut rebased = error.clone();
+            rebased.range = TextRange::new(TextSize::from(start), TextSize::from(end));
+            errors.push(rebased);
         }
     }
     for error in middle.errors() {
-        errors.push(SyntaxError::new(
-            error.message.clone(),
-            TextRange::new(
-                error.range.start() + prefix_len,
-                error.range.end() + prefix_len,
-            ),
-        ));
+        let mut rebased = error.clone();
+        rebased.range = TextRange::new(
+            error.range.start() + prefix_len,
+            error.range.end() + prefix_len,
+        );
+        errors.push(rebased);
     }
 
     Some(Parse::new(green, errors))

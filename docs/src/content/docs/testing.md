@@ -34,6 +34,10 @@ expectations and `FIXTURE_FILTER=group__case` runs one case. Suites:
   sequential top-down scope)
 - `crates/semantics/tests/typing-strict` — the strict stream: the per-file typing mode and
   the `strict`-code diagnostics appended after the ordinary rendering
+- `crates/format/tests/format` — the formatter golden suite (ported from the legacy suite):
+  each case's source formats to the expected block, and the runner re-formats the output to
+  assert idempotence on every case; a case whose expectation is a refusal renders the
+  structured `FormatError`
 
 ### The cross-stack differential gate
 
@@ -73,6 +77,17 @@ equivalence** — output after editing a file through the salsa setter equals a 
 the edited text, and editing back restores the original. `FUZZ_ITERS` scales the budgets; the
 bounded default runs in `cargo test -p semantics`, and `fuzz_deep` (ignored) carries long runs.
 On a panic the harness prints the generating inputs.
+
+### The formatter fuzz harness
+
+`crates/format/tests/test_fuzz.rs` holds the formatter's arm of the same doctrine. On every
+input — valid-program seeds, byte-level seed mutations, token soup, random bytes, and real
+corpus files when fetched — it checks: never-panic (`format` either succeeds or refuses with a
+structured error), determinism, and **idempotence**: whenever formatting succeeds, formatting
+the output again must succeed and reproduce it byte-for-byte. The refusal path is part of the
+property: a file with an R-grammar syntax error is refused, while errors raised by the `#:`
+annotation grammar (marked `in_annotation` by the parser) only send the affected block down
+the verbatim path.
 
 ## Fixture format
 

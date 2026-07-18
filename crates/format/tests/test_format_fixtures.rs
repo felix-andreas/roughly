@@ -20,7 +20,6 @@ fn render(source: &str) -> String {
 }
 
 #[test]
-#[ignore = "formatter bring-up: run explicitly while the golden suite converges"]
 fn format_fixtures() {
     let suite = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/format");
     syntax::testing::run_fixture_suite(&suite, &render);
