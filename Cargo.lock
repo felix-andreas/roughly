@@ -1363,12 +1363,15 @@ dependencies = [
 name = "roughly"
 version = "0.2.8-alpha"
 dependencies = [
+ "async-lsp",
  "clap",
  "console",
  "format",
+ "futures",
  "ide",
  "ignore",
  "indoc",
+ "salsa",
  "semantics",
  "serde",
  "serde_json",
@@ -1376,7 +1379,10 @@ dependencies = [
  "syntax",
  "tempfile",
  "thiserror",
+ "tokio",
+ "tokio-util",
  "toml",
+ "tower",
  "tracing",
  "tracing-subscriber",
  "tracing-tree",

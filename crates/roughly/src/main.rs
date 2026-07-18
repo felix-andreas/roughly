@@ -48,9 +48,8 @@ fn main() -> ExitCode {
             stdio: _,
             verbose: _,
         } => {
-            let _ = experimental_features;
-            cli::error("the language server is not available in this build yet");
-            ExitCode::from(2)
+            cli::server(experimental_features);
+            ExitCode::SUCCESS
         }
         Command::Debug(debug) => match debug {
             Debug::Ast { path } => exit_code(cli::ast(&path).map(|()| Outcome::Clean)),

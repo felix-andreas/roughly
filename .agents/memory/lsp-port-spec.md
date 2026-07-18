@@ -249,3 +249,23 @@ lists would-change files exit 1, --diff prints diffs.
   (legacy-only instruments; test_stats covers measurement on the new
   stack). Related-notes JSON field emits `[]` until the related model
   exists.
+
+## 12. Salsa cancellation mechanics (verified against salsa 0.28 source)
+
+- `db.cancellation_token() -> CancellationToken` (Arc'd flag, per handle /
+  ZalsaLocal). Frontend holds a clone; `token.cancel()` makes the worker's
+  in-flight query unwind with `Cancelled::Local` at its next salsa
+  operation. Catch with `salsa::Cancelled::catch(|| ...)`.
+- The token resets via the attach machinery when a new top-level query
+  attaches (`uncancel` in attach.rs) — verify empirically in the suite; if
+  reset timing surprises, the worker can guard reads with its own
+  is_cancelled check before starting.
+- `db.trigger_cancellation()` (&mut self) = cancel ALL other handles and
+  wait (zalsa_mut) — that is what input setters do implicitly; do not call
+  it on the worker thread while the worker holds the only handle.
+- RootDatabase already derives Clone (handle clone shares storage).
+- Plan: single worker thread owns the db + all documents (same Job enum
+  protocol as legacy: Initialize/Read/Write over mpsc; oneshot replies;
+  cancel token replaces the engine's AtomicBool; idle_interrupt can stay a
+  plain AtomicBool checked between idle units, with the salsa token used
+  for intra-query interruption of idle work too).

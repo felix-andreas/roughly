@@ -511,6 +511,10 @@ pub fn fmt(
     })
 }
 
+pub fn server(experimental_features: ExperimentalFeatures) {
+    crate::server::run(experimental_features);
+}
+
 pub fn ast(path: &Path) -> Result<(), CommandError> {
     let text = match std::fs::read_to_string(path) {
         Ok(text) => text,

@@ -7,6 +7,7 @@ pub mod config;
 pub mod diagnostics;
 pub mod namespace;
 pub mod position;
+pub mod server;
 
 /// Analysis walks recurse as deeply as the source nests, so commands and the
 /// analysis worker run on threads with an explicit large stack instead of

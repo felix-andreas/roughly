@@ -1,0 +1,2171 @@
+//! The language server: an async-lsp frontend on the tokio thread and one
+//! dedicated worker thread owning the salsa database and every document.
+//! Edits cancel in-flight analysis cooperatively (salsa's cancellation
+//! token), so the latest edit always wins; a panic on the worker is a
+//! coherence failure and terminates the process deterministically.
+
+use crate::config::{CONFIG_FILE_NAME, Config, ConfigError, ExperimentalFeatures};
+use crate::diagnostics::{apply_suppressions, document_diagnostics, first_wave_diagnostics};
+use crate::position::{LineColumn, LineIndex};
+use async_lsp::client_monitor::ClientProcessMonitorLayer;
+use async_lsp::concurrency::ConcurrencyLayer;
+use async_lsp::lsp_types::{self, request};
+use async_lsp::panic::CatchUnwindLayer;
+use async_lsp::router::Router;
+use async_lsp::server::LifecycleLayer;
+use async_lsp::tracing::TracingLayer;
+use async_lsp::{ClientSocket, ErrorCode, LanguageClient, LanguageServer, ResponseError};
+use futures::future::BoxFuture;
+use semantics::diagnostics::{Diagnostic, Severity};
+use semantics::{DocumentKind, ProjectFiles, RootDatabase, SourceFile};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::ops::ControlFlow;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
+use syntax::{SyntaxKind, TextRange, TextSize};
+use tokio::sync::oneshot;
+use tower::ServiceBuilder;
+
+pub fn run(experimental_features: ExperimentalFeatures) {
+    run_async(experimental_features);
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn run_async(experimental_features: ExperimentalFeatures) {
+    install_panic_hook();
+    let runtime = tokio::runtime::Handle::current();
+
+    let (server, _) = async_lsp::MainLoop::new_server(|client| {
+        let (sender, receiver) = mpsc::channel::<Job>();
+        let cancel = CancelHandle::default();
+        let idle_interrupt = Arc::new(AtomicBool::new(false));
+
+        let seed = WorkerSeed {
+            client: client.clone(),
+            experimental_features,
+            cancel: cancel.clone(),
+            idle_interrupt: idle_interrupt.clone(),
+            runtime: runtime.clone(),
+        };
+        std::thread::Builder::new()
+            .name("roughly-analysis".to_owned())
+            .stack_size(crate::ANALYSIS_STACK_SIZE)
+            .spawn(move || run_worker(seed, receiver))
+            .expect("analysis worker thread should spawn");
+
+        // No ConcurrencyLayer: the serial worker thread is the concurrency
+        // bound, and that layer's backpressure deadlocks pending request
+        // futures against the mainloop's dispatch. The edit-driven
+        // cancellation supersedes `$/cancelRequest` early-abort.
+        let _ = ConcurrencyLayer::default();
+        ServiceBuilder::new()
+            .layer(TracingLayer::default())
+            .layer(LifecycleLayer::default())
+            .layer(CatchUnwindLayer::default())
+            .layer(ClientProcessMonitorLayer::new(client.clone()))
+            .service(Router::from_language_server(ServerState {
+                sender,
+                cancel,
+                idle_interrupt,
+            }))
+    });
+
+    #[cfg(unix)]
+    let (stdin, stdout) = (
+        async_lsp::stdio::PipeStdin::lock_tokio().expect("stdin"),
+        async_lsp::stdio::PipeStdout::lock_tokio().expect("stdout"),
+    );
+    #[cfg(not(unix))]
+    let (stdin, stdout) = (
+        tokio_util::compat::TokioAsyncReadCompatExt::compat(tokio::io::stdin()),
+        tokio_util::compat::TokioAsyncWriteCompatExt::compat_write(tokio::io::stdout()),
+    );
+
+    server
+        .run_buffered(stdin, stdout)
+        .await
+        .expect("language server main loop failed");
+}
+
+/// The frontend's handle to the worker's salsa cancellation token: the token
+/// only exists once the worker constructs the database, so the flag arrives
+/// late through the shared slot.
+#[derive(Clone, Default)]
+struct CancelHandle {
+    token: Arc<std::sync::Mutex<Option<salsa::CancellationToken>>>,
+}
+
+impl CancelHandle {
+    fn cancel(&self) {
+        if let Some(token) = self.token.lock().expect("cancel token lock").as_ref() {
+            token.cancel();
+        }
+    }
+
+    fn install(&self, token: salsa::CancellationToken) {
+        *self.token.lock().expect("cancel token lock") = Some(token);
+    }
+}
+
+fn install_panic_hook() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        // Cooperative cancellation is not a fault; everything else prints.
+        // Process death is the worker loop's decision, never the hook's.
+        if info.payload().is::<salsa::Cancelled>() {
+            return;
+        }
+        default_hook(info);
+    }));
+}
+
+enum Job {
+    Initialize(
+        Box<lsp_types::InitializeParams>,
+        oneshot::Sender<Result<lsp_types::InitializeResult, ResponseError>>,
+    ),
+    Read(Box<dyn FnOnce(&mut Worker) + Send>),
+    Write(Box<dyn FnOnce(&mut Worker) + Send>),
+}
+
+struct WorkerSeed {
+    client: ClientSocket,
+    experimental_features: ExperimentalFeatures,
+    cancel: CancelHandle,
+    idle_interrupt: Arc<AtomicBool>,
+    runtime: tokio::runtime::Handle,
+}
+
+fn run_worker(seed: WorkerSeed, receiver: mpsc::Receiver<Job>) {
+    let mut seed = Some(seed);
+    let mut worker: Option<Worker> = None;
+    loop {
+        let job = if worker.as_ref().is_some_and(Worker::has_idle_work) {
+            // Reset before the poll: a job enqueued before the poll is simply
+            // received; one enqueued after flags the token after this reset,
+            // so the idle unit observes it at its next cancellation check.
+            seed_idle_interrupt(&worker).store(false, Ordering::SeqCst);
+            match receiver.try_recv() {
+                Ok(job) => Some(job),
+                Err(mpsc::TryRecvError::Empty) => None,
+                Err(mpsc::TryRecvError::Disconnected) => return,
+            }
+        } else {
+            match receiver.recv() {
+                Ok(job) => Some(job),
+                Err(_) => return,
+            }
+        };
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match job {
+            Some(Job::Initialize(params, reply)) => {
+                let seed = seed.take().expect("initialize arrives exactly once");
+                let (initialized, result) = Worker::initialize(seed, *params);
+                worker = Some(initialized);
+                let _ = reply.send(Ok(result));
+            }
+            Some(Job::Read(work)) => {
+                if let Some(worker) = worker.as_mut() {
+                    worker.refresh_cancellation();
+                    work(worker);
+                }
+            }
+            Some(Job::Write(work)) => match worker.as_mut() {
+                Some(worker) => {
+                    worker.refresh_cancellation();
+                    work(worker);
+                }
+                // LSP allows dropping notifications before initialize;
+                // nothing exists yet to corrupt.
+                None => tracing::warn!("dropping a notification before initialize"),
+            },
+            None => {
+                if let Some(worker) = worker.as_mut() {
+                    worker.refresh_cancellation();
+                    worker.run_idle_unit();
+                }
+            }
+        }));
+        if outcome.is_err() {
+            // A read catches its own cancellation; anything reaching here is
+            // a coherence panic. Serving a corrupted analysis state is worse
+            // than dying, so terminate deterministically.
+            tracing::error!("analysis worker panicked; exiting");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn seed_idle_interrupt(worker: &Option<Worker>) -> &AtomicBool {
+    &worker
+        .as_ref()
+        .expect("idle work implies an initialized worker")
+        .idle_interrupt
+}
+
+struct ServerState {
+    sender: mpsc::Sender<Job>,
+    cancel: CancelHandle,
+    idle_interrupt: Arc<AtomicBool>,
+}
+
+impl ServerState {
+    fn read<T, F>(&self, build: F) -> BoxFuture<'static, Result<T, ResponseError>>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut Worker) -> Result<T, ResponseError> + Send + 'static,
+    {
+        let (reply, receive) = oneshot::channel();
+        let job = Job::Read(Box::new(move |worker| {
+            let _ = reply.send(build(worker));
+        }));
+        if self.sender.send(job).is_err() {
+            return Box::pin(async { Err(worker_gone_error()) });
+        }
+        self.idle_interrupt.store(true, Ordering::SeqCst);
+        Box::pin(async move { receive.await.unwrap_or_else(|_| Err(worker_gone_error())) })
+    }
+
+    /// Input-mutating notifications: flip the cancellation token FIRST so an
+    /// in-flight read abandons, then enqueue. A send failure is
+    /// unrecoverable — the analysis state can no longer mirror the client.
+    fn notify_edit<F>(&self, build: F) -> ControlFlow<async_lsp::Result<()>>
+    where
+        F: FnOnce(&mut Worker) + Send + 'static,
+    {
+        self.cancel.cancel();
+        if self.sender.send(Job::Write(Box::new(build))).is_err() {
+            panic!("analysis worker is gone; cannot apply a document-sync edit");
+        }
+        self.idle_interrupt.store(true, Ordering::SeqCst);
+        ControlFlow::Continue(())
+    }
+
+    fn notify<F>(&self, build: F) -> ControlFlow<async_lsp::Result<()>>
+    where
+        F: FnOnce(&mut Worker) + Send + 'static,
+    {
+        if self.sender.send(Job::Write(Box::new(build))).is_err() {
+            panic!("analysis worker is gone; cannot apply a notification");
+        }
+        self.idle_interrupt.store(true, Ordering::SeqCst);
+        ControlFlow::Continue(())
+    }
+}
+
+fn worker_gone_error() -> ResponseError {
+    ResponseError::new(ErrorCode::INTERNAL_ERROR, "analysis worker unavailable")
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PositionEncoding {
+    Utf8,
+    Utf16,
+}
+
+impl PositionEncoding {
+    fn negotiate(offered: Option<&[lsp_types::PositionEncodingKind]>) -> PositionEncoding {
+        if offered.is_some_and(|kinds| kinds.contains(&lsp_types::PositionEncodingKind::UTF8)) {
+            PositionEncoding::Utf8
+        } else {
+            PositionEncoding::Utf16
+        }
+    }
+
+    fn kind(self) -> lsp_types::PositionEncodingKind {
+        match self {
+            PositionEncoding::Utf8 => lsp_types::PositionEncodingKind::UTF8,
+            PositionEncoding::Utf16 => lsp_types::PositionEncodingKind::UTF16,
+        }
+    }
+}
+
+struct Worker {
+    client: ClientSocket,
+    runtime: tokio::runtime::Handle,
+    cancel: CancelHandle,
+    current_token: salsa::CancellationToken,
+    idle_interrupt: Arc<AtomicBool>,
+    experimental_features: ExperimentalFeatures,
+    encoding: PositionEncoding,
+    supports_pull_diagnostics: bool,
+    supports_diagnostic_refresh: bool,
+    supports_label_offsets: bool,
+    supports_snippets: bool,
+    workspace_root: PathBuf,
+    config: Config,
+    pending_config_error: Option<String>,
+    db: RootDatabase,
+    /// Every tracked R document (open buffers and on-disk package files).
+    files: HashMap<PathBuf, SourceFile>,
+    open_documents: HashSet<PathBuf>,
+    stub_documents: HashMap<PathBuf, String>,
+    namespace_documents: HashMap<PathBuf, String>,
+    virtual_document_uris: HashMap<PathBuf, lsp_types::Url>,
+    /// Documents owed a settled (full) diagnostics publish, most recent last.
+    pending_semantic_publishes: Vec<PathBuf>,
+    /// Workspace files to warm at idle time; results are never published.
+    prime_queue: VecDeque<PathBuf>,
+}
+
+impl Worker {
+    fn initialize(
+        seed: WorkerSeed,
+        params: lsp_types::InitializeParams,
+    ) -> (Worker, lsp_types::InitializeResult) {
+        let encoding = PositionEncoding::negotiate(
+            params
+                .capabilities
+                .general
+                .as_ref()
+                .and_then(|general| general.position_encodings.as_deref()),
+        );
+        let supports_pull_diagnostics = params
+            .capabilities
+            .text_document
+            .as_ref()
+            .is_some_and(|text| text.diagnostic.is_some());
+        let supports_diagnostic_refresh = params
+            .capabilities
+            .workspace
+            .as_ref()
+            .and_then(|workspace| workspace.diagnostic.as_ref())
+            .and_then(|diagnostic| diagnostic.refresh_support)
+            .unwrap_or(false);
+        let supports_label_offsets = params
+            .capabilities
+            .text_document
+            .as_ref()
+            .and_then(|text| text.signature_help.as_ref())
+            .and_then(|help| help.signature_information.as_ref())
+            .and_then(|info| info.parameter_information.as_ref())
+            .and_then(|parameter| parameter.label_offset_support)
+            .unwrap_or(false);
+        let supports_snippets = params
+            .capabilities
+            .text_document
+            .as_ref()
+            .and_then(|text| text.completion.as_ref())
+            .and_then(|completion| completion.completion_item.as_ref())
+            .and_then(|item| item.snippet_support)
+            .unwrap_or(false);
+
+        // The workspace root comes from the client, never the process cwd.
+        let workspace_root = params
+            .workspace_folders
+            .as_ref()
+            .and_then(|folders| folders.first())
+            .and_then(|folder| folder.uri.to_file_path().ok())
+            .or_else(|| {
+                #[allow(deprecated)]
+                params
+                    .root_uri
+                    .as_ref()
+                    .and_then(|uri| uri.to_file_path().ok())
+            })
+            .unwrap_or_else(|| PathBuf::from("."));
+
+        let (config, pending_config_error) = match Config::discover(&workspace_root) {
+            Ok(config) => (config, None),
+            Err(error) => (Config::default(), Some(error)),
+        };
+
+        let db = RootDatabase::default();
+        let current_token = salsa::Database::cancellation_token(&db);
+        seed.cancel.install(current_token.clone());
+
+        let mut worker = Worker {
+            client: seed.client,
+            runtime: seed.runtime,
+            cancel: seed.cancel,
+            current_token,
+            idle_interrupt: seed.idle_interrupt,
+            experimental_features: seed.experimental_features,
+            encoding,
+            supports_pull_diagnostics,
+            supports_diagnostic_refresh,
+            supports_label_offsets,
+            supports_snippets,
+            workspace_root,
+            config,
+            pending_config_error: pending_config_error.map(|error| error.to_string()),
+            db,
+            files: HashMap::new(),
+            open_documents: HashSet::new(),
+            stub_documents: HashMap::new(),
+            namespace_documents: HashMap::new(),
+            virtual_document_uris: HashMap::new(),
+            pending_semantic_publishes: Vec::new(),
+            prime_queue: VecDeque::new(),
+        };
+        worker.install_stubs();
+        worker.load_workspace_sources();
+
+        let result = initialize_result(encoding, worker.experimental_features);
+        (worker, result)
+    }
+
+    fn install_stubs(&mut self) {
+        let mut sources = semantics::stubs::shipped_stub_sources();
+        let stubs_dir = self.workspace_root.join("stubs");
+        if let Ok(entries) = std::fs::read_dir(&stubs_dir) {
+            let mut paths: Vec<PathBuf> = entries
+                .flatten()
+                .map(|entry| entry.path())
+                .filter(|path| {
+                    path.extension()
+                        .is_some_and(|extension| extension == "Rtypes")
+                })
+                .collect();
+            paths.sort();
+            for path in paths {
+                match std::fs::read_to_string(&path) {
+                    Ok(text) => {
+                        let stem = path
+                            .file_stem()
+                            .map(|stem| stem.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        sources.push((stem, text));
+                    }
+                    Err(error) => {
+                        tracing::warn!(
+                            "skipping unreadable override stub {}: {error}",
+                            path.display()
+                        );
+                    }
+                }
+            }
+        }
+        semantics::stubs::StubSources::new(&self.db, sources);
+    }
+
+    fn load_workspace_sources(&mut self) {
+        let r_path = self.workspace_root.join("R");
+        if r_path.is_dir() {
+            let entries =
+                std::fs::read_dir(&r_path).expect("listing the workspace R directory must succeed");
+            let mut paths: Vec<PathBuf> = entries
+                .flatten()
+                .map(|entry| entry.path())
+                .filter(|path| {
+                    path.is_file()
+                        && path
+                            .extension()
+                            .is_some_and(|extension| extension == "R" || extension == "r")
+                })
+                .collect();
+            paths.sort();
+            for path in paths {
+                let text = std::fs::read_to_string(&path)
+                    .expect("reading a workspace source file must succeed");
+                let file = SourceFile::new(&self.db, text, DocumentKind::Package);
+                self.files.insert(path.clone(), file);
+                self.prime_queue.push_back(path);
+            }
+        }
+        self.rebuild_project_files();
+    }
+
+    /// Recomputes the `ProjectFiles` input: package documents first,
+    /// ascending by workspace-relative path, then scripts — the order the
+    /// last-writer-wins symbol index and the CLI agree on.
+    fn rebuild_project_files(&mut self) {
+        use salsa::Setter;
+        let r_path = self.workspace_root.join("R");
+        let mut ordered: Vec<(&PathBuf, &SourceFile)> = self.files.iter().collect();
+        ordered.sort_by_key(|(path, _)| {
+            (
+                !path.starts_with(&r_path),
+                path.strip_prefix(&self.workspace_root)
+                    .unwrap_or(path)
+                    .to_string_lossy()
+                    .replace('\\', "/"),
+            )
+        });
+        let files: Vec<SourceFile> = ordered.into_iter().map(|(_, file)| *file).collect();
+        match ProjectFiles::try_get(&self.db) {
+            Some(project) => {
+                project.set_files(&mut self.db).to(files);
+            }
+            None => {
+                ProjectFiles::new(&self.db, files);
+            }
+        }
+    }
+
+    /// An edit's cancellation flip is consumed by whatever query was in
+    /// flight when it happened; every job afterwards starts on a fresh
+    /// uncancelled handle (cloning the storage handle is cheap).
+    fn refresh_cancellation(&mut self) {
+        if self.current_token.is_cancelled() {
+            self.db = self.db.clone();
+            self.current_token = salsa::Database::cancellation_token(&self.db);
+            self.cancel.install(self.current_token.clone());
+        }
+    }
+
+    fn has_idle_work(&self) -> bool {
+        !self.pending_semantic_publishes.is_empty() || !self.prime_queue.is_empty()
+    }
+
+    fn run_idle_unit(&mut self) {
+        if let Some(path) = self.pending_semantic_publishes.pop() {
+            if !self.open_documents.contains(&path) {
+                return;
+            }
+            match self.cancellable(|worker| worker.settled_diagnostics(&path)) {
+                Ok(Some(diagnostics)) => {
+                    let uri = self.document_uri(&path);
+                    self.publish(uri, diagnostics, None);
+                }
+                Ok(None) => {}
+                Err(_) => self.pending_semantic_publishes.push(path),
+            }
+            return;
+        }
+        if let Some(path) = self.prime_queue.pop_front() {
+            let Some(&file) = self.files.get(&path) else {
+                return;
+            };
+            let config = self.config;
+            let outcome = self.cancellable(|worker| {
+                let _ = document_diagnostics(&worker.db, file, &config);
+            });
+            if outcome.is_err() {
+                self.prime_queue.push_front(path);
+            }
+        }
+    }
+
+    /// Runs `body` catching cooperative cancellation; the caller decides the
+    /// per-feature degradation policy.
+    fn cancellable<T>(
+        &mut self,
+        body: impl FnOnce(&mut Worker) -> T,
+    ) -> Result<T, salsa::Cancelled> {
+        let this: *mut Worker = self;
+        salsa::Cancelled::catch(std::panic::AssertUnwindSafe(|| {
+            // The closure runs synchronously on this thread; the raw pointer
+            // only bridges catch_unwind's UnwindSafe bound.
+            body(unsafe { &mut *this })
+        }))
+    }
+
+    //
+    // Paths and URIs
+    //
+
+    fn document_path(&mut self, uri: &lsp_types::Url) -> Option<PathBuf> {
+        if uri.scheme() == "file" {
+            return uri.to_file_path().ok();
+        }
+        let path = self.virtual_document_path(uri);
+        self.virtual_document_uris.insert(path.clone(), uri.clone());
+        Some(path)
+    }
+
+    /// A deterministic, injective synthetic path for a non-`file:` URI,
+    /// under the workspace root. A pure table key — never read from disk.
+    fn virtual_document_path(&self, uri: &lsp_types::Url) -> PathBuf {
+        let encoded = uri
+            .as_str()
+            .replace('%', "%25")
+            .replace('/', "%2F")
+            .replace('\\', "%5C");
+        self.workspace_root.join(".roughly-virtual").join(encoded)
+    }
+
+    fn document_uri(&self, path: &Path) -> lsp_types::Url {
+        if let Some(uri) = self.virtual_document_uris.get(path) {
+            return uri.clone();
+        }
+        lsp_types::Url::from_file_path(path).expect("tracked paths convert to URIs")
+    }
+
+    fn is_package_path(&self, path: &Path) -> bool {
+        path.starts_with(self.workspace_root.join("R"))
+    }
+
+    fn is_stub_document(path: &Path) -> bool {
+        path.extension()
+            .is_some_and(|extension| extension == "Rtypes")
+    }
+
+    fn is_namespace_document(path: &Path) -> bool {
+        path.file_name().is_some_and(|name| name == "NAMESPACE")
+    }
+
+    //
+    // Text and positions
+    //
+
+    fn text(&self, file: SourceFile) -> String {
+        file.text(&self.db).to_owned()
+    }
+
+    fn to_offset(&self, text: &str, position: lsp_types::Position) -> TextSize {
+        let index = LineIndex::new(text);
+        let column = LineColumn {
+            line: position.line,
+            column: position.character,
+        };
+        match self.encoding {
+            PositionEncoding::Utf8 => index.offset(column, text),
+            PositionEncoding::Utf16 => index.offset_utf16(column, text),
+        }
+    }
+
+    fn to_position(&self, text: &str, offset: TextSize) -> lsp_types::Position {
+        let index = LineIndex::new(text);
+        let column = match self.encoding {
+            PositionEncoding::Utf8 => index.line_column(offset),
+            PositionEncoding::Utf16 => index.line_column_utf16(offset, text),
+        };
+        lsp_types::Position::new(column.line, column.column)
+    }
+
+    fn to_range(&self, text: &str, range: TextRange) -> lsp_types::Range {
+        lsp_types::Range {
+            start: self.to_position(text, range.start()),
+            end: self.to_position(text, range.end()),
+        }
+    }
+
+    /// A range in another (tracked) document, converted against that
+    /// document's own text.
+    fn to_range_in(&self, file: SourceFile, range: TextRange) -> lsp_types::Range {
+        let text = self.text(file);
+        self.to_range(&text, range)
+    }
+
+    fn path_of(&self, file: SourceFile) -> Option<&PathBuf> {
+        self.files
+            .iter()
+            .find(|(_, candidate)| **candidate == file)
+            .map(|(path, _)| path)
+    }
+
+    //
+    // Document sync
+    //
+
+    fn did_open(&mut self, params: lsp_types::DidOpenTextDocumentParams) {
+        let Some(path) = self.document_path(&params.text_document.uri) else {
+            tracing::warn!("unusable URI in didOpen: {}", params.text_document.uri);
+            return;
+        };
+        let version = params.text_document.version;
+        if Worker::is_stub_document(&path) {
+            self.stub_documents
+                .insert(path.clone(), params.text_document.text);
+            if !self.supports_pull_diagnostics {
+                let uri = self.document_uri(&path);
+                self.publish(uri, Vec::new(), Some(version));
+            }
+            return;
+        }
+        if Worker::is_namespace_document(&path) {
+            self.namespace_documents
+                .insert(path.clone(), params.text_document.text.clone());
+            if !self.supports_pull_diagnostics {
+                let diagnostics = self.namespace_diagnostics(&params.text_document.text);
+                let uri = self.document_uri(&path);
+                self.publish(uri, diagnostics, Some(version));
+            }
+            return;
+        }
+
+        let is_package = self.is_package_path(&path);
+        let kind = if is_package {
+            DocumentKind::Package
+        } else {
+            DocumentKind::Script
+        };
+        use salsa::Setter;
+        match self.files.get(&path) {
+            Some(&file) => {
+                file.set_text(&mut self.db).to(params.text_document.text);
+            }
+            None => {
+                let file = SourceFile::new(&self.db, params.text_document.text, kind);
+                self.files.insert(path.clone(), file);
+                self.rebuild_project_files();
+            }
+        }
+        self.open_documents.insert(path.clone());
+        if !self.supports_pull_diagnostics {
+            self.publish_first_wave(&path, version);
+        }
+    }
+
+    fn did_change(&mut self, params: lsp_types::DidChangeTextDocumentParams) {
+        let Some(path) = self.document_path(&params.text_document.uri) else {
+            tracing::warn!("unusable URI in didChange: {}", params.text_document.uri);
+            return;
+        };
+        let version = params.text_document.version;
+
+        if let Some(text) = self.stub_documents.get(&path).cloned() {
+            let updated = self.apply_content_changes(text, &params.content_changes);
+            self.stub_documents.insert(path.clone(), updated);
+            if !self.supports_pull_diagnostics {
+                let uri = self.document_uri(&path);
+                self.publish(uri, Vec::new(), Some(version));
+            }
+            return;
+        }
+        if let Some(text) = self.namespace_documents.get(&path).cloned() {
+            let updated = self.apply_content_changes(text, &params.content_changes);
+            self.namespace_documents
+                .insert(path.clone(), updated.clone());
+            if !self.supports_pull_diagnostics {
+                let diagnostics = self.namespace_diagnostics(&updated);
+                let uri = self.document_uri(&path);
+                self.publish(uri, diagnostics, Some(version));
+            }
+            return;
+        }
+
+        if !self.open_documents.contains(&path) {
+            self.report_error(&format!(
+                "didChange for a document that is not open: {}",
+                path.display()
+            ));
+            return;
+        }
+        let &file = self
+            .files
+            .get(&path)
+            .expect("open documents are always tracked");
+        let text = self.text(file);
+        let updated = self.apply_content_changes(text, &params.content_changes);
+        use salsa::Setter;
+        file.set_text(&mut self.db).to(updated);
+        if !self.supports_pull_diagnostics {
+            self.publish_first_wave(&path, version);
+        }
+    }
+
+    /// Applies each change against the evolving buffer (each ranged change
+    /// refers to the state after the previous ones; a change without a range
+    /// replaces the whole document).
+    fn apply_content_changes(
+        &self,
+        mut text: String,
+        changes: &[lsp_types::TextDocumentContentChangeEvent],
+    ) -> String {
+        for change in changes {
+            match change.range {
+                None => text = change.text.clone(),
+                Some(range) => {
+                    let index = LineIndex::new(&text);
+                    let (start, end) = match self.encoding {
+                        PositionEncoding::Utf8 => (
+                            index.offset(
+                                LineColumn {
+                                    line: range.start.line,
+                                    column: range.start.character,
+                                },
+                                &text,
+                            ),
+                            index.offset(
+                                LineColumn {
+                                    line: range.end.line,
+                                    column: range.end.character,
+                                },
+                                &text,
+                            ),
+                        ),
+                        PositionEncoding::Utf16 => (
+                            index.offset_utf16(
+                                LineColumn {
+                                    line: range.start.line,
+                                    column: range.start.character,
+                                },
+                                &text,
+                            ),
+                            index.offset_utf16(
+                                LineColumn {
+                                    line: range.end.line,
+                                    column: range.end.character,
+                                },
+                                &text,
+                            ),
+                        ),
+                    };
+                    text.replace_range(usize::from(start)..usize::from(end), &change.text);
+                }
+            }
+        }
+        text
+    }
+
+    fn did_save(&mut self, params: lsp_types::DidSaveTextDocumentParams) {
+        let Some(path) = self.document_path(&params.text_document.uri) else {
+            return;
+        };
+        if !self.open_documents.contains(&path) {
+            // Editors send didSave for config and other buffers; the config
+            // reload runs off the file watcher.
+            return;
+        }
+        assert!(
+            self.files.contains_key(&path),
+            "open documents must be tracked"
+        );
+        // A package-visible save can move diagnostics in dependent files.
+        self.refresh_all_diagnostics();
+    }
+
+    fn did_close(&mut self, params: lsp_types::DidCloseTextDocumentParams) {
+        let Some(path) = self.document_path(&params.text_document.uri) else {
+            return;
+        };
+        if self.stub_documents.remove(&path).is_some()
+            || self.namespace_documents.remove(&path).is_some()
+        {
+            return;
+        }
+        self.open_documents.remove(&path);
+        self.pending_semantic_publishes.retain(|owed| owed != &path);
+
+        if self.is_package_path(&path) {
+            // A closed package file reverts to its on-disk text, discarding
+            // unsaved buffer edits.
+            match std::fs::read_to_string(&path) {
+                Ok(text) => {
+                    if let Some(&file) = self.files.get(&path) {
+                        use salsa::Setter;
+                        file.set_text(&mut self.db).to(text);
+                    }
+                    return;
+                }
+                Err(error) => {
+                    // The close can race a delete/rename; retract below.
+                    tracing::warn!("re-reading closed file failed: {error}");
+                }
+            }
+        }
+        self.files.remove(&path);
+        self.virtual_document_uris.remove(&path);
+        self.rebuild_project_files();
+    }
+
+    fn did_change_watched_files(&mut self, params: lsp_types::DidChangeWatchedFilesParams) {
+        let mut config_changed = false;
+        for change in &params.changes {
+            let Ok(path) = change.uri.to_file_path() else {
+                continue;
+            };
+            // Matched by file name, not full path: tolerates symlinked roots
+            // and case-normalizing clients.
+            if path
+                .file_name()
+                .is_some_and(|name| name == CONFIG_FILE_NAME)
+            {
+                // Re-discover rather than read the changed file: a deleted
+                // workspace config falls back to an ancestor or defaults.
+                match Config::discover(&self.workspace_root) {
+                    Ok(config) => {
+                        config_changed |= config != self.config;
+                        self.config = config;
+                        self.publish_config_diagnostics(None);
+                    }
+                    Err(error) => {
+                        self.report_error(&format!("{error}; keeping the previous configuration"));
+                        self.publish_config_diagnostics(Some(&error));
+                    }
+                }
+            } else if self.is_package_path(&path)
+                && path
+                    .extension()
+                    .is_some_and(|extension| extension == "R" || extension == "r")
+                && !self.open_documents.contains(&path)
+            {
+                use salsa::Setter;
+                match std::fs::read_to_string(&path) {
+                    Ok(text) => match self.files.get(&path) {
+                        Some(&file) => {
+                            file.set_text(&mut self.db).to(text);
+                        }
+                        None => {
+                            let file = SourceFile::new(&self.db, text, DocumentKind::Package);
+                            self.files.insert(path.clone(), file);
+                            self.rebuild_project_files();
+                        }
+                    },
+                    Err(_) => {
+                        if self.files.remove(&path).is_some() {
+                            self.rebuild_project_files();
+                        }
+                    }
+                }
+            }
+        }
+        if config_changed {
+            self.refresh_all_diagnostics();
+        }
+    }
+
+    fn initialized(&mut self) {
+        if let Some(message) = self.pending_config_error.take() {
+            self.report_error(&message);
+            let location = Config::discover_path(&self.workspace_root)
+                .and_then(|path| Config::from_path(path).err());
+            self.publish_config_diagnostics(location.as_ref());
+        }
+        self.register_file_watchers();
+    }
+
+    fn register_file_watchers(&self) {
+        let mut watchers = vec![
+            lsp_types::FileSystemWatcher {
+                glob_pattern: lsp_types::GlobPattern::Relative(lsp_types::RelativePattern {
+                    base_uri: lsp_types::OneOf::Right(
+                        lsp_types::Url::from_file_path(self.workspace_root.join("R"))
+                            .unwrap_or_else(|_| self.document_uri(&self.workspace_root)),
+                    ),
+                    pattern: "*.[rR]".to_owned(),
+                }),
+                kind: None,
+            },
+            lsp_types::FileSystemWatcher {
+                glob_pattern: lsp_types::GlobPattern::Relative(lsp_types::RelativePattern {
+                    base_uri: lsp_types::OneOf::Right(self.document_uri(&self.workspace_root)),
+                    pattern: CONFIG_FILE_NAME.to_owned(),
+                }),
+                kind: None,
+            },
+        ];
+        // A governing config above the workspace root must reload live too.
+        if let Some(config_path) = Config::discover_path(&self.workspace_root)
+            && let Some(parent) = config_path.parent()
+            && parent != self.workspace_root
+        {
+            watchers.push(lsp_types::FileSystemWatcher {
+                glob_pattern: lsp_types::GlobPattern::Relative(lsp_types::RelativePattern {
+                    base_uri: lsp_types::OneOf::Right(self.document_uri(parent)),
+                    pattern: CONFIG_FILE_NAME.to_owned(),
+                }),
+                kind: None,
+            });
+        }
+        let registration = lsp_types::Registration {
+            id: "workspace/didChangeWatchedFiles".to_owned(),
+            method: "workspace/didChangeWatchedFiles".to_owned(),
+            register_options: Some(
+                serde_json::to_value(lsp_types::DidChangeWatchedFilesRegistrationOptions {
+                    watchers,
+                })
+                .expect("watcher options serialize"),
+            ),
+        };
+        let mut client = self.client.clone();
+        self.runtime.spawn(async move {
+            if let Err(error) = client
+                .register_capability(lsp_types::RegistrationParams {
+                    registrations: vec![registration],
+                })
+                .await
+            {
+                tracing::error!("file watcher registration failed: {error}");
+            }
+        });
+    }
+
+    //
+    // Diagnostics
+    //
+
+    fn publish(
+        &self,
+        uri: lsp_types::Url,
+        diagnostics: Vec<lsp_types::Diagnostic>,
+        version: Option<i32>,
+    ) {
+        let mut client = self.client.clone();
+        let params = lsp_types::PublishDiagnosticsParams::new(uri, diagnostics, version);
+        if let Err(error) = client.publish_diagnostics(params) {
+            tracing::error!("publishing diagnostics failed: {error}");
+        }
+    }
+
+    fn publish_first_wave(&mut self, path: &Path, version: i32) {
+        let Some(&file) = self.files.get(path) else {
+            return;
+        };
+        let config = self.config;
+        let diagnostics = self
+            .cancellable(|worker| {
+                let rendered = first_wave_diagnostics(&worker.db, file, &config);
+                worker.finish_diagnostics(file, rendered)
+            })
+            .unwrap_or_default();
+        let uri = self.document_uri(path);
+        self.publish(uri, diagnostics, Some(version));
+        self.defer_semantic_publish(path);
+    }
+
+    fn defer_semantic_publish(&mut self, path: &Path) {
+        self.pending_semantic_publishes.retain(|owed| owed != path);
+        self.pending_semantic_publishes.push(path.to_path_buf());
+    }
+
+    /// The full (settled) diagnostic set for one tracked document.
+    fn settled_diagnostics(&mut self, path: &Path) -> Option<Vec<lsp_types::Diagnostic>> {
+        let &file = self.files.get(path)?;
+        let config = self.config;
+        let rendered = document_diagnostics(&self.db, file, &config);
+        Some(self.finish_diagnostics(file, rendered))
+    }
+
+    /// The shared rendering tail: suppression comments, then LSP encoding.
+    fn finish_diagnostics(
+        &self,
+        file: SourceFile,
+        rendered: Vec<Diagnostic>,
+    ) -> Vec<lsp_types::Diagnostic> {
+        let text = self.text(file);
+        let rendered = apply_suppressions(rendered, &text);
+        rendered
+            .into_iter()
+            .map(|diagnostic| self.convert_diagnostic(&text, diagnostic))
+            .collect()
+    }
+
+    fn convert_diagnostic(&self, text: &str, diagnostic: Diagnostic) -> lsp_types::Diagnostic {
+        // The unnecessary tag lets editors render dead code faded — the
+        // conventional presentation for a value no read uses.
+        let tags = matches!(
+            diagnostic.code,
+            "unused" | "unused-parameter" | "unused-import"
+        )
+        .then(|| vec![lsp_types::DiagnosticTag::UNNECESSARY]);
+        lsp_types::Diagnostic {
+            range: self.to_range(text, diagnostic.range),
+            severity: Some(match diagnostic.severity {
+                Severity::Error => lsp_types::DiagnosticSeverity::ERROR,
+                Severity::Warning => lsp_types::DiagnosticSeverity::WARNING,
+            }),
+            code: Some(lsp_types::NumberOrString::String(
+                diagnostic.code.to_owned(),
+            )),
+            code_description: None,
+            source: Some("roughly".into()),
+            message: diagnostic.message,
+            related_information: None,
+            tags,
+            data: None,
+        }
+    }
+
+    fn namespace_diagnostics(&self, text: &str) -> Vec<lsp_types::Diagnostic> {
+        let imports = crate::namespace::parse_namespace_imports(text);
+        let knows =
+            |package: &str| semantics::stubs::namespace_known(&self.db, package).unwrap_or(false);
+        let exports = |package: &str, name: &str| {
+            semantics::stubs::namespace_exports(&self.db, package, name)
+        };
+        crate::namespace::namespace_import_problems(&imports, &knows, &exports)
+            .into_iter()
+            .map(|diagnostic| self.convert_diagnostic(text, diagnostic))
+            .collect()
+    }
+
+    /// A malformed `roughly.toml` is published as a diagnostic on the config
+    /// file itself; `None` clears it.
+    fn publish_config_diagnostics(&self, error: Option<&ConfigError>) {
+        let config_path = self.workspace_root.join(CONFIG_FILE_NAME);
+        let Ok(uri) = lsp_types::Url::from_file_path(&config_path) else {
+            return;
+        };
+        let diagnostics = match error {
+            Some(error) => {
+                let (line, column) = error.parse_location().unwrap_or((1, 1));
+                let start = lsp_types::Position::new(
+                    line.saturating_sub(1) as u32,
+                    column.saturating_sub(1) as u32,
+                );
+                let end = lsp_types::Position::new(start.line, start.character + 1);
+                vec![lsp_types::Diagnostic {
+                    range: lsp_types::Range { start, end },
+                    severity: Some(lsp_types::DiagnosticSeverity::ERROR),
+                    code: Some(lsp_types::NumberOrString::String("config".to_owned())),
+                    code_description: None,
+                    source: Some("roughly".into()),
+                    message: error.to_string(),
+                    related_information: None,
+                    tags: None,
+                    data: None,
+                }]
+            }
+            None => Vec::new(),
+        };
+        self.publish(uri, diagnostics, None);
+    }
+
+    /// Cross-file diagnostics move even on a save or config change: pull
+    /// clients with refresh support are asked to re-pull, push clients get
+    /// every open document re-published at idle time.
+    fn refresh_all_diagnostics(&mut self) {
+        if self.supports_pull_diagnostics {
+            if self.supports_diagnostic_refresh {
+                let mut client = self.client.clone();
+                self.runtime.spawn(async move {
+                    let _ = client.workspace_diagnostic_refresh(()).await;
+                });
+            }
+            return;
+        }
+        let open: Vec<PathBuf> = self
+            .open_documents
+            .iter()
+            .filter(|path| self.files.contains_key(*path))
+            .cloned()
+            .collect();
+        for path in open {
+            self.defer_semantic_publish(&path);
+        }
+    }
+
+    fn report_error(&self, message: &str) {
+        let mut client = self.client.clone();
+        let _ = client.show_message(lsp_types::ShowMessageParams {
+            typ: lsp_types::MessageType::ERROR,
+            message: message.to_owned(),
+        });
+    }
+}
+
+fn initialize_result(
+    encoding: PositionEncoding,
+    experimental: ExperimentalFeatures,
+) -> lsp_types::InitializeResult {
+    lsp_types::InitializeResult {
+        capabilities: lsp_types::ServerCapabilities {
+            position_encoding: Some(encoding.kind()),
+            code_action_provider: Some(lsp_types::CodeActionProviderCapability::Options(
+                lsp_types::CodeActionOptions {
+                    code_action_kinds: Some(vec![lsp_types::CodeActionKind::QUICKFIX]),
+                    ..Default::default()
+                },
+            )),
+            completion_provider: Some(lsp_types::CompletionOptions {
+                trigger_characters: Some(["$", "@", ":", "\""].map(str::to_owned).to_vec()),
+                ..Default::default()
+            }),
+            definition_provider: Some(lsp_types::OneOf::Left(true)),
+            type_definition_provider: Some(lsp_types::TypeDefinitionProviderCapability::Simple(
+                true,
+            )),
+            diagnostic_provider: Some(lsp_types::DiagnosticServerCapabilities::Options(
+                lsp_types::DiagnosticOptions {
+                    identifier: Some("roughly".to_owned()),
+                    inter_file_dependencies: true,
+                    workspace_diagnostics: false,
+                    work_done_progress_options: Default::default(),
+                },
+            )),
+            document_formatting_provider: Some(lsp_types::OneOf::Left(true)),
+            document_range_formatting_provider: Some(lsp_types::OneOf::Left(
+                experimental.range_formatting,
+            )),
+            document_symbol_provider: Some(lsp_types::OneOf::Left(true)),
+            hover_provider: Some(lsp_types::HoverProviderCapability::Simple(true)),
+            inlay_hint_provider: Some(lsp_types::OneOf::Left(true)),
+            signature_help_provider: Some(lsp_types::SignatureHelpOptions {
+                trigger_characters: Some(["(", ","].map(str::to_owned).to_vec()),
+                retrigger_characters: None,
+                work_done_progress_options: Default::default(),
+            }),
+            references_provider: Some(lsp_types::OneOf::Left(true)),
+            document_highlight_provider: Some(lsp_types::OneOf::Left(true)),
+            folding_range_provider: Some(lsp_types::FoldingRangeProviderCapability::Simple(true)),
+            rename_provider: Some(lsp_types::OneOf::Left(true)),
+            semantic_tokens_provider: Some(
+                lsp_types::SemanticTokensServerCapabilities::SemanticTokensOptions(
+                    lsp_types::SemanticTokensOptions {
+                        legend: lsp_types::SemanticTokensLegend {
+                            token_types: semantic_token_legend(),
+                            token_modifiers: Vec::new(),
+                        },
+                        full: Some(lsp_types::SemanticTokensFullOptions::Bool(true)),
+                        range: None,
+                        work_done_progress_options: Default::default(),
+                    },
+                ),
+            ),
+            text_document_sync: Some(lsp_types::TextDocumentSyncCapability::Options(
+                lsp_types::TextDocumentSyncOptions {
+                    open_close: Some(true),
+                    change: Some(lsp_types::TextDocumentSyncKind::INCREMENTAL),
+                    save: Some(lsp_types::TextDocumentSyncSaveOptions::SaveOptions(
+                        lsp_types::SaveOptions {
+                            include_text: Some(false),
+                        },
+                    )),
+                    ..Default::default()
+                },
+            )),
+            workspace_symbol_provider: Some(lsp_types::OneOf::Left(true)),
+            ..Default::default()
+        },
+        server_info: Some(lsp_types::ServerInfo {
+            name: env!("CARGO_PKG_NAME").to_owned(),
+            version: Some(env!("CARGO_PKG_VERSION").to_owned()),
+        }),
+    }
+}
+
+/// The semantic-token legend, in index order. `#:` annotation bodies are the
+/// one surface colored here (they are type syntax invisible to R grammars).
+fn semantic_token_legend() -> Vec<lsp_types::SemanticTokenType> {
+    vec![
+        lsp_types::SemanticTokenType::TYPE,
+        lsp_types::SemanticTokenType::TYPE_PARAMETER,
+        lsp_types::SemanticTokenType::PARAMETER,
+        lsp_types::SemanticTokenType::OPERATOR,
+        lsp_types::SemanticTokenType::DECORATOR,
+    ]
+}
+
+impl LanguageServer for ServerState {
+    type Error = ResponseError;
+    type NotifyResult = ControlFlow<async_lsp::Result<()>>;
+
+    fn initialize(
+        &mut self,
+        params: lsp_types::InitializeParams,
+    ) -> BoxFuture<'static, Result<lsp_types::InitializeResult, Self::Error>> {
+        let (reply, receive) = oneshot::channel();
+        if self
+            .sender
+            .send(Job::Initialize(Box::new(params), reply))
+            .is_err()
+        {
+            return Box::pin(async { Err(worker_gone_error()) });
+        }
+        self.idle_interrupt.store(true, Ordering::SeqCst);
+        Box::pin(async move { receive.await.unwrap_or_else(|_| Err(worker_gone_error())) })
+    }
+
+    fn initialized(&mut self, _: lsp_types::InitializedParams) -> Self::NotifyResult {
+        self.notify(|worker| worker.initialized())
+    }
+
+    fn did_open(&mut self, params: lsp_types::DidOpenTextDocumentParams) -> Self::NotifyResult {
+        self.notify_edit(move |worker| worker.did_open(params))
+    }
+
+    fn did_change(&mut self, params: lsp_types::DidChangeTextDocumentParams) -> Self::NotifyResult {
+        self.notify_edit(move |worker| worker.did_change(params))
+    }
+
+    fn did_save(&mut self, params: lsp_types::DidSaveTextDocumentParams) -> Self::NotifyResult {
+        self.notify_edit(move |worker| worker.did_save(params))
+    }
+
+    fn did_close(&mut self, params: lsp_types::DidCloseTextDocumentParams) -> Self::NotifyResult {
+        self.notify_edit(move |worker| worker.did_close(params))
+    }
+
+    fn did_change_watched_files(
+        &mut self,
+        params: lsp_types::DidChangeWatchedFilesParams,
+    ) -> Self::NotifyResult {
+        self.notify_edit(move |worker| worker.did_change_watched_files(params))
+    }
+
+    fn did_change_configuration(
+        &mut self,
+        _: lsp_types::DidChangeConfigurationParams,
+    ) -> Self::NotifyResult {
+        ControlFlow::Continue(())
+    }
+
+    fn hover(
+        &mut self,
+        params: lsp_types::HoverParams,
+    ) -> BoxFuture<'static, Result<Option<lsp_types::Hover>, Self::Error>> {
+        self.read(move |worker| {
+            let position = params.text_document_position_params;
+            let Some(path) = worker.document_path(&position.text_document.uri) else {
+                return Ok(None);
+            };
+            let Some(&file) = worker.files.get(&path) else {
+                return Ok(None);
+            };
+            let text = worker.text(file);
+            let offset = worker.to_offset(&text, position.position);
+            let hover = worker
+                .cancellable(|worker| ide::hover(&worker.db, file, offset))
+                .unwrap_or_default();
+            Ok(hover.map(|hover| lsp_types::Hover {
+                contents: lsp_types::HoverContents::Markup(lsp_types::MarkupContent {
+                    kind: lsp_types::MarkupKind::Markdown,
+                    value: format!("```r\n{}\n```", hover.lines.join("\n")),
+                }),
+                range: Some(worker.to_range(&text, hover.range)),
+            }))
+        })
+    }
+
+    fn definition(
+        &mut self,
+        params: lsp_types::GotoDefinitionParams,
+    ) -> BoxFuture<'static, Result<Option<lsp_types::GotoDefinitionResponse>, Self::Error>> {
+        self.read(move |worker| {
+            let position = params.text_document_position_params;
+            let Some(path) = worker.document_path(&position.text_document.uri) else {
+                return Ok(None);
+            };
+            let Some(&file) = worker.files.get(&path) else {
+                return Ok(None);
+            };
+            let Some(files) = ProjectFiles::try_get(&worker.db) else {
+                return Ok(None);
+            };
+            let text = worker.text(file);
+            let offset = worker.to_offset(&text, position.position);
+            let target = worker
+                .cancellable(|worker| ide::definition(&worker.db, files, file, offset))
+                .unwrap_or_default();
+            Ok(target.and_then(|target| {
+                let path = worker.path_of(target.file)?;
+                Some(lsp_types::GotoDefinitionResponse::Scalar(
+                    lsp_types::Location {
+                        uri: worker.document_uri(path),
+                        range: worker.to_range_in(target.file, target.range),
+                    },
+                ))
+            }))
+        })
+    }
+
+    fn type_definition(
+        &mut self,
+        params: request::GotoTypeDefinitionParams,
+    ) -> BoxFuture<'static, Result<Option<request::GotoTypeDefinitionResponse>, Self::Error>> {
+        self.read(move |worker| {
+            let position = params.text_document_position_params;
+            let Some(path) = worker.document_path(&position.text_document.uri) else {
+                return Ok(None);
+            };
+            let Some(&file) = worker.files.get(&path) else {
+                return Ok(None);
+            };
+            let Some(files) = ProjectFiles::try_get(&worker.db) else {
+                return Ok(None);
+            };
+            let text = worker.text(file);
+            let offset = worker.to_offset(&text, position.position);
+            let target = worker
+                .cancellable(|worker| ide::type_definition(&worker.db, files, file, offset))
+                .unwrap_or_default();
+            Ok(target.and_then(|target| {
+                let path = worker.path_of(target.file)?;
+                Some(lsp_types::GotoDefinitionResponse::Scalar(
+                    lsp_types::Location {
+                        uri: worker.document_uri(path),
+                        range: worker.to_range_in(target.file, target.range),
+                    },
+                ))
+            }))
+        })
+    }
+
+    fn references(
+        &mut self,
+        params: lsp_types::ReferenceParams,
+    ) -> BoxFuture<'static, Result<Option<Vec<lsp_types::Location>>, Self::Error>> {
+        self.read(move |worker| {
+            let position = params.text_document_position;
+            let include_declaration = params.context.include_declaration;
+            let Some(path) = worker.document_path(&position.text_document.uri) else {
+                return Ok(None);
+            };
+            let Some(&file) = worker.files.get(&path) else {
+                return Ok(None);
+            };
+            let Some(files) = ProjectFiles::try_get(&worker.db) else {
+                return Ok(None);
+            };
+            let text = worker.text(file);
+            let offset = worker.to_offset(&text, position.position);
+            let occurrences = worker
+                .cancellable(|worker| {
+                    ide::references(&worker.db, files, file, offset, include_declaration)
+                })
+                .unwrap_or_default();
+            let locations: Vec<lsp_types::Location> = occurrences
+                .into_iter()
+                .filter_map(|occurrence| {
+                    let path = worker.path_of(occurrence.file)?;
+                    Some(lsp_types::Location {
+                        uri: worker.document_uri(path),
+                        range: worker.to_range_in(occurrence.file, occurrence.range),
+                    })
+                })
+                .collect();
+            Ok((!locations.is_empty()).then_some(locations))
+        })
+    }
+
+    fn document_highlight(
+        &mut self,
+        params: lsp_types::DocumentHighlightParams,
+    ) -> BoxFuture<'static, Result<Option<Vec<lsp_types::DocumentHighlight>>, Self::Error>> {
+        self.read(move |worker| {
+            let position = params.text_document_position_params;
+            let Some(path) = worker.document_path(&position.text_document.uri) else {
+                return Ok(None);
+            };
+            let Some(&file) = worker.files.get(&path) else {
+                return Ok(None);
+            };
+            let Some(files) = ProjectFiles::try_get(&worker.db) else {
+                return Ok(None);
+            };
+            let text = worker.text(file);
+            let offset = worker.to_offset(&text, position.position);
+            let occurrences = worker
+                .cancellable(|worker| ide::references(&worker.db, files, file, offset, true))
+                .unwrap_or_default();
+            let highlights: Vec<lsp_types::DocumentHighlight> = occurrences
+                .into_iter()
+                .filter(|occurrence| occurrence.file == file)
+                .map(|occurrence| lsp_types::DocumentHighlight {
+                    range: worker.to_range(&text, occurrence.range),
+                    kind: None,
+                })
+                .collect();
+            Ok((!highlights.is_empty()).then_some(highlights))
+        })
+    }
+
+    fn rename(
+        &mut self,
+        params: lsp_types::RenameParams,
+    ) -> BoxFuture<'static, Result<Option<lsp_types::WorkspaceEdit>, Self::Error>> {
+        self.read(move |worker| {
+            let new_name = params.new_name;
+            if !is_valid_r_identifier(&new_name) {
+                return Err(ResponseError::new(
+                    ErrorCode::INVALID_PARAMS,
+                    format!("`{new_name}` is not a valid R identifier"),
+                ));
+            }
+            let position = params.text_document_position;
+            let Some(path) = worker.document_path(&position.text_document.uri) else {
+                return Ok(None);
+            };
+            let Some(&file) = worker.files.get(&path) else {
+                return Ok(None);
+            };
+            let Some(files) = ProjectFiles::try_get(&worker.db) else {
+                return Ok(None);
+            };
+            let text = worker.text(file);
+            let offset = worker.to_offset(&text, position.position);
+            let occurrences =
+                match worker.cancellable(|worker| ide::rename(&worker.db, files, file, offset)) {
+                    Ok(occurrences) => occurrences,
+                    // A mutation must never degrade to a null edit.
+                    Err(_) => {
+                        return Err(ResponseError::new(
+                            ErrorCode::CONTENT_MODIFIED,
+                            "rename was cancelled by a concurrent edit",
+                        ));
+                    }
+                };
+            Ok(occurrences.map(|occurrences| {
+                let mut changes: HashMap<lsp_types::Url, Vec<lsp_types::TextEdit>> = HashMap::new();
+                for occurrence in occurrences {
+                    let Some(path) = worker.path_of(occurrence.file) else {
+                        continue;
+                    };
+                    changes.entry(worker.document_uri(path)).or_default().push(
+                        lsp_types::TextEdit {
+                            range: worker.to_range_in(occurrence.file, occurrence.range),
+                            new_text: new_name.clone(),
+                        },
+                    );
+                }
+                lsp_types::WorkspaceEdit {
+                    changes: Some(changes),
+                    ..Default::default()
+                }
+            }))
+        })
+    }
+
+    fn completion(
+        &mut self,
+        params: lsp_types::CompletionParams,
+    ) -> BoxFuture<'static, Result<Option<lsp_types::CompletionResponse>, Self::Error>> {
+        self.read(move |worker| {
+            let position = params.text_document_position;
+            let Some(path) = worker.document_path(&position.text_document.uri) else {
+                return Ok(None);
+            };
+            let Some(&file) = worker.files.get(&path) else {
+                return Ok(None);
+            };
+            let Some(files) = ProjectFiles::try_get(&worker.db) else {
+                return Ok(None);
+            };
+            let text = worker.text(file);
+            let offset = worker.to_offset(&text, position.position);
+            let result = worker
+                .cancellable(|worker| ide::completion(&worker.db, files, file, offset))
+                .unwrap_or_default();
+            Ok(result.map(|result| {
+                let items = result
+                    .items
+                    .into_iter()
+                    .map(|item| convert_completion_item(item, worker.supports_snippets))
+                    .collect();
+                lsp_types::CompletionResponse::List(lsp_types::CompletionList {
+                    is_incomplete: result.is_incomplete,
+                    items,
+                })
+            }))
+        })
+    }
+
+    fn inlay_hint(
+        &mut self,
+        params: lsp_types::InlayHintParams,
+    ) -> BoxFuture<'static, Result<Option<Vec<lsp_types::InlayHint>>, Self::Error>> {
+        self.read(move |worker| {
+            let Some(path) = worker.document_path(&params.text_document.uri) else {
+                return Ok(None);
+            };
+            let Some(&file) = worker.files.get(&path) else {
+                return Ok(None);
+            };
+            let text = worker.text(file);
+            let viewport = {
+                let start = worker.to_offset(&text, params.range.start);
+                let end = worker.to_offset(&text, params.range.end);
+                TextRange::new(start, end)
+            };
+            let hints = worker
+                .cancellable(|worker| ide::inlay_hints(&worker.db, file, Some(viewport)))
+                .unwrap_or_default();
+            Ok(Some(
+                hints
+                    .into_iter()
+                    .map(|hint| lsp_types::InlayHint {
+                        position: worker.to_position(&text, hint.offset),
+                        label: lsp_types::InlayHintLabel::String(hint.label),
+                        kind: Some(lsp_types::InlayHintKind::TYPE),
+                        text_edits: None,
+                        tooltip: None,
+                        padding_left: Some(false),
+                        padding_right: Some(false),
+                        data: None,
+                    })
+                    .collect(),
+            ))
+        })
+    }
+
+    fn signature_help(
+        &mut self,
+        params: lsp_types::SignatureHelpParams,
+    ) -> BoxFuture<'static, Result<Option<lsp_types::SignatureHelp>, Self::Error>> {
+        self.read(move |worker| {
+            let position = params.text_document_position_params;
+            let Some(path) = worker.document_path(&position.text_document.uri) else {
+                return Ok(None);
+            };
+            let Some(&file) = worker.files.get(&path) else {
+                return Ok(None);
+            };
+            let text = worker.text(file);
+            let offset = worker.to_offset(&text, position.position);
+            let help = worker
+                .cancellable(|worker| ide::signature_help(&worker.db, file, offset))
+                .unwrap_or_default();
+            Ok(help.map(|help| {
+                let active_parameter = help
+                    .signatures
+                    .get(help.active_signature)
+                    .and_then(|signature| signature.active_parameter);
+                let signatures = help
+                    .signatures
+                    .into_iter()
+                    .map(|signature| convert_signature(signature, worker.supports_label_offsets))
+                    .collect();
+                lsp_types::SignatureHelp {
+                    signatures,
+                    active_signature: Some(help.active_signature as u32),
+                    active_parameter: active_parameter.map(|index| index as u32),
+                }
+            }))
+        })
+    }
+
+    fn code_action(
+        &mut self,
+        params: lsp_types::CodeActionParams,
+    ) -> BoxFuture<'static, Result<Option<lsp_types::CodeActionResponse>, Self::Error>> {
+        self.read(move |worker| {
+            let Some(path) = worker.document_path(&params.text_document.uri) else {
+                return Ok(None);
+            };
+            let Some(&file) = worker.files.get(&path) else {
+                return Ok(None);
+            };
+            let text = worker.text(file);
+            let range = TextRange::new(
+                worker.to_offset(&text, params.range.start),
+                worker.to_offset(&text, params.range.end),
+            );
+            let actions = worker
+                .cancellable(|worker| ide::code_actions(&worker.db, file, range))
+                .unwrap_or_default();
+            if actions.is_empty() {
+                return Ok(None);
+            }
+            let uri = worker.document_uri(&path);
+            Ok(Some(
+                actions
+                    .into_iter()
+                    .map(|action| {
+                        let edits: Vec<lsp_types::TextEdit> = action
+                            .edits
+                            .into_iter()
+                            .map(|edit| lsp_types::TextEdit {
+                                range: worker.to_range(&text, edit.range),
+                                new_text: edit.replacement,
+                            })
+                            .collect();
+                        lsp_types::CodeActionOrCommand::CodeAction(lsp_types::CodeAction {
+                            title: action.title,
+                            kind: Some(lsp_types::CodeActionKind::QUICKFIX),
+                            edit: Some(lsp_types::WorkspaceEdit {
+                                changes: Some(HashMap::from([(uri.clone(), edits)])),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        })
+                    })
+                    .collect(),
+            ))
+        })
+    }
+
+    fn formatting(
+        &mut self,
+        params: lsp_types::DocumentFormattingParams,
+    ) -> BoxFuture<'static, Result<Option<Vec<lsp_types::TextEdit>>, Self::Error>> {
+        self.read(move |worker| {
+            let Some(path) = worker.document_path(&params.text_document.uri) else {
+                return Ok(None);
+            };
+            let Some(&file) = worker.files.get(&path) else {
+                return Ok(None);
+            };
+            let text = worker.text(file);
+            match format::format(&text, worker.config.format) {
+                Ok(formatted) => {
+                    let index = LineIndex::new(&text);
+                    let end_line = index.line_count() - 1;
+                    let end =
+                        lsp_types::Position::new(end_line, index.line_length(end_line, &text));
+                    Ok(Some(vec![lsp_types::TextEdit {
+                        range: lsp_types::Range {
+                            start: lsp_types::Position::new(0, 0),
+                            end,
+                        },
+                        new_text: formatted,
+                    }]))
+                }
+                // A refusal (syntax errors) surfaces as "no edits".
+                Err(error) => {
+                    tracing::error!("formatting failed: {error:?}");
+                    Ok(None)
+                }
+            }
+        })
+    }
+
+    fn document_symbol(
+        &mut self,
+        params: lsp_types::DocumentSymbolParams,
+    ) -> BoxFuture<'static, Result<Option<lsp_types::DocumentSymbolResponse>, Self::Error>> {
+        self.read(move |worker| {
+            let Some(path) = worker.document_path(&params.text_document.uri) else {
+                return Ok(None);
+            };
+            let Some(&file) = worker.files.get(&path) else {
+                return Ok(None);
+            };
+            let text = worker.text(file);
+            let symbols = worker
+                .cancellable(|worker| ide::document_symbols(&worker.db, file))
+                .unwrap_or_default();
+            #[allow(deprecated)]
+            let symbols: Vec<lsp_types::DocumentSymbol> = symbols
+                .into_iter()
+                .filter(|(name, _)| !name.is_empty())
+                .map(|(name, target)| lsp_types::DocumentSymbol {
+                    name,
+                    detail: None,
+                    kind: lsp_types::SymbolKind::VARIABLE,
+                    tags: None,
+                    deprecated: None,
+                    range: worker.to_range(&text, target.range),
+                    selection_range: worker.to_range(&text, target.range),
+                    children: None,
+                })
+                .collect();
+            Ok(Some(lsp_types::DocumentSymbolResponse::Nested(symbols)))
+        })
+    }
+
+    fn symbol(
+        &mut self,
+        params: lsp_types::WorkspaceSymbolParams,
+    ) -> BoxFuture<'static, Result<Option<lsp_types::WorkspaceSymbolResponse>, Self::Error>> {
+        self.read(move |worker| {
+            let Some(files) = ProjectFiles::try_get(&worker.db) else {
+                return Ok(None);
+            };
+            let query = params.query;
+            let symbols = worker
+                .cancellable(|worker| ide::workspace_symbols(&worker.db, files, &query))
+                .unwrap_or_default();
+            #[allow(deprecated)]
+            let symbols: Vec<lsp_types::SymbolInformation> = symbols
+                .into_iter()
+                .filter_map(|(name, target)| {
+                    let path = worker.path_of(target.file)?;
+                    Some(lsp_types::SymbolInformation {
+                        name,
+                        kind: lsp_types::SymbolKind::VARIABLE,
+                        tags: None,
+                        deprecated: None,
+                        location: lsp_types::Location {
+                            uri: worker.document_uri(path),
+                            range: worker.to_range_in(target.file, target.range),
+                        },
+                        container_name: None,
+                    })
+                })
+                .collect();
+            Ok(Some(lsp_types::WorkspaceSymbolResponse::Flat(symbols)))
+        })
+    }
+
+    fn folding_range(
+        &mut self,
+        params: lsp_types::FoldingRangeParams,
+    ) -> BoxFuture<'static, Result<Option<Vec<lsp_types::FoldingRange>>, Self::Error>> {
+        self.read(move |worker| {
+            let Some(path) = worker.document_path(&params.text_document.uri) else {
+                return Ok(None);
+            };
+            let Some(&file) = worker.files.get(&path) else {
+                return Ok(None);
+            };
+            let text = worker.text(file);
+            Ok(Some(folding_ranges(&worker.db, file, &text)))
+        })
+    }
+
+    fn semantic_tokens_full(
+        &mut self,
+        params: lsp_types::SemanticTokensParams,
+    ) -> BoxFuture<'static, Result<Option<lsp_types::SemanticTokensResult>, Self::Error>> {
+        self.read(move |worker| {
+            let Some(path) = worker.document_path(&params.text_document.uri) else {
+                return Ok(None);
+            };
+            let Some(&file) = worker.files.get(&path) else {
+                return Ok(None);
+            };
+            let text = worker.text(file);
+            let tokens = annotation_semantic_tokens(&worker.db, file, &text, worker.encoding);
+            Ok(Some(lsp_types::SemanticTokensResult::Tokens(
+                lsp_types::SemanticTokens {
+                    result_id: None,
+                    data: tokens,
+                },
+            )))
+        })
+    }
+
+    fn document_diagnostic(
+        &mut self,
+        params: lsp_types::DocumentDiagnosticParams,
+    ) -> BoxFuture<'static, Result<lsp_types::DocumentDiagnosticReportResult, Self::Error>> {
+        self.read(move |worker| {
+            let Some(path) = worker.document_path(&params.text_document.uri) else {
+                return Ok(empty_full_diagnostic_report());
+            };
+            if let Some(_stub) = worker.stub_documents.get(&path) {
+                return Ok(diagnostic_report(Vec::new(), params.previous_result_id));
+            }
+            if let Some(namespace) = worker.namespace_documents.get(&path).cloned() {
+                let diagnostics = worker.namespace_diagnostics(&namespace);
+                return Ok(diagnostic_report(diagnostics, params.previous_result_id));
+            }
+            if !worker.files.contains_key(&path) {
+                // A pull may legitimately target an untracked document.
+                return Ok(empty_full_diagnostic_report());
+            }
+            match worker.cancellable(|worker| worker.settled_diagnostics(&path)) {
+                Ok(Some(diagnostics)) => {
+                    Ok(diagnostic_report(diagnostics, params.previous_result_id))
+                }
+                Ok(None) => Ok(empty_full_diagnostic_report()),
+                // A pull report is authoritative and cached: a cancelled read
+                // must never become "this document is clean".
+                Err(_) => Err(diagnostics_cancelled_error()),
+            }
+        })
+    }
+}
+
+fn convert_completion_item(item: ide::CompletionItem, snippets: bool) -> lsp_types::CompletionItem {
+    let kind = match item.kind {
+        ide::CompletionKind::Keyword => lsp_types::CompletionItemKind::KEYWORD,
+        ide::CompletionKind::Variable => lsp_types::CompletionItemKind::VARIABLE,
+        ide::CompletionKind::Function => lsp_types::CompletionItemKind::FUNCTION,
+        ide::CompletionKind::Field => lsp_types::CompletionItemKind::FIELD,
+    };
+    let mut converted = lsp_types::CompletionItem {
+        label: item.label.clone(),
+        kind: Some(kind),
+        detail: item.detail,
+        documentation: item.documentation.map(|documentation| {
+            lsp_types::Documentation::MarkupContent(lsp_types::MarkupContent {
+                kind: lsp_types::MarkupKind::Markdown,
+                value: documentation,
+            })
+        }),
+        ..Default::default()
+    };
+    if snippets && item.kind == ide::CompletionKind::Function {
+        converted.insert_text = Some(format!("{}($0)", item.label));
+        converted.insert_text_format = Some(lsp_types::InsertTextFormat::SNIPPET);
+        converted.command = Some(lsp_types::Command {
+            title: "trigger parameter hints".to_owned(),
+            command: "editor.action.triggerParameterHints".to_owned(),
+            arguments: None,
+        });
+    }
+    converted
+}
+
+/// Label offsets are always UTF-16 code units per the LSP spec, independent
+/// of the negotiated document encoding.
+fn convert_signature(
+    signature: ide::SignatureData,
+    label_offsets: bool,
+) -> lsp_types::SignatureInformation {
+    let parameters: Vec<lsp_types::ParameterInformation> = signature
+        .parameters
+        .iter()
+        .map(|span| {
+            let prefix = &signature.label[..usize::from(span.start())];
+            let text = &signature.label[usize::from(span.start())..usize::from(span.end())];
+            let label = if label_offsets {
+                let start = prefix.encode_utf16().count() as u32;
+                let length = text.encode_utf16().count() as u32;
+                lsp_types::ParameterLabel::LabelOffsets([start, start + length])
+            } else {
+                lsp_types::ParameterLabel::Simple(text.to_owned())
+            };
+            lsp_types::ParameterInformation {
+                label,
+                documentation: None,
+            }
+        })
+        .collect();
+    lsp_types::SignatureInformation {
+        label: signature.label,
+        documentation: None,
+        parameters: Some(parameters),
+        active_parameter: signature.active_parameter.map(|index| index as u32),
+    }
+}
+
+fn empty_full_diagnostic_report() -> lsp_types::DocumentDiagnosticReportResult {
+    lsp_types::DocumentDiagnosticReportResult::Report(lsp_types::DocumentDiagnosticReport::Full(
+        lsp_types::RelatedFullDocumentDiagnosticReport {
+            related_documents: None,
+            full_document_diagnostic_report: lsp_types::FullDocumentDiagnosticReport {
+                result_id: None,
+                items: Vec::new(),
+            },
+        },
+    ))
+}
+
+/// A content hash of the serialized diagnostics — correct under inter-file
+/// dependencies, where a document's own version does not move but its
+/// diagnostics do.
+fn diagnostics_result_id(diagnostics: &[lsp_types::Diagnostic]) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::hash::DefaultHasher::new();
+    serde_json::to_string(diagnostics)
+        .unwrap_or_default()
+        .hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+fn diagnostic_report(
+    items: Vec<lsp_types::Diagnostic>,
+    previous_result_id: Option<String>,
+) -> lsp_types::DocumentDiagnosticReportResult {
+    let result_id = diagnostics_result_id(&items);
+    if previous_result_id.as_deref() == Some(result_id.as_str()) {
+        return lsp_types::DocumentDiagnosticReportResult::Report(
+            lsp_types::DocumentDiagnosticReport::Unchanged(
+                lsp_types::RelatedUnchangedDocumentDiagnosticReport {
+                    related_documents: None,
+                    unchanged_document_diagnostic_report:
+                        lsp_types::UnchangedDocumentDiagnosticReport { result_id },
+                },
+            ),
+        );
+    }
+    lsp_types::DocumentDiagnosticReportResult::Report(lsp_types::DocumentDiagnosticReport::Full(
+        lsp_types::RelatedFullDocumentDiagnosticReport {
+            related_documents: None,
+            full_document_diagnostic_report: lsp_types::FullDocumentDiagnosticReport {
+                result_id: Some(result_id),
+                items,
+            },
+        },
+    ))
+}
+
+/// Retryable cancellation: the wire shape `{"retriggerRequest": true}` makes
+/// the client re-pull instead of caching an empty answer.
+fn diagnostics_cancelled_error() -> ResponseError {
+    ResponseError::new_with_data(
+        ErrorCode::SERVER_CANCELLED,
+        "diagnostics were cancelled by a concurrent edit",
+        serde_json::to_value(lsp_types::DiagnosticServerCancellationData {
+            retrigger_request: true,
+        })
+        .expect("cancellation data serializes"),
+    )
+}
+
+/// Valid R identifier: a letter or `.` (not followed by a digit) first, then
+/// alphanumerics, `.`, `_`; reserved words excluded.
+fn is_valid_r_identifier(name: &str) -> bool {
+    const RESERVED: &[&str] = &[
+        "if",
+        "else",
+        "repeat",
+        "while",
+        "function",
+        "for",
+        "in",
+        "next",
+        "break",
+        "TRUE",
+        "FALSE",
+        "NULL",
+        "Inf",
+        "NaN",
+        "NA",
+        "NA_integer_",
+        "NA_real_",
+        "NA_character_",
+        "NA_complex_",
+    ];
+    if RESERVED.contains(&name) {
+        return false;
+    }
+    let mut characters = name.chars();
+    let Some(first) = characters.next() else {
+        return false;
+    };
+    if !(first.is_alphabetic() || first == '.') {
+        return false;
+    }
+    if first == '.'
+        && name
+            .chars()
+            .nth(1)
+            .is_some_and(|second| second.is_ascii_digit())
+    {
+        return false;
+    }
+    name.chars()
+        .all(|character| character.is_alphanumeric() || character == '.' || character == '_')
+}
+
+/// Region folds for multi-line brace/paren/argument-list nodes (keeping the
+/// closing delimiter visible) and comment folds for consecutive comment runs
+/// (`#:` blocks fold as one region).
+fn folding_ranges(db: &RootDatabase, file: SourceFile, text: &str) -> Vec<lsp_types::FoldingRange> {
+    let index = LineIndex::new(text);
+    let parse = semantics::parse(db, file);
+    let mut ranges = Vec::new();
+    for node in parse.syntax_node().descendants() {
+        if matches!(
+            node.kind(),
+            SyntaxKind::BRACE_EXPR | SyntaxKind::PAREN_EXPR | SyntaxKind::ARGUMENT_LIST
+        ) {
+            let start = index.line_column(node.text_range().start());
+            let end = index.line_column(node.text_range().end());
+            if end.line > start.line {
+                ranges.push(lsp_types::FoldingRange {
+                    start_line: start.line,
+                    start_character: None,
+                    end_line: end.line - 1,
+                    end_character: None,
+                    kind: Some(lsp_types::FoldingRangeKind::Region),
+                    collapsed_text: None,
+                });
+            }
+        }
+    }
+    // Comment runs: consecutive lines whose first token is a comment.
+    let mut run_start: Option<u32> = None;
+    let mut previous_line: Option<u32> = None;
+    let mut comment_lines: Vec<u32> = Vec::new();
+    for element in parse.syntax_node().descendants_with_tokens() {
+        if let syntax::SyntaxElement::Token(token) = element
+            && matches!(token.kind(), SyntaxKind::COMMENT)
+        {
+            comment_lines.push(index.line_column(token.text_range().start()).line);
+        }
+    }
+    comment_lines.sort_unstable();
+    comment_lines.dedup();
+    for line in comment_lines {
+        match (run_start, previous_line) {
+            (Some(start), Some(previous)) if line == previous + 1 => {
+                previous_line = Some(line);
+                let _ = start;
+            }
+            (Some(start), Some(previous)) => {
+                if previous > start {
+                    ranges.push(comment_fold(start, previous));
+                }
+                run_start = Some(line);
+                previous_line = Some(line);
+            }
+            _ => {
+                run_start = Some(line);
+                previous_line = Some(line);
+            }
+        }
+    }
+    if let (Some(start), Some(previous)) = (run_start, previous_line)
+        && previous > start
+    {
+        ranges.push(comment_fold(start, previous));
+    }
+    ranges.sort_by_key(|range| (range.start_line, range.end_line));
+    ranges
+}
+
+fn comment_fold(start: u32, end: u32) -> lsp_types::FoldingRange {
+    lsp_types::FoldingRange {
+        start_line: start,
+        start_character: None,
+        end_line: end,
+        end_character: None,
+        kind: Some(lsp_types::FoldingRangeKind::Comment),
+        collapsed_text: None,
+    }
+}
+
+/// Delta-encoded semantic tokens for the `#:` annotation regions: type names
+/// color as types, `<T>` binders as type parameters, record/parameter names
+/// as parameters, punctuation as operators, `@` directives as decorators.
+fn annotation_semantic_tokens(
+    db: &RootDatabase,
+    file: SourceFile,
+    text: &str,
+    encoding: PositionEncoding,
+) -> Vec<lsp_types::SemanticToken> {
+    let index = LineIndex::new(text);
+    let parse = semantics::parse(db, file);
+    let mut spans: Vec<(TextRange, u32)> = Vec::new();
+    for annotation in parse
+        .syntax_node()
+        .descendants()
+        .filter(|node| node.kind() == SyntaxKind::ANNOTATION)
+    {
+        for element in annotation.descendants_with_tokens() {
+            let syntax::SyntaxElement::Token(token) = element else {
+                continue;
+            };
+            let parent_kind = token.parent().map(|parent| parent.kind());
+            let token_type = match token.kind() {
+                SyntaxKind::IDENT => match parent_kind {
+                    Some(SyntaxKind::TYPE_BINDER) => Some(1),
+                    Some(SyntaxKind::TYPE_FIELD) | Some(SyntaxKind::TYPE_FUNCTION) => Some(2),
+                    Some(SyntaxKind::ANNOTATION_DIRECTIVE) => Some(4),
+                    _ => Some(0),
+                },
+                SyntaxKind::COMMA
+                | SyntaxKind::PIPE
+                | SyntaxKind::COLON
+                | SyntaxKind::L_BRACKET
+                | SyntaxKind::R_BRACKET
+                | SyntaxKind::L_PAREN
+                | SyntaxKind::R_PAREN
+                | SyntaxKind::L_BRACE
+                | SyntaxKind::R_BRACE
+                | SyntaxKind::LESS
+                | SyntaxKind::GREATER
+                | SyntaxKind::DOTS => Some(3),
+                SyntaxKind::AT => Some(4),
+                SyntaxKind::NULL_KW => Some(0),
+                _ => None,
+            };
+            if let Some(token_type) = token_type
+                && !token.text_range().is_empty()
+            {
+                spans.push((token.text_range(), token_type));
+            }
+        }
+    }
+    spans.sort_by_key(|(range, _)| range.start());
+
+    let mut data = Vec::new();
+    let mut previous_line = 0u32;
+    let mut previous_start = 0u32;
+    for (range, token_type) in spans {
+        let position = match encoding {
+            PositionEncoding::Utf8 => index.line_column(range.start()),
+            PositionEncoding::Utf16 => index.line_column_utf16(range.start(), text),
+        };
+        let length = match encoding {
+            PositionEncoding::Utf8 => range.len().into(),
+            PositionEncoding::Utf16 => text[usize::from(range.start())..usize::from(range.end())]
+                .encode_utf16()
+                .count() as u32,
+        };
+        let delta_line = position.line - previous_line;
+        let delta_start = if delta_line == 0 {
+            position.column - previous_start
+        } else {
+            position.column
+        };
+        data.push(lsp_types::SemanticToken {
+            delta_line,
+            delta_start,
+            length,
+            token_type,
+            token_modifiers_bitset: 0,
+        });
+        previous_line = position.line;
+        previous_start = position.column;
+    }
+    data
+}
