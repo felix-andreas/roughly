@@ -1,17 +1,23 @@
-//! Per-position IDE cross-stack differential: every byte position of every
-//! typing-suite case runs hover, goto-definition, and references through the
-//! frozen legacy stack (the oracle) and the rewrite's `ide` crate, comparing
-//! **targets and ranges** — never prose, per the wording-freedom doctrine:
+//! Per-position IDE cross-stack differential — a HARD GATE: every byte
+//! position of every typing-suite case runs hover, goto-definition,
+//! references, rename, and signature help through the frozen legacy stack
+//! (the oracle) and the rewrite's `ide` crate, plus inlay-hint anchors once
+//! per case, comparing **targets and ranges** — never prose, per the
+//! wording-freedom doctrine:
 //!
 //! - definition: both resolve or both don't; the rewrite's single target must
 //!   equal or lie inside one of the oracle's targets;
-//! - references: identical byte-range sets;
+//! - references and rename: identical byte-range sets;
 //! - hover: agreement on presence, and the rewrite's range equal or inside
-//!   the oracle's (contents are not compared).
+//!   the oracle's (contents are not compared);
+//! - signature help: agreement on presence and the active parameter index;
+//! - inlay hints: identical anchor positions (labels stay fixture-pinned).
 //!
-//! Divergences land in `target/differential-ide.txt`, rolled up by class.
-//! Ignored by default while triage hardens it into a gate:
-//! `cargo test -p differential --release -- --ignored ide_differential`.
+//! Accepted classes are counted separately (hover/signature new-only = more
+//! coverage; references/rename declined on undeclared annotation type
+//! tokens = deliberate narrowing), oracle-defect cases sit on committed
+//! allowlists that fail when stale, and any unexplained divergence fails the
+//! test. Details land in `target/differential-ide.txt`.
 
 use analysis::text::{TextPosition, TextRange as LegacyTextRange};
 use analysis::{Analysis, CheckConfig, LintConfig};
@@ -35,6 +41,23 @@ const ORACLE_DEFICIT_CASES: &[&str] = &[
     "typing::scoping__forward_capture_sees_the_frame_write",
 ];
 
+/// Adjudicated design differences, per case with the reason; divergences in
+/// these cases are accepted wholesale, and a stale entry fails.
+const ACCEPTED_DIFFERENCE_CASES: &[(&str, &str)] = &[
+    (
+        "typing::higher_order__any_callee_arguments_are_not_checked",
+        "the oracle hints a binding from its INTERNAL value type (`-> Any`) while \
+         the exported scheme says Unknown; the rewrite hints only scheme-consistent \
+         types, so a scheme carrying Unknown shows no hint",
+    ),
+    (
+        "typing-scripts::sequential__aliased_function_reference_exports_closed",
+        "same INTERNAL-vs-exported hint difference: the oracle hints `g <- f` with \
+         the open internal type while both stacks export the closed \
+         `fn(p: Unknown) -> Unknown`; the rewrite hints only the exported scheme",
+    ),
+];
+
 #[test]
 fn ide_differential() {
     let mut report = String::new();
@@ -44,6 +67,10 @@ fn ide_differential() {
     let mut diverging_cases = 0usize;
     let mut unexplained: Vec<String> = Vec::new();
     let mut stale_allowlist: Vec<&str> = ORACLE_DEFICIT_CASES.to_vec();
+    let mut stale_accepted: Vec<&str> = ACCEPTED_DIFFERENCE_CASES
+        .iter()
+        .map(|(case, _)| *case)
+        .collect();
 
     for directory in ["typing", "typing-scripts"] {
         let suite_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -111,12 +138,18 @@ fn ide_differential() {
                         // legacy-only loss is still a real divergence.
                         for divergence in &divergences {
                             let additive = divergence.contains("definition new-only")
-                                || (divergence.contains("references set mismatch")
+                                || ((divergence.contains("references set mismatch")
+                                    || divergence.contains("inlay hint positions mismatch"))
                                     && divergence.contains("legacy-only []"));
                             if !additive {
                                 unexplained.push(format!("{case_key}: {divergence}"));
                             }
                         }
+                    } else if ACCEPTED_DIFFERENCE_CASES
+                        .iter()
+                        .any(|(case, _)| *case == case_key)
+                    {
+                        stale_accepted.retain(|entry| *entry != case_key);
                     } else {
                         for divergence in &divergences {
                             unexplained.push(format!("{case_key}: {divergence}"));
@@ -159,6 +192,10 @@ fn ide_differential() {
     assert!(
         stale_allowlist.is_empty(),
         "stale oracle-deficit allowlist entries (now matching — remove them): {stale_allowlist:?}"
+    );
+    assert!(
+        stale_accepted.is_empty(),
+        "stale accepted-difference entries (now matching — remove them): {stale_accepted:?}"
     );
 }
 
@@ -293,6 +330,93 @@ fn compare_case(
             }
         }
 
+        // Rename: identical edit-site sets under the same annotation-token
+        // narrowing as references.
+        let legacy_rename: BTreeSet<(usize, usize)> =
+            analysis::ide::rename(&mut analysis_state, &path, position, "renamed")
+                .map(|result| {
+                    result
+                        .edits
+                        .values()
+                        .flatten()
+                        .filter_map(|edit| range_to_bytes(&line_starts, source, edit.range))
+                        .collect()
+                })
+                .unwrap_or_default();
+        let new_rename: BTreeSet<(usize, usize)> = ide::rename(&db, files, file, text_size)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|occurrence| {
+                (
+                    usize::from(occurrence.range.start()),
+                    usize::from(occurrence.range.end()),
+                )
+            })
+            .collect();
+        if legacy_rename != new_rename {
+            if new_rename.is_empty() && inside_annotation(source, offset) {
+                *rollup
+                    .entry("rename on undeclared type token (accepted narrower)".to_owned())
+                    .or_default() += 1;
+            } else if legacy_rename.is_subset(&new_rename)
+                && new_references == new_rename
+                && legacy_rename == legacy_references
+            {
+                // The same capture-deficit additions references already
+                // classified; avoid double-reporting.
+                *rollup
+                    .entry("rename additions matching references (accepted)".to_owned())
+                    .or_default() += 1;
+            } else {
+                let legacy_only: Vec<_> = legacy_rename.difference(&new_rename).collect();
+                let new_only: Vec<_> = new_rename.difference(&legacy_rename).collect();
+                record(
+                    rollup,
+                    &mut divergences,
+                    offset,
+                    "rename set mismatch",
+                    &format!("legacy-only {legacy_only:?} / new-only {new_only:?}"),
+                );
+            }
+        }
+
+        // Signature help: presence and the active parameter index (labels
+        // are prose — not compared).
+        let legacy_signature = analysis::ide::signature_help(&mut analysis_state, &path, position)
+            .and_then(|help| {
+                help.signatures
+                    .get(help.active_signature)
+                    .map(|signature| signature.active_parameter)
+            });
+        let new_signature =
+            ide::signature_help(&db, file, text_size).map(|help| help.active_parameter);
+        match (&legacy_signature, &new_signature) {
+            (None, None) => {}
+            (Some(legacy), Some(new)) => {
+                if legacy != new {
+                    record(
+                        rollup,
+                        &mut divergences,
+                        offset,
+                        "signature active-parameter mismatch",
+                        &format!("legacy {legacy:?} / new {new:?}"),
+                    );
+                }
+            }
+            (Some(_), None) => record(
+                rollup,
+                &mut divergences,
+                offset,
+                "signature legacy-only",
+                "",
+            ),
+            (None, Some(_)) => {
+                *rollup
+                    .entry("signature new-only (accepted improvement)".to_owned())
+                    .or_default() += 1;
+            }
+        }
+
         // Hover: presence + range containment. The rewrite hovering where
         // the oracle does not is strictly more coverage — an accepted
         // improvement counted separately, not a divergence.
@@ -330,6 +454,29 @@ fn compare_case(
                     .or_default() += 1;
             }
         }
+    }
+
+    // Inlay hints, once per case: anchor positions must agree (labels are
+    // renderer prose and stay fixture-pinned instead).
+    let legacy_hints: BTreeSet<usize> =
+        analysis::ide::inlay_hints(&mut analysis_state, &path, None)
+            .iter()
+            .filter_map(|hint| position_to_byte(&line_starts, source, hint.position))
+            .collect();
+    let new_hints: BTreeSet<usize> = ide::inlay_hints(&db, file, None)
+        .iter()
+        .map(|hint| usize::from(hint.offset))
+        .collect();
+    if legacy_hints != new_hints {
+        let legacy_only: Vec<_> = legacy_hints.difference(&new_hints).collect();
+        let new_only: Vec<_> = new_hints.difference(&legacy_hints).collect();
+        record(
+            rollup,
+            &mut divergences,
+            0,
+            "inlay hint positions mismatch",
+            &format!("legacy-only {legacy_only:?} / new-only {new_only:?}"),
+        );
     }
 
     divergences

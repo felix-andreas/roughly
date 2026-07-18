@@ -72,18 +72,22 @@ allowlisted.
 
 ### The per-position IDE differential
 
-`cargo test -p differential --test test_ide_differential` runs hover, goto-definition, and
-references at **every byte position** of every typing-suite case through both stacks and
-compares targets and ranges — never prose, per the wording-freedom doctrine: definitions must
-agree on presence with the rewrite's target equal to or inside one of the oracle's; reference
-sets must be identical; hovers must agree on presence with the rewrite's range equal or inside
-the oracle's. Two divergence classes are accepted by policy and counted separately: the rewrite
-hovering where the oracle does not (strictly more coverage), and the rewrite declining
-references on annotation type tokens with no project declaration (primitives, `fn`, binders —
-the oracle offers spelled-name matches there). Cases where the oracle's naming is wrong
-(forward capture, super-assignment, local mutual recursion) sit on a committed allowlist that
-only accepts pure additions and fails when stale. The test is a hard gate: any unexplained
-divergence fails; details land in `target/differential-ide.txt`.
+`cargo test -p differential --test test_ide_differential` runs hover, goto-definition,
+references, rename, and signature help at **every byte position** of every typing-suite case
+through both stacks (plus inlay-hint anchors once per case) and compares targets and ranges —
+never prose, per the wording-freedom doctrine: definitions must agree on presence with the
+rewrite's target equal to or inside one of the oracle's; reference and rename sets must be
+identical; hovers must agree on presence with the rewrite's range equal or inside the
+oracle's; signature help must agree on presence and the active parameter; hint anchors must
+match exactly. Divergence classes accepted by policy are counted separately: the rewrite
+hovering or offering signatures where the oracle does not (strictly more coverage), and the
+rewrite declining references/rename on annotation type tokens with no project declaration
+(primitives, `fn`, binders — the oracle offers spelled-name matches there). Cases where the
+oracle's naming is wrong (forward capture, super-assignment, local mutual recursion) sit on a
+committed allowlist that only accepts pure additions, and adjudicated design differences (the
+rewrite hints only exported-scheme-consistent types) carry their reasons in a second list;
+both fail when stale. The test is a hard gate: any unexplained divergence fails; details land
+in `target/differential-ide.txt`.
 
 ### The semantics fuzz harness
 

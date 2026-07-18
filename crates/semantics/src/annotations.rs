@@ -234,7 +234,7 @@ enum BlockForm {
 /// refusal wording for the first violation. Directives own their payload
 /// types as nested children, so each top-level child is one block item —
 /// except a binder list, which belongs to the compact type following it.
-fn block_form_violation(node: &SyntaxNode) -> Option<&'static str> {
+pub fn block_form_violation(node: &SyntaxNode) -> Option<&'static str> {
     let mut previous: Option<BlockForm> = None;
     let mut children = node.children().peekable();
     while let Some(child) = children.next() {

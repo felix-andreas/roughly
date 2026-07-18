@@ -208,7 +208,11 @@ pub fn inlay_hints(db: &dyn Db, file: SourceFile, viewport: Option<TextRange>) -
         let Some(check) = item_check(db, item) else {
             continue;
         };
-        let annotated = item_annotation_syntax(db, item).is_some();
+        // A refused (form-mixing) annotation drops its whole payload, so the
+        // binding is effectively unannotated and still hints.
+        let annotated = item_annotation_syntax(db, item).is_some_and(|annotation| {
+            semantics::annotations::block_form_violation(&annotation.syntax_node()).is_none()
+        });
 
         for (index, expression) in hir.expressions.iter().enumerate() {
             let ExpressionKind::Assign { target, value, .. } = &expression.kind else {
@@ -243,7 +247,7 @@ pub fn inlay_hints(db: &dyn Db, file: SourceFile, viewport: Option<TextRange>) -
                 else {
                     continue;
                 };
-                if !is_hintable(db, *ty, false) {
+                if !is_hintable(db, *ty, matches!(ty.kind(db), TyKind::Function(_))) {
                     continue;
                 }
                 renderer.render(db, *ty)
@@ -276,27 +280,37 @@ pub fn signature_help(db: &dyn Db, file: SourceFile, offset: TextSize) -> Option
     let hir = item_hir(db, position.item)?;
     let check = item_check(db, position.item)?;
 
-    let (callee, arguments) = hir
+    // Containing calls, smallest first; the innermost whose callee has a
+    // function type wins, so a cursor inside `list(...)` inside `f(...)`
+    // still shows `f`'s signature (call-site builtins have none).
+    let mut calls: Vec<(TextRange, ExprId)> = hir
         .expressions
         .iter()
         .enumerate()
         .filter_map(|(index, expression)| match &expression.kind {
-            ExpressionKind::Call { callee, arguments }
+            ExpressionKind::Call { .. }
                 if !expression.range.is_empty()
                     && expression.range.start() <= position.relative
                     && position.relative <= expression.range.end() =>
             {
-                Some((expression.range, ExprId(index as u32), callee, arguments))
+                Some((expression.range, ExprId(index as u32)))
             }
             _ => None,
         })
-        .min_by_key(|(range, id, ..)| (range.len(), range.start(), id.0))
-        .map(|(_, _, callee, arguments)| (callee, arguments))?;
+        .collect();
+    calls.sort_by_key(|(range, id)| (range.len(), range.start(), id.0));
 
-    let callee_ty = *check.expression_types.get(callee)?;
-    let TyKind::Function(function) = callee_ty.kind(db) else {
-        return None;
-    };
+    let (function, arguments) = calls.iter().find_map(|(_, id)| {
+        let ExpressionKind::Call { callee, arguments } = &hir.expression(*id).kind else {
+            return None;
+        };
+        let callee_ty = *check.expression_types.get(callee)?;
+        match callee_ty.kind(db) {
+            TyKind::Function(function) => Some((function.clone(), arguments)),
+            _ => None,
+        }
+    })?;
+    let function = &function;
 
     let rendered = render_signature(db, function);
     let active_parameter = active_parameter(
@@ -1389,8 +1403,16 @@ fn active_parameter(
 
 // ---- inlay hint internals ----
 
+/// Variables are presentable only when the hinted type is a function AT THE
+/// TOP — the label generalizes them into binder names. A variable anywhere
+/// else (including inside a function nested in a union) would render an
+/// unanchored type parameter, so those types show nothing.
 fn scheme_is_hintable(db: &dyn Db, scheme: &TypeScheme<'_>) -> bool {
-    is_hintable(db, scheme.body, false)
+    is_hintable(
+        db,
+        scheme.body,
+        matches!(scheme.body.kind(db), TyKind::Function(_)),
+    )
 }
 
 /// Whether every leaf of the type is presentable in a hint.
@@ -1421,16 +1443,16 @@ fn is_hintable(db: &dyn Db, ty: Ty<'_>, variables_allowed: bool) -> bool {
             function
                 .positional
                 .iter()
-                .all(|&ty| is_hintable(db, ty, true))
+                .all(|&ty| is_hintable(db, ty, variables_allowed))
                 && function
                     .named
                     .iter()
-                    .all(|field| is_hintable(db, field.ty, true))
+                    .all(|field| is_hintable(db, field.ty, variables_allowed))
                 && function
                     .variadic
                     .as_ref()
-                    .is_none_or(|rest| is_hintable(db, rest.element, true))
-                && is_hintable(db, function.ret, true)
+                    .is_none_or(|rest| is_hintable(db, rest.element, variables_allowed))
+                && is_hintable(db, function.ret, variables_allowed)
         }
     }
 }
