@@ -268,8 +268,11 @@ pub struct AcceptedDeficits {
 /// closed transitively over "the name's defining item reads an unstable
 /// name". A type finding (either side) with no intersecting counterpart in
 /// the other stack is accepted when its item reads or defines an unstable
-/// name. Additionally, a NEW-only type finding whose found-side mentions
-/// `NULL` is accepted: the rewrite types `switch`/branch results as unions
+/// name. Two further rules: an unpaired legacy/new pair with an IDENTICAL
+/// message across a def-use edge (the oracle blames the defining item, the
+/// rewrite the reading site) drops as one finding with two blame
+/// conventions; and a NEW-only type finding whose found-side mentions
+/// `NULL` is accepted — the rewrite types `switch`/branch results as unions
 /// with `NULL` where the oracle collapses to `Unknown` first, so its
 /// NULL-union strictness has no oracle counterpart by construction. Every
 /// acceptance is counted in `deficit_rollup`.
@@ -329,6 +332,63 @@ pub fn filter_model_divergences(
             *class == "type" && *start < finding.2 && finding.1 < *end
         })
     };
+    // The oracle can attribute a mismatch discovered through a cross-item
+    // read at the item DEFINING the read name (whichever item its fixpoint
+    // finalizes when the error surfaces), where the rewrite blames the
+    // reading site. An identical message across a def-use edge is one
+    // finding with two blame conventions — drop the pair.
+    let item_of = |start: usize, end: usize| {
+        facts
+            .item_spans
+            .iter()
+            .position(|&(item_start, item_end)| item_start <= start && end <= item_end)
+    };
+    let mut legacy_blame: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
+    let mut new_blame: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
+    for (legacy_index, legacy_finding) in legacy.iter().enumerate() {
+        if legacy_finding.0 != "type" || intersects(legacy_finding, &new) {
+            continue;
+        }
+        let Some(defining) = item_of(legacy_finding.1, legacy_finding.2) else {
+            continue;
+        };
+        for (new_index, new_finding) in new.iter().enumerate() {
+            if new_blame.contains(&new_index)
+                || new_finding.0 != "type"
+                || new_finding.3 != legacy_finding.3
+                || intersects(new_finding, &legacy)
+            {
+                continue;
+            }
+            let Some(reading) = item_of(new_finding.1, new_finding.2) else {
+                continue;
+            };
+            if reading != defining
+                && facts.item_reads[reading]
+                    .iter()
+                    .any(|name| facts.item_defines[defining].contains(name))
+            {
+                legacy_blame.insert(legacy_index);
+                new_blame.insert(new_index);
+                *deficit_rollup
+                    .entry("(cross-item blame, def-use edge)".to_owned())
+                    .or_default() += 2;
+                break;
+            }
+        }
+    }
+    let legacy: Vec<Finding> = legacy
+        .into_iter()
+        .enumerate()
+        .filter(|(index, _)| !legacy_blame.contains(index))
+        .map(|(_, finding)| finding)
+        .collect();
+    let new: Vec<Finding> = new
+        .into_iter()
+        .enumerate()
+        .filter(|(index, _)| !new_blame.contains(index))
+        .map(|(_, finding)| finding)
+        .collect();
     let legacy_kept: Vec<Finding> = legacy
         .iter()
         .filter(|finding| {

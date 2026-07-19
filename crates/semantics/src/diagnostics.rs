@@ -1352,7 +1352,15 @@ impl<'db> TypeRenderer<'db> {
         for ty in &function.positional {
             parameters.push(self.render(db, *ty));
         }
-        for field in &function.named {
+        for (index, field) in function.named.iter().enumerate() {
+            // The rest parameter sits at its declared boundary among the
+            // named parameters, not always last — the position is part of
+            // the shape (R matches remaining positional arguments into it).
+            if let Some(rest) = &function.variadic
+                && rest.preceding_named == index
+            {
+                parameters.push(format!("...: {}", self.render(db, rest.element)));
+            }
             let name = if field.optional {
                 format!("[{}]", field.name.text(db))
             } else {
@@ -1360,7 +1368,9 @@ impl<'db> TypeRenderer<'db> {
             };
             parameters.push(format!("{name}: {}", self.render(db, field.ty)));
         }
-        if let Some(rest) = &function.variadic {
+        if let Some(rest) = &function.variadic
+            && rest.preceding_named >= function.named.len()
+        {
             parameters.push(format!("...: {}", self.render(db, rest.element)));
         }
         let ret = self.render(db, function.ret);

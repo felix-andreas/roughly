@@ -1783,6 +1783,15 @@ There may be at most one rest parameter. Its position is part of the signature a
 position of `...` in the R formal list: parameters written before it fill positionally, parameters
 written after it fill by name only (see [Function calls](#function-calls)).
 
+A declared function annotation must have a shape R's argument matcher can honor for the annotated
+definition, checked as a whole-signature mismatch when violated:
+
+- a declared optional `[name]` requires the actual formal to carry a default (callers may omit
+  it); the reverse — an actual default on a parameter the annotation declares required — is fine
+- the rest parameter must sit at the same boundary in the annotation and the formal list,
+  including existing on both sides or neither: a fixed annotation on a variadic function and a
+  variadic annotation on a fixed function are both rejected
+
 Additional rules:
 
 - if the return type is omitted, it is **elided** — inferred from the body on a checked definition

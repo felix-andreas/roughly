@@ -269,6 +269,41 @@ f <- function(x, y) y
 #++++
 f: <T> fn(x: T[], y: Id[]) -> integer[]
 
+#==== declared_shape
+#---- declared_optional_requires_an_actual_default
+#: fn(count: integer, [label]: character) -> integer
+double_count <- function(count, label) count + count
+#++++
+double_count: Unknown
+69..105 error[type-mismatch] expected `fn(count: integer, [label]: character) -> integer`, found `fn(count: integer, label: character) -> integer`
+
+#---- rest_position_must_match_the_formals
+#: fn(...: Any, x: integer) -> integer
+f <- function(x, ...) x
+#++++
+f: Unknown
+44..62 error[type-mismatch] expected `fn(...: Any, x: integer) -> integer`, found `fn(x: integer, ...: Any) -> integer`
+
+#---- fixed_annotation_on_a_variadic_function_is_rejected
+#: fn(x: integer) -> integer
+f <- function(x, ...) x
+#++++
+f: Unknown
+34..52 error[type-mismatch] expected `fn(x: integer) -> integer`, found `fn(x: integer, ...: Any) -> integer`
+
+#---- variadic_annotation_on_a_fixed_function_is_rejected
+#: fn(x: integer, ...: Any) -> integer
+f <- function(x) x
+#++++
+f: Unknown
+44..57 error[type-mismatch] expected `fn(x: integer, ...: Any) -> integer`, found `fn(x: integer) -> integer`
+
+#---- matching_shapes_are_fine
+#: fn(count: integer, [label]: character, ...: Any) -> integer
+render <- function(count, label = "x", ...) count
+#++++
+render: fn(count: integer, [label]: character, ...: Any) -> integer
+
 #==== placement
 #---- type_definition_below_top_level_is_refused
 value <- {

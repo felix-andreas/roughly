@@ -69,6 +69,26 @@ const ACCEPTED_DIFFERENCE_CASES: &[(&str, &str)] = &[
          the rewrite parses and applies the declared annotation",
     ),
     (
+        "typing::declared_shape__declared_optional_requires_an_actual_default",
+        "the oracle serves hover on the `[label]` parameter-name token inside the \
+         annotation; the rewrite's annotation hover covers type tokens only",
+    ),
+    (
+        "typing::declared_shape__matching_shapes_are_fine",
+        "the oracle serves hover on the `[label]` parameter-name token inside the \
+         annotation; the rewrite's annotation hover covers type tokens only",
+    ),
+    (
+        "typing::declared_shape__rest_position_must_match_the_formals",
+        "the rewrite resolves a `...` formal as a real binding (definition and \
+         references on the dots token); the oracle offers no dots navigation",
+    ),
+    (
+        "typing::declared_shape__fixed_annotation_on_a_variadic_function_is_rejected",
+        "the rewrite resolves a `...` formal as a real binding (definition and \
+         references on the dots token); the oracle offers no dots navigation",
+    ),
+    (
         "typing::higher_order__any_callee_arguments_are_not_checked",
         "the oracle hints a binding from its INTERNAL value type (`-> Any`) while \
          the exported scheme says Unknown; the rewrite hints only scheme-consistent \

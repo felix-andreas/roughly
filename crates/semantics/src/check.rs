@@ -21,7 +21,8 @@ use crate::hir::{
 use crate::infer::{Entry, InferenceTable, UnifyError};
 use crate::naming::{BindingId, ItemNaming};
 use crate::types::{
-    Atomic, Constraint, FunctionType, Name, Ty, TyKind, TypeScheme, scalar, union_of, unknown,
+    Atomic, Constraint, FunctionType, Name, RecordField, RestParameter, Ty, TyKind, TypeScheme,
+    any, scalar, union_of, unknown,
 };
 use rustc_hash::FxHashMap;
 use syntax::TextRange;
@@ -2406,6 +2407,81 @@ impl<'db> Checker<'db, '_> {
             return;
         };
         let range = expression.range;
+
+        // The declared shape must be one R's argument matcher can honor for
+        // this definition: a declared optional `[name]` needs an actual
+        // default (callers may omit it), and the rest parameter must sit at
+        // the same boundary on both sides — including not existing on
+        // exactly one side. A violation reports the two shapes whole; the
+        // body still checks under the declared parameter types so hover and
+        // navigation keep their facts.
+        let dots_index = parameters.iter().position(|p| p.name == "...");
+        let declared_preceding = declared.positional.len()
+            + declared
+                .variadic
+                .as_ref()
+                .map_or(0, |rest| rest.preceding_named);
+        let variadic_mismatch = match (&declared.variadic, dots_index) {
+            (Some(_), Some(index)) => index != declared_preceding,
+            (None, None) => false,
+            _ => true,
+        };
+        let optional_mismatch = parameters.iter().any(|parameter| {
+            parameter.default.is_none()
+                && declared
+                    .named
+                    .iter()
+                    .any(|field| field.optional && field.name.text(self.db) == parameter.name)
+        });
+        if variadic_mismatch || optional_mismatch {
+            let mut found_named = Vec::new();
+            let mut found_variadic = None;
+            let mut positional_index = 0usize;
+            for parameter in parameters {
+                if parameter.name == "..." {
+                    found_variadic = Some(RestParameter {
+                        element: declared
+                            .variadic
+                            .as_ref()
+                            .map_or_else(|| any(self.db), |rest| rest.element),
+                        preceding_named: found_named.len(),
+                    });
+                    continue;
+                }
+                let ty = if let Some(field) = declared
+                    .named
+                    .iter()
+                    .find(|field| field.name.text(self.db) == parameter.name)
+                {
+                    field.ty
+                } else if positional_index < declared.positional.len() {
+                    let ty = declared.positional[positional_index];
+                    positional_index += 1;
+                    ty
+                } else {
+                    unknown(self.db)
+                };
+                found_named.push(RecordField {
+                    name: Name::new(self.db, parameter.name.clone()),
+                    ty,
+                    optional: parameter.default.is_some(),
+                });
+            }
+            let found = Ty::new(
+                self.db,
+                TyKind::Function(FunctionType {
+                    positional: Vec::new(),
+                    named: found_named,
+                    variadic: found_variadic,
+                    ret: declared.ret,
+                }),
+            );
+            let expected = Ty::new(self.db, TyKind::Function(declared.clone()));
+            self.errors.push(TypeError {
+                range,
+                kind: TypeErrorKind::Mismatch { expected, found },
+            });
+        }
 
         self.table.level += 1;
         let pending_mark = self.pending_enclosing_writes.len();

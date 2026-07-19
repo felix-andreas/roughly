@@ -90,8 +90,11 @@ accepted class named in a rollup:
   misses because it mints the slot first;
 - **model divergences** — unpaired type findings over *unstable names* (multiply-bound,
   self-referential, or forward-captured names, closed transitively), where the oracle's
-  settled-slot frame model and the rewrite's sequential/last-wins model legitimately differ,
-  plus the rewrite's NULL-union strictness the oracle collapses to `Unknown` before reaching.
+  settled-slot frame model and the rewrite's sequential/last-wins model legitimately differ;
+  an unpaired legacy/new pair with an identical message across a def-use edge (the oracle
+  blames the defining item where the rewrite blames the reading site — one finding, two blame
+  conventions); plus the rewrite's NULL-union strictness the oracle collapses to `Unknown`
+  before reaching.
 
 An ignored-by-default arm sweeps the FROZEN STACK'S OWN fixture corpus
 (`cargo test -p differential --release -- --ignored legacy_corpus_differential`): every

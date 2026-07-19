@@ -89,6 +89,8 @@ const TEMPLATES: &[&str] = &[
     "#: Instype\n{n} <- 1L",
     "#: @type Shape {list{part: Instype}}\n\n#: @new Shape\n{n} <- list(part = 1)",
     "#: fn(x: Instype) -> integer\n{n} <- function(x) x",
+    "#: fn(x: integer, [y]: character) -> integer\n{n} <- function(x, y) x",
+    "#: fn(x: integer) -> integer\n{n} <- function(x, ...) x",
     "{n} <- with({m}, x + y)",
     "{n} <- stats::sd(c(1, 2))",
     "{n} <- nosuchpkg::mystery()",

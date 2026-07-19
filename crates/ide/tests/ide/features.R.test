@@ -205,7 +205,7 @@ hint @30: fn() -> double
 #---- stub_name_not_renameable
 f <- function() pri$0nt(1)
 #++++
-hover 16..21: print: fn(x: double, [digits]: Any, [quote]: logical, [right]: logical, [max]: Any, [width]: Any, [n]: Any, [na.print]: Any, [row.names]: Any, ...: Any) -> double
+hover 16..21: print: fn(x: double, ...: Any, [digits]: Any, [quote]: logical, [right]: logical, [max]: Any, [width]: Any, [n]: Any, [na.print]: Any, [row.names]: Any) -> double
 hover-definition: package base (1 declaration(s))
 definition: none
 references: none
