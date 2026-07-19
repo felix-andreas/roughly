@@ -15,6 +15,7 @@ pub mod infer;
 pub mod lints;
 pub mod naming;
 pub mod stubs;
+pub mod testing;
 pub mod types;
 
 use std::collections::BTreeSet;

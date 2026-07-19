@@ -160,14 +160,20 @@ the output again must succeed and reproduce it byte-for-byte. The refusal path i
 property: a file with an R-grammar syntax error is refused, while errors raised by the `#:`
 annotation grammar (marked `in_annotation` by the parser) only send the affected block down
 the verbatim path. The invariant battery itself is exported as
-`format::check_format_invariants` (and `syntax::testing::check_parse_invariants` for the
-parser) so the coverage-guided targets below share the exact same contract, and
+`format::check_format_invariants` (with `syntax::testing::check_parse_invariants` for the
+parser and `semantics::testing::check_semantics_input` for the semantic pipeline — the
+latter folds every lint under an everything-on configuration into the rendering, so the
+lint layer inherits the never-panic, determinism, geometry, and incremental invariants) so
+the coverage-guided targets below share the exact same contracts, and each harness's
 `fuzz_regressions_hold_invariants` pins every input those targets have ever broken.
 
 ### Coverage-guided fuzzing
 
 `fuzz/` is a cargo-fuzz crate (its own workspace, excluded from the main one) with libFuzzer
-targets `parse` and `format`, each a thin wrapper over the exported invariant batteries. It
+targets `parse`, `format`, and `semantics`, each a thin wrapper over the exported
+invariant batteries (the `semantics` target derives its document kind and incremental edit
+from the input bytes, so one byte stream drives the full battery including the splice
+cache). It
 needs nightly: `cargo install cargo-fuzz`, then from `fuzz/`:
 
 ```sh

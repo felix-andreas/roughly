@@ -16,6 +16,7 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 syntax = { path = "../crates/syntax" }
 format = { path = "../crates/format" }
+semantics = { path = "../crates/semantics" }
 
 [[bin]]
 name = "parse"
@@ -27,6 +28,13 @@ bench = false
 [[bin]]
 name = "format"
 path = "fuzz_targets/format.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "semantics"
+path = "fuzz_targets/semantics.rs"
 test = false
 doc = false
 bench = false

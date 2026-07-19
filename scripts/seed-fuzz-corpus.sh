@@ -4,7 +4,7 @@
 # case. Run from the repository root before `cargo fuzz run`.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-for target in parse format; do
+for target in parse format semantics; do
   mkdir -p "fuzz/corpus/$target"
 done
 python3 - << 'PY'
@@ -32,10 +32,10 @@ for root in roots:
     for stub in root.rglob("*.Rtypes"):
         sources.append(stub.read_text(errors="replace"))
 
-for target in ("parse", "format"):
+for target in ("parse", "format", "semantics"):
     out = pathlib.Path("fuzz/corpus") / target
     for source in sources:
         digest = hashlib.sha1(source.encode()).hexdigest()
         (out / digest).write_text(source)
-print(f"seeded {len(sources)} case sources into fuzz/corpus/{{parse,format}}")
+print(f"seeded {len(sources)} case sources into fuzz/corpus/{{parse,format,semantics}}")
 PY

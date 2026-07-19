@@ -7,9 +7,10 @@
 //!      and the strict stream all run to completion (salsa fixpoint cycles
 //!      must converge, never hit the iteration cap);
 //!   2. determinism — a fresh database on the same text produces the
-//!      identical rendering (schemes + diagnostics);
-//!   3. geometry — every diagnostic range lies inside the file with
-//!      start <= end;
+//!      identical rendering (schemes + diagnostics + every lint under an
+//!      everything-on configuration);
+//!   3. geometry — every diagnostic and lint range lies inside the file
+//!      with start <= end;
 //!   4. incremental equivalence — after editing the file through the salsa
 //!      setter, the re-checked output equals a fresh database built on the
 //!      edited text, and editing back restores the original output.
@@ -25,10 +26,8 @@
 //! seed. `fuzz_deep` multiplies everything for nightly/manual runs.
 
 use salsa::Setter as _;
-use semantics::diagnostics::{TypeRenderer, file_diagnostics, strict_diagnostics};
-use semantics::{
-    DocumentKind, ItemKind, ProjectFiles, RootDatabase, SourceFile, item_check, item_tree,
-};
+use semantics::testing::{check_semantics_invariants, render_semantics as render};
+use semantics::{DocumentKind, ProjectFiles, RootDatabase, SourceFile};
 
 struct SplitMix64(u64);
 
@@ -139,86 +138,6 @@ fn generate_soup(rng: &mut SplitMix64) -> String {
 
 /// The canonical rendering of one file's full pipeline output; running it is
 /// the never-panic check, its string is the determinism/equivalence witness.
-fn render(db: &RootDatabase, file: SourceFile) -> String {
-    let mut output = String::new();
-    for item in item_tree(db, file) {
-        if !matches!(*item.kind(db), ItemKind::Function | ItemKind::Value) {
-            continue;
-        }
-        let Some(name) = item.name(db).clone() else {
-            continue;
-        };
-        let Some(check) = item_check(db, item) else {
-            continue;
-        };
-        let Some(scheme) = check.scheme else {
-            continue;
-        };
-        let mut renderer = TypeRenderer::default();
-        output.push_str(&name);
-        output.push_str(": ");
-        output.push_str(&renderer.render_scheme(db, &scheme));
-        output.push('\n');
-    }
-    let length = file.text(db).len();
-    for diagnostic in file_diagnostics(db, file)
-        .into_iter()
-        .chain(strict_diagnostics(db, file))
-    {
-        let start = u32::from(diagnostic.range.start()) as usize;
-        let end = u32::from(diagnostic.range.end()) as usize;
-        assert!(
-            start <= end && end <= length,
-            "diagnostic range {start}..{end} escapes the file (length {length})"
-        );
-        output.push_str(&format!(
-            "{start}..{end} [{}] {}\n",
-            diagnostic.code, diagnostic.message
-        ));
-    }
-    output
-}
-
-fn fresh_output(source: &str, kind: DocumentKind) -> String {
-    let db = RootDatabase::default();
-    semantics::stubs::install_shipped_stubs(&db);
-    let file = SourceFile::new(&db, source.to_owned(), kind);
-    ProjectFiles::new(&db, vec![file]);
-    render(&db, file)
-}
-
-fn check_pipeline(source: &str, edited_source: &str, kind: DocumentKind) {
-    let first = fresh_output(source, kind);
-    let second = fresh_output(source, kind);
-    assert_eq!(
-        first, second,
-        "non-deterministic pipeline output for:\n{source}"
-    );
-
-    // Incremental equivalence: edit through the setter, compare against a
-    // fresh database on the edited text, then edit back and compare against
-    // the original output.
-    let mut db = RootDatabase::default();
-    semantics::stubs::install_shipped_stubs(&db);
-    let file = SourceFile::new(&db, source.to_owned(), kind);
-    ProjectFiles::new(&db, vec![file]);
-    let before = render(&db, file);
-    assert_eq!(before, first, "fresh databases disagree for:\n{source}");
-    file.set_text(&mut db).to(edited_source.to_owned());
-    let incremental = render(&db, file);
-    let fresh = fresh_output(edited_source, kind);
-    assert_eq!(
-        incremental, fresh,
-        "incremental output diverges from a fresh build after editing\n---- from:\n{source}\n---- to:\n{edited_source}"
-    );
-    file.set_text(&mut db).to(source.to_owned());
-    let back = render(&db, file);
-    assert_eq!(
-        back, before,
-        "output not restored after editing back\n---- source:\n{source}\n---- via:\n{edited_source}"
-    );
-}
-
 /// Attaches the failing inputs to any panic escaping the pipeline — a bare
 /// salsa or checker panic names no source, which makes a fuzz find useless.
 fn check_pipeline_reporting(rng: &mut SplitMix64, source: &str) {
@@ -228,7 +147,8 @@ fn check_pipeline_reporting(rng: &mut SplitMix64, source: &str) {
         DocumentKind::Package
     };
     let edited_source = generate_program(rng);
-    let result = std::panic::catch_unwind(|| check_pipeline(source, &edited_source, kind));
+    let result =
+        std::panic::catch_unwind(|| check_semantics_invariants(source, &edited_source, kind));
     if let Err(payload) = result {
         eprintln!(
             "---- pipeline panicked ({kind:?}) ----\n{source}\n---- edited to ----\n{edited_source}\n----"
@@ -296,6 +216,23 @@ fn run_multi_file(budget: usize, seed: u64) {
             before,
             "cross-file output not restored after editing back"
         );
+    }
+}
+
+/// Inputs the coverage-guided `fuzz/semantics` target once broke an
+/// invariant on, kept verbatim so the failures stay pinned without the
+/// gitignored corpus. `foo$\n`: a splice middle ending in a dangling `$`
+/// must refuse suffix reuse (the fresh parse continues across the newline,
+/// moving the error position).
+/// `f)\nla<- function()`: an appending edit leaves an empty splice suffix,
+/// and the old parse's end-of-file error must not be rebased into the new
+/// text (the middle re-derives the end state).
+const REGRESSIONS: &[&str] = &["foo$\n", "f)\nla<- function()"];
+
+#[test]
+fn fuzz_regressions_hold_invariants() {
+    for input in REGRESSIONS {
+        semantics::testing::check_semantics_input(input);
     }
 }
 

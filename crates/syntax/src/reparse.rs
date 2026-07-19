@@ -148,6 +148,18 @@ fn try_splice(
         return None;
     }
     let middle = crate::parse(middle_text);
+    // A parse error touching the middle's end means the parser is mid-
+    // construct at the boundary — a trailing `$` or infix operator, a
+    // dangling `else` — and a from-scratch parse of the whole text would
+    // continue across the suffix newline, giving a different statement
+    // split and different error positions. Refuse; sound-by-fallback.
+    if middle
+        .errors()
+        .iter()
+        .any(|error| u32::from(error.range.end()) as usize == middle_text.len())
+    {
+        return None;
+    }
     let middle_root = middle.syntax_node();
 
     // Assemble the new root: shared prefix greens + reparsed middle greens +
@@ -170,7 +182,10 @@ fn try_splice(
     for error in old.errors() {
         if error.range.end() <= prefix_len {
             errors.push(error.clone());
-        } else if error.range.start() >= old_suffix_start {
+        } else if suffix_start < children.len() && error.range.start() >= old_suffix_start {
+            // With an empty suffix a zero-width end-of-file error would
+            // satisfy the start bound too, but it belongs to the replaced
+            // region — the middle's own parse re-derives the end state.
             let start = (i64::from(u32::from(error.range.start())) + delta) as u32;
             let end = (i64::from(u32::from(error.range.end())) + delta) as u32;
             let mut rebased = error.clone();
