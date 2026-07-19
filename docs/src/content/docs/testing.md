@@ -159,7 +159,34 @@ structured error), determinism, and **idempotence**: whenever formatting succeed
 the output again must succeed and reproduce it byte-for-byte. The refusal path is part of the
 property: a file with an R-grammar syntax error is refused, while errors raised by the `#:`
 annotation grammar (marked `in_annotation` by the parser) only send the affected block down
-the verbatim path.
+the verbatim path. The invariant battery itself is exported as
+`format::check_format_invariants` (and `syntax::testing::check_parse_invariants` for the
+parser) so the coverage-guided targets below share the exact same contract, and
+`fuzz_regressions_hold_invariants` pins every input those targets have ever broken.
+
+### Coverage-guided fuzzing
+
+`fuzz/` is a cargo-fuzz crate (its own workspace, excluded from the main one) with libFuzzer
+targets `parse` and `format`, each a thin wrapper over the exported invariant batteries. It
+needs nightly: `cargo install cargo-fuzz`, then from `fuzz/`:
+
+```sh
+./../scripts/seed-fuzz-corpus.sh          # seed corpus from all fixture case sources
+cargo +nightly fuzz run format -- -max_total_time=600 -print_final_stats=1
+cargo +nightly fuzz run parse  -- -max_total_time=600
+```
+
+The seeder extracts every fixture case's source across the repository into
+`fuzz/corpus/{parse,format}/` (content-addressed, so re-running only adds). Corpus and
+artifacts are gitignored — durable regressions belong in the `REGRESSIONS` battery or a
+fixture case, not in the corpus. On a find: `cargo +nightly fuzz tmin format <artifact>`
+minimizes it; fix the bug, replay the artifact, add the minimized input to `REGRESSIONS`
+(plus a golden fixture case when the shape deserves a pinned rendering). A coverage report
+for judging corpus quality needs the llvm-tools component:
+`cargo +nightly fuzz coverage format && cargo cov -- show` per the
+[cargo-fuzz coverage guide](https://rust-fuzz.github.io/book/cargo-fuzz/coverage.html).
+Deep runs are manual/scheduled work; the bounded in-tree batteries remain the default-suite
+gate.
 
 ### The lint fixture suites
 

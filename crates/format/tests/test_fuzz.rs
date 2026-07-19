@@ -18,6 +18,7 @@
 //! deterministic per seed. `fuzz_deep` multiplies everything for
 //! nightly/manual runs.
 
+use format::check_format_invariants as check_invariants;
 use format::{Config, format};
 use std::path::PathBuf;
 
@@ -141,28 +142,40 @@ const ALPHABET: &[&str] = &[
     "\r\n",
 ];
 
+/// Inputs found by the coverage-guided `fuzz/` targets, each of which once
+/// broke an invariant (idempotence, or output that no longer parses).
+/// Unlike `SEEDS` these may legitimately refuse — only the invariants must
+/// hold. Kept verbatim so the failures stay pinned without depending on the
+/// gitignored fuzz corpus.
+const REGRESSIONS: &[&str] = &[
+    "{\n  ;\n}\n",
+    "{#:\n}\n",
+    "foo:::#ar\nfoCo:::bar(1)\nfoo:::...\n",
+    "f((f\n),)",
+    "f(,\n)",
+    "f(xf(x\n),x.= ,)\n",
+    "(r\n#:\n-a)",
+    "(ir\n#:dL\n--a)",
+    "#\r#:",
+    "#e\r\r#:on",
+    "\r\r#:@e\r\r#:on\n",
+    "-\n#:\nb",
+    "---\n#: L\nbL",
+    "1-----\n#: @\n\n- bL",
+    "--fn(ir\n#:dL\n--a, )",
+    " if (1)E else repeat 4",
+    "repeat if (1) TRUE else repeat 42\nif (TRUE) ifNA\n(if (TRUE) FALSE\nelse NA)\n",
+    "{ repeat 4 }",
+    "{ repeat commentt\n}",
+    "f <-#: Pers function(x, y) y\non\nx\n",
+    "1L --- fn(ier\n#:dL\n----a, bar)\n\n!\n L\n",
+];
+
 fn iterations() -> usize {
     std::env::var("FUZZ_ITERS")
         .ok()
         .and_then(|value| value.parse().ok())
         .unwrap_or(1500)
-}
-
-/// The invariant battery for one input: no panic, deterministic, and
-/// idempotent whenever formatting succeeds.
-fn check_invariants(input: &str) {
-    let first = format(input, Config::default());
-    let again = format(input, Config::default());
-    assert_eq!(first, again, "non-deterministic format for input {input:?}");
-
-    if let Ok(output) = first {
-        match format(&output, Config::default()) {
-            Ok(second) => assert_eq!(second, output, "format not idempotent for input {input:?}"),
-            Err(error) => panic!(
-                "formatted output no longer formats for input {input:?}: {error} (output {output:?})"
-            ),
-        }
-    }
 }
 
 #[test]
@@ -173,6 +186,13 @@ fn seeds_hold_invariants() {
             "seed unexpectedly refused: {seed:?}"
         );
         check_invariants(seed);
+    }
+}
+
+#[test]
+fn fuzz_regressions_hold_invariants() {
+    for input in REGRESSIONS {
+        check_invariants(input);
     }
 }
 

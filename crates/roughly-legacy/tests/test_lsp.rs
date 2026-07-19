@@ -411,9 +411,12 @@ async fn setup_test_with_pull_and_refresh(initial_files: &[(&str, &str)]) -> Tes
 
 impl TestContext {
     async fn shutdown(mut self) {
-        self.server.shutdown(()).await.expect("shutdown failed");
-        self.server.exit(()).expect("exit failed");
-        self.server.emit(Stop).expect("emit Stop failed");
+        // The mainloop may already have stopped by the time these arrive
+        // (server-side teardown races the reply); a dead channel during
+        // shutdown is success, not a failure to surface.
+        let _ = self.server.shutdown(()).await;
+        let _ = self.server.exit(());
+        let _ = self.server.emit(Stop);
         let _ = tokio::time::timeout(Duration::from_secs(3), self.mainloop_handle).await;
     }
 

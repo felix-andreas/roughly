@@ -79,6 +79,61 @@ pub fn format(source: &str, config: Config) -> Result<String, FormatError> {
         }
     }
 
+    // A `#:` region opened mid-line with the statement CONTINUING past it
+    // (`f <-#: T ...` — the region swallows the rest of the line while the
+    // expression resumes below) has no meaningful layout, so line-based join
+    // decisions cannot be stable. Refuse it like an R-grammar error. A
+    // statement's leading annotation and a TRAILING annotation after a
+    // complete statement (nothing significant follows within the statement)
+    // are unaffected.
+    for node in root.descendants() {
+        if node.kind() != syntax::SyntaxKind::ANNOTATION {
+            continue;
+        }
+        let offset = u32::from(node.text_range().start()) as usize;
+        let line = line_of(&line_starts, offset);
+        let mid_line = source[line_starts[line]..offset]
+            .chars()
+            .any(|c| !c.is_whitespace());
+        if !mid_line {
+            continue;
+        }
+        // The statement within the nearest sequence: climb until the parent
+        // is a braced block or the file root (blocks are expressions in R,
+        // so expression-kind alone cannot be the boundary).
+        let statement = |mut candidate: syntax::SyntaxNode| {
+            while let Some(parent) = candidate.parent() {
+                if parent.kind() == syntax::SyntaxKind::BRACE_EXPR || parent.parent().is_none() {
+                    break;
+                }
+                candidate = parent;
+            }
+            candidate
+        };
+        let continues = node
+            .last_token()
+            .and_then(|token| token.next_token())
+            .into_iter()
+            .flat_map(|token| std::iter::successors(Some(token), |token| token.next_token()))
+            .find(|token| {
+                !matches!(
+                    token.kind(),
+                    syntax::SyntaxKind::WHITESPACE | syntax::SyntaxKind::NEWLINE
+                )
+            })
+            .and_then(|token| token.parent())
+            .is_some_and(|parent| statement(parent) == statement(node.clone()));
+        if continues {
+            return Err(FormatError {
+                message:
+                    "a `#:` annotation cannot interrupt an expression — move it to its own line"
+                        .to_owned(),
+                line,
+                column: offset - line_starts[line],
+            });
+        }
+    }
+
     let line_ending = match config.line_ending {
         LineEnding::Auto => {
             if source
@@ -106,6 +161,7 @@ pub fn format(source: &str, config: Config) -> Result<String, FormatError> {
         indent: " ".repeat(config.indent_width),
         line_ending,
         out: String::with_capacity(source.len() * 3 / 2),
+        comment_end: None,
     };
     formatter.source_file(&root);
     Ok(formatter.out)
@@ -133,6 +189,10 @@ struct Formatter<'a> {
     indent: String,
     line_ending: &'static str,
     out: String,
+    /// Output length right after the last emitted comment: anything written
+    /// on the same line after a comment would become comment text, so the
+    /// element walk forces a line break first (see `element`).
+    comment_end: Option<usize>,
 }
 
 impl Formatter<'_> {
@@ -229,12 +289,17 @@ impl Formatter<'_> {
     }
 
     /// Whether the last significant token before `element` (inside `node`) is
-    /// a comment. Element-level `previous` checks miss comments swallowed into
-    /// the previous sibling's subtree, and anything glued after such a comment
-    /// would be commented out.
+    /// a comment or part of a `#:` annotation. Element-level `previous` checks
+    /// miss comments swallowed into the previous sibling's subtree, and
+    /// anything glued after such a token would become comment text.
     fn after_comment(&self, node: &SyntaxNode, element: &Element) -> bool {
         self.last_token_before(node, element.text_range().start())
-            .is_some_and(|token| token.kind() == SyntaxKind::COMMENT)
+            .is_some_and(|token| {
+                token.kind() == SyntaxKind::COMMENT
+                    || token
+                        .parent_ancestors()
+                        .any(|ancestor| ancestor.kind() == SyntaxKind::ANNOTATION)
+            })
     }
 
     /// The first significant descendant token starting at or after `offset`.
@@ -262,7 +327,38 @@ impl Formatter<'_> {
     }
 
     fn is_comment(element: Option<&Element>) -> bool {
-        element.is_some_and(|element| element.kind() == SyntaxKind::COMMENT)
+        element.is_some_and(|element| {
+            matches!(element.kind(), SyntaxKind::COMMENT | SyntaxKind::ANNOTATION)
+        })
+    }
+
+    /// Loop bodies are always brace-wrapped onto their own lines, so a
+    /// `for`/`while`/`repeat` with a non-empty body renders multiline even
+    /// when written on one line. Single-line layout choices must consult
+    /// this: input geometry alone would pick a layout the rendered body
+    /// immediately breaks, and a second pass would then format differently.
+    fn forces_multiline(node: &SyntaxNode) -> bool {
+        node.descendants().any(|descendant| {
+            if !matches!(
+                descendant.kind(),
+                SyntaxKind::FOR_EXPR | SyntaxKind::WHILE_EXPR | SyntaxKind::REPEAT_EXPR
+            ) {
+                return false;
+            }
+            descendant.children().last().is_some_and(|body| {
+                body.kind() != SyntaxKind::BRACE_EXPR
+                    || body.children_with_tokens().any(|child| {
+                        !matches!(
+                            child.kind(),
+                            SyntaxKind::L_BRACE
+                                | SyntaxKind::R_BRACE
+                                | SyntaxKind::WHITESPACE
+                                | SyntaxKind::NEWLINE
+                                | SyntaxKind::SEMICOLON
+                        )
+                    })
+            })
+        })
     }
 
     fn comment_text(&self, element: &Element) -> &str {
@@ -371,6 +467,16 @@ impl Formatter<'_> {
     }
 
     fn element(&mut self, element: &Element, level: usize, make_multiline: bool) {
+        // Nothing may follow a comment on its line — it would become comment
+        // text. Walks normally break the line themselves; this guard covers
+        // the joins that do not know a comment interposed (an operand
+        // continuing an operator across a commented line break).
+        if let Some(comment_end) = self.comment_end.take()
+            && element.kind() != SyntaxKind::COMMENT
+            && !self.out[comment_end..].contains('\n')
+        {
+            self.newline(level);
+        }
         match element {
             SyntaxElement::Node(node) => self.node(node, level, make_multiline),
             SyntaxElement::Token(token) => self.token(token, level),
@@ -422,7 +528,12 @@ impl Formatter<'_> {
                     self.element(&element, level, false);
                 }
             }
-            SyntaxKind::ANNOTATION => self.annotation(node, level),
+            SyntaxKind::ANNOTATION => {
+                self.annotation(node, level);
+                // Like a comment, nothing may follow an annotation on its
+                // line — it would become annotation text.
+                self.comment_end = Some(self.out.len());
+            }
             _ => {
                 // Every other node (argument, parameter, type nodes reached
                 // outside an annotation) prints its children with canonical
@@ -521,6 +632,7 @@ impl Formatter<'_> {
     // ---- comments and strings ----
 
     fn comment(&mut self, token: &SyntaxToken) {
+        self.comment_end = Some(self.out.len());
         let raw = self
             .comment_text(&SyntaxElement::Token(token.clone()))
             .trim_end()
@@ -606,12 +718,14 @@ impl Formatter<'_> {
         let mut previous: Option<&Element> = None;
         for element in &elements {
             match element.kind() {
-                SyntaxKind::COMMENT => {
+                SyntaxKind::COMMENT | SyntaxKind::ANNOTATION => {
                     let trailing = elements
                         .iter()
                         .skip_while(|other| other.text_range() != element.text_range())
                         .skip(1)
-                        .all(|rest| rest.kind() == SyntaxKind::COMMENT);
+                        .all(|rest| {
+                            matches!(rest.kind(), SyntaxKind::COMMENT | SyntaxKind::ANNOTATION)
+                        });
                     if previous.is_some_and(|previous| {
                         self.same_line(previous.text_range(), element.text_range())
                     }) {
@@ -688,7 +802,7 @@ impl Formatter<'_> {
         let mut previous: Option<&Element> = None;
         for element in &elements {
             match element.kind() {
-                SyntaxKind::COMMENT => {
+                SyntaxKind::COMMENT | SyntaxKind::ANNOTATION => {
                     if previous.is_some_and(|previous| {
                         self.same_line(previous.text_range(), element.text_range())
                     }) {
@@ -749,7 +863,7 @@ impl Formatter<'_> {
         let mut previous: Option<&Element> = None;
         for element in &elements {
             match element.kind() {
-                SyntaxKind::COMMENT => {
+                SyntaxKind::COMMENT | SyntaxKind::ANNOTATION => {
                     if previous.is_some_and(|previous| {
                         self.same_line(previous.text_range(), element.text_range())
                     }) {
@@ -787,9 +901,14 @@ impl Formatter<'_> {
             .rposition(|element| element.kind() == SyntaxKind::R_PAREN);
         let hug = close.is_none_or(|close_index| {
             let close_start = elements[close_index].text_range().start();
-            let comment_before_close = self
-                .last_token_before(node, close_start)
-                .is_some_and(|token| token.kind() == SyntaxKind::COMMENT);
+            let comment_before_close =
+                self.last_token_before(node, close_start)
+                    .is_some_and(|token| {
+                        token.kind() == SyntaxKind::COMMENT
+                            || token
+                                .parent_ancestors()
+                                .any(|ancestor| ancestor.kind() == SyntaxKind::ANNOTATION)
+                    });
             close_index
                 .checked_sub(1)
                 .map(|body| &elements[body])
@@ -810,7 +929,7 @@ impl Formatter<'_> {
                     }
                     self.element(element, level, false);
                 }
-                SyntaxKind::COMMENT => {
+                SyntaxKind::COMMENT | SyntaxKind::ANNOTATION => {
                     if previous.is_some_and(|previous| {
                         self.same_line(previous.text_range(), element.text_range())
                     }) {
@@ -842,9 +961,14 @@ impl Formatter<'_> {
             .rposition(|element| element.kind() == SyntaxKind::R_BRACE);
         let hug = close.is_none_or(|close_index| {
             let close_start = elements[close_index].text_range().start();
-            let comment_before_close = self
-                .last_token_before(node, close_start)
-                .is_some_and(|token| token.kind() == SyntaxKind::COMMENT);
+            let comment_before_close =
+                self.last_token_before(node, close_start)
+                    .is_some_and(|token| {
+                        token.kind() == SyntaxKind::COMMENT
+                            || token
+                                .parent_ancestors()
+                                .any(|ancestor| ancestor.kind() == SyntaxKind::ANNOTATION)
+                    });
             close_index
                 .checked_sub(1)
                 .map(|body| &elements[body])
@@ -856,12 +980,24 @@ impl Formatter<'_> {
                             == self.line(node.text_range().start())
                 })
         });
-        let is_multiline = !hug || make_multiline;
+        let is_multiline = !hug || make_multiline || Self::forces_multiline(node);
         let body_elements: Vec<Element> = elements
             .iter()
             .filter(|element| !matches!(element.kind(), SyntaxKind::L_BRACE | SyntaxKind::R_BRACE))
             .cloned()
             .collect();
+        // Stray semicolons render nothing on their own, so a body of only
+        // semicolons is an empty block — emitting its (dropped) lines would
+        // leave a bare blank interior line that a second pass collapses,
+        // breaking idempotence.
+        let body_elements: Vec<Element> = if body_elements
+            .iter()
+            .all(|element| element.kind() == SyntaxKind::SEMICOLON)
+        {
+            Vec::new()
+        } else {
+            body_elements
+        };
         let is_empty = body_elements.is_empty();
 
         self.out.push('{');
@@ -942,7 +1078,7 @@ impl Formatter<'_> {
         let mut previous: Option<&Element> = None;
         for element in &elements {
             match element.kind() {
-                SyntaxKind::COMMENT => {
+                SyntaxKind::COMMENT | SyntaxKind::ANNOTATION => {
                     if previous.is_some_and(|previous| {
                         self.same_line(previous.text_range(), element.text_range())
                     }) {
@@ -1028,20 +1164,22 @@ impl Formatter<'_> {
                 }
                 SyntaxKind::R_PAREN | SyntaxKind::R_BRACKET => {
                     if !seen_close {
-                        if is_multiline {
-                            if !hug && !is_empty {
-                                self.newline(level);
-                            }
+                        if is_multiline && !hug && !is_empty {
+                            self.newline(level);
                         } else if trailing_space {
                             // Also with only empty arguments: `alist(, )`
-                            // keeps the space after its comma.
+                            // keeps the space after its comma. This applies
+                            // whenever the closer shares its line with the
+                            // comma — including a multiline list that
+                            // collapsed (hugged or all-empty), which must
+                            // match what its single-line output reformats to.
                             self.space();
                         }
                         seen_close = true;
                     }
                     self.element(element, level, false);
                 }
-                SyntaxKind::COMMENT => {
+                SyntaxKind::COMMENT | SyntaxKind::ANNOTATION => {
                     if previous.is_some_and(|previous| {
                         self.same_line(previous.text_range(), element.text_range())
                     }) {
@@ -1115,7 +1253,7 @@ impl Formatter<'_> {
         let mut previous: Option<&Element> = None;
         for element in &elements {
             match element.kind() {
-                SyntaxKind::COMMENT => {
+                SyntaxKind::COMMENT | SyntaxKind::ANNOTATION => {
                     if previous.is_some_and(|previous| {
                         self.same_line(previous.text_range(), element.text_range())
                     }) {
@@ -1166,7 +1304,7 @@ impl Formatter<'_> {
         for element in &elements {
             let is_body = body_range == Some(element.text_range()) && element.as_node().is_some();
             match element.kind() {
-                SyntaxKind::COMMENT => {
+                SyntaxKind::COMMENT | SyntaxKind::ANNOTATION => {
                     if previous.is_some_and(|previous| {
                         self.same_line(previous.text_range(), element.text_range())
                     }) {
@@ -1218,7 +1356,9 @@ impl Formatter<'_> {
         // keeps the newline before the closing paren) — the single/multiline
         // choice must not see it.
         let range = self.significant_range(&SyntaxElement::Node(node.clone()));
-        let is_multiline = make_multiline || self.line(range.start()) != self.line(range.end());
+        let is_multiline = make_multiline
+            || self.line(range.start()) != self.line(range.end())
+            || Self::forces_multiline(node);
 
         let open = elements
             .iter()
@@ -1265,7 +1405,7 @@ impl Formatter<'_> {
                     self.element(element, level, false);
                     is_alternative = true;
                 }
-                SyntaxKind::COMMENT => {
+                SyntaxKind::COMMENT | SyntaxKind::ANNOTATION => {
                     if previous.is_some_and(|previous| {
                         self.same_line(previous.text_range(), element.text_range())
                     }) {
@@ -1379,7 +1519,7 @@ impl Formatter<'_> {
                     }
                     self.element(element, level, false);
                 }
-                SyntaxKind::COMMENT => {
+                SyntaxKind::COMMENT | SyntaxKind::ANNOTATION => {
                     if previous.is_some_and(|previous| {
                         self.same_line(previous.text_range(), element.text_range())
                     }) {
@@ -1486,7 +1626,7 @@ impl Formatter<'_> {
             let previous_is_comment = Self::is_comment(previous);
             match element.kind() {
                 SyntaxKind::WHILE_KW => self.element(element, level, false),
-                SyntaxKind::COMMENT => {
+                SyntaxKind::COMMENT | SyntaxKind::ANNOTATION => {
                     if previous.is_some_and(|previous| {
                         self.same_line(previous.text_range(), element.text_range())
                     }) {
@@ -1550,7 +1690,7 @@ impl Formatter<'_> {
             let previous_is_comment = Self::is_comment(previous);
             match element.kind() {
                 SyntaxKind::REPEAT_KW => self.element(element, level, false),
-                SyntaxKind::COMMENT => {
+                SyntaxKind::COMMENT | SyntaxKind::ANNOTATION => {
                     if previous.is_some_and(|previous| {
                         self.same_line(previous.text_range(), element.text_range())
                     }) {
@@ -1792,9 +1932,13 @@ impl Formatter<'_> {
 // ---- free helpers ----
 
 fn line_starts(source: &str) -> Vec<usize> {
+    // A bare `\r` terminates a line exactly like the lexer says it does;
+    // `\r\n` counts once. Diverging from the lexer here makes two tokens
+    // separated by a lone `\r` look same-line and glue into comment text.
     let mut starts = vec![0];
-    for (index, byte) in source.bytes().enumerate() {
-        if byte == b'\n' {
+    let bytes = source.as_bytes();
+    for (index, &byte) in bytes.iter().enumerate() {
+        if byte == b'\n' || (byte == b'\r' && bytes.get(index + 1) != Some(&b'\n')) {
             starts.push(index + 1);
         }
     }
@@ -1947,4 +2091,23 @@ fn is_opener(kind: AnnotationTokenKind) -> bool {
 fn is_closer(kind: AnnotationTokenKind) -> bool {
     use AnnotationTokenKind::*;
     matches!(kind, CloseParen | CloseBracket | CloseBrace | CloseAngle)
+}
+
+/// The fuzz invariant battery for one input: formatting never panics, is
+/// deterministic, and is idempotent whenever it succeeds (the output
+/// formats again, byte-identically). Shared by the in-tree property fuzzer
+/// and the coverage-guided `fuzz/` targets so the contract has one home.
+pub fn check_format_invariants(input: &str) {
+    let first = format(input, Config::default());
+    let again = format(input, Config::default());
+    assert_eq!(first, again, "non-deterministic format for input {input:?}");
+
+    if let Ok(output) = first {
+        match format(&output, Config::default()) {
+            Ok(second) => assert_eq!(second, output, "format not idempotent for input {input:?}"),
+            Err(error) => panic!(
+                "formatted output no longer formats for input {input:?}: {error} (output {output:?})"
+            ),
+        }
+    }
 }

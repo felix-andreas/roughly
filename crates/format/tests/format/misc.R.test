@@ -247,3 +247,36 @@ process_data <- function(data_list, strict = FALSE) {
     }
   )
 }
+
+#---- semicolon_only_block_collapses_to_empty
+{
+  ;
+}
+#++++
+{}
+
+#---- empty_trailing_argument_keeps_comma_space
+f((f
+),)
+#++++
+f((f), )
+
+#---- inline_loop_body_expands_enclosing_if
+if (1)E else repeat 4
+#++++
+if (1) {
+  E
+} else {
+  repeat {
+    4
+  }
+}
+
+#---- brace_hug_releases_inline_loop
+{ repeat 4 }
+#++++
+{
+  repeat {
+    4
+  }
+}

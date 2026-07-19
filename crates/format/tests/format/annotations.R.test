@@ -542,3 +542,18 @@ x <- 1L #: integer
 foo(bar) #:  list[ integer ]
 #++++
 foo(bar) #: list[integer]
+
+#---- own_line_annotation_survives_expression_join
+(r
+#:
+-a)
+#++++
+(r
+  #:
+  - a)
+
+#---- midline_annotation_interrupting_expression_refused
+x <- #: integer
+1L
+#++++
+ERROR: Syntax error: a `#:` annotation cannot interrupt an expression — move it to its own line at line 1, column 6

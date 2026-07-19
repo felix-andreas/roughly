@@ -22,6 +22,7 @@
 //! runs.
 
 use std::path::PathBuf;
+use syntax::testing::check_parse_invariants as check_invariants;
 
 struct SplitMix64(u64);
 
@@ -164,94 +165,6 @@ fn iterations() -> usize {
         .ok()
         .and_then(|value| value.parse().ok())
         .unwrap_or(1500)
-}
-
-/// The full invariant battery for one input.
-fn check_invariants(input: &str) {
-    let parse = syntax::parse(input);
-    let reprinted = parse.text();
-    assert_eq!(
-        reprinted, input,
-        "lossless round-trip violated for input {input:?}"
-    );
-
-    let (tokens, _errors) = syntax::lex(input);
-    let total: u32 = tokens.iter().map(|token| u32::from(token.len)).sum();
-    assert_eq!(
-        total as usize,
-        input.len(),
-        "token cover violated for input {input:?}"
-    );
-    for token in &tokens {
-        assert!(
-            u32::from(token.len) > 0,
-            "zero-length token for input {input:?}"
-        );
-    }
-
-    check_geometry(&parse.syntax_node(), input);
-
-    // Error-report quality: every diagnostic is renderable (non-empty
-    // message, in-bounds range), and the report count stays linear in the
-    // input — a cascade that fans one mistake into a storm is a bug even
-    // when every individual message is well-formed.
-    assert!(
-        parse.errors().len() <= 2 * tokens.len() + 16,
-        "error cascade: {} errors from {} tokens for input {input:?}",
-        parse.errors().len(),
-        tokens.len()
-    );
-    for error in parse.errors() {
-        assert!(
-            !error.message.is_empty(),
-            "empty error message for input {input:?}"
-        );
-        assert!(
-            u32::from(error.range.end()) as usize <= input.len(),
-            "error range out of bounds for input {input:?}"
-        );
-    }
-
-    // Determinism: a second parse yields a structurally equal tree and the
-    // same errors.
-    let again = syntax::parse(input);
-    assert_eq!(
-        parse.green(),
-        again.green(),
-        "non-deterministic parse for input {input:?}"
-    );
-    assert_eq!(
-        parse.errors(),
-        again.errors(),
-        "non-deterministic errors for input {input:?}"
-    );
-}
-
-/// Every node's children (nodes and tokens) must tile its range exactly.
-fn check_geometry(node: &syntax::SyntaxNode, input: &str) {
-    let range = node.text_range();
-    let mut cursor = range.start();
-    for child in node.children_with_tokens() {
-        let child_range = child.text_range();
-        assert_eq!(
-            child_range.start(),
-            cursor,
-            "child ranges not contiguous under {:?} for input {input:?}",
-            node.kind()
-        );
-        cursor = child_range.end();
-        if let rowan::NodeOrToken::Node(child) = child {
-            check_geometry(&child, input);
-        }
-    }
-    if node.children_with_tokens().next().is_some() {
-        assert_eq!(
-            cursor,
-            range.end(),
-            "children do not cover {:?} for input {input:?}",
-            node.kind()
-        );
-    }
 }
 
 #[test]

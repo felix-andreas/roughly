@@ -1,0 +1,36 @@
+# Coverage-guided (libFuzzer) targets over the pipeline's entry points,
+# asserting the SAME invariant batteries as the in-tree property fuzzers —
+# the property harnesses are deterministic-random and blind to branch
+# coverage, so these explore where they cannot. Needs nightly + cargo-fuzz;
+# see the fuzzing section of docs/src/content/docs/testing.md.
+[package]
+name = "roughly-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+syntax = { path = "../crates/syntax" }
+format = { path = "../crates/format" }
+
+[[bin]]
+name = "parse"
+path = "fuzz_targets/parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "format"
+path = "fuzz_targets/format.rs"
+test = false
+doc = false
+bench = false
+
+# Its own workspace: the fuzz crate needs nightly and must not join the
+# stable workspace battery.
+[workspace]

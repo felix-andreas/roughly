@@ -14,7 +14,6 @@
 
 - **Testing-parity remainder (from the user-directed assessment; the differential net and the missing-diagnostic probes are DONE and in the ledger):**
   - Shadows-builtin / shadows-imported-namespace warnings (legacy naming-class, differential-invisible): implement as a **default-off lint** in the lint framework when touched — hygiene, not semantics, and noisy on legitimate S3 method definitions (`print <- …`).
-  - Coverage-guided fuzz targets + llvm-cov (listed under structure & performance).
   - ide fixtures are thin (46 vs legacy's 295) but the per-position IDE differential sweeps every byte of every typing case against the oracle — keep growing typing cases and the ide surface inherits coverage.
 - **Loop-carried reads ignore the outer binding for typing:** `while (x > 0L) größe <- größe - 1L` after `größe <- @new Point` — the first iteration reads the outer `Point` (legacy flags the arithmetic), but the rewrite's loop re-walk resolves the read to the carried slot only. The unused check already treats maybe-undefined top-level reads as cross-item reads; the CHECK level should union the outer/global type into such reads. Accepted via the fuzz arm's unstable-name filter for now.
 
@@ -30,7 +29,7 @@
 
 - **The rewrite is complete and shipping** (decisions.md "target architecture" record): every phase gate holds — corpus/round-trip/acceptance/fuzzing, semantic parity via the differentials, cutover suites, perf + memory + keystroke budgets, order-independent fixpoint, multi-core stress. The legacy crates stay in-tree **by user directive** until the user asks for the final deletion sweep; when that comes, migrate the remaining fixture data out of the legacy trees and archive a final corpus parity report first.
 - Other performance levers, none currently felt: narrowing `interface_sccs`' dependency surface to a per-item read-name projection (~3 ms/keystroke validation walk); parallel fixpoint scheduling (4 workers buy only 1.2x today — the package-interface fixed point serializes the cold pass).
-- **Fuzzing follow-ups toward release hardening:** add coverage-guided `cargo-fuzz` targets for `syntax::parse` and `format::format` (the property harnesses are deterministic-random, blind to branch coverage) and a scheduled deep-fuzz run; add an `llvm-cov` coverage report to know the line/branch numbers instead of asserting suite breadth by construction.
+- **Coverage-guided fuzzing landed** (`fuzz/` crate, testing.md documents the workflow): libFuzzer targets over the exported invariant batteries plus `scripts/seed-fuzz-corpus.sh`; the first sessions found and fixed nine real formatter bugs (all pinned in the `REGRESSIONS` battery + golden fixtures). Remaining: a scheduled deep-fuzz run on real CI hardware, and an `llvm-cov` coverage report to know line/branch numbers (recipe in testing.md; skipped in-container for disk).
 - CI: the widened whole-workspace workflow is staged in `.github/pending-ci.yml` — a human must `git mv` it into `.github/workflows/` (automated tokens lack workflow scope). Until then CI gates only the product crate's own suites; the workspace battery runs locally per slice. Authoritative perf numbers need the CI runner.
 
 ## Open — website & docs
