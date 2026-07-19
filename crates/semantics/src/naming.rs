@@ -129,8 +129,9 @@ pub fn resolve_item_with_masked_verbs(
         module,
         masked_verbs,
         next_binding: 0,
-        scopes: vec![Scope::new(ScopeKind::TopLevel)],
+        scopes: vec![Scope::new(ScopeKind::TopLevel, 0)],
         bindings_by_site: FxHashMap::default(),
+        scope_ids: FxHashMap::default(),
         flow: FlowState::new(),
         writes: Vec::new(),
         write_by_expression: FxHashMap::default(),
@@ -159,13 +160,18 @@ enum ScopeKind {
 }
 
 struct Scope {
+    /// Stable frame identity (per defining expression, so loop re-walks
+    /// reuse it): capture liveness marks writes of the SAME frame only — a
+    /// shadowed outer binding is not what the closure reads.
+    id: u32,
     kind: ScopeKind,
     slots: BTreeMap<String, BindingId>,
 }
 
 impl Scope {
-    fn new(kind: ScopeKind) -> Scope {
+    fn new(kind: ScopeKind, id: u32) -> Scope {
         Scope {
+            id,
             kind,
             slots: BTreeMap::new(),
         }
@@ -188,6 +194,8 @@ type FlowState = BTreeMap<BindingId, BTreeSet<Reach>>;
 struct AssignmentWrite {
     name: String,
     range: TextRange,
+    /// The written slot's owning frame (see [`Scope::id`]).
+    scope: u32,
     used: bool,
     reportable: bool,
 }
@@ -200,6 +208,9 @@ struct Context<'a> {
     scopes: Vec<Scope>,
     /// Loop re-walks must mint no new ids: one binding per (site, name).
     bindings_by_site: FxHashMap<(u32, u32, String), BindingId>,
+    /// Frame ids per defining expression (the top level is 0); loop
+    /// re-walks reuse them like binding ids.
+    scope_ids: FxHashMap<ExprId, u32>,
     flow: FlowState,
     writes: Vec<AssignmentWrite>,
     write_by_expression: FxHashMap<ExprId, u32>,
@@ -216,6 +227,13 @@ struct Context<'a> {
 }
 
 impl Context<'_> {
+    /// Stable per defining expression, so loop re-walks reuse the id (the
+    /// top-level frame is 0).
+    fn stable_scope_id(&mut self, expression: ExprId) -> u32 {
+        let next = self.scope_ids.len() as u32 + 1;
+        *self.scope_ids.entry(expression).or_insert(next)
+    }
+
     fn mint_binding(&mut self, name: &str, range: TextRange, kind: BindingKind) -> BindingId {
         let key = (
             u32::from(range.start()),
@@ -417,7 +435,8 @@ impl Context<'_> {
                 }
             }
             ExpressionKind::Function { parameters, body } => {
-                self.scopes.push(Scope::new(ScopeKind::Function));
+                let scope_id = self.stable_scope_id(id);
+                self.scopes.push(Scope::new(ScopeKind::Function, scope_id));
                 let saved_flow = std::mem::take(&mut self.flow);
                 let parameters = parameters.clone();
                 for parameter in &parameters {
@@ -485,7 +504,8 @@ impl Context<'_> {
                 // Reads fall through to enclosing scopes as ordinary reads
                 // and control flow runs straight through; only the bindings
                 // are scoped.
-                self.scopes.push(Scope::new(ScopeKind::Local));
+                let scope_id = self.stable_scope_id(id);
+                self.scopes.push(Scope::new(ScopeKind::Local, scope_id));
                 self.premint_frame_assignments(*body);
                 self.resolve(*body);
                 self.scopes.pop();
@@ -692,11 +712,16 @@ impl Context<'_> {
                 }
                 if depth < self.current_function_depth() {
                     // A read of an enclosing frame's slot from inside a
-                    // function: a capture — every write to it stays
-                    // observable, so it is never a dead store.
+                    // function: a capture — every write of the name IN THAT
+                    // FRAME stays observable (sequential rebindings are one
+                    // runtime variable), so none of them is a dead store. A
+                    // same-named binding in a DIFFERENT frame is not what
+                    // this closure reads — a shadowed outer binding stays
+                    // reportably dead.
                     self.naming.captured_slots.insert(slot);
+                    let frame = self.scopes[depth].id;
                     for index in 0..self.writes.len() {
-                        if self.writes[index].name == *name {
+                        if self.writes[index].scope == frame && self.writes[index].name == *name {
                             self.writes[index].used = true;
                         }
                     }
@@ -902,9 +927,17 @@ impl Context<'_> {
             Some(&index) => index,
             None => {
                 let index = self.writes.len() as u32;
+                let scope = self
+                    .scopes
+                    .iter()
+                    .rev()
+                    .find(|scope| scope.slots.get(name) == Some(&slot))
+                    .map(|scope| scope.id)
+                    .unwrap_or_else(|| self.scopes.last().expect("scope stack is never empty").id);
                 self.writes.push(AssignmentWrite {
                     name: name.to_owned(),
                     range,
+                    scope,
                     used: false,
                     reportable,
                 });

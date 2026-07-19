@@ -380,6 +380,61 @@ f <- function() {
 f: fn() -> character
 20..30 error[annotation] A `#:` typing comment cannot be separated from its expression by an empty line.
 
+#==== alias_callees
+#---- alias_typed_callee_expands_to_a_function
+#: @alias Formatter {fn(count: integer) -> character}
+
+#: Formatter
+render <- function(count) "ok"
+out <- render(1L)
+#++++
+render: Formatter
+out: character
+
+#---- alias_typed_callee_still_checks_arguments
+#: @alias Formatter {fn(count: integer) -> character}
+
+#: Formatter
+render <- function(count) "ok"
+out <- render("nope")
+#++++
+render: Formatter
+out: Unknown
+113..119 error[type-mismatch] expected `integer`, found `character`
+
+#==== elided_returns
+#---- elided_callback_return_means_null
+#: @param cb {fn(integer)}
+run_cb <- function(cb) cb(1L)
+run_cb(function(x) x + 1L)
+#++++
+run_cb: fn(cb: fn(integer) -> NULL) -> Unknown
+64..82 error[type-mismatch] expected `fn(integer) -> NULL`, found `fn(x: T) -> T`
+
+#---- elided_callback_accepts_a_null_callback
+#: @param cb {fn(integer)}
+run_cb <- function(cb) cb(1L)
+run_cb(function(x) NULL)
+#++++
+run_cb: fn(cb: fn(integer) -> NULL) -> Unknown
+
+#---- elided_definition_return_still_infers
+#: fn(count: integer)
+f <- function(count) count
+#++++
+f: fn(count: integer) -> Unknown
+
+#---- nested_compact_callback_elides_to_null
+#: fn(cb: fn(integer)) -> NULL
+run_cb <- function(cb) {
+  cb(1L)
+  NULL
+}
+run_cb(function(x) x + 1L)
+#++++
+run_cb: fn(cb: fn(integer) -> NULL) -> NULL
+81..99 error[type-mismatch] expected `fn(integer) -> NULL`, found `fn(x: T) -> T`
+
 #==== placement
 #---- type_definition_below_top_level_is_refused
 value <- {

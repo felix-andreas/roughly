@@ -197,3 +197,27 @@ for (i in 1:3) total <- i
 report <- function() total
 #++++
 report: fn() -> Unknown
+
+#---- shadowed_outer_binding_is_dead_despite_the_capture
+f <- function() {
+  x <- "outer"
+  g <- function() {
+    x <- TRUE
+    h <- function() x
+    h
+  }
+  g
+}
+#++++
+f: fn() -> fn() -> fn() -> logical
+20..21 warning[unused] `x` is assigned but never used.
+
+#---- rebinding_in_the_captured_frame_stays_alive
+f <- function() {
+  x <- 1L
+  g <- function() x
+  x <- 2L
+  g
+}
+#++++
+f: fn() -> fn() -> integer

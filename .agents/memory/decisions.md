@@ -684,3 +684,13 @@ Chosen shape, keeping one source of truth per fact:
 - **IDE consequences:** goto-type-definition and hover pick the nominal up from the recorded expression types with no feature-side work; inlay hints skip annotated nested bindings (the annotation already names the type), symmetric with the root gate on surviving payload.
 
 Impact: correctness — eight corpus cases close (1515/1523 matching), with fixtures pinning the constructor idiom in both forms, the mismatch error at the value, trust, bare-expression checks, and nested blank-line detachment; simplicity — one association walk and one application seam instead of per-position special cases; incremental analysis — everything stays inside existing per-item queries.
+
+# Decision record: capture liveness is frame-scoped
+
+**Status:** decided and implemented (agent-owned decision under the delegated ownership mandate). Settles which writes a closure's captured read keeps alive for the unused check — the corpus differential showed the rewrite marking by NAME across all frames, so a shadowed outer binding never warned.
+
+Rule: a read from inside a nested function keeps every write of the name alive **in the frame the read resolves to** (sequential rebindings of one name in one frame are a single runtime variable, and the closure runs after the frame settled), and no other frame's — a same-named binding in an enclosing frame that the resolved binding shadows is not what the closure reads, so it stays reportably dead. This is exactly R's environment semantics and agrees with the oracle.
+
+Mechanics: frames carry a stable identity (`Scope::id`, minted per defining expression like binding ids so loop re-walks reuse it), each assignment write records its slot's owning frame, and the capture sweep filters on frame + name. Writes recorded after the read stay covered by the existing per-slot `captured_slots` marking at the write site. The typing reference documents the rule with both directions as examples.
+
+Impact: correctness — two corpus cases close and a false-negative class (dead shadowed bindings in closure-heavy code) is gone; simplicity — one id per scope instead of a second liveness structure; incremental analysis — naming stays a per-item pure function.

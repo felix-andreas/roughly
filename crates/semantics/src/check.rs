@@ -3128,6 +3128,16 @@ impl<'db> Checker<'db, '_> {
         arguments: &[CallArgument<'db>],
     ) -> Ty<'db> {
         let resolved = self.table.shallow_resolve(self.db, callee);
+        // An alias- or nominal-typed callee calls through its representation:
+        // `#: Formatter` (an alias of a function type) names the same
+        // callable its expansion does. Undeclared names floor to `Unknown`
+        // inside `structural`, so a typo'd callee stays quiet here (the
+        // unknown-type diagnostic owns it).
+        let resolved = if matches!(resolved.kind(self.db), TyKind::Named(..)) {
+            self.structural(resolved)
+        } else {
+            resolved
+        };
         match resolved.kind(self.db) {
             TyKind::Function(function) => {
                 let function = function.clone();

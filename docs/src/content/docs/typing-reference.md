@@ -245,6 +245,16 @@ Examples:
 - `f <- function() { x <- 1L; x <- 2L; y <- x; y }` warns that the first write to `x` is unused
   (a dead store)
 
+A read from inside a nested function is a capture: the closure runs after its frame executed, so
+every write of the captured name **in the frame the read resolves to** stays observable and none
+of them is a dead store. Only that frame's writes — a same-named binding in an enclosing frame
+that the inner binding shadows is not what the closure reads, and it still warns:
+
+- `f <- function() { x <- 1L; g <- function() x; x <- 2L; g }` is clean: both writes to `f`'s
+  `x` stay alive through the capture
+- `f <- function() { x <- "outer"; g <- function() { x <- TRUE; function() x } }` warns that
+  `x <- "outer"` is unused: the innermost function reads `g`'s `x`, which shadows it
+
 ### Type names
 
 Top-level `@type` and `@alias` declarations share one project-global namespace.

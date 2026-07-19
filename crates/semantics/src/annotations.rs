@@ -81,6 +81,7 @@ pub fn lower_annotation<'db>(db: &'db dyn Db, node: &SyntaxNode) -> Annotation<'
         depth: 0,
         beyond_check_depth: false,
         beyond_parse_depth: false,
+        definition_type: false,
     };
     let mut annotation = Annotation {
         range: node.text_range(),
@@ -199,7 +200,9 @@ pub fn lower_annotation<'db>(db: &'db dyn Db, node: &SyntaxNode) -> Annotation<'
                     "trust" => {
                         annotation.trusted = true;
                         if let Some(ty) = child.children().find(|c| is_type_kind(c.kind())) {
+                            lowering.definition_type = true;
                             let lowered = lowering.lower_type(&ty);
+                            lowering.definition_type = false;
                             annotation.declared = Some(TypeScheme {
                                 binders: Vec::new(),
                                 body: lowered,
@@ -252,7 +255,9 @@ pub fn lower_annotation<'db>(db: &'db dyn Db, node: &SyntaxNode) -> Annotation<'
             }
             kind if is_type_kind(kind) => {
                 // Compact form: the annotation IS the declared type.
+                lowering.definition_type = true;
                 let body = lowering.lower_type(&child);
+                lowering.definition_type = false;
                 if let TyKind::Function(function) = body.kind(db) {
                     annotation.parameter_names = function
                         .named
@@ -452,6 +457,13 @@ struct Lowering<'db> {
     depth: usize,
     beyond_check_depth: bool,
     beyond_parse_depth: bool,
+    /// Lowering the annotated definition's own declared type (a compact or
+    /// `@trust` annotation): only there an elided `->` on the OUTERMOST
+    /// function type means "inferred from the body". Everywhere else — a
+    /// nested function type, `@param`/`@return` payloads, `@type`/`@alias`
+    /// bodies — an elided return means `NULL`, R's default for a function
+    /// that returns nothing declared.
+    definition_type: bool,
 }
 
 impl<'db> Lowering<'db> {
@@ -748,7 +760,16 @@ impl<'db> Lowering<'db> {
                     .any(|token| token.kind() == SyntaxKind::MINUS_GREATER)
             })
             .map(|ty| self.lower_type(&ty))
-            .unwrap_or_else(|| unknown(self.db));
+            .unwrap_or_else(|| {
+                // The definition's own outermost function type elides to
+                // "inferred from the body"; any other elided return means
+                // `NULL` (see the `definition_type` field).
+                if self.definition_type && self.depth == 1 {
+                    unknown(self.db)
+                } else {
+                    null(self.db)
+                }
+            });
         Ty::new(
             self.db,
             TyKind::Function(FunctionType {
