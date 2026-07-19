@@ -86,3 +86,88 @@ f <- function(g) g(g)
 #++++
 f: Unknown
 17..21 error[type-mismatch] I cannot construct an infinite type: T occurs inside `fn(T) -> U`.
+
+#==== constants
+#---- reserved_constants_infer_fixed_types
+flag <- NA
+count <- NA_integer_
+amount <- NA_real_
+label <- NA_character_
+z <- NA_complex_
+inf <- Inf
+nan <- NaN
+im <- 1i
+#++++
+flag: logical
+count: integer
+amount: double
+label: character
+z: complex
+inf: double
+nan: double
+im: complex
+
+#==== operators
+#---- modulo_and_integer_division_follow_arithmetic
+f <- function() 7L %% 2L
+g <- function() 7L %/% 2.5
+#++++
+f: fn() -> integer
+g: fn() -> double
+
+#---- power_is_always_double
+f <- function() 2L ^ 3L
+g <- function() 2L ** 3L
+h <- function(x) x ^ 2L
+#++++
+f: fn() -> double
+g: fn() -> double
+h: <T: numeric> fn(x: T) -> double
+
+#---- unary_minus_keeps_the_atom_and_shape
+f <- function() -1L
+g <- function() -c(1L, 2L)
+h <- function() -c(foo = 1L, bar = 2L)
+#++++
+f: fn() -> integer
+g: fn() -> integer[]
+h: fn() -> integer[]
+
+#---- unary_not_requires_logical
+f <- function() !TRUE
+g <- function() !c(TRUE, FALSE)
+h <- function() !1L
+#++++
+f: fn() -> logical
+g: fn() -> logical[]
+h: Unknown
+71..73 error[type-mismatch] expected a `logical` value, found `integer`
+
+#---- comparison_families
+f <- function() "a" < "b"
+g <- function() c(1L, 2L) > 1L
+h <- function() 1L < "a"
+#++++
+f: fn() -> logical
+g: fn() -> logical[]
+h: Unknown
+73..81 error[type-mismatch] expected `integer`, found `character`
+
+#---- range_operator_shapes
+f <- function() 1L:10L
+g <- function() 1:10
+h <- function() 1.5:3L
+k <- function(n) 1:n
+#++++
+f: fn() -> integer[]
+g: fn() -> integer[]
+h: fn() -> double[]
+k: <T: scalar numeric> fn(n: T) -> double[]
+
+#---- boolean_operators_are_scalar_only
+f <- function(a, b) a && b
+g <- function() c(TRUE, FALSE) && TRUE
+#++++
+f: fn(a: logical, b: logical) -> logical
+g: Unknown
+43..57 error[type-mismatch] expected `logical`, found `logical[]`

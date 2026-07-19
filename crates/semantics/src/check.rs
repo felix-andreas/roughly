@@ -1300,7 +1300,16 @@ impl<'db> Checker<'db, '_> {
             LiteralKind::String(_) => scalar(self.db, Atomic::Character),
             LiteralKind::Logical(_) => scalar(self.db, Atomic::Logical),
             LiteralKind::Null => crate::types::null(self.db),
-            LiteralKind::Na => scalar(self.db, Atomic::Logical),
+            LiteralKind::Na(atom) => scalar(
+                self.db,
+                match atom {
+                    crate::hir::NaAtom::Logical => Atomic::Logical,
+                    crate::hir::NaAtom::Integer => Atomic::Integer,
+                    crate::hir::NaAtom::Double => Atomic::Double,
+                    crate::hir::NaAtom::Complex => Atomic::Complex,
+                    crate::hir::NaAtom::Character => Atomic::Character,
+                },
+            ),
             LiteralKind::Inf | LiteralKind::NaN => scalar(self.db, Atomic::Double),
         }
     }

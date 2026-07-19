@@ -94,9 +94,21 @@ pub enum LiteralKind {
     String(String),
     Logical(bool),
     Null,
-    Na,
+    /// `NA` and its typed variants: each is a scalar of a fixed atom (`NA`
+    /// is logical; `NA_integer_`, `NA_real_`, `NA_complex_`, and
+    /// `NA_character_` name theirs).
+    Na(NaAtom),
     Inf,
     NaN,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NaAtom {
+    Logical,
+    Integer,
+    Double,
+    Complex,
+    Character,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -672,7 +684,11 @@ fn literal_kind(node: &SyntaxNode) -> LiteralKind {
         SyntaxKind::NULL_KW => LiteralKind::Null,
         SyntaxKind::INF_KW => LiteralKind::Inf,
         SyntaxKind::NAN_KW => LiteralKind::NaN,
-        _ => LiteralKind::Na,
+        SyntaxKind::NA_INTEGER_KW => LiteralKind::Na(NaAtom::Integer),
+        SyntaxKind::NA_REAL_KW => LiteralKind::Na(NaAtom::Double),
+        SyntaxKind::NA_COMPLEX_KW => LiteralKind::Na(NaAtom::Complex),
+        SyntaxKind::NA_CHARACTER_KW => LiteralKind::Na(NaAtom::Character),
+        _ => LiteralKind::Na(NaAtom::Logical),
     }
 }
 
