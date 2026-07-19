@@ -35,6 +35,7 @@ pub(crate) fn parse(text: &str) -> Parse {
         groups: vec![0],
         depth: 0,
         in_annotation: false,
+        statement_had_lexer_error: false,
     };
     parser.source_file();
     let green = parser.builder.finish();
@@ -59,6 +60,10 @@ struct Parser<'a> {
     depth: u32,
     /// Whether errors are currently raised by the `#:` annotation grammar.
     in_annotation: bool,
+    /// Whether the statement being parsed consumed a lexer `ERROR_TOKEN`.
+    /// The lexer's diagnostic is already precise, so the statement loop
+    /// suppresses its own boundary report on top of it.
+    statement_had_lexer_error: bool,
 }
 
 impl Parser<'_> {
@@ -883,6 +888,7 @@ impl Parser<'_> {
     fn statements(&mut self, terminator: Option<SyntaxKind>) {
         loop {
             self.eat_trivia(true);
+            self.statement_had_lexer_error = false;
             match self.current() {
                 Some(SyntaxKind::SEMICOLON) => {
                     self.bump();
@@ -919,11 +925,16 @@ impl Parser<'_> {
             match self.current() {
                 None | Some(SyntaxKind::NEWLINE | SyntaxKind::SEMICOLON) => {}
                 Some(kind) if Some(kind) == terminator => {}
-                Some(_) => {
-                    let description = self.describe_current();
-                    self.error_here(format!(
-                        "unexpected {description} after this expression; expected a newline or `;`"
-                    ));
+                Some(kind) => {
+                    // A statement that already contains a lexer error owns
+                    // this whole broken region; re-reporting its tail as
+                    // "unexpected ..." would double up on one mistake.
+                    if kind != SyntaxKind::ERROR_TOKEN && !self.statement_had_lexer_error {
+                        let description = self.describe_current();
+                        self.error_here(format!(
+                            "unexpected {description} after this expression; expected a newline or `;`"
+                        ));
+                    }
                     self.start(SyntaxKind::ERROR);
                     self.recover_to_statement_boundary(terminator);
                     self.finish();
@@ -1055,6 +1066,14 @@ impl Parser<'_> {
         match kind {
             SyntaxKind::IDENT | SyntaxKind::DOTS | SyntaxKind::DOTDOTI | SyntaxKind::UNDERSCORE => {
                 self.wrap_name()
+            }
+            // The lexer already diagnosed this token precisely; consume it as
+            // a placeholder atom so no second report stacks on top.
+            SyntaxKind::ERROR_TOKEN => {
+                self.statement_had_lexer_error = true;
+                self.start(SyntaxKind::ERROR);
+                self.bump();
+                self.finish();
             }
             SyntaxKind::INTEGER
             | SyntaxKind::DOUBLE

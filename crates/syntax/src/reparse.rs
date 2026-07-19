@@ -132,20 +132,14 @@ fn try_splice(
                 open_delimiters.push(SyntaxKind::L_BRACKET);
                 open_delimiters.push(SyntaxKind::L_BRACKET);
             }
-            SyntaxKind::R_PAREN => {
-                if open_delimiters.last() == Some(&SyntaxKind::L_PAREN) {
-                    open_delimiters.pop();
-                }
+            SyntaxKind::R_PAREN if open_delimiters.last() == Some(&SyntaxKind::L_PAREN) => {
+                open_delimiters.pop();
             }
-            SyntaxKind::R_BRACKET => {
-                if open_delimiters.last() == Some(&SyntaxKind::L_BRACKET) {
-                    open_delimiters.pop();
-                }
+            SyntaxKind::R_BRACKET if open_delimiters.last() == Some(&SyntaxKind::L_BRACKET) => {
+                open_delimiters.pop();
             }
-            SyntaxKind::R_BRACE => {
-                if open_delimiters.last() == Some(&SyntaxKind::L_BRACE) {
-                    open_delimiters.pop();
-                }
+            SyntaxKind::R_BRACE if open_delimiters.last() == Some(&SyntaxKind::L_BRACE) => {
+                open_delimiters.pop();
             }
             _ => {}
         }

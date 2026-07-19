@@ -191,6 +191,27 @@ fn check_invariants(input: &str) {
 
     check_geometry(&parse.syntax_node(), input);
 
+    // Error-report quality: every diagnostic is renderable (non-empty
+    // message, in-bounds range), and the report count stays linear in the
+    // input — a cascade that fans one mistake into a storm is a bug even
+    // when every individual message is well-formed.
+    assert!(
+        parse.errors().len() <= 2 * tokens.len() + 16,
+        "error cascade: {} errors from {} tokens for input {input:?}",
+        parse.errors().len(),
+        tokens.len()
+    );
+    for error in parse.errors() {
+        assert!(
+            !error.message.is_empty(),
+            "empty error message for input {input:?}"
+        );
+        assert!(
+            u32::from(error.range.end()) as usize <= input.len(),
+            "error range out of bounds for input {input:?}"
+        );
+    }
+
     // Determinism: a second parse yields a structurally equal tree and the
     // same errors.
     let again = syntax::parse(input);

@@ -148,7 +148,7 @@ fn hover_definition<'db>(
             maybe_undefined: naming.maybe_undefined.contains(&expression),
         });
     }
-    if naming.non_locals.get(&expression).is_some() {
+    if naming.non_locals.contains_key(&expression) {
         if let Some(definition) = global_hover_definition(db, files, name, None) {
             return Some(definition);
         }

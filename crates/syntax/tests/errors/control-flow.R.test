@@ -1,0 +1,103 @@
+#==== if
+#---- if_unclosed_condition
+if (ready 1 else 2
+#++++
+error: unclosed `(` in the `if` condition; expected a matching `)`
+ --> 1:4
+  | if (ready 1 else 2
+  |    ^
+
+#---- if_missing_branch
+answer <- if (ready)
+#++++
+error: expected a branch after the `if` condition, found end of file
+ --> 1:21
+  | answer <- if (ready)
+  |                     ^
+
+#---- else_missing_expression
+answer <- if (ready) 1 else
+#++++
+error: expected an expression after `else`, found end of file
+ --> 1:28
+  | answer <- if (ready) 1 else
+  |                            ^
+
+#==== while
+#---- while_missing_condition
+while () tick()
+#++++
+error: expected a condition inside `while (…)`, found `)`
+ --> 1:8
+  | while () tick()
+  |        ^
+
+#---- while_unclosed_condition
+while (busy tick()
+#++++
+error: unclosed `(` in the `while` condition; expected a matching `)`
+ --> 1:7
+  | while (busy tick()
+  |       ^
+
+#---- while_missing_body
+while (busy)
+#++++
+error: expected a body for the `while` loop
+ --> 1:13
+  | while (busy)
+  |             ^
+
+#==== for
+#---- for_missing_paren
+for x in items) print(x)
+#++++
+error: expected `(` after `for`, found identifier
+ --> 1:5
+  | for x in items) print(x)
+  |     ^
+error: unexpected `in` after this expression; expected a newline or `;`
+ --> 1:7
+  | for x in items) print(x)
+  |       ^^
+
+#---- for_missing_variable
+for (in items) print(x)
+#++++
+error: expected a loop variable after `for (`, found `in`
+ --> 1:6
+  | for (in items) print(x)
+  |      ^^
+
+#---- for_missing_sequence
+for (x in) print(x)
+#++++
+error: expected a sequence expression in the `for` head, found `)`
+ --> 1:10
+  | for (x in) print(x)
+  |          ^
+
+#---- for_unclosed_head
+for (x in items print(x)
+#++++
+error: unclosed `(` in the `for` head; expected a matching `)`
+ --> 1:5
+  | for (x in items print(x)
+  |     ^
+
+#---- for_missing_body
+for (x in items)
+#++++
+error: expected a body for the `for` loop
+ --> 1:17
+  | for (x in items)
+  |                 ^
+
+#==== repeat
+#---- repeat_missing_body
+repeat
+#++++
+error: expected a body after `repeat`
+ --> 1:7
+  | repeat
+  |       ^

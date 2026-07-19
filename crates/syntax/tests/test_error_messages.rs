@@ -32,7 +32,7 @@ fn render_errors(source: &str) -> String {
     for error in parse.errors() {
         let start = u32::from(error.range.start()) as usize;
         let end = u32::from(error.range.end()) as usize;
-        let line = line_of(start.min(source.len().saturating_sub(1).max(0)));
+        let line = line_of(start.min(source.len().saturating_sub(1)));
         let line_start = line_starts[line];
         let line_text = source[line_start..].lines().next().unwrap_or("");
         let column = source[line_start..start.min(source.len())].chars().count();

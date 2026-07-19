@@ -104,7 +104,6 @@ SOURCE_FILE@0..2
   ERROR@0..2
     ERROR_TOKEN@0..2 "0x"
 err: 0..2: missing digits after `0x`
-err: 0..2: expected a statement, found unrecognized text
 
 #---- complex_forms
 c(2i, 1.5i, 0x2i)

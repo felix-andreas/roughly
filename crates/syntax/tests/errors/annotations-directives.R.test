@@ -1,0 +1,112 @@
+#==== directives
+#---- bare_at
+#: @
+x <- 1
+#++++
+error: expected a directive name after `@`
+ --> 1:5
+  | #: @
+  |     ^
+
+#---- unknown_directive
+#: @wat integer
+x <- 1
+#++++
+error: unknown annotation directive `@wat`
+ --> 1:5
+  | #: @wat integer
+  |     ^^^
+
+#---- param_missing_name
+#: @param
+f <- function(x) x
+#++++
+error: expected a parameter name after `@param`
+ --> 1:10
+  | #: @param
+  |          ^
+error: expected `{TYPE}` after `@param`
+ --> 1:10
+  | #: @param
+  |          ^
+
+#---- param_missing_type
+#: @param x
+f <- function(x) x
+#++++
+error: expected `{TYPE}` after `@param`
+ --> 1:12
+  | #: @param x
+  |            ^
+
+#---- return_missing_type
+#: @return
+f <- function(x) x
+#++++
+error: expected `{TYPE}` after `@return`
+ --> 1:11
+  | #: @return
+  |           ^
+
+#---- forall_missing_name
+#: @forall
+f <- function(x) x
+#++++
+error: expected a type parameter name after `@forall`
+ --> 1:11
+  | #: @forall
+  |           ^
+
+#---- trust_missing_type
+#: @trust
+f <- function(x) x
+#++++
+error: expected a type after `@trust`
+ --> 1:10
+  | #: @trust
+  |          ^
+
+#==== type_definitions
+#---- type_missing_name
+#: @type
+x <- 1
+#++++
+error: expected a type name after `@type`
+ --> 1:9
+  | #: @type
+  |         ^
+error: expected `{TYPE}` after `@type`
+ --> 1:9
+  | #: @type
+  |         ^
+
+#---- type_missing_braces
+#: @type Point
+x <- 1
+#++++
+error: expected `{TYPE}` after `@type`
+ --> 1:15
+  | #: @type Point
+  |               ^
+
+#---- type_unclosed_brace
+#: @type Point {list{x: double
+x <- 1
+#++++
+error: unclosed `{` in `@type`; expected a matching `}`
+ --> 1:16
+  | #: @type Point {list{x: double
+  |                ^
+error: expected `,` or `}` in this list type
+ --> 1:31
+  | #: @type Point {list{x: double
+  |                               ^
+
+#---- type_empty_braces
+#: @type Point {}
+x <- 1
+#++++
+error: expected a type inside `{...}` of `@type`
+ --> 1:17
+  | #: @type Point {}
+  |                 ^

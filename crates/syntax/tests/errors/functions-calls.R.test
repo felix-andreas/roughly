@@ -1,0 +1,78 @@
+#==== definitions
+#---- function_missing_parameter_list
+f <- function 1
+#++++
+error: expected `(` to open the parameter list, found number
+ --> 1:15
+  | f <- function 1
+  |               ^
+
+#---- function_unclosed_parameter_list
+f <- function(x, y
+#++++
+error: unclosed `(`; expected `)` to close the parameter list
+ --> 1:14
+  | f <- function(x, y
+  |              ^
+error: expected a function body
+ --> 1:19
+  | f <- function(x, y
+  |                   ^
+
+#---- function_parameter_separator
+f <- function(x y) x
+#++++
+error: expected `,` or `)` in the parameter list, found identifier
+ --> 1:17
+  | f <- function(x y) x
+  |                 ^
+
+#---- function_missing_default
+f <- function(x = ) x
+#++++
+error: expected a default value after `=`
+ --> 1:19
+  | f <- function(x = ) x
+  |                   ^
+
+#---- function_missing_body
+f <- function(x)
+#++++
+error: expected a function body
+ --> 1:17
+  | f <- function(x)
+  |                 ^
+
+#---- lambda_bad_parameter
+g <- \(1) 1
+#++++
+error: expected a parameter name, found number
+ --> 1:8
+  | g <- \(1) 1
+  |        ^
+
+#==== calls
+#---- call_missing_comma
+total <- sum(1 2)
+#++++
+error: expected `,` or `)` in this argument list, found number
+ --> 1:16
+  | total <- sum(1 2)
+  |                ^
+
+#---- call_unclosed_nested
+wrap <- f(g(1, h(2)
+#++++
+error: unclosed `(`; expected `)` to close it
+ --> 1:10
+  | wrap <- f(g(1, h(2)
+  |          ^
+error: unclosed `(`; expected `)` to close it
+ --> 1:12
+  | wrap <- f(g(1, h(2)
+  |            ^
+
+#---- call_argument_after_comma
+f(1, )
+#++++
+no errors

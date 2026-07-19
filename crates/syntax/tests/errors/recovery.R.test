@@ -1,0 +1,74 @@
+#==== locality
+#---- broken_call_between_good_statements
+first <- 1
+oops <- sum(1 2)
+second <- 2
+#++++
+error: expected `,` or `)` in this argument list, found number
+ --> 2:15
+  | oops <- sum(1 2)
+  |               ^
+
+#---- broken_annotation_keeps_code_clean
+#: fn(x: integer ->
+half <- function(x) x / 2
+later <- half(4L)
+#++++
+error: expected `,` or `)` in this function type's parameters
+ --> 1:18
+  | #: fn(x: integer ->
+  |                  ^^
+error: expected a return type after `->`
+ --> 1:20
+  | #: fn(x: integer ->
+  |                    ^
+
+#---- orphan_else_recovers
+if (a) 1
+else 2
+after <- 3
+#++++
+error: unexpected `else`: it must stay on the same line as the `if` branch it belongs to (or the `if` must be inside braces)
+ --> 2:1
+  | else 2
+  | ^^^^
+
+#---- unterminated_string_stops_at_newline
+name <- "unclosed
+after <- 1
+#++++
+error: unterminated string; expected a closing quote
+ --> 1:9
+  | name <- "unclosed
+  |         ^^^^^^^^^
+
+#==== valid_shapes_stay_clean
+#---- braced_else_on_next_line
+result <- {
+  if (a) 1
+  else 2
+}
+#++++
+no errors
+
+#---- dotdot_prefixed_name
+..2dge <- function(from) from
+#++++
+no errors
+
+#---- chained_else_if
+grade <- if (a) 1 else if (b) 2 else 3
+#++++
+no errors
+
+#---- raw_string_closers
+a <- r"(one)"
+b <- r"[two]"
+c <- r"{three}"
+#++++
+no errors
+
+#---- empty_call_argument
+slice <- m[1, ]
+#++++
+no errors

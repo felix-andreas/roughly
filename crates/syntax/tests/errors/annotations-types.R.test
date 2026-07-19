@@ -1,0 +1,213 @@
+#==== function_types
+#---- unclosed_function_type_paren
+#: fn(x: integer -> double
+half <- function(x) x / 2
+#++++
+error: expected `,` or `)` in this function type's parameters
+ --> 1:18
+  | #: fn(x: integer -> double
+  |                  ^^
+
+#---- function_type_parameter_separator
+#: fn(x: integer y: double) -> double
+mix <- function(x, y) x + y
+#++++
+error: expected `,` or `)` in this function type's parameters
+ --> 1:18
+  | #: fn(x: integer y: double) -> double
+  |                  ^
+error: expected a type, found `:`
+ --> 1:19
+  | #: fn(x: integer y: double) -> double
+  |                   ^
+error: expected a type, found `)`
+ --> 1:27
+  | #: fn(x: integer y: double) -> double
+  |                           ^
+error: expected a type, found `->`
+ --> 1:29
+  | #: fn(x: integer y: double) -> double
+  |                             ^^
+
+#---- missing_return_type
+#: fn(x: integer) ->
+step <- function(x) x
+#++++
+error: expected a return type after `->`
+ --> 1:21
+  | #: fn(x: integer) ->
+  |                     ^
+
+#==== containers
+#---- unclosed_record_brace
+#: list{a: integer
+box <- list(a = 1L)
+#++++
+error: expected `,` or `}` in this list type
+ --> 1:19
+  | #: list{a: integer
+  |                   ^
+
+#---- record_field_separator
+#: list{a: integer b: double}
+box <- list(a = 1L, b = 2)
+#++++
+error: expected `,` or `}` in this list type
+ --> 1:20
+  | #: list{a: integer b: double}
+  |                    ^
+error: expected a type, found `:`
+ --> 1:21
+  | #: list{a: integer b: double}
+  |                     ^
+error: expected a type, found `}`
+ --> 1:29
+  | #: list{a: integer b: double}
+  |                             ^
+
+#---- unclosed_list_bracket
+#: list[integer
+items <- list(1L)
+#++++
+error: unclosed `[` in this list type; expected a matching `]`
+ --> 1:8
+  | #: list[integer
+  |        ^
+
+#==== unions
+#---- union_missing_member
+#: integer |
+value <- 1L
+#++++
+error: expected a type
+ --> 1:13
+  | #: integer |
+  |             ^
+
+#==== binders
+#---- unclosed_binder_list
+#: <T fn(x: T) -> T
+id <- function(x) x
+#++++
+error: expected `,` or `>` in the type parameter list
+ --> 1:7
+  | #: <T fn(x: T) -> T
+  |       ^^
+
+#---- empty_binder_list
+#: <> fn(x: integer) -> integer
+id <- function(x) x
+#++++
+no errors
+
+#---- binder_missing_constraint
+#: <T: > fn(x: T) -> T
+id <- function(x) x
+#++++
+error: expected a constraint name after `:`
+ --> 1:8
+  | #: <T: > fn(x: T) -> T
+  |        ^
+
+#---- higher_rank_refused
+#: fn(f: <T> fn(x: T) -> T) -> integer
+apply1 <- function(f) f(1L)
+#++++
+error: higher-rank polymorphism is not supported: type parameter binders may only appear at the outermost level
+ --> 1:10
+  | #: fn(f: <T> fn(x: T) -> T) -> integer
+  |          ^
+error: expected `,` or `)` in this function type's parameters
+ --> 1:14
+  | #: fn(f: <T> fn(x: T) -> T) -> integer
+  |              ^^
+error: expected a type, found `)`
+ --> 1:27
+  | #: fn(f: <T> fn(x: T) -> T) -> integer
+  |                           ^
+error: expected a type, found `->`
+ --> 1:29
+  | #: fn(f: <T> fn(x: T) -> T) -> integer
+  |                             ^^
+
+#==== type_arguments
+#---- unclosed_type_arguments
+#: Box<integer
+wrapped <- make_box(1L)
+#++++
+error: expected `,` or `>` in the type argument list
+ --> 1:15
+  | #: Box<integer
+  |               ^
+
+#==== optional_parameters
+#---- optional_missing_colon
+#: fn([x] integer) -> integer
+f <- function(x = 1L) x
+#++++
+error: expected `:` after `[name]` in an optional parameter
+ --> 1:11
+  | #: fn([x] integer) -> integer
+  |           ^^^^^^^
+error: expected `,` or `)` in this function type's parameters
+ --> 1:11
+  | #: fn([x] integer) -> integer
+  |           ^^^^^^^
+error: expected a type, found `)`
+ --> 1:18
+  | #: fn([x] integer) -> integer
+  |                  ^
+error: expected a type, found `->`
+ --> 1:20
+  | #: fn([x] integer) -> integer
+  |                    ^^
+
+#---- optional_bad_name
+#: fn([1]: integer) -> integer
+f <- function(x = 1L) x
+#++++
+error: expected `[name]: TYPE` for an optional parameter
+ --> 1:8
+  | #: fn([1]: integer) -> integer
+  |        ^
+error: expected `]` after the optional parameter name
+ --> 1:8
+  | #: fn([1]: integer) -> integer
+  |        ^
+error: expected `:` after `[name]` in an optional parameter
+ --> 1:8
+  | #: fn([1]: integer) -> integer
+  |        ^
+error: expected `,` or `)` in this function type's parameters
+ --> 1:8
+  | #: fn([1]: integer) -> integer
+  |        ^
+error: expected a type, found number
+ --> 1:8
+  | #: fn([1]: integer) -> integer
+  |        ^
+error: expected a type, found `]`
+ --> 1:9
+  | #: fn([1]: integer) -> integer
+  |         ^
+error: expected a type, found `:`
+ --> 1:10
+  | #: fn([1]: integer) -> integer
+  |          ^
+error: expected a type, found `)`
+ --> 1:19
+  | #: fn([1]: integer) -> integer
+  |                   ^
+error: expected a type, found `->`
+ --> 1:21
+  | #: fn([1]: integer) -> integer
+  |                     ^^
+
+#---- optional_unclosed_bracket
+#: fn([x: integer) -> integer
+f <- function(x = 1L) x
+#++++
+error: expected `]` after the optional parameter name
+ --> 1:9
+  | #: fn([x: integer) -> integer
+  |         ^

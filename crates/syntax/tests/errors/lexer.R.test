@@ -1,0 +1,71 @@
+#==== strings
+#---- unterminated_string
+x <- "abc
+#++++
+error: unterminated string; expected a closing quote
+ --> 1:6
+  | x <- "abc
+  |      ^^^^
+
+#---- unterminated_string_single_quote
+x <- 'abc
+#++++
+error: unterminated string; expected a closing quote
+ --> 1:6
+  | x <- 'abc
+  |      ^^^^
+
+#---- unterminated_raw_string
+x <- r"(abc
+#++++
+error: unterminated raw string; expected `)"`
+ --> 1:6
+  | x <- r"(abc
+  |      ^^^^^^
+
+#---- malformed_raw_string
+x <- r"abc"
+#++++
+error: malformed raw string: expected `(`, `[`, or `{` after the quote
+ --> 1:6
+  | x <- r"abc"
+  |      ^^
+error: unterminated string; expected a closing quote
+ --> 1:11
+  | x <- r"abc"
+  |           ^
+
+#---- unterminated_backtick_name
+`weird name <- 1
+#++++
+error: unterminated backtick name; expected a closing `` ` ``
+ --> 1:1
+  | `weird name <- 1
+  | ^^^^^^^^^^^^^^^^
+
+#==== numbers
+#---- missing_hex_digits
+mask <- 0x
+#++++
+error: missing digits after `0x`
+ --> 1:9
+  | mask <- 0x
+  |         ^^
+
+#==== operators
+#---- unterminated_percent_operator
+z <- 1 %o 2
+#++++
+error: unterminated `%` operator; expected a closing `%`
+ --> 1:8
+  | z <- 1 %o 2
+  |        ^^^^
+
+#==== characters
+#---- unexpected_character
+x <- 1 ; §
+#++++
+error: unexpected character `§`
+ --> 1:10
+  | x <- 1 ; §
+  |          ^

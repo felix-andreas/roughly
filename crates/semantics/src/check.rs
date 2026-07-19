@@ -2315,19 +2315,19 @@ impl<'db> Checker<'db, '_> {
                     self.report_unify(range, error);
                 }
             }
-            TyKind::Rigid(name) => {
+            TyKind::Rigid(name)
                 if !matches!(
                     self.rigid_constraints.get(name),
                     Some(Constraint::Numeric | Constraint::ScalarNumeric)
-                ) {
-                    self.errors.push(TypeError {
-                        range,
-                        kind: TypeErrorKind::ConstraintViolation {
-                            constraint: Constraint::Numeric,
-                            found: ty,
-                        },
-                    });
-                }
+                ) =>
+            {
+                self.errors.push(TypeError {
+                    range,
+                    kind: TypeErrorKind::ConstraintViolation {
+                        constraint: Constraint::Numeric,
+                        found: ty,
+                    },
+                });
             }
             _ => {}
         }

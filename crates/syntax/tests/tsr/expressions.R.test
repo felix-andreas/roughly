@@ -2639,7 +2639,7 @@ SOURCE_FILE@0..653
     L_BRACE@622..623 "{"
     NEWLINE@623..624 "\n"
     WHITESPACE@624..626 "  "
-    IF_EXPR@626..644
+    IF_EXPR@626..651
       IF_KW@626..628 "if"
       WHITESPACE@628..629 " "
       L_PAREN@629..630 "("
@@ -2652,17 +2652,17 @@ SOURCE_FILE@0..653
       NEWLINE@637..638 "\n"
       WHITESPACE@638..640 "  "
       ELSE_KW@640..644 "else"
-    ERROR@644..651
-      ERROR_TOKEN@644..646 "·"
-      WHITESPACE@646..647 " "
-      LESS_MINUS@647..649 "<-"
-      WHITESPACE@649..650 " "
-      DOUBLE@650..651 "1"
+      BINARY_EXPR@644..651
+        ERROR@644..646
+          ERROR_TOKEN@644..646 "·"
+        WHITESPACE@646..647 " "
+        LESS_MINUS@647..649 "<-"
+        WHITESPACE@649..650 " "
+        LITERAL@650..651
+          DOUBLE@650..651 "1"
     NEWLINE@651..652 "\n"
     R_BRACE@652..653 "}"
 err: 644..646: unexpected character `·`
-err: 644..646: expected an expression after `else`, found unrecognized text
-err: 644..646: unexpected unrecognized text after this expression; expected a newline or `;`
 
 #---- identifiers_starting_with_else_that_are_not_the_else_keyword_2_200
 # Correctly treats `else.x` as a single identifier, not as `else` followed by `.x`,
