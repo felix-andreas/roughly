@@ -199,7 +199,7 @@ pub trait GlobalEnv<'db> {
 }
 
 pub fn check_item<'db>(db: &'db dyn Db, module: &Module, naming: &ItemNaming) -> ItemCheck<'db> {
-    check_item_with_annotation(db, module, naming, None, None)
+    check_item_with_annotation(db, module, naming, None, &[], None)
 }
 
 /// Full-check executions since process start — a plain instrument for perf
@@ -212,6 +212,7 @@ pub fn check_item_with_annotation<'db>(
     module: &Module,
     naming: &ItemNaming,
     annotation: Option<&crate::annotations::Annotation<'db>>,
+    expression_annotations: &[(ExprId, crate::annotations::Annotation<'db>)],
     globals: Option<&dyn GlobalEnv<'db>>,
 ) -> ItemCheck<'db> {
     CHECK_EXECUTIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -225,6 +226,7 @@ pub fn check_item_with_annotation<'db>(
         naming,
         globals,
         table,
+        expression_annotations: expression_annotations.iter().cloned().collect(),
         environment: Environment::default(),
         scheme_arena: Vec::new(),
         rigid_constraints: FxHashMap::default(),
@@ -339,6 +341,13 @@ pub fn check_item_with_annotation<'db>(
                 };
             }
             _ => {
+                // A checked, trusted, or `@new` annotation on a bare
+                // expression statement applies through the same
+                // expression-level path as nested statements; the item still
+                // exports nothing.
+                if let Some(present) = annotation {
+                    context.expression_annotations.insert(root, present.clone());
+                }
                 context.infer(root);
             }
         }
@@ -552,6 +561,10 @@ struct Checker<'db, 'a> {
     naming: &'a ItemNaming,
     globals: Option<&'a dyn GlobalEnv<'db>>,
     table: InferenceTable<'db>,
+    /// Statement-level annotations below the item root, by annotated
+    /// expression (plus the item annotation itself for a non-assignment
+    /// root): applied where the expression infers.
+    expression_annotations: FxHashMap<ExprId, crate::annotations::Annotation<'db>>,
     environment: Environment<'db>,
     scheme_arena: Vec<TypeScheme<'db>>,
     /// Declared constraints of in-scope rigid binders (`<T: numeric>`).
@@ -865,9 +878,12 @@ impl<'db> Checker<'db, '_> {
                 target,
                 value,
             } => {
-                let spelling = *spelling;
-                let value_ty = self.infer(*value);
-                self.write_target(spelling, *target, value_ty);
+                let (spelling, target, value) = (*spelling, *target, *value);
+                let value_ty = self.infer(value);
+                // A statement-level annotation on the assignment applies
+                // before the write so the binding takes the annotated type.
+                let value_ty = self.apply_expression_annotation(id, value, value_ty);
+                self.write_target(spelling, target, value_ty);
                 value_ty
             }
             ExpressionKind::Unary { operator, operand } => {
@@ -1058,7 +1074,57 @@ impl<'db> Checker<'db, '_> {
             ExpressionKind::Paren(inner) => self.infer(*inner),
             ExpressionKind::Break | ExpressionKind::Next => self.unknown(),
         };
+        // Assignments applied their annotation before the slot write above.
+        let ty = if matches!(expression.kind, ExpressionKind::Assign { .. }) {
+            ty
+        } else {
+            self.apply_expression_annotation(id, id, ty)
+        };
         self.record(id, ty)
+    }
+
+    /// Applies a statement-level annotation to the annotated expression's
+    /// value: `@new` checks the representation and mints the nominal,
+    /// `@trust` overrides unchecked, and a checked declared type enforces
+    /// directional compatibility — the same contract as at the item root,
+    /// minus the export.
+    fn apply_expression_annotation(
+        &mut self,
+        annotated: ExprId,
+        value: ExprId,
+        value_ty: Ty<'db>,
+    ) -> Ty<'db> {
+        let Some(annotation) = self.expression_annotations.get(&annotated).cloned() else {
+            return value_ty;
+        };
+        if let Some((name, arguments, _)) = &annotation.new_nominal {
+            let scheme = self.check_new_nominal(*name, arguments, value, value_ty);
+            return self.instantiate(&scheme);
+        }
+        let Some(declared) = &annotation.declared else {
+            return value_ty;
+        };
+        if annotation.trusted {
+            return declared.body;
+        }
+        if matches!(declared.body.kind(self.db), TyKind::Unknown | TyKind::Any) {
+            return declared.body;
+        }
+        let resolved_value = self.table.resolve(self.db, value_ty);
+        if !self
+            .table
+            .compatible(self.db, resolved_value, declared.body)
+        {
+            let range = self.module.expression(value).range;
+            self.errors.push(TypeError {
+                range,
+                kind: TypeErrorKind::Mismatch {
+                    expected: self.table.resolve(self.db, declared.body),
+                    found: resolved_value,
+                },
+            });
+        }
+        declared.body
     }
 
     fn literal_ty(&mut self, literal: &LiteralKind) -> Ty<'db> {
@@ -5050,7 +5116,7 @@ mod tests {
             .expect("one top-level item");
         let module = lower_item(&item);
         let naming = resolve_item(&module);
-        check_item_with_annotation(db, &module, &naming, annotation.as_ref(), None)
+        check_item_with_annotation(db, &module, &naming, annotation.as_ref(), &[], None)
     }
 
     #[test]

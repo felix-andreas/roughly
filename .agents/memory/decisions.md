@@ -672,3 +672,15 @@ Chosen shape:
 - **Definitions are top-level-only** and nested `@type`/`@alias` blocks error without entering the vocabulary (`file_type_definitions` reads top-level children only).
 
 Impact: correctness — 14 legacy-corpus cases and the whole reported validation family close, with fixtures pinning each shape and message; simplicity — one errors vector and one attachment walk instead of per-consumer validity checks; incremental analysis — everything stays in per-file parse-pure passes except the vocabulary judgment, which joins the existing per-file semantic families.
+
+# Decision record: statement-level annotations attach at any depth and apply where the expression infers
+
+**Status:** decided and implemented (agent-owned decision under the delegated ownership mandate). Closes the largest legacy-corpus gap: annotations below the item root were invisible to the checker, so the constructor idiom (`#: @new Person` on a local assignment or block-final expression inside a function body) silently did nothing.
+
+Chosen shape, keeping one source of truth per fact:
+
+- **Association:** `statement_annotations(parent)` — the existing adjacency walk — runs over any statement sequence (the file root or a braced block), so top-level attachment, expression-level attachment, and the dangling-annotation diagnostics (now covering nested blocks) share one rule. `item_expression_annotations(db, item)` maps each attached block inside an item to the annotated expression's HIR id by exact range; it is a plain function, not a tracked query (`Annotation` carries `TextRange`s with no salsa-value plumbing, and its callers are tracked queries whose dependencies already flow through `item_syntax`/`item_hir`).
+- **Application:** the checker owns one `apply_expression_annotation` seam — assignments apply it before the slot write (the binding takes the annotated type), every other expression applies it where it infers, and a non-assignment item ROOT routes its own annotation through the same seam (closing the bare-expression checked-annotation gap). `@new` reuses `check_new_nominal` (representation check, nominal minted); a checked declared type enforces the same directional `compatible` contract as at the root; `@trust` overrides unchecked. Loop-body re-walk error discarding covers the new errors for free.
+- **IDE consequences:** goto-type-definition and hover pick the nominal up from the recorded expression types with no feature-side work; inlay hints skip annotated nested bindings (the annotation already names the type), symmetric with the root gate on surviving payload.
+
+Impact: correctness — eight corpus cases close (1515/1523 matching), with fixtures pinning the constructor idiom in both forms, the mismatch error at the value, trust, bare-expression checks, and nested blank-line detachment; simplicity — one association walk and one application seam instead of per-position special cases; incremental analysis — everything stays inside existing per-item queries.

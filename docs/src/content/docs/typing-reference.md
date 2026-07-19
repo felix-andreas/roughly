@@ -17,6 +17,20 @@ Consecutive `#:` lines with no blank line between them are treated as a single a
 
 Most annotation blocks are attached to the following binding or expression.
 
+Attachment works at any statement depth, not only at the top level: a block inside a function
+body annotates the local assignment or block-final expression that follows it, with the full
+checked / `@new` / `@trust` semantics. This is how the constructor idiom types:
+
+```r
+#: @type Person {list{name: character}}
+
+#: fn(name: character) -> Person
+make_person <- function(name) {
+  #: @new Person
+  list(name = name)
+}
+```
+
 Attachment requires adjacency: the annotated expression must start on the line directly after the
 block. It is an error when a block that needs a target has none, and the annotation then does not
 apply:

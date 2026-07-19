@@ -357,30 +357,32 @@ pub fn package_scheme_exists(db: &dyn Db, name: &str) -> bool {
     })
 }
 
-/// Where a top-level `#:` annotation's target expression is, if it has one.
-/// An annotation applies only to the expression starting on the very next
-/// line: a blank line, an interposed plain comment, or the end of the file
-/// break the association (and earn a diagnostic when the block needed a
-/// target).
+/// Where a `#:` annotation's target expression is, if it has one. An
+/// annotation applies only to the expression starting on the very next
+/// line: a blank line, an interposed plain comment, or the end of the
+/// statement sequence break the association (and earn a diagnostic when the
+/// block needed a target).
 pub enum AnnotationTarget {
     Attached(syntax::SyntaxNode),
     /// An element follows, but only after one or more blank lines.
     BlankLineSeparated,
-    /// Nothing attachable follows: end of file, or a plain comment or
-    /// another annotation region interposes.
+    /// Nothing attachable follows: end of the sequence, or a plain comment
+    /// or another annotation region interposes.
     Dangling,
 }
 
-/// Each top-level `ANNOTATION` child of the root with its attachment. The
-/// single source of the association rule — both annotation application
-/// (`item_annotation_syntax`) and the dangling-annotation diagnostics read
-/// this.
-pub fn top_level_annotations(
-    root: &syntax::SyntaxNode,
+/// Each `ANNOTATION` child of one statement sequence (the file root, or a
+/// braced block) with its attachment. The single source of the association
+/// rule — annotation application at the top level
+/// (`item_annotation_syntax`), expression-level attachment inside items
+/// (`item_expression_annotations`), and the dangling-annotation diagnostics
+/// all read this.
+pub fn statement_annotations(
+    parent: &syntax::SyntaxNode,
 ) -> Vec<(syntax::SyntaxNode, AnnotationTarget)> {
     let mut associations: Vec<(syntax::SyntaxNode, AnnotationTarget)> = Vec::new();
     let mut pending: Option<(syntax::SyntaxNode, usize)> = None;
-    for child in root.children_with_tokens() {
+    for child in parent.children_with_tokens() {
         match child {
             rowan::NodeOrToken::Node(node) if node.kind() == syntax::SyntaxKind::ANNOTATION => {
                 if let Some((previous, newlines)) = pending.take() {
@@ -438,7 +440,7 @@ pub fn top_level_annotations(
     associations
 }
 
-/// The annotation region attached to an item (see [`top_level_annotations`]
+/// The annotation region attached to an item (see [`statement_annotations`]
 /// for the association rule), as a position-independent green subtree.
 /// Annotations are siblings of the item statement in the file tree, so
 /// attachment happens here, not inside `item_syntax`.
@@ -469,7 +471,7 @@ pub fn item_annotation_syntax<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<I
         }
     }
     let item_node = item_node?;
-    top_level_annotations(&root)
+    statement_annotations(&root)
         .into_iter()
         .find_map(|(annotation, target)| match target {
             AnnotationTarget::Attached(node) if node == item_node => {
@@ -477,6 +479,61 @@ pub fn item_annotation_syntax<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<I
             }
             _ => None,
         })
+}
+
+/// Annotations attached to statements BELOW the item root — block statements
+/// and block-final expressions, the constructor idiom's `#: @new` inside a
+/// function body — keyed by the annotated expression's HIR id. The item's
+/// own annotation is a top-level sibling and arrives separately
+/// (`item_annotation_syntax`); the association rule is the same
+/// (`statement_annotations`). Only payload-bearing annotations attach —
+/// definitions, toggles, and refused blocks have their own reporting. A
+/// plain function, not a tracked query: `Annotation` carries `TextRange`s
+/// (no salsa value plumbing), and the callers are tracked queries whose
+/// dependencies flow through `item_syntax`/`item_hir` anyway.
+pub fn item_expression_annotations<'db>(
+    db: &'db dyn Db,
+    item: Item<'db>,
+) -> Vec<(hir::ExprId, annotations::Annotation<'db>)> {
+    let Some(syntax) = item_syntax(db, item) else {
+        return Vec::new();
+    };
+    let Some(module) = item_hir(db, item) else {
+        return Vec::new();
+    };
+    let root = syntax.syntax_node();
+    let mut parents: Vec<syntax::SyntaxNode> = Vec::new();
+    for node in root
+        .descendants()
+        .filter(|node| node.kind() == syntax::SyntaxKind::ANNOTATION)
+    {
+        if let Some(parent) = node.parent()
+            && !parents.contains(&parent)
+        {
+            parents.push(parent);
+        }
+    }
+    let mut attachments = Vec::new();
+    for parent in parents {
+        for (annotation, target) in statement_annotations(&parent) {
+            let AnnotationTarget::Attached(target) = target else {
+                continue;
+            };
+            let Some(index) = module
+                .expressions
+                .iter()
+                .position(|expression| expression.range == target.text_range())
+            else {
+                continue;
+            };
+            let lowered = annotations::lower_annotation(db, &annotation);
+            if lowered.declared.is_none() && lowered.new_nominal.is_none() && !lowered.trusted {
+                continue;
+            }
+            attachments.push((hir::ExprId(index as u32), lowered));
+        }
+    }
+    attachments
 }
 
 /// The ordered project file set (package files first, in path order — the
@@ -813,8 +870,15 @@ fn check_member_scheme<'db>(
         base: &base,
         members: table,
     };
-    check::check_item_with_annotation(db, &module, &naming, annotation.as_ref(), Some(&globals))
-        .scheme
+    check::check_item_with_annotation(
+        db,
+        &module,
+        &naming,
+        annotation.as_ref(),
+        &item_expression_annotations(db, item),
+        Some(&globals),
+    )
+    .scheme
 }
 
 /// The exported scheme of one definition item — always `item_check`'s
@@ -882,6 +946,7 @@ pub fn item_check<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<check::ItemCh
         &module,
         &naming,
         annotation.as_ref(),
+        &item_expression_annotations(db, item),
         Some(&globals),
     );
     // A cyclic-group member's export is the group's canonical fixpoint value,

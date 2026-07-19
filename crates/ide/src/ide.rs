@@ -394,6 +394,13 @@ pub fn inlay_hints(db: &dyn Db, file: SourceFile, viewport: Option<TextRange>) -
             let lowered = semantics::annotations::lower_annotation(db, &annotation.syntax_node());
             lowered.declared.is_some() || lowered.new_nominal.is_some() || lowered.trusted
         });
+        // Nested statements carry their own annotations; a hint would just
+        // restate the line above.
+        let annotated_expressions: std::collections::BTreeSet<ExprId> =
+            semantics::item_expression_annotations(db, item)
+                .into_iter()
+                .map(|(id, _)| id)
+                .collect();
 
         for (index, expression) in hir.expressions.iter().enumerate() {
             let ExpressionKind::Assign { target, value, .. } = &expression.kind else {
@@ -407,7 +414,7 @@ pub fn inlay_hints(db: &dyn Db, file: SourceFile, viewport: Option<TextRange>) -
             let is_root = hir.root == Some(id);
             // The item's annotation binds its top-level statement; nested
             // bindings are unannotated either way.
-            if is_root && annotated {
+            if (is_root && annotated) || annotated_expressions.contains(&id) {
                 continue;
             }
 

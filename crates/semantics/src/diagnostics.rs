@@ -100,16 +100,21 @@ pub fn parse_stage_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic>
     diagnostics
 }
 
-/// Errors for top-level annotations that promise typing for an expression
-/// but have none: the annotated expression must start on the very next line
-/// (see `top_level_annotations` for the association rule). `@type`/`@alias`
+/// Errors for annotations that promise typing for an expression but have
+/// none: the annotated expression must start on the very next line (see
+/// `statement_annotations` for the association rule). Statement sequences —
+/// the file root and every braced block — are checked; `@type`/`@alias`
 /// definition blocks and `@strict` toggles stand alone, and a block already
 /// refused for its shape reports only that refusal.
 fn dangling_annotation_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
     let parsed = parse(db, file);
     let root = parsed.syntax_node();
     let mut diagnostics = Vec::new();
-    for (node, target) in crate::top_level_annotations(&root) {
+    let sequences = std::iter::once(root.clone()).chain(
+        root.descendants()
+            .filter(|node| node.kind() == syntax::SyntaxKind::BRACE_EXPR),
+    );
+    for (node, target) in sequences.flat_map(|parent| crate::statement_annotations(&parent)) {
         let annotation = crate::annotations::lower_annotation(db, &node);
         if !annotation.definitions.is_empty()
             || annotation.strict.is_some()

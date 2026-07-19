@@ -304,6 +304,82 @@ render <- function(count, label = "x", ...) count
 #++++
 render: fn(count: integer, [label]: character, ...: Any) -> integer
 
+#==== expression_level
+#---- new_on_a_local_assignment_constructs_the_nominal
+#: @type Person {list{name: character}}
+
+#: fn(name: character) -> Person
+make_person <- function(name) {
+  #: @new Person
+  person <- list(name = name)
+  person
+}
+#++++
+make_person: fn(name: character) -> Person
+
+#---- new_on_the_block_final_expression
+#: @type User {list{name: character, age: integer}}
+
+#: fn(name: character, age: integer) -> User
+create_user <- function(name, age) {
+  #: @new User
+  list(name = name, age = age)
+}
+#++++
+create_user: fn(name: character, age: integer) -> User
+
+#---- new_with_incompatible_representation_errors
+#: @type Person {list{name: character}}
+
+make <- function() {
+  #: @new Person
+  list(name = 1L)
+}
+#++++
+make: Unknown
+81..96 error[type-mismatch] expected `list{name: character}`, found `list{name: integer}`
+
+#---- checked_annotation_on_a_local_binding
+f <- function() {
+  #: integer
+  count <- "many"
+  count
+}
+#++++
+f: Unknown
+42..48 error[type-mismatch] expected `integer`, found `character`
+
+#---- trusted_local_overrides_unchecked
+f <- function() {
+  #: @trust integer
+  count <- "many"
+  count
+}
+#++++
+f: fn() -> integer
+
+#---- checked_bare_expression_at_top_level
+#: integer
+"foo"
+#++++
+11..16 error[type-mismatch] expected `integer`, found `character`
+
+#---- checked_bare_expression_matching_is_quiet
+#: integer
+1L
+#++++
+
+#---- blank_line_still_breaks_nested_attachment
+f <- function() {
+  #: integer
+
+  count <- "many"
+  count
+}
+#++++
+f: fn() -> character
+20..30 error[annotation] A `#:` typing comment cannot be separated from its expression by an empty line.
+
 #==== placement
 #---- type_definition_below_top_level_is_refused
 value <- {

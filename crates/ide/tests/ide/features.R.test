@@ -507,13 +507,15 @@ hover 98..104: @type UserId {integer}
 definition 9..15
 references: 9..15*, 36..42, 47..53, 98..104
 rename: 4 edit(s)
+type-definition 9..15
 signature: none
 action: Add inferred type annotation for `g`
-  edit 73..73 -> "#: <T> fn(id: T) -> T\n"
+  edit 73..73 -> "#: fn(id: UserId) -> UserId\n"
 action: Add inferred type annotations for the whole file
-  edit 73..73 -> "#: <T> fn(id: T) -> T\n"
+  edit 105..105 -> "  #: UserId\n"
+  edit 73..73 -> "#: fn(id: UserId) -> UserId\n"
 completion (1): UserId
-hint @74: <T> fn(id: T) -> T
+hint @74: fn(id: UserId) -> UserId
 
 #---- hover_alias
 #: @alias Rows {list[integer]}
@@ -564,12 +566,11 @@ hover 50..55: @type Score {double}
 definition 9..14
 references: 9..14*, 50..55
 rename: 2 edit(s)
+type-definition 9..14
 signature: none
 action: Add inferred type annotations for the whole file
-  edit 56..56 -> "  #: double\n"
+  edit 56..56 -> "  #: Score\n"
 completion (1): Score
-hint @28: fn() -> double
-hint @59: double
 
 #---- declaration_name_is_target
 #: @type Sco$0re {double}
@@ -585,10 +586,8 @@ references: 9..14*, 49..54
 rename: 2 edit(s)
 signature: none
 action: Add inferred type annotations for the whole file
-  edit 55..55 -> "  #: double\n"
+  edit 55..55 -> "  #: Score\n"
 completion (1): Score
-hint @27: fn() -> double
-hint @58: double
 
 #---- annotation_completion_types
 #: @type UserId {integer}
