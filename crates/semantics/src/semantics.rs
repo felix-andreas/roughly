@@ -21,19 +21,31 @@ use syntax::Parse;
 use syntax::ast::AstNode as _;
 
 #[salsa::db]
-pub trait Db: salsa::Database {}
+pub trait Db: salsa::Database {
+    /// The splice-reparse acceleration cache consulted by `parse`. Purely an
+    /// acceleration: the spliced tree is byte- and error-identical to a
+    /// from-scratch parse, so cache state never changes any query value.
+    fn splice_cache(&self) -> &SpliceCache;
+}
 
 #[salsa::db]
 #[derive(Clone, Default)]
 pub struct RootDatabase {
     storage: salsa::Storage<Self>,
+    /// Shared across storage-handle clones so the server's fresh handles
+    /// (cancellation refreshes, worker fan-out) keep the warm entries.
+    splice_cache: std::sync::Arc<SpliceCache>,
 }
 
 #[salsa::db]
 impl salsa::Database for RootDatabase {}
 
 #[salsa::db]
-impl Db for RootDatabase {}
+impl Db for RootDatabase {
+    fn splice_cache(&self) -> &SpliceCache {
+        &self.splice_cache
+    }
+}
 
 /// Whether a file participates in the package interface or is a standalone
 /// script.
@@ -52,13 +64,96 @@ pub struct SourceFile {
     pub kind: DocumentKind,
 }
 
-/// The lossless parse of a file. A full from-scratch parse per text revision:
-/// parsing is the cheapest stage, and sub-file incrementality happens one
-/// level down — untouched items derive equal values and salsa's early cutoff
-/// prunes everything downstream.
+/// The lossless parse of a file. Per text revision the query consults the
+/// splice cache: when the file's previous text and tree are at hand, only the
+/// edited statement region is reparsed and the untouched green subtrees are
+/// shared by pointer (`syntax::reparse`); otherwise — and whenever the splice
+/// refuses — it is a full from-scratch parse. The two paths are byte- and
+/// error-identical (the syntax edit-stream fuzzer pins the equivalence, and
+/// the semantics fuzzer's setter-edit-equals-fresh-database invariant crosses
+/// this cache), so the cache is invisible to every downstream query.
 #[salsa::tracked(returns(clone))]
 pub fn parse(db: &dyn Db, file: SourceFile) -> ParseResult {
-    ParseResult(syntax::parse(file.text(db)))
+    ParseResult(db.splice_cache().parse(file, file.text(db)))
+}
+
+/// The previous `(text, parse)` per file, keyed by the salsa input id.
+///
+/// Correctness never depends on an entry: a stale or mismatched text only
+/// yields a larger derived edit region, and `syntax::reparse` falls back to a
+/// full parse whenever splicing is not provably equivalent. The map is
+/// bounded: at capacity, inserting an unknown file clears it wholesale —
+/// crude, but a cold pass cycling thousands of files then costs one clear
+/// instead of an eviction policy, while an editing session's open set stays
+/// resident.
+#[derive(Default)]
+pub struct SpliceCache {
+    entries: std::sync::Mutex<rustc_hash::FxHashMap<SourceFile, (std::sync::Arc<str>, Parse)>>,
+}
+
+const SPLICE_CACHE_CAPACITY: usize = 64;
+
+impl SpliceCache {
+    fn parse(&self, file: SourceFile, new_text: &str) -> Parse {
+        // Clone the entry out and compute unlocked, so parallel workers
+        // parsing different files never serialize on the parse itself.
+        let previous = {
+            let entries = self.entries.lock().expect("splice cache lock");
+            entries.get(&file).cloned()
+        };
+        let parse = match &previous {
+            Some((old_text, old_parse)) => {
+                if **old_text == *new_text {
+                    old_parse.clone()
+                } else {
+                    let (deleted, inserted) = derived_edit(old_text, new_text);
+                    syntax::reparse(old_parse, new_text, deleted, inserted)
+                }
+            }
+            None => syntax::parse(new_text),
+        };
+        let mut entries = self.entries.lock().expect("splice cache lock");
+        if entries.len() >= SPLICE_CACHE_CAPACITY && !entries.contains_key(&file) {
+            entries.clear();
+        }
+        entries.insert(file, (std::sync::Arc::from(new_text), parse.clone()));
+        parse
+    }
+}
+
+/// The single edit turning `old` into `new`: the byte range replaced in `old`
+/// and the length of its replacement, from the longest common prefix and
+/// suffix (backed off to character boundaries). Several accumulated edits
+/// collapse into one region spanning them all.
+fn derived_edit(old: &str, new: &str) -> (syntax::TextRange, syntax::TextSize) {
+    let mut prefix = old
+        .as_bytes()
+        .iter()
+        .zip(new.as_bytes())
+        .take_while(|(a, b)| a == b)
+        .count();
+    while !old.is_char_boundary(prefix) {
+        prefix -= 1;
+    }
+    let limit = old.len().min(new.len()) - prefix;
+    let mut suffix = old
+        .as_bytes()
+        .iter()
+        .rev()
+        .zip(new.as_bytes().iter().rev())
+        .take_while(|(a, b)| a == b)
+        .count()
+        .min(limit);
+    while !old.is_char_boundary(old.len() - suffix) {
+        suffix -= 1;
+    }
+    (
+        syntax::TextRange::new(
+            syntax::TextSize::from(prefix as u32),
+            syntax::TextSize::from((old.len() - suffix) as u32),
+        ),
+        syntax::TextSize::from((new.len() - suffix - prefix) as u32),
+    )
 }
 
 /// Newtype giving `syntax::Parse` the salsa value plumbing.

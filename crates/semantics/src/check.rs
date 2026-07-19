@@ -2474,7 +2474,17 @@ impl<'db> Checker<'db, '_> {
         // alias-typed declaration checks through its expansion. An Unknown
         // declared return (elided `->`) constrains nothing.
         if !matches!(declared.ret.kind(self.db), TyKind::Unknown) {
-            let body_range = self.module.expression(*body).range;
+            // Blame the expression that produces the value — a block's tail
+            // expression — not the whole body; the block range stays only
+            // when there is no tail (an empty or semicolon-terminated body).
+            let blamed = match &self.module.expression(*body).kind {
+                ExpressionKind::Block {
+                    statements,
+                    trailing_semicolon: false,
+                } => statements.last().copied().unwrap_or(*body),
+                _ => *body,
+            };
+            let body_range = self.module.expression(blamed).range;
             let resolved_body = self.table.resolve(self.db, body_ty);
             if !matches!(resolved_body.kind(self.db), TyKind::Unknown)
                 && !self.table.compatible(self.db, resolved_body, declared.ret)

@@ -48,22 +48,32 @@ Analysis is incremental at **item** granularity on salsa:
   workspace-relative path order (the order the last-writer-wins symbol index
   and the CLI agree on). `StubSources` is a set-once singleton carrying the
   `.Rtypes` corpus.
-- `parse(file)` is a plain per-file query — the hand parse is the cheapest
-  stage, and sub-file parse invalidation would be a chicken-and-egg (statement
-  boundaries are only known after parsing). Incrementality happens one level
-  down: the **item tree** assigns insertion-stable identities (kind + name +
-  parent + disambiguator, interned) so an edit in one item leaves sibling
-  items' derived values equal, and salsa's early cutoff prunes all downstream
-  work.
+- `parse(file)` is a per-file query accelerated by a **splice cache**: the
+  file's previous text and tree are kept beside the database (shared across
+  storage-handle clones), the current edit is derived as the longest
+  common-prefix/suffix delta, and `syntax::reparse` reparses only the touched
+  statement region, sharing the untouched green subtrees by pointer. The
+  spliced result is byte- and error-identical to a from-scratch parse (the
+  edit-stream fuzzer pins the equivalence; the splice refuses and falls back
+  whenever that is not provable), so the cache is invisible to every
+  downstream query — sub-file parse *invalidation* stays out of salsa by
+  design. Semantic incrementality happens one level down: the **item tree**
+  assigns insertion-stable identities (kind + name + parent + disambiguator,
+  interned) so an edit in one item leaves sibling items' derived values equal,
+  and salsa's early cutoff prunes all downstream work.
 - Per item: green subtree → HIR (with item-relative spans) → naming (the
   mutable-slot variable model with reaching-write flow) → the inference walk
   (`item_check`) producing expression types, type errors, strict origins, and
   the exported scheme.
-- The **package interface** resolves through salsa fixpoint cycles
-  (`global_scheme`): a definition reading its own scheme makes `item_check`
-  the cycle head; a still-changing value at the round cap pins the exported
-  scheme to `Unknown` — reaching salsa's own iteration cap is a bug, never a
-  fallback.
+- The **package interface** resolves cyclic definition groups through one
+  canonical fixpoint, independent of which member is queried first:
+  `interface_sccs` condenses the static item-to-winner reference graph
+  (iterative Tarjan, canonical project order), `scc_schemes` runs Jacobi
+  rounds from all-`Unknown` until the scheme table converges (the round cap
+  pins **all** members), and `item_check` adopts the canonical scheme as the
+  single exported truth. Member checks inside the fixpoint never re-enter
+  `item_check`, so no salsa cycle forms; salsa's own cycle recovery remains
+  only as a backstop for reference edges the static graph cannot see.
 - Types are **interned** (id equality, no deep clones). Deep resolution over
   the interned type DAG is memoized per binding epoch with
   cycle-cut-to-`Unknown` semantics; the decision log records the design.
