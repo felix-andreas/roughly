@@ -10,13 +10,13 @@ publish = false
 path = "src/differential.rs"
 
 [dependencies]
+analysis-legacy = { path = "../analysis-legacy" }
+semantics = { path = "../semantics" }
 
 [dev-dependencies]
 salsa.workspace = true
-analysis-legacy = { path = "../analysis-legacy" }
 format = { path = "../format" }
 ide = { path = "../ide" }
 ropey.workspace = true
 roughly-legacy = { path = "../roughly-legacy" }
-semantics = { path = "../semantics" }
 syntax = { path = "../syntax" }

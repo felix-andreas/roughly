@@ -874,11 +874,13 @@ fn item_check_recover<'db>(
 struct SalsaGlobals<'db> {
     db: &'db dyn Db,
     definitions: Option<&'db rustc_hash::FxHashMap<String, Item<'db>>>,
-    /// For an item in a script: the script's earlier items, in order. A
-    /// script executes top-down, so a binding is visible only after its
-    /// assignment and rebinding changes later uses — the nearest earlier
-    /// definition wins, before package globals.
-    script_predecessors: Option<Vec<Item<'db>>>,
+    /// For an item in a script: the script's items in order plus the item's
+    /// own position. A script executes top-down, so an immediate read sees
+    /// the nearest EARLIER definition (before package globals), while a
+    /// deferred read — from inside a closure, which runs after the frame
+    /// settled — sees the LAST definition of the name anywhere in the
+    /// script, the item's own binding included (self-recursion).
+    script_items: Option<(Vec<Item<'db>>, usize)>,
     /// The script file itself, for its file-local type declarations.
     script_file: Option<SourceFile>,
 }
@@ -888,25 +890,30 @@ impl<'db> SalsaGlobals<'db> {
         let definitions = ProjectFiles::try_get(db).map(|files| package_definitions(db, files));
         let file = *item.file(db);
         let is_script = *file.kind(db) == DocumentKind::Script;
-        let script_predecessors = is_script.then(|| {
+        let script_items = is_script.then(|| {
             let items = item_tree(db, file);
             let index = items
                 .iter()
                 .position(|&candidate| candidate == item)
                 .unwrap_or(items.len());
-            items[..index].to_vec()
+            (items, index)
         });
         SalsaGlobals {
             db,
             definitions,
-            script_predecessors,
+            script_items,
             script_file: is_script.then_some(file),
         }
     }
 
-    fn script_definition(&self, name: &str) -> Option<Item<'db>> {
-        self.script_predecessors
-            .as_ref()?
+    fn script_definition(&self, name: &str, deferred: bool) -> Option<Item<'db>> {
+        let (items, index) = self.script_items.as_ref()?;
+        let visible = if deferred {
+            &items[..]
+        } else {
+            &items[..*index]
+        };
+        visible
             .iter()
             .rev()
             .find(|item| {
@@ -918,8 +925,8 @@ impl<'db> SalsaGlobals<'db> {
 }
 
 impl<'db> check::GlobalEnv<'db> for SalsaGlobals<'db> {
-    fn scheme(&self, name: &str) -> Option<types::TypeScheme<'db>> {
-        if let Some(item) = self.script_definition(name) {
+    fn scheme(&self, name: &str, deferred: bool) -> Option<types::TypeScheme<'db>> {
+        if let Some(item) = self.script_definition(name, deferred) {
             return Some(global_scheme(self.db, item));
         }
         if let Some(item) = self
@@ -936,10 +943,10 @@ impl<'db> check::GlobalEnv<'db> for SalsaGlobals<'db> {
         library.schemes.get(name)?.last().cloned()
     }
 
-    fn overloads(&self, name: &str) -> Option<Vec<types::TypeScheme<'db>>> {
+    fn overloads(&self, name: &str, deferred: bool) -> Option<Vec<types::TypeScheme<'db>>> {
         // A script-local or package definition wins over the stub set,
         // disabling per-call overload selection for that name.
-        if self.script_definition(name).is_some() {
+        if self.script_definition(name, deferred).is_some() {
             return None;
         }
         if self
@@ -980,18 +987,18 @@ struct SccGlobals<'db, 'a> {
 }
 
 impl<'db> check::GlobalEnv<'db> for SccGlobals<'db, '_> {
-    fn scheme(&self, name: &str) -> Option<types::TypeScheme<'db>> {
+    fn scheme(&self, name: &str, deferred: bool) -> Option<types::TypeScheme<'db>> {
         self.members
             .get(name)
             .cloned()
-            .or_else(|| self.base.scheme(name))
+            .or_else(|| self.base.scheme(name, deferred))
     }
 
-    fn overloads(&self, name: &str) -> Option<Vec<types::TypeScheme<'db>>> {
+    fn overloads(&self, name: &str, deferred: bool) -> Option<Vec<types::TypeScheme<'db>>> {
         if self.members.contains_key(name) {
             return None;
         }
-        self.base.overloads(name)
+        self.base.overloads(name, deferred)
     }
 
     fn type_definitions(

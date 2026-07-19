@@ -6,29 +6,17 @@
 //! parser's errors must be better than the oracle's, not identical) are not
 //! compared.
 //!
-//! Two findings match when class and message are byte-identical and the new
-//! range equals or lies inside the legacy range: the rewrite is required to
-//! be at least as precise as the oracle, and strictly tighter ranges are an
-//! intended improvement, not a divergence. Cases where the oracle itself is
-//! wrong are listed in `ACCEPTED_DIVERGENCES` with the reason; everything
-//! else must match, and each suite's test fails on any unexplained
-//! divergence (the details land in `target/differential-<suite>.txt`).
-//!
-//! Publication rules mirror the legacy host edge: type errors and strict
-//! findings honor the per-file typing directive (`# typing: ...` /
-//! `#: @strict`) over the configured default, annotation and naming findings
-//! are always published.
+//! The comparison harness — finding extraction, the class + range-containment
+//! matching policy, and the accepted oracle-deficit filters — lives in the
+//! `differential` library and is shared with the corpus and fuzz arms. Cases
+//! where the oracle itself is wrong are listed in `ACCEPTED_DIVERGENCES` with
+//! the reason; everything else must match, and each suite's test fails on any
+//! unexplained divergence (the details land in `target/differential-<suite>.txt`).
 
-use analysis::{Analysis, CheckConfig, DiagnosticCode, LintConfig};
-use semantics::diagnostics::{file_diagnostics, strict_diagnostics};
-use semantics::{
-    DocumentKind, ProjectFiles, RootDatabase, SourceFile, TypingMode, file_typing_mode,
-};
+use differential::{filter_oracle_deficits, findings_match, legacy_findings, new_findings};
+use semantics::DocumentKind;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
-
-/// One comparable finding: (class, start byte, end byte, message).
-type Finding = (&'static str, usize, usize, String);
 
 /// How one suite runs: where its fixtures live, how the document is
 /// classified (legacy classifies by path — only files under `R/` are package
@@ -72,6 +60,14 @@ const ACCEPTED_DIVERGENCES: &[(&str, &str)] = &[
         "recursion__pure_self_call_is_attributed",
         "legacy records no strict origin on a recursive binding whose Unknown comes from the reference cycle itself; the new stack attributes the whole binding",
     ),
+    (
+        "resolution__forward_capture_resolves_to_the_later_binding",
+        "legacy flags a forward-captured script binding as unresolved and unused; the new naming pass resolves closure reads against the whole settled frame",
+    ),
+    (
+        "reads_that_keep_bindings_alive__pipe_read_is_a_use",
+        "legacy does not model reads inside `|>` pipelines as uses and wrongly calls the piped binding dead",
+    ),
 ];
 
 /// Allowlist entries justified by an oracle PANIC (a `debug_assert` in the
@@ -81,128 +77,6 @@ const ORACLE_PANIC_CASES: &[&str] = &[
     "interface__growing_self_reference_pins_to_unknown",
     "recursion__growing_recursion_is_attributed",
 ];
-
-fn legacy_findings(source: &str, suite: &Suite) -> Vec<Finding> {
-    let mut analysis_state = Analysis::new(
-        PathBuf::from("/pkg"),
-        LintConfig::default(),
-        CheckConfig {
-            unused: true,
-            typing: true,
-            strict: suite.strict,
-        },
-    );
-    let Ok(document_id) =
-        analysis_state.add_document_from_source(PathBuf::from(suite.document_path), source)
-    else {
-        return Vec::new();
-    };
-    analysis::run_full(&mut analysis_state);
-    let mut findings = Vec::new();
-    for diagnostic in analysis_state.document_diagnostics(document_id) {
-        let class = match diagnostic.code {
-            DiagnosticCode::TypeError => "type",
-            DiagnosticCode::AnnotationError => "annotation",
-            DiagnosticCode::Unresolved => "unresolved",
-            DiagnosticCode::Unused => "unused",
-            DiagnosticCode::Strict => "strict",
-            DiagnosticCode::SyntaxError | DiagnosticCode::Lint(_) | DiagnosticCode::Naming => {
-                continue;
-            }
-        };
-        findings.push((
-            class,
-            diagnostic.range.start_byte,
-            diagnostic.range.end_byte,
-            diagnostic.message,
-        ));
-    }
-    findings.sort();
-    findings
-}
-
-fn new_findings(source: &str, suite: &Suite) -> Vec<Finding> {
-    let db = RootDatabase::default();
-    semantics::stubs::install_shipped_stubs(&db);
-    let file = SourceFile::new(&db, source.to_owned(), suite.kind);
-    ProjectFiles::new(&db, vec![file]);
-    let (typing_enabled, strict_enabled) = match file_typing_mode(&db, file) {
-        Some(TypingMode::Off) => (false, false),
-        Some(TypingMode::On) => (true, false),
-        Some(TypingMode::Strict) => (true, true),
-        None => (true, suite.strict),
-    };
-    let mut findings = Vec::new();
-    for diagnostic in file_diagnostics(&db, file) {
-        let class = match diagnostic.code {
-            "type-mismatch" if typing_enabled => "type",
-            "annotation" => "annotation",
-            "unresolved" => "unresolved",
-            "unused" => "unused",
-            _ => continue,
-        };
-        findings.push((
-            class,
-            u32::from(diagnostic.range.start()) as usize,
-            u32::from(diagnostic.range.end()) as usize,
-            diagnostic.message,
-        ));
-    }
-    if strict_enabled {
-        for diagnostic in strict_diagnostics(&db, file) {
-            findings.push((
-                "strict",
-                u32::from(diagnostic.range.start()) as usize,
-                u32::from(diagnostic.range.end()) as usize,
-                diagnostic.message,
-            ));
-        }
-    }
-    findings.sort();
-    findings
-}
-
-/// Whether every legacy finding pairs with a distinct new finding of the same
-/// class whose range is equal or contained, with no new findings left over.
-/// Message text is NOT compared — wording is free to improve on the oracle's
-/// (user directive); the oracle pins which findings exist and where. Pairs
-/// whose messages differ land in `wording` for informational review. Exact
-/// (class, range, message) pairs match first so a wording difference never
-/// steals a partner from an exact counterpart.
-fn findings_match(
-    legacy: &[Finding],
-    new: &[Finding],
-    wording: &mut Vec<(String, String)>,
-) -> bool {
-    if legacy.len() != new.len() {
-        return false;
-    }
-    let mut used = vec![false; new.len()];
-    let mut unpaired = Vec::new();
-    'exact: for (legacy_index, (class, start, end, message)) in legacy.iter().enumerate() {
-        for (index, (new_class, new_start, new_end, new_message)) in new.iter().enumerate() {
-            let contained = new_start >= start && new_end <= end;
-            if !used[index] && new_class == class && new_message == message && contained {
-                used[index] = true;
-                continue 'exact;
-            }
-        }
-        unpaired.push(legacy_index);
-    }
-    'relaxed: for legacy_index in unpaired {
-        let (class, start, end, message) = &legacy[legacy_index];
-        for (index, (new_class, new_start, new_end, new_message)) in new.iter().enumerate() {
-            let contained = new_start >= start && new_end <= end;
-            if !used[index] && new_class == class && contained {
-                used[index] = true;
-                wording.push((message.clone(), new_message.clone()));
-                continue 'relaxed;
-            }
-        }
-        return false;
-    }
-    true
-}
 
 fn run_suite(suite: &Suite) {
     let suite_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -226,7 +100,9 @@ fn run_suite(suite: &Suite) {
             // The oracle itself can crash (its fixed-point panics on some
             // inputs the rewrite handles); such a case counts as an accepted
             // divergence when allowlisted, a failure otherwise.
-            let legacy = std::panic::catch_unwind(|| legacy_findings(&case.source, suite));
+            let legacy = std::panic::catch_unwind(|| {
+                legacy_findings(&case.source, suite.document_path, suite.strict).0
+            });
             let Ok(legacy) = legacy else {
                 if accepted_case {
                     accepted += 1;
@@ -236,7 +112,7 @@ fn run_suite(suite: &Suite) {
                 }
                 continue;
             };
-            let new = new_findings(&case.source, suite);
+            let new = new_findings(&case.source, suite.kind, suite.strict);
             let mut wording = Vec::new();
             if findings_match(&legacy, &new, &mut wording) {
                 matching += 1;
@@ -360,13 +236,8 @@ fn differential_corpus() {
         "no corpus files under {corpus_root:?} — run scripts/fetch-corpus.sh first"
     );
 
-    let suite = Suite {
-        directory: "corpus",
-        document_path: "/pkg/R/case.R",
-        kind: DocumentKind::Package,
-        strict: false,
-        report: "differential-corpus.txt",
-    };
+    let document_path = "/pkg/R/case.R";
+    let report_name = "differential-corpus.txt";
     let mut report = String::new();
     let mut rollup: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
     let mut wording_rollup: std::collections::BTreeMap<String, usize> =
@@ -388,7 +259,7 @@ fn differential_corpus() {
             skipped_syntax += 1;
             continue;
         }
-        let (legacy, legacy_syntax_errors) = legacy_findings_and_syntax(&source, &suite);
+        let (legacy, legacy_syntax_errors) = legacy_findings(&source, document_path, false);
         if legacy_syntax_errors {
             skipped_syntax += 1;
             continue;
@@ -396,60 +267,13 @@ fn differential_corpus() {
         files += 1;
         // A panic on one file (a bug to fix) must not kill the whole triage
         // run: record the file and keep sweeping.
-        let new = std::panic::catch_unwind(|| new_findings(&source, &suite));
+        let new = std::panic::catch_unwind(|| new_findings(&source, DocumentKind::Package, false));
         let Ok(new) = new else {
             panicking.push(relative.display().to_string());
             *rollup.entry("new stack PANICKED".to_owned()).or_default() += 1;
             continue;
         };
-        // Accepted oracle deficit: the oracle's naming lacks forward-capture
-        // resolution (locals written later in a frame that earlier-defined
-        // closures read), so it emits unresolved warnings the rewrite
-        // correctly resolves. A legacy-only unresolved finding whose name the
-        // new side resolves EVERYWHERE in the file (no unresolved finding
-        // mentions it) is accepted as that class — counted per name below so
-        // an accidental resolution bug would still be visible for review.
-        let legacy: Vec<Finding> = legacy
-            .into_iter()
-            .filter(|finding| {
-                if finding.0 == "unresolved" {
-                    let Some(name) = unresolved_name(&finding.3) else {
-                        return true;
-                    };
-                    let resolved_by_new = !new.iter().any(|(class, _, _, message)| {
-                        *class == "unresolved" && message.contains(name)
-                    });
-                    if resolved_by_new {
-                        *oracle_deficit_rollup.entry(name.to_owned()).or_default() += 1;
-                    }
-                    return !resolved_by_new;
-                }
-                // Accepted oracle over-rejection: the rewrite's tolerance
-                // floor treats `Unknown` as an absent fact (not a checkable
-                // claim), while the oracle sometimes rejects Unknown-carrying
-                // values (`list{Unknown}` against `list[T] | T[]`). A
-                // legacy-only type finding whose found-side mentions Unknown,
-                // with no new type finding inside its range, is that floor.
-                if finding.0 == "type"
-                    && finding
-                        .3
-                        .split("found")
-                        .nth(1)
-                        .is_some_and(|found| found.contains("Unknown"))
-                {
-                    let new_has_counterpart = new.iter().any(|(class, start, end, _)| {
-                        *class == "type" && *start >= finding.1 && *end <= finding.2
-                    });
-                    if !new_has_counterpart {
-                        *oracle_deficit_rollup
-                            .entry("(Unknown-tolerant type check)".to_owned())
-                            .or_default() += 1;
-                        return false;
-                    }
-                }
-                true
-            })
-            .collect();
+        let (legacy, _) = filter_oracle_deficits(legacy, &new, None, &mut oracle_deficit_rollup);
         let mut wording = Vec::new();
         if findings_match(&legacy, &new, &mut wording) {
             matching += 1;
@@ -530,7 +354,7 @@ fn differential_corpus() {
     }
     let report_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../target")
-        .join(suite.report);
+        .join(report_name);
     let _ = std::fs::write(
         &report_path,
         format!(
@@ -542,14 +366,6 @@ fn differential_corpus() {
         "the new stack panicked on {} corpus file(s):\n{panic_text}",
         panicking.len()
     );
-}
-
-/// The name inside the first backtick pair of an unresolved message.
-fn unresolved_name(message: &str) -> Option<&str> {
-    let start = message.find('`')? + 1;
-    let rest = &message[start..];
-    let end = rest.rfind("` in this package")?;
-    Some(&rest[..end])
 }
 
 fn collect_r_files(directory: &Path, paths: &mut Vec<PathBuf>) {
@@ -568,48 +384,4 @@ fn collect_r_files(directory: &Path, paths: &mut Vec<PathBuf>) {
             paths.push(path);
         }
     }
-}
-
-/// Legacy findings plus whether the file had any syntax error (out-of-scope
-/// files are skipped rather than compared).
-fn legacy_findings_and_syntax(source: &str, suite: &Suite) -> (Vec<Finding>, bool) {
-    let mut analysis_state = Analysis::new(
-        PathBuf::from("/pkg"),
-        LintConfig::default(),
-        CheckConfig {
-            unused: true,
-            typing: true,
-            strict: suite.strict,
-        },
-    );
-    let Ok(document_id) =
-        analysis_state.add_document_from_source(PathBuf::from(suite.document_path), source)
-    else {
-        return (Vec::new(), true);
-    };
-    analysis::run_full(&mut analysis_state);
-    let mut findings = Vec::new();
-    let mut syntax_errors = false;
-    for diagnostic in analysis_state.document_diagnostics(document_id) {
-        let class = match diagnostic.code {
-            DiagnosticCode::TypeError => "type",
-            DiagnosticCode::AnnotationError => "annotation",
-            DiagnosticCode::Unresolved => "unresolved",
-            DiagnosticCode::Unused => "unused",
-            DiagnosticCode::Strict => "strict",
-            DiagnosticCode::SyntaxError => {
-                syntax_errors = true;
-                continue;
-            }
-            DiagnosticCode::Lint(_) | DiagnosticCode::Naming => continue,
-        };
-        findings.push((
-            class,
-            diagnostic.range.start_byte,
-            diagnostic.range.end_byte,
-            diagnostic.message,
-        ));
-    }
-    findings.sort();
-    (findings, syntax_errors)
 }

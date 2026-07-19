@@ -88,13 +88,36 @@ pub fn parse_stage_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic>
     diagnostics
 }
 
+/// name → the index of the earliest item whose top-level frame writes it.
+/// Conditional writes (inside a top-level `for`/`while`/`if`/`repeat` or a
+/// bare block) create the document's variable slot exactly like an
+/// unconditional `name <- value`, so they participate: a later read in the
+/// same document resolves to the slot even though the name is not
+/// package-visible.
+#[salsa::tracked(returns(ref))]
+fn frame_slot_positions(db: &dyn Db, file: SourceFile) -> rustc_hash::FxHashMap<String, usize> {
+    let mut positions = rustc_hash::FxHashMap::default();
+    for (index, item) in item_tree(db, file).into_iter().enumerate() {
+        let Some(naming) = crate::item_naming(db, item) else {
+            continue;
+        };
+        for binding in naming.bindings.values() {
+            if binding.kind != crate::naming::BindingKind::TopLevel {
+                continue;
+            }
+            positions.entry(binding.name.clone()).or_insert(index);
+        }
+    }
+    positions
+}
+
 /// All diagnostics of one file: syntax errors, naming findings, and type
 /// errors, in position order.
 #[salsa::tracked(returns(clone))]
 pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
     let mut diagnostics = parse_stage_diagnostics(db, file);
 
-    for item in item_tree(db, file) {
+    for (item_index, item) in item_tree(db, file).into_iter().enumerate() {
         let Some(offset) = item_offset(db, item) else {
             continue;
         };
@@ -139,33 +162,45 @@ pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
                 related: Vec::new(),
             });
         }
-        if *file.kind(db) == DocumentKind::Package {
-            for (expression, name) in &naming.non_locals {
-                if crate::package_scheme_exists(db, name)
-                    || super_globals(db, file).contains(name)
-                    || declared_global_variable(db, name)
-                {
-                    continue;
-                }
-                let expression_range = module.expression(*expression).range;
-                let range = TextRange::new(
-                    expression_range.start() + offset,
-                    expression_range.end() + offset,
-                );
-                let display = display_name(name);
-                let suggestion = unresolved_suggestion(db, name)
-                    .map(|nearest| format!(" Did you mean `{nearest}`?"))
-                    .unwrap_or_default();
-                diagnostics.push(Diagnostic {
-                    range,
-                    severity: Severity::Warning,
-                    code: "unresolved",
-                    message: format!(
-                        "I could not resolve `{display}` in this package, its imports, or builtins.{suggestion}"
-                    ),
-                    related: Vec::new(),
-                });
+        // Scripts resolve reads against the same universe as package files
+        // (their own bindings, the package interface, imports, builtins), so
+        // an unresolved read warns in both document kinds. Document-local
+        // variable slots resolve sequentially: an immediate read sees only
+        // slots created by earlier statements (a use before every definition
+        // is unresolved, matching the top-down run), while a read from
+        // inside a nested function is deferred — the closure runs after the
+        // frame settled, so any slot in the document resolves it, including
+        // the enclosing statement's own target (self-recursion).
+        for (expression, name) in &naming.non_locals {
+            if crate::package_scheme_exists(db, name)
+                || super_globals(db, file).contains(name)
+                || declared_global_variable(db, name)
+            {
+                continue;
             }
+            if let Some(&earliest) = frame_slot_positions(db, file).get(name)
+                && (earliest < item_index || naming.deferred_non_locals.contains(expression))
+            {
+                continue;
+            }
+            let expression_range = module.expression(*expression).range;
+            let range = TextRange::new(
+                expression_range.start() + offset,
+                expression_range.end() + offset,
+            );
+            let display = display_name(name);
+            let suggestion = unresolved_suggestion(db, name)
+                .map(|nearest| format!(" Did you mean `{nearest}`?"))
+                .unwrap_or_default();
+            diagnostics.push(Diagnostic {
+                range,
+                severity: Severity::Warning,
+                code: "unresolved",
+                message: format!(
+                    "I could not resolve `{display}` in this package, its imports, or builtins.{suggestion}"
+                ),
+                related: Vec::new(),
+            });
         }
     }
 
@@ -173,6 +208,7 @@ pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
         diagnostics.extend(script_unused_bindings(db, file));
     }
     diagnostics.extend(duplicate_binding_diagnostics(db, file));
+    diagnostics.extend(duplicate_type_diagnostics(db, file));
 
     diagnostics.sort_by_key(|diagnostic| (diagnostic.range.start(), diagnostic.range.end()));
     diagnostics
@@ -274,6 +310,84 @@ fn duplicate_binding_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnosti
                     }],
                 });
             }
+        }
+    }
+    diagnostics
+}
+
+/// The `@type` / `@alias` declaration sites of one package file, in
+/// declaration order: each declared name with the range of its annotation
+/// block.
+#[salsa::tracked(returns(ref))]
+fn type_declaration_sites(db: &dyn Db, file: SourceFile) -> Vec<(String, TextRange)> {
+    let parsed = parse(db, file);
+    let mut sites = Vec::new();
+    for node in parsed
+        .syntax_node()
+        .descendants()
+        .filter(|node| node.kind() == syntax::SyntaxKind::ANNOTATION)
+    {
+        for definition in crate::annotations::lower_annotation(db, &node).definitions {
+            sites.push((definition.name.text(db).to_owned(), node.text_range()));
+        }
+    }
+    sites
+}
+
+/// Errors for a project-global type name declared more than once: `@type` and
+/// `@alias` share one project-global namespace and every declaration
+/// participating in a duplicate-name conflict is erroneous (see the typing
+/// reference). Script declarations shadow the project namespace instead of
+/// conflicting with it, so only package files participate. Occurrence order
+/// is project order, then declaration order within a file; each site points
+/// at its nearest neighbouring declaration.
+fn duplicate_type_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
+    if *file.kind(db) != DocumentKind::Package {
+        return Vec::new();
+    }
+    let Some(files) = crate::ProjectFiles::try_get(db) else {
+        return Vec::new();
+    };
+    let mut occurrences: std::collections::BTreeMap<&str, Vec<(SourceFile, TextRange)>> =
+        std::collections::BTreeMap::new();
+    for &project_file in files.files(db) {
+        if *project_file.kind(db) != DocumentKind::Package {
+            continue;
+        }
+        for (name, range) in type_declaration_sites(db, project_file) {
+            occurrences
+                .entry(name.as_str())
+                .or_default()
+                .push((project_file, *range));
+        }
+    }
+    let mut diagnostics = Vec::new();
+    for (name, sites) in occurrences {
+        if sites.len() < 2 {
+            continue;
+        }
+        for (index, &(site_file, range)) in sites.iter().enumerate() {
+            if site_file != file {
+                continue;
+            }
+            let (neighbour_file, neighbour_range) = if index > 0 {
+                sites[index - 1]
+            } else {
+                sites[index + 1]
+            };
+            diagnostics.push(Diagnostic {
+                range,
+                severity: Severity::Error,
+                code: "annotation",
+                message: format!(
+                    "the type name `{name}` is declared more than once — `@type` and `@alias` declarations share one project-global namespace."
+                ),
+                related: vec![RelatedLocation {
+                    file: neighbour_file,
+                    range: neighbour_range,
+                    message: "another declaration of this name is here.",
+                }],
+            });
         }
     }
     diagnostics
@@ -504,62 +618,135 @@ fn script_unused_bindings(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
         .filter(|error| !error.in_annotation)
         .map(|error| error.range)
         .collect();
-    let mut definers: Vec<(usize, String, TextRange, bool)> = Vec::new();
+    struct Definer {
+        item_index: usize,
+        name: String,
+        range: TextRange,
+        used: bool,
+        /// A conditionally executed write (inside a top-level loop or `if`):
+        /// it rebinds the slot only on some runs, so it does not end the
+        /// liveness of earlier definers of the name.
+        conditional: bool,
+    }
+    let mut definers: Vec<Definer> = Vec::new();
     // Every item participates as a reader — a bare `print(x)` statement keeps
-    // `x` alive — while only named definitions register as definers.
+    // `x` alive. Definers are the item's own named definition plus any other
+    // top-level frame slot the item creates (a conditional write inside a
+    // top-level `for`/`while`/`if` binds the frame like any assignment).
     let mut reads: Vec<(usize, String, bool)> = Vec::new();
     for (index, item) in item_tree(db, file).into_iter().enumerate() {
         let Some(naming) = crate::item_naming(db, item) else {
             continue;
         };
-        if matches!(
+        let Some(offset) = item_offset(db, item) else {
+            continue;
+        };
+        let item_name = matches!(
             *item.kind(db),
             crate::ItemKind::Function | crate::ItemKind::Value
-        ) && let Some(name) = item.name(db).clone()
-            && let Some(offset) = item_offset(db, item)
+        )
+        .then(|| item.name(db).clone())
+        .flatten();
+        let broken = |range: TextRange| {
+            error_ranges
+                .iter()
+                .any(|error| error.start() <= range.end() && range.start() <= error.end())
+        };
+        if let Some(name) = item_name.clone()
             && let Some(module) = crate::item_hir(db, item)
             && let Some(root) = module.root
         {
             let root_range = module.expression(root).range;
             let range = TextRange::new(root_range.start() + offset, root_range.end() + offset);
-            let broken = error_ranges
-                .iter()
-                .any(|error| error.start() <= range.end() && range.start() <= error.end());
-            if !broken {
-                definers.push((index, name, range, false));
+            if !broken(range) {
+                definers.push(Definer {
+                    item_index: index,
+                    name,
+                    range,
+                    used: false,
+                    conditional: false,
+                });
+            }
+        }
+        for binding in naming.bindings.values() {
+            if binding.kind != crate::naming::BindingKind::TopLevel
+                || item_name.as_deref() == Some(binding.name.as_str())
+            {
+                continue;
+            }
+            let range =
+                TextRange::new(binding.range.start() + offset, binding.range.end() + offset);
+            if !broken(range) {
+                definers.push(Definer {
+                    item_index: index,
+                    name: binding.name.clone(),
+                    range,
+                    // A read within the item itself (a loop reading its own
+                    // carried variable) already keeps the definer alive.
+                    used: naming.used_top_level_names.contains(&binding.name),
+                    conditional: true,
+                });
             }
         }
         for (expression, name) in &naming.non_locals {
             let deferred = naming.deferred_non_locals.contains(expression);
             reads.push((index, name.clone(), deferred));
         }
+        // A quiet read (data masking, an opaque operator) is never reported
+        // as unresolved, but at runtime it falls back to enclosing bindings,
+        // so it keeps definers alive like any other read.
+        for (expression, name) in &naming.quiet_reads {
+            let deferred = naming.deferred_quiet_reads.contains(expression);
+            reads.push((index, name.clone(), deferred));
+        }
+        // A maybe-undefined read of the item's own top-level slot (a loop
+        // reading its carried variable) reaches the enclosing frame on the
+        // unwritten path — its first iteration reads the earlier binding, so
+        // it counts as a cross-item read too.
+        for expression in &naming.maybe_undefined {
+            let Some(slot) = naming.resolutions.get(expression) else {
+                continue;
+            };
+            let Some(binding) = naming.bindings.get(slot) else {
+                continue;
+            };
+            if binding.kind == crate::naming::BindingKind::TopLevel {
+                reads.push((index, binding.name.clone(), false));
+            }
+        }
     }
     for (read_index, name, deferred) in &reads {
         if *deferred {
             // A read from inside a function: the function may run any time
             // after the frame exists, so every write to the name is live.
-            for definer in definers.iter_mut().filter(|(_, n, _, _)| n == name) {
-                definer.3 = true;
+            for definer in definers.iter_mut().filter(|d| d.name == *name) {
+                definer.used = true;
             }
         } else {
             // An immediate read sees the binding current at its item: the
-            // nearest earlier definer.
-            if let Some(definer) = definers
+            // nearest earlier definer — but a conditional definer rebinds
+            // only on some runs, so marking continues past it until the
+            // nearest unconditional one.
+            for definer in definers
                 .iter_mut()
-                .rfind(|(index, n, _, _)| n == name && index < read_index)
+                .rev()
+                .filter(|d| d.name == *name && d.item_index < *read_index)
             {
-                definer.3 = true;
+                definer.used = true;
+                if !definer.conditional {
+                    break;
+                }
             }
         }
     }
     definers
         .into_iter()
-        .filter(|(_, _, _, used)| !used)
-        .map(|(_, name, range, _)| Diagnostic {
-            range,
+        .filter(|definer| !definer.used)
+        .map(|definer| Diagnostic {
+            range: definer.range,
             severity: Severity::Warning,
             code: "unused",
-            message: format!("`{name}` is assigned but never used."),
+            message: format!("`{}` is assigned but never used.", definer.name),
             related: Vec::new(),
         })
         .collect()

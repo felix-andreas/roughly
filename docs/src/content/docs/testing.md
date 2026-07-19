@@ -65,6 +65,34 @@ differences" report section. Cases where the oracle itself is wrong are allowlis
 the harness flags stale allowlist entries, and each suite's test fails on any unexplained
 divergence; the per-case details land in `target/differential-<suite>.txt`.
 
+The comparison harness itself — finding extraction from each stack, the class +
+range-containment matching policy, and the accepted oracle-deficit filters — lives in the
+`differential` crate's library, shared by every arm.
+
+### The differential fuzz arm
+
+`cargo test -p differential --test test_fuzz_differential` runs seeded random programs through
+both stacks with the same matching policy (a package arm and a script arm, deterministic per
+seed, `FUZZ_ITERS` scales the budget). The fixture arm only compares sources someone thought to
+write down; this arm sweeps the space between, where a diagnostic class one stack silently lacks
+shows up as a divergence instead of going unnoticed — it is what surfaced the missing script
+unresolved checks, duplicate type-name errors, and conditional-slot semantics. Its generator is
+differential-specific: the template pool is biased toward programs that PRODUCE findings both
+stacks model, and strict mode stays off (strict attribution on recursive shapes diverges by
+design and only the fixture arm's case allowlist can express that). Divergences accepted by the
+shared filters are counted, never failed, and each filter is deliberately narrow with the
+accepted class named in a rollup:
+
+- **oracle deficits** — forward-capture unresolved/unused warnings the rewrite correctly
+  resolves (site-scoped), bindings kept alive by pipeline reads the oracle does not model,
+  Unknown-tolerant type checks the oracle over-rejects;
+- **legacy slot tolerance** — use-before-write reads inside the defining statement the oracle
+  misses because it mints the slot first;
+- **model divergences** — unpaired type findings over *unstable names* (multiply-bound,
+  self-referential, or forward-captured names, closed transitively), where the oracle's
+  settled-slot frame model and the rewrite's sequential/last-wins model legitimately differ,
+  plus the rewrite's NULL-union strictness the oracle collapses to `Unknown` before reaching.
+
 A fourth, ignored-by-default arm compares the stacks over the real-file corpus
 (`cargo test -p differential -- --ignored differential_corpus`, after `scripts/fetch-corpus.sh`):
 every corpus `.R` file both parsers accept runs through both pipelines with the same matching

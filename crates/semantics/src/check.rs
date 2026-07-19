@@ -177,13 +177,17 @@ pub enum StrictOriginKind {
 /// Resolver for names that are not item-local: package globals and the stdlib
 /// stub corpus.
 pub trait GlobalEnv<'db> {
-    fn scheme(&self, name: &str) -> Option<TypeScheme<'db>>;
+    /// The scheme a read of `name` sees. `deferred` marks a read from inside
+    /// a nested function: the closure runs after its document frame settled,
+    /// so in sequential documents the LAST binding of the name wins there,
+    /// while an immediate read sees only bindings earlier than itself.
+    fn scheme(&self, name: &str, deferred: bool) -> Option<TypeScheme<'db>>;
 
     /// The full ordered overload-candidate set of a name, `None` when the name
     /// has at most one candidate or a package/local definition wins over the
-    /// stub set.
-    fn overloads(&self, name: &str) -> Option<Vec<TypeScheme<'db>>> {
-        let _ = name;
+    /// stub set. `deferred` as in [`GlobalEnv::scheme`].
+    fn overloads(&self, name: &str, deferred: bool) -> Option<Vec<TypeScheme<'db>>> {
+        let _ = (name, deferred);
         None
     }
 
@@ -895,7 +899,7 @@ impl<'db> Checker<'db, '_> {
                 let name = name.clone();
                 match validated
                     .as_ref()
-                    .and_then(|name| self.globals.and_then(|globals| globals.scheme(name)))
+                    .and_then(|name| self.globals.and_then(|globals| globals.scheme(name, false)))
                 {
                     Some(namespace_scheme) => self.instantiate(&namespace_scheme),
                     None => {
@@ -1064,7 +1068,9 @@ impl<'db> Checker<'db, '_> {
             // the unresolved diagnostic); a read that RESOLVES to a binding
             // with no known type is a strict origin.
             if let Some(name) = self.naming.non_locals.get(&id).cloned()
-                && let Some(scheme) = self.globals.and_then(|globals| globals.scheme(&name))
+                && let Some(scheme) = self.globals.and_then(|globals| {
+                    globals.scheme(&name, self.naming.deferred_non_locals.contains(&id))
+                })
             {
                 let instantiated = self.instantiate(&scheme);
                 if matches!(
@@ -2813,7 +2819,9 @@ impl<'db> Checker<'db, '_> {
             } => validated_namespace_name(self.db, *internal, package, name)?,
             _ => return None,
         };
-        let schemes = self.globals?.overloads(&name)?;
+        let schemes = self
+            .globals?
+            .overloads(&name, self.naming.deferred_non_locals.contains(&callee))?;
         if schemes.len() < 2 {
             return None;
         }

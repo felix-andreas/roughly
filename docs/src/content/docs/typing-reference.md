@@ -234,7 +234,19 @@ body:
 
 - a top-level binding is visible only after its assignment
 - rebinding a name changes later uses, exactly like local rebinding
-- a use before any script-local or package-global definition is an unresolved name
+- a use before any script-local or package-global definition is an unresolved name — including a
+  read inside the very statement that first binds the name (`x <- x + 1L` with no earlier `x`),
+  which errors at runtime
+- a read from inside a nested function is **deferred**: the closure runs after the frame settled,
+  so it resolves against the whole document — the LAST top-level binding of the name wins, the
+  enclosing statement's own binding included (self-recursion resolves; a self-recursive closure
+  types through the cycle fixpoint)
+- conditional top-level writes (inside a top-level `if`/`for`/`while`/`repeat`) create the
+  document's variable slot exactly as in package files: later reads in the same document resolve
+  to it (the slot exports no scheme yet, so such reads type `Unknown`)
+- a masked read (`with`, data.table indexing) or a read inside an opaque operator (`|>`, `&`,
+  user `%op%`s) is never reported unresolved, but it counts as a use — it keeps the binding it
+  would fall back to alive for the unused check, and navigation (goto, references) connects it
 
 Scripts are typechecked like package files: they check against package-global value schemes and
 project-global types, plus their own script-local bindings and type declarations.

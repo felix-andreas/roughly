@@ -80,12 +80,24 @@ pub struct ItemNaming {
     /// read happens when the function is *called*, after the enclosing frame
     /// finished executing.
     pub deferred_non_locals: BTreeSet<ExprId>,
+    /// Reads no lexical slot resolves that sit in a quiet context (data
+    /// masking, an unsupported operator's operands): never reported as
+    /// unresolved, but a read all the same — a masked expression falls back
+    /// to enclosing bindings at runtime, so these keep cross-item bindings
+    /// alive for the unused check.
+    pub quiet_reads: BTreeMap<ExprId, String>,
+    /// The subset of `quiet_reads` read from inside a nested function.
+    pub deferred_quiet_reads: BTreeSet<ExprId>,
     /// Dead stores (surfaced only when the unused check is enabled).
     pub unused_assignments: Vec<UnusedAssignment>,
     /// Parameters no read resolves to (`...` excluded), for the default-off
     /// unused-parameter lint: R signatures legitimately carry ignored formals
     /// (an S3 method must match its generic), so a project opts in.
     pub unused_parameters: Vec<UnusedAssignment>,
+    /// Names of the item's own top-level slots that some read within the item
+    /// resolved to (a loop reading its own carried variable, a capture). The
+    /// cross-item unused check seeds these definers as already used.
+    pub used_top_level_names: BTreeSet<String>,
     /// Slots read or super-assigned from inside a function nested below the
     /// slot's frame: every write to them stays observable.
     pub captured_slots: BTreeSet<BindingId>,
@@ -625,13 +637,14 @@ impl Context<'_> {
         match resolved {
             Some((depth, slot)) => {
                 self.naming.resolutions.insert(id, slot);
-                if self
-                    .naming
-                    .bindings
-                    .get(&slot)
-                    .is_some_and(|binding| binding.kind == BindingKind::Parameter)
-                {
-                    self.read_parameter_slots.insert(slot);
+                match self.naming.bindings.get(&slot).map(|binding| binding.kind) {
+                    Some(BindingKind::Parameter) => {
+                        self.read_parameter_slots.insert(slot);
+                    }
+                    Some(BindingKind::TopLevel) => {
+                        self.naming.used_top_level_names.insert(name.to_owned());
+                    }
+                    _ => {}
                 }
                 // Mark every reaching write used; an unassigned reaching path
                 // makes the read maybe-undefined.
@@ -664,10 +677,17 @@ impl Context<'_> {
                 }
             }
             None => {
-                if self.emit && self.quiet_depth == 0 {
-                    self.naming.non_locals.insert(id, name.to_owned());
-                    if self.current_function_depth() > 0 {
-                        self.naming.deferred_non_locals.insert(id);
+                if self.emit {
+                    if self.quiet_depth == 0 {
+                        self.naming.non_locals.insert(id, name.to_owned());
+                        if self.current_function_depth() > 0 {
+                            self.naming.deferred_non_locals.insert(id);
+                        }
+                    } else {
+                        self.naming.quiet_reads.insert(id, name.to_owned());
+                        if self.current_function_depth() > 0 {
+                            self.naming.deferred_quiet_reads.insert(id);
+                        }
                     }
                 }
             }

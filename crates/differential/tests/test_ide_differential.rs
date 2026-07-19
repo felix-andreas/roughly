@@ -39,6 +39,13 @@ const ORACLE_DEFICIT_CASES: &[&str] = &[
     "typing::scoping__forward_capture_resolves_after_repass",
     "typing::scoping__local_mutual_recursion_is_tolerant",
     "typing::scoping__forward_capture_sees_the_frame_write",
+    // The oracle offers no navigation on a use-before-definition read; the
+    // rewrite connects the read to the later declaration it warns about.
+    "typing-scripts::resolution__use_before_any_definition_is_unresolved",
+    "typing-scripts::resolution__read_inside_the_defining_statement_is_unresolved",
+    // The oracle offers no navigation on pipeline reads; the rewrite
+    // connects them to their declaration.
+    "typing-scripts::reads_that_keep_bindings_alive__pipe_read_is_a_use",
 ];
 
 /// Adjudicated design differences, per case with the reason; divergences in
@@ -55,6 +62,36 @@ const ACCEPTED_DIFFERENCE_CASES: &[(&str, &str)] = &[
         "same INTERNAL-vs-exported hint difference: the oracle hints `g <- f` with \
          the open internal type while both stacks export the closed \
          `fn(p: Unknown) -> Unknown`; the rewrite hints only the exported scheme",
+    ),
+    (
+        "typing::scoping__conditional_top_level_slot_resolves_a_later_read_in_this_file",
+        "a conditional top-level slot exports no scheme yet, so the rewrite types \
+         the closure reading it Unknown and withholds the Unknown-carrying inlay \
+         hint the oracle shows",
+    ),
+    (
+        "typing-scripts::resolution__self_recursive_closure_resolves",
+        "a self-recursive script closure pins to `fn() -> Unknown` through the \
+         cycle fixpoint, so the rewrite withholds the Unknown-carrying inlay hint \
+         and the active-parameter guess the oracle offers from its repass type",
+    ),
+    (
+        "typing-scripts::resolution__forward_capture_resolves_to_the_later_binding",
+        "the rewrite resolves the forward-captured read the oracle leaves \
+         unresolved (navigation additions), and the two differ on \
+         active-parameter guessing at the resulting call",
+    ),
+    (
+        "typing-scripts::conditional_slots__loop_reading_its_carried_variable_stays_alive",
+        "the carried loop variable types Unknown in the rewrite (its conditional \
+         slot exports no scheme), so the Unknown-carrying inlay hint the oracle \
+         shows is withheld",
+    ),
+    (
+        "typing-scripts::reads_that_keep_bindings_alive__masked_read_is_a_use",
+        "the rewrite keeps a masked read's result Unknown (data-frame columns \
+         are opaque), so the Unknown-carrying inlay hint the oracle shows from \
+         resolving the mask is withheld",
     ),
 ];
 

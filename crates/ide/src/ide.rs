@@ -754,7 +754,28 @@ pub fn completion(
                     let kind = match *item.kind(db) {
                         ItemKind::Function => CompletionKind::Function,
                         ItemKind::Value => CompletionKind::Variable,
-                        ItemKind::Statement => continue,
+                        // A statement item still creates top-level variable
+                        // slots (a conditional write inside a top-level loop
+                        // or `if`), and those names complete like any global.
+                        ItemKind::Statement => {
+                            if let Some(naming) = item_naming(db, item) {
+                                for info in naming.bindings.values() {
+                                    if info.kind == BindingKind::TopLevel
+                                        && search_match(&info.name, &query).is_some()
+                                    {
+                                        items.push(CompletionItem {
+                                            label: info.name.clone(),
+                                            kind: CompletionKind::Variable,
+                                            source: CompletionSource::Global,
+                                            detail: None,
+                                            documentation: None,
+                                            takes_arguments: None,
+                                        });
+                                    }
+                                }
+                            }
+                            continue;
+                        }
                     };
                     let Some(name) = item.name(db).clone() else {
                         continue;
@@ -2620,7 +2641,14 @@ fn target_at<'db>(
                 binding: *binding,
             });
         }
-        if let Some(name) = naming.non_locals.get(&expression) {
+        // A quiet read (data masking, an opaque operator) resolves like any
+        // cross-item read for navigation — only the unresolved diagnostic is
+        // withheld for it.
+        if let Some(name) = naming
+            .non_locals
+            .get(&expression)
+            .or_else(|| naming.quiet_reads.get(&expression))
+        {
             // Only project-defined names have occurrences to offer; stub and
             // unresolved names resolve nowhere.
             let defined = global_declaration_exists(db, files, name);
@@ -2655,11 +2683,18 @@ fn target_at<'db>(
     None
 }
 
+/// Whether any item declares `name` as a top-level slot — named definitions
+/// and conditional writes (a `for`-body assignment at the top level) alike,
+/// matching the occurrence walk's notion of a declaration.
 fn global_declaration_exists(db: &dyn Db, files: ProjectFiles, name: &str) -> bool {
     files.files(db).iter().any(|file| {
         item_tree(db, *file).into_iter().any(|item| {
-            matches!(*item.kind(db), ItemKind::Function | ItemKind::Value)
-                && item.name(db).as_deref() == Some(name)
+            item_naming(db, item).is_some_and(|naming| {
+                naming
+                    .bindings
+                    .values()
+                    .any(|info| info.kind == BindingKind::TopLevel && info.name == name)
+            })
         })
     })
 }
@@ -2727,10 +2762,13 @@ fn occurrences(db: &dyn Db, files: ProjectFiles, target: &Target<'_>) -> Vec<Occ
                                 );
                             }
                         }
-                        // Reads that resolve outside the item: the global's
-                        // uses from other definitions.
+                        // Reads that resolve outside the item — quiet
+                        // (masked, opaque-operator) reads included: the
+                        // global's uses from other definitions.
                         if let Some(hir) = item_hir(db, item) {
-                            for (expression, non_local) in &naming.non_locals {
+                            for (expression, non_local) in
+                                naming.non_locals.iter().chain(&naming.quiet_reads)
+                            {
                                 if non_local == name {
                                     result.push(Occurrence {
                                         file,
