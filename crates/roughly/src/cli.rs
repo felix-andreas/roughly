@@ -226,6 +226,42 @@ pub fn check(
             .map(std::num::NonZero::get)
             .unwrap_or(1)
             .min(checked.len().max(1));
+        // Warm per-item naming (and the stub corpus) across cores first: the
+        // project-wide interface walk demands naming for every item, and
+        // computed inside that one salsa query it serializes the whole
+        // front half of the cold pass on a single thread. With the memos
+        // warm the walk is a cheap graph assembly. Files are dealt to
+        // workers largest-first so one big file cannot skew a chunk.
+        std::thread::scope(|scope| {
+            {
+                let db = db.clone();
+                scope.spawn(move || {
+                    let _ = semantics::stubs::stubs(&db);
+                });
+            }
+            let mut by_size: Vec<usize> = (0..checked.len()).collect();
+            by_size.sort_by_key(|&index| std::cmp::Reverse(checked[index].1.len()));
+            for worker in 0..workers {
+                let db = db.clone();
+                let files = &files;
+                let deal: Vec<usize> = by_size
+                    .iter()
+                    .copied()
+                    .skip(worker)
+                    .step_by(workers)
+                    .collect();
+                scope.spawn(move || {
+                    for index in deal {
+                        let Some(file) = files[index] else {
+                            continue;
+                        };
+                        for item in semantics::item_tree(&db, file) {
+                            let _ = semantics::item_naming(&db, item);
+                        }
+                    }
+                });
+            }
+        });
         type FileFindings = Vec<(Diagnostic, Vec<RelatedNote>)>;
         let mut per_file: Vec<FileFindings> = (0..checked.len()).map(|_| Vec::new()).collect();
         std::thread::scope(|scope| {
