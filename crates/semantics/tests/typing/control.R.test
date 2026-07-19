@@ -196,7 +196,7 @@ f: <T> fn(x: T) -> Unknown
 for (i in 1:3) total <- i
 report <- function() total
 #++++
-report: fn() -> Unknown
+report: fn() -> integer
 
 #---- shadowed_outer_binding_is_dead_despite_the_capture
 f <- function() {
@@ -221,3 +221,35 @@ f <- function() {
 }
 #++++
 f: fn() -> fn() -> integer
+
+#==== missing_formals
+#---- reading_a_missing_formal_is_an_error
+describe <- function(name, punct) {
+  if (missing(punct)) {
+    return(nchar(punct))
+  }
+  paste0(name, punct)
+}
+#++++
+describe: Unknown
+77..82 error[type-mismatch] reading `punct` here would fail at run time: this branch runs only when `punct` is missing, and it has no default.
+
+#---- supplying_the_formal_on_the_missing_branch_is_fine
+describe <- function(name, punct) {
+  if (missing(punct)) {
+    punct <- "."
+  }
+  paste0(name, punct)
+}
+#++++
+describe: <T> fn(name: T, [punct]: character) -> character
+
+#---- the_else_branch_reads_the_supplied_formal
+describe <- function(name, punct) {
+  if (missing(punct)) {
+    return(name)
+  }
+  paste0(name, punct)
+}
+#++++
+describe: <T, U> fn(name: T, [punct]: U) -> T | character

@@ -101,12 +101,6 @@ const ACCEPTED_DIFFERENCE_CASES: &[(&str, &str)] = &[
          `fn(p: Unknown) -> Unknown`; the rewrite hints only the exported scheme",
     ),
     (
-        "typing::scoping__conditional_top_level_slot_resolves_a_later_read_in_this_file",
-        "a conditional top-level slot exports no scheme yet, so the rewrite types \
-         the closure reading it Unknown and withholds the Unknown-carrying inlay \
-         hint the oracle shows",
-    ),
-    (
         "typing-scripts::resolution__self_recursive_closure_resolves",
         "a self-recursive script closure pins to `fn() -> Unknown` through the \
          cycle fixpoint, so the rewrite withholds the Unknown-carrying inlay hint \

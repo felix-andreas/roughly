@@ -96,14 +96,13 @@ accepted class named in a rollup:
   conventions); plus the rewrite's NULL-union strictness the oracle collapses to `Unknown`
   before reaching.
 
-An ignored-by-default arm sweeps the FROZEN STACK'S OWN fixture corpus
-(`cargo test -p differential --release -- --ignored legacy_corpus_differential`): every
-single-file case input from the legacy `typecheck`/`naming`/`type_syntax`/`diagnostics`/
-`unused`/`realworld` suites runs through both stacks with the shared policy — years of
-accumulated shapes the rewrite's suites do not spell out, compared without porting a single
-legacy expectation (the oracle recomputes its findings, so legacy renderings never constrain
-the rewrite). It is a triage instrument until the rewrite gaps its sweep itemized in the
-backlog close, then it becomes a default gate.
+A default-suite arm sweeps the FROZEN STACK'S OWN fixture corpus
+(`legacy_corpus_differential`): every single-file case input from the legacy
+`typecheck`/`naming`/`type_syntax`/`diagnostics`/`unused`/`realworld` suites runs through both
+stacks with the shared policy — years of accumulated shapes the rewrite's suites do not spell
+out, compared without porting a single legacy expectation (the oracle recomputes its findings,
+so legacy renderings never constrain the rewrite). Every case must match or carry an
+adjudicated allowlist entry with its reason; stale entries fail.
 
 A further ignored-by-default arm compares the stacks over the real-file corpus
 (`cargo test -p differential -- --ignored differential_corpus`, after `scripts/fetch-corpus.sh`):

@@ -44,6 +44,11 @@ pub enum TypeErrorKind<'db> {
     NotAFunction {
         found: Ty<'db>,
     },
+    /// A read of a no-default formal on the branch where `missing(name)`
+    /// held — it would fail at run time.
+    MissingFormalRead {
+        name: String,
+    },
     /// The call's argument count cannot fill the function's formals (too many
     /// positionals, or a required formal left unfilled).
     ArityMismatch {
@@ -148,6 +153,13 @@ pub struct ItemCheck<'db> {
     /// the declared set. Absent when no candidate matched. Signature help
     /// lists the whole declared set with the committed candidate active.
     pub selected_overloads: FxHashMap<ExprId, usize>,
+    /// The settled scheme of every name the item's TOP-LEVEL frame binds
+    /// (variable-erased like the export). For a statement item this is how a
+    /// conditional write (`for (i in 1:3) total <- i`) serves cross-item
+    /// reads of the document slot it creates; a definition item's own name
+    /// keeps resolving through `scheme`. A failed item exports `Unknown`
+    /// here too.
+    pub top_level_bindings: Vec<(String, TypeScheme<'db>)>,
 }
 
 /// One `Unknown` origin: where an undetermined type was first introduced
@@ -240,6 +252,7 @@ pub fn check_item_with_annotation<'db>(
         forward_captured: rustc_hash::FxHashSet::default(),
         capture_joins: FxHashMap::default(),
         capture_repass_needed: false,
+        no_default_formals: rustc_hash::FxHashSet::default(),
     };
     // An annotation whose type mentions a cyclically expanding alias is
     // unusable: report once at the annotated statement (where legacy blames
@@ -366,44 +379,85 @@ pub fn check_item_with_annotation<'db>(
     let mut errors = context.errors;
     let scheme = if errors.is_empty() {
         // Inference variables are table-scoped: a scheme crossing the item
-        // boundary must never carry one (a foreign table cannot resolve it),
-        // so residual monomorphic variables — kept raw inside the item to
-        // tie use sites together — erase to `Unknown` at the export edge.
-        scheme.map(|scheme| TypeScheme {
-            binders: scheme.binders,
-            body: erase_residual_vars(db, &mut context.table, scheme.body),
-        })
+        // boundary must never carry one (a foreign table cannot resolve it).
+        // At the export edge a residual variable CARRYING A CONSTRAINT
+        // generalizes into a binder — `mixed_apply <- invoke(mirror)` keeps
+        // its `<T: numeric>` so cross-item calls still check — while an
+        // unconstrained one (no information) erases to `Unknown`.
+        scheme.map(|scheme| close_scheme(db, &mut context.table, scheme))
     } else {
         errors.truncate(1);
         scheme.map(|_| TypeScheme::monomorphic(unknown(db)))
     };
+    let mut top_level_bindings = Vec::new();
+    for info in naming.bindings.values() {
+        if info.kind != crate::naming::BindingKind::TopLevel {
+            continue;
+        }
+        let Some(entry) = context.environment.get(info.id) else {
+            continue;
+        };
+        let binding_scheme = if errors.is_empty() {
+            let open = match entry {
+                EnvEntry::Mono(ty) | EnvEntry::MissingFormal(ty) => TypeScheme::monomorphic(ty),
+                EnvEntry::Scheme(index) => context.scheme_arena[index as usize].clone(),
+            };
+            close_scheme(db, &mut context.table, open)
+        } else {
+            TypeScheme::monomorphic(unknown(db))
+        };
+        top_level_bindings.push((info.name.clone(), binding_scheme));
+    }
     ItemCheck {
         expression_types,
         errors,
         strict_origins: context.strict_origins,
         scheme,
         selected_overloads: context.selected_overloads,
+        top_level_bindings,
     }
 }
 
+/// Closes a scheme at the export edge: bound variables substitute, unbound
+/// CONSTRAINED variables generalize into fresh binders (the constraint is
+/// real information a reader must honor), and unbound unconstrained ones
+/// erase to `Unknown` via [`erase_residual_vars`]. The synthetic binder
+/// names never display — the renderer canonicalizes rigid names to
+/// `T`/`U`/`V` by first occurrence.
+fn close_scheme<'db>(
+    db: &'db dyn Db,
+    table: &mut InferenceTable<'db>,
+    scheme: TypeScheme<'db>,
+) -> TypeScheme<'db> {
+    let mut closer = ResidualCloser {
+        binders: scheme.binders,
+        generalized: FxHashMap::default(),
+    };
+    let body = erase_residual_vars_at(db, table, scheme.body, 0, Some(&mut closer));
+    TypeScheme {
+        binders: closer.binders,
+        body,
+    }
+}
+
+/// Accumulates export-edge generalization state for [`close_scheme`].
+struct ResidualCloser<'db> {
+    binders: Vec<(Name<'db>, Constraint)>,
+    generalized: FxHashMap<crate::types::InferenceVar, Ty<'db>>,
+}
+
 /// Substitutes every bound inference variable and replaces every still-unbound
-/// one with `Unknown`. Follows variable bindings only — named types stay
+/// one with `Unknown` (or, with a closer, generalizes constrained ones — see
+/// [`close_scheme`]). Follows variable bindings only — named types stay
 /// unexpanded (an exported `UserId` must display as `UserId`, not its alias
 /// body). The depth cap guards against variable-linked structures nesting
 /// past reason; a closed scheme is required, so past it the type erases.
-fn erase_residual_vars<'db>(
-    db: &'db dyn Db,
-    table: &mut InferenceTable<'db>,
-    ty: Ty<'db>,
-) -> Ty<'db> {
-    erase_residual_vars_at(db, table, ty, 0)
-}
-
 fn erase_residual_vars_at<'db>(
     db: &'db dyn Db,
     table: &mut InferenceTable<'db>,
     ty: Ty<'db>,
     depth: usize,
+    mut closer: Option<&mut ResidualCloser<'db>>,
 ) -> Ty<'db> {
     const ERASE_DEPTH_LIMIT: usize = 64;
     if depth >= ERASE_DEPTH_LIMIT {
@@ -411,29 +465,82 @@ fn erase_residual_vars_at<'db>(
     }
     let resolved = table.shallow_resolve(db, ty);
     match resolved.kind(db).clone() {
-        TyKind::Var(_) => unknown(db),
+        TyKind::Var(var) => {
+            if let Some(closer) = closer.as_deref_mut()
+                && let Entry::Unbound { constraint, .. } = table.entry(var)
+                && *constraint != Constraint::Unconstrained
+            {
+                if let Some(&rigid) = closer.generalized.get(&var) {
+                    return rigid;
+                }
+                let constraint = *constraint;
+                let mut ordinal = closer.binders.len() + 1;
+                let name = loop {
+                    let candidate = Name::new(db, format!("R{ordinal}"));
+                    if !closer
+                        .binders
+                        .iter()
+                        .any(|(existing, _)| *existing == candidate)
+                    {
+                        break candidate;
+                    }
+                    ordinal += 1;
+                };
+                let rigid = Ty::new(db, TyKind::Rigid(name));
+                closer.binders.push((name, constraint));
+                closer.generalized.insert(var, rigid);
+                return rigid;
+            }
+            unknown(db)
+        }
         TyKind::Vector(inner) => Ty::new(
             db,
-            TyKind::Vector(erase_residual_vars_at(db, table, inner, depth + 1)),
+            TyKind::Vector(erase_residual_vars_at(
+                db,
+                table,
+                inner,
+                depth + 1,
+                closer.as_deref_mut(),
+            )),
         ),
         TyKind::NamedVector(inner) => Ty::new(
             db,
-            TyKind::NamedVector(erase_residual_vars_at(db, table, inner, depth + 1)),
+            TyKind::NamedVector(erase_residual_vars_at(
+                db,
+                table,
+                inner,
+                depth + 1,
+                closer.as_deref_mut(),
+            )),
         ),
         TyKind::List(inner) => Ty::new(
             db,
-            TyKind::List(erase_residual_vars_at(db, table, inner, depth + 1)),
+            TyKind::List(erase_residual_vars_at(
+                db,
+                table,
+                inner,
+                depth + 1,
+                closer.as_deref_mut(),
+            )),
         ),
         TyKind::NamedList(inner) => Ty::new(
             db,
-            TyKind::NamedList(erase_residual_vars_at(db, table, inner, depth + 1)),
+            TyKind::NamedList(erase_residual_vars_at(
+                db,
+                table,
+                inner,
+                depth + 1,
+                closer.as_deref_mut(),
+            )),
         ),
         TyKind::Tuple(items) => Ty::new(
             db,
             TyKind::Tuple(
                 items
                     .iter()
-                    .map(|&item| erase_residual_vars_at(db, table, item, depth + 1))
+                    .map(|&item| {
+                        erase_residual_vars_at(db, table, item, depth + 1, closer.as_deref_mut())
+                    })
                     .collect(),
             ),
         ),
@@ -444,7 +551,13 @@ fn erase_residual_vars_at<'db>(
                     .iter()
                     .map(|field| {
                         let mut field = field.clone();
-                        field.ty = erase_residual_vars_at(db, table, field.ty, depth + 1);
+                        field.ty = erase_residual_vars_at(
+                            db,
+                            table,
+                            field.ty,
+                            depth + 1,
+                            closer.as_deref_mut(),
+                        );
                         field
                     })
                     .collect(),
@@ -456,30 +569,52 @@ fn erase_residual_vars_at<'db>(
                 positional: function
                     .positional
                     .iter()
-                    .map(|&ty| erase_residual_vars_at(db, table, ty, depth + 1))
+                    .map(|&ty| {
+                        erase_residual_vars_at(db, table, ty, depth + 1, closer.as_deref_mut())
+                    })
                     .collect(),
                 named: function
                     .named
                     .iter()
                     .map(|field| {
                         let mut field = field.clone();
-                        field.ty = erase_residual_vars_at(db, table, field.ty, depth + 1);
+                        field.ty = erase_residual_vars_at(
+                            db,
+                            table,
+                            field.ty,
+                            depth + 1,
+                            closer.as_deref_mut(),
+                        );
                         field
                     })
                     .collect(),
                 variadic: function.variadic.as_ref().map(|rest| {
                     let mut rest = rest.clone();
-                    rest.element = erase_residual_vars_at(db, table, rest.element, depth + 1);
+                    rest.element = erase_residual_vars_at(
+                        db,
+                        table,
+                        rest.element,
+                        depth + 1,
+                        closer.as_deref_mut(),
+                    );
                     rest
                 }),
-                ret: erase_residual_vars_at(db, table, function.ret, depth + 1),
+                ret: erase_residual_vars_at(
+                    db,
+                    table,
+                    function.ret,
+                    depth + 1,
+                    closer.as_deref_mut(),
+                ),
             }),
         ),
         TyKind::Union(members) => union_of(
             db,
             members
                 .iter()
-                .map(|&member| erase_residual_vars_at(db, table, member, depth + 1))
+                .map(|&member| {
+                    erase_residual_vars_at(db, table, member, depth + 1, closer.as_deref_mut())
+                })
                 .collect::<Vec<_>>(),
         ),
         TyKind::Named(name, arguments) => Ty::new(
@@ -488,7 +623,15 @@ fn erase_residual_vars_at<'db>(
                 name,
                 arguments
                     .iter()
-                    .map(|&argument| erase_residual_vars_at(db, table, argument, depth + 1))
+                    .map(|&argument| {
+                        erase_residual_vars_at(
+                            db,
+                            table,
+                            argument,
+                            depth + 1,
+                            closer.as_deref_mut(),
+                        )
+                    })
                     .collect(),
             ),
         ),
@@ -512,6 +655,11 @@ enum EnvEntry<'db> {
     /// A generalized (let-bound function) scheme, stored by index to keep the
     /// entry `Copy`; schemes live in the checker's arena.
     Scheme(u32),
+    /// A no-default formal on the branch where `missing(name)` held: reading
+    /// it would fail at run time ("argument is missing, with no default"), so
+    /// a read errors. Carries the supplied-state type; any write returns the
+    /// slot to an ordinary entry.
+    MissingFormal(Ty<'db>),
 }
 
 impl<'db> Environment<'db> {
@@ -594,6 +742,9 @@ struct Checker<'db, 'a> {
     /// The current body wrote a forward-captured slot: its closures were
     /// inferred against an incomplete join, so the body re-checks once.
     capture_repass_needed: bool,
+    /// Formal-parameter slots with no default: a `missing(name)` guard on
+    /// one marks its true edge read-erroring.
+    no_default_formals: rustc_hash::FxHashSet<BindingId>,
 }
 
 /// One call argument, inferred exactly once before any signature matching, so
@@ -652,6 +803,10 @@ impl NumericOperand<'_> {
 /// One recognized type-guard condition: the tested slot and the refined type
 /// on each `if` edge (`None` = no refinement on that edge).
 struct GuardRefinement<'db> {
+    /// The true edge marks the slot as a read-erroring missing formal
+    /// (`missing(name)` on a no-default parameter) instead of refining its
+    /// type.
+    missing_on_true: bool,
     slot: BindingId,
     true_edge: Option<Ty<'db>>,
     false_edge: Option<Ty<'db>>,
@@ -976,6 +1131,7 @@ impl<'db> Checker<'db, '_> {
                         optional: parameter.default.is_some()
                             || missing_tested.contains(&parameter.name),
                     });
+                    let no_default = parameter.default.is_none();
                     if let Some(slot) = self
                         .naming
                         .bindings
@@ -984,6 +1140,9 @@ impl<'db> Checker<'db, '_> {
                         .map(|(id, _)| *id)
                     {
                         self.environment.set(slot, EnvEntry::Mono(parameter_ty));
+                        if no_default {
+                            self.no_default_formals.insert(slot);
+                        }
                     }
                     if let Some(default) = parameter.default {
                         self.infer(default);
@@ -1168,6 +1327,20 @@ impl<'db> Checker<'db, '_> {
                 let scheme = self.schemes()[index as usize].clone();
                 self.instantiate(&scheme)
             }
+            Some(EnvEntry::MissingFormal(_)) => {
+                let name = self
+                    .naming
+                    .bindings
+                    .get(&slot)
+                    .map(|info| info.name.clone())
+                    .unwrap_or_default();
+                let range = self.module.expression(id).range;
+                self.errors.push(TypeError {
+                    range,
+                    kind: TypeErrorKind::MissingFormalRead { name },
+                });
+                self.unknown()
+            }
             // A read before any write reached the slot. A captured slot
             // resolves to the running join of the frame's writes — the
             // closure runs later, when they have happened (the letrec shape);
@@ -1255,6 +1428,10 @@ impl<'db> Checker<'db, '_> {
                 let scheme = self.schemes()[index as usize].clone();
                 let instantiated = self.instantiate(&scheme);
                 EnvEntry::Mono(self.join_types(instantiated, written))
+            }
+            // A write on the missing branch supplies the formal.
+            Some(EnvEntry::MissingFormal(existing)) => {
+                EnvEntry::Mono(self.join_types(existing, written))
             }
             None => EnvEntry::Mono(written),
         };
@@ -1456,10 +1633,15 @@ impl<'db> Checker<'db, '_> {
         let guard = self.recognize_guard(condition);
 
         let mark = self.environment.mark();
-        if let Some(guard) = &guard
-            && let Some(true_edge) = guard.true_edge
-        {
-            self.environment.set(guard.slot, EnvEntry::Mono(true_edge));
+        if let Some(guard) = &guard {
+            if let Some(true_edge) = guard.true_edge {
+                self.environment.set(guard.slot, EnvEntry::Mono(true_edge));
+            } else if guard.missing_on_true
+                && let Some(EnvEntry::Mono(current)) = self.environment.get(guard.slot)
+            {
+                self.environment
+                    .set(guard.slot, EnvEntry::MissingFormal(current));
+            }
         }
         let then_ty = self.infer(then_branch);
         let then_diverges = self.diverges(then_branch);
@@ -1734,7 +1916,10 @@ impl<'db> Checker<'db, '_> {
                 operand,
             } => {
                 let inner = self.recognize_guard(*operand)?;
+                // `!missing(x)` has no read-erroring edge to swap into: the
+                // false edge stays the ordinary supplied state.
                 Some(GuardRefinement {
+                    missing_on_true: false,
                     slot: inner.slot,
                     true_edge: inner.false_edge,
                     false_edge: inner.true_edge,
@@ -1748,7 +1933,6 @@ impl<'db> Checker<'db, '_> {
                 if self.naming.resolutions.contains_key(callee) {
                     return None;
                 }
-                let guard = guard_kind(name)?;
                 let [argument] = arguments.as_slice() else {
                     return None;
                 };
@@ -1763,6 +1947,18 @@ impl<'db> Checker<'db, '_> {
                     return None;
                 }
                 let slot = *self.naming.resolutions.get(&value)?;
+                if name == "missing" {
+                    return self
+                        .no_default_formals
+                        .contains(&slot)
+                        .then_some(GuardRefinement {
+                            missing_on_true: true,
+                            slot,
+                            true_edge: None,
+                            false_edge: None,
+                        });
+                }
+                let guard = guard_kind(name)?;
                 let EnvEntry::Mono(current) = self.environment.get(slot)? else {
                     return None;
                 };
@@ -1786,6 +1982,7 @@ impl<'db> Checker<'db, '_> {
                     // the static type is untracked.
                     TyKind::Any | TyKind::Unknown => {
                         return Some(GuardRefinement {
+                            missing_on_true: false,
                             slot,
                             true_edge: Some(crate::types::null(self.db)),
                             false_edge: None,
@@ -1811,6 +2008,7 @@ impl<'db> Checker<'db, '_> {
                             return None;
                         }
                         return Some(GuardRefinement {
+                            missing_on_true: false,
                             slot,
                             true_edge: Some(shaped),
                             false_edge: Some(fresh),
@@ -1879,6 +2077,7 @@ impl<'db> Checker<'db, '_> {
             Some(union_of(self.db, kept))
         };
         GuardRefinement {
+            missing_on_true: false,
             slot,
             true_edge: edge(true_members),
             false_edge: edge(false_members),
@@ -2586,6 +2785,9 @@ impl<'db> Checker<'db, '_> {
                 .map(|(id, _)| *id)
             {
                 self.environment.set(slot, EnvEntry::Mono(parameter_ty));
+                if parameter.default.is_none() {
+                    self.no_default_formals.insert(slot);
+                }
             }
             if let Some(default) = parameter.default {
                 let default_ty = self.infer(default);
@@ -4140,6 +4342,13 @@ impl<'db> Checker<'db, '_> {
     ) -> Vec<BindingId> {
         let mut changed = Vec::new();
         for &(slot, branch_entry) in writes {
+            // The missing-formal marker is branch-local: joined back into
+            // the fall-through state it means only "possibly missing", which
+            // reads as the ordinary supplied type.
+            let branch_entry = match branch_entry {
+                Some(EnvEntry::MissingFormal(ty)) => Some(EnvEntry::Mono(ty)),
+                other => other,
+            };
             let current = self.environment.get(slot);
             let joined = match (current, branch_entry) {
                 (Some(EnvEntry::Mono(a)), Some(EnvEntry::Mono(b))) if a != b => {

@@ -172,6 +172,11 @@ like a variable slot: a later top-level read resolves to it, with the maybe-unde
 below when an unassigned path also reaches. A conditional reassignment of a name that already has
 an unconditional top-level definition keeps resolving to the package-global winner.
 
+Such a slot also **types**: cross-item reads see the join of every conditional writer's settled
+type (`for (i in 1:3) total <- i` then `report <- function() total` types `report` as
+`fn() -> integer`), in scripts under the same sequential/deferred visibility as named
+definitions.
+
 ### Replacement-form assignment
 
 A replacement-form assignment (`x$field <- v`, `x[["name"]] <- v`, `x[[key]] <- v`, `x@slot <- v`)
@@ -1919,6 +1924,9 @@ An unannotated `function(...)` expression infers a function type directly from i
 - the values reaching `...` are not tracked into the body: a body use of `...` (forwarding it to
   another call) types as `Unknown`
 - parameter and return types are inferred; unconstrained parameters generalize at binding boundaries like any other inferred type
+- a constraint an inference variable still carries at an item's export edge survives as a scheme
+  binder — `mixed_apply <- invoke(mirror)` exports `<T: numeric> fn(x: T) -> T`, so cross-item
+  calls keep checking it — while an unconstrained residual variable erases to `Unknown`
 - default value expressions are typechecked: an error inside a default is reported, and a non-`NULL`
   default for an annotated parameter must be compatible with the declared type
 - a `NULL` default is R's "no value" sentinel for an optional parameter, so it is always allowed

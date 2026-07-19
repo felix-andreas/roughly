@@ -45,14 +45,14 @@ const ACCEPTED_DIVERGENCES: &[(&str, &str)] = &[(
      credit because it lies outside the oracle's span",
 )];
 
-/// Currently a triage instrument, not a gate: ~2% of cases surface known
-/// rewrite gaps itemized in the backlog (expression-level annotations,
-/// annotation block-form validations, declared-function shape checks,
-/// nesting-depth caps, missing-formal flow analysis). Run it manually after
-/// closing one of those to watch the count fall; promote it into the default
-/// suite when the divergence list is empty or fully allowlisted.
+/// A default-suite gate: every comparable legacy case input must match (or
+/// carry an adjudicated `ACCEPTED_DIVERGENCES` entry with its reason). The
+/// sweep drove the parity work that closed all itemized rewrite gaps —
+/// annotation shape validations, declared-function shape checks,
+/// expression-level annotations, elided-return semantics, conditional-slot
+/// schemes, export-edge constraint generalization, missing-formal flow —
+/// and now pins them against the frozen stack.
 #[test]
-#[ignore = "triage instrument until the itemized rewrite gaps close; run explicitly with -- --ignored"]
 fn legacy_corpus_differential() {
     let legacy_tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("../analysis-legacy/tests");
     let mut report = String::new();

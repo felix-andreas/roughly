@@ -647,6 +647,90 @@ pub fn project_type_definitions<'db>(
     definitions
 }
 
+/// Statement items binding each top-level name, in project order: a
+/// conditional write at a document's top level (inside a top-level
+/// `if`/`for`/`while`/`repeat` or a bare block) creates the document's
+/// variable slot, and cross-item reads of a name with no unconditional
+/// winner resolve here — the slot's type is the join of every writer.
+#[salsa::tracked(returns(ref))]
+pub fn conditional_slot_items<'db>(
+    db: &'db dyn Db,
+    files: ProjectFiles,
+) -> rustc_hash::FxHashMap<String, Vec<Item<'db>>> {
+    let mut writers: rustc_hash::FxHashMap<String, Vec<Item<'db>>> =
+        rustc_hash::FxHashMap::default();
+    for &file in files.files(db) {
+        if *file.kind(db) != DocumentKind::Package {
+            continue;
+        }
+        for item in item_tree(db, file) {
+            if *item.kind(db) != ItemKind::Statement {
+                continue;
+            }
+            let Some(naming) = item_naming(db, item) else {
+                continue;
+            };
+            for binding in naming.bindings.values() {
+                if binding.kind == naming::BindingKind::TopLevel {
+                    writers.entry(binding.name.clone()).or_default().push(item);
+                }
+            }
+        }
+    }
+    writers
+}
+
+/// The settled scheme a statement item exports for one of its top-level
+/// bindings (see `ItemCheck::top_level_bindings`). A tracked projection so
+/// readers cut off when the binding's scheme is unchanged even though the
+/// item re-checked. Cycle recovery mirrors `global_scheme`: a statement
+/// item reading its own conditionally-written name (`while (b > 0L)
+/// b <- b - 1L`) routes back into its own check.
+#[salsa::tracked(
+    returns(clone),
+    cycle_fn = statement_binding_recover,
+    cycle_initial = statement_binding_initial
+)]
+pub fn statement_binding_scheme<'db>(
+    db: &'db dyn Db,
+    item: Item<'db>,
+    name: types::Name<'db>,
+) -> Option<types::TypeScheme<'db>> {
+    let check = item_check(db, item)?;
+    let name = name.text(db);
+    check
+        .top_level_bindings
+        .iter()
+        .find(|(binding, _)| binding == name)
+        .map(|(_, scheme)| scheme.clone())
+}
+
+fn statement_binding_initial<'db>(
+    db: &'db dyn Db,
+    _id: salsa::Id,
+    _item: Item<'db>,
+    _name: types::Name<'db>,
+) -> Option<types::TypeScheme<'db>> {
+    Some(types::TypeScheme::monomorphic(types::unknown(db)))
+}
+
+fn statement_binding_recover<'db>(
+    db: &'db dyn Db,
+    cycle: &salsa::Cycle,
+    last_provisional: &Option<types::TypeScheme<'db>>,
+    value: Option<types::TypeScheme<'db>>,
+    _item: Item<'db>,
+    _name: types::Name<'db>,
+) -> Option<types::TypeScheme<'db>> {
+    if &value == last_provisional {
+        return value;
+    }
+    if cycle.iteration() >= SCHEME_ROUND_CAP {
+        return Some(types::TypeScheme::monomorphic(types::unknown(db)));
+    }
+    value
+}
+
 /// The winning definition item per package-exported name: later files (and
 /// later assignments within one file) override earlier ones.
 #[salsa::tracked(returns(ref))]
@@ -1059,18 +1143,54 @@ impl<'db> SalsaGlobals<'db> {
         visible
             .iter()
             .rev()
-            .find(|item| {
-                matches!(*item.kind(self.db), ItemKind::Function | ItemKind::Value)
-                    && item.name(self.db).as_deref() == Some(name)
+            .find(|item| match *item.kind(self.db) {
+                ItemKind::Function | ItemKind::Value => item.name(self.db).as_deref() == Some(name),
+                // A statement item binds the name through a conditional
+                // top-level write (the document-slot model).
+                ItemKind::Statement => item_naming(self.db, **item).is_some_and(|naming| {
+                    naming.bindings.values().any(|binding| {
+                        binding.kind == naming::BindingKind::TopLevel && binding.name == name
+                    })
+                }),
             })
             .copied()
+    }
+
+    /// The joined scheme of a package-level conditional slot: every
+    /// statement item writing the name contributes its settled binding type.
+    fn conditional_slot_scheme(&self, name: &str) -> Option<types::TypeScheme<'db>> {
+        let files = ProjectFiles::try_get(self.db)?;
+        let writers = conditional_slot_items(self.db, files).get(name)?;
+        let interned = types::Name::new(self.db, name.to_owned());
+        let mut schemes: Vec<types::TypeScheme<'db>> = writers
+            .iter()
+            .filter_map(|&item| statement_binding_scheme(self.db, item, interned))
+            .collect();
+        match schemes.len() {
+            0 => None,
+            1 => schemes.pop(),
+            _ => {
+                let bodies: Vec<types::Ty<'db>> =
+                    schemes.into_iter().map(|scheme| scheme.body).collect();
+                Some(types::TypeScheme::monomorphic(types::union_of(
+                    self.db, bodies,
+                )))
+            }
+        }
     }
 }
 
 impl<'db> check::GlobalEnv<'db> for SalsaGlobals<'db> {
     fn scheme(&self, name: &str, deferred: bool) -> Option<types::TypeScheme<'db>> {
         if let Some(item) = self.script_definition(name, deferred) {
-            return Some(global_scheme(self.db, item));
+            if *item.kind(self.db) == ItemKind::Statement {
+                let interned = types::Name::new(self.db, name.to_owned());
+                if let Some(scheme) = statement_binding_scheme(self.db, item, interned) {
+                    return Some(scheme);
+                }
+            } else {
+                return Some(global_scheme(self.db, item));
+            }
         }
         if let Some(item) = self
             .definitions
@@ -1078,6 +1198,9 @@ impl<'db> check::GlobalEnv<'db> for SalsaGlobals<'db> {
             .and_then(|winners| winners.get(name))
         {
             return Some(global_scheme(self.db, *item));
+        }
+        if let Some(scheme) = self.conditional_slot_scheme(name) {
+            return Some(scheme);
         }
         // Reading an overloaded stub name as a plain value (not a call)
         // resolves to its last candidate: the corpus orders candidates

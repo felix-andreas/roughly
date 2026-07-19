@@ -185,3 +185,18 @@ checked <- function(x) paste0("bad: ", class(x)[1])
 fail_with: <T> fn(x: T) -> Unknown
 checked: Unknown
 99..110 error[type-mismatch] `[` is not supported on `character`
+
+#==== exported_constraints
+#---- higher_order_result_keeps_its_constraint_across_items
+invoke <- function(f) function(x) f(x + 1L)
+mirror <- function(x) x
+mixed_apply <- invoke(mirror)
+bad <- mixed_apply("ok")
+ok <- mixed_apply(2L)
+#++++
+invoke: <T: numeric, U> fn(f: fn(T) -> U) -> fn(x: T) -> U
+mirror: <T> fn(x: T) -> T
+mixed_apply: <T: numeric> fn(x: T) -> T
+bad: Unknown
+ok: integer
+117..121 error[type-mismatch] expected a numeric value (`integer` or `double`), found `character`

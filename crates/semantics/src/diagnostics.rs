@@ -1138,6 +1138,9 @@ fn render_type_error_message(db: &dyn Db, error: &TypeError<'_>) -> String {
             renderer.render(db, *expected),
             renderer.render(db, *found)
         ),
+        TypeErrorKind::MissingFormalRead { name } => format!(
+            "reading `{name}` here would fail at run time: this branch runs only when `{name}` is missing, and it has no default."
+        ),
         TypeErrorKind::NotAFunction { found } => {
             format!(
                 "this has type `{}`, which is not a function — it cannot be called",
