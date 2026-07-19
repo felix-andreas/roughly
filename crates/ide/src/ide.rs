@@ -386,10 +386,13 @@ pub fn inlay_hints(db: &dyn Db, file: SourceFile, viewport: Option<TextRange>) -
         let Some(check) = item_check(db, item) else {
             continue;
         };
-        // A refused (form-mixing) annotation drops its whole payload, so the
-        // binding is effectively unannotated and still hints.
+        // An annotation types its binding only through surviving payload: a
+        // refused block (form, ordering, duplicate-parameter, depth errors)
+        // drops the payload entirely, and a definitions-only or toggle-only
+        // block types nothing — all of those leave the binding hintable.
         let annotated = item_annotation_syntax(db, item).is_some_and(|annotation| {
-            semantics::annotations::block_form_violation(&annotation.syntax_node()).is_none()
+            let lowered = semantics::annotations::lower_annotation(db, &annotation.syntax_node());
+            lowered.declared.is_some() || lowered.new_nominal.is_some() || lowered.trusted
         });
 
         for (index, expression) in hir.expressions.iter().enumerate() {

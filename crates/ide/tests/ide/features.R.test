@@ -568,6 +568,7 @@ signature: none
 action: Add inferred type annotations for the whole file
   edit 56..56 -> "  #: double\n"
 completion (1): Score
+hint @28: fn() -> double
 hint @59: double
 
 #---- declaration_name_is_target
@@ -586,6 +587,7 @@ signature: none
 action: Add inferred type annotations for the whole file
   edit 55..55 -> "  #: double\n"
 completion (1): Score
+hint @27: fn() -> double
 hint @58: double
 
 #---- annotation_completion_types

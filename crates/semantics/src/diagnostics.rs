@@ -70,20 +70,78 @@ pub fn parse_stage_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic>
         });
     }
 
-    for node in parsed
-        .syntax_node()
+    let root = parsed.syntax_node();
+    for node in root
         .descendants()
         .filter(|node| node.kind() == syntax::SyntaxKind::ANNOTATION)
     {
-        if let Some(violation) = crate::annotations::lower_annotation(db, &node).invalid {
+        let annotation = crate::annotations::lower_annotation(db, &node);
+        for (message, range) in &annotation.errors {
+            diagnostics.push(Diagnostic {
+                range: *range,
+                severity: Severity::Error,
+                code: "annotation",
+                message: message.clone(),
+                related: Vec::new(),
+            });
+        }
+        if !annotation.definitions.is_empty() && node.parent().as_ref() != Some(&root) {
             diagnostics.push(Diagnostic {
                 range: node.text_range(),
                 severity: Severity::Error,
                 code: "annotation",
-                message: violation.to_owned(),
+                message: "Type definition blocks are only allowed at the top level of a file."
+                    .to_owned(),
                 related: Vec::new(),
             });
         }
+    }
+    diagnostics.extend(dangling_annotation_diagnostics(db, file));
+    diagnostics
+}
+
+/// Errors for top-level annotations that promise typing for an expression
+/// but have none: the annotated expression must start on the very next line
+/// (see `top_level_annotations` for the association rule). `@type`/`@alias`
+/// definition blocks and `@strict` toggles stand alone, and a block already
+/// refused for its shape reports only that refusal.
+fn dangling_annotation_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
+    let parsed = parse(db, file);
+    let root = parsed.syntax_node();
+    let mut diagnostics = Vec::new();
+    for (node, target) in crate::top_level_annotations(&root) {
+        let annotation = crate::annotations::lower_annotation(db, &node);
+        if !annotation.definitions.is_empty()
+            || annotation.strict.is_some()
+            || !annotation.errors.is_empty()
+            || !annotation.typing_errors.is_empty()
+        {
+            continue;
+        }
+        let message = match target {
+            crate::AnnotationTarget::Attached(_) => {
+                // The association holds; the only remaining shape problem is
+                // a block with no content at all.
+                if node.children().next().is_none() {
+                    "A `#:` typing comment must include a type expression."
+                } else {
+                    continue;
+                }
+            }
+            crate::AnnotationTarget::BlankLineSeparated => {
+                "A `#:` typing comment cannot be separated from its expression by an empty line."
+            }
+            crate::AnnotationTarget::Dangling => {
+                "A `#:` typing comment must be followed immediately by an expression."
+            }
+        };
+        diagnostics.push(Diagnostic {
+            range: node.text_range(),
+            severity: Severity::Error,
+            code: "annotation",
+            message: message.to_owned(),
+            related: Vec::new(),
+        });
     }
     diagnostics
 }
@@ -210,6 +268,7 @@ pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
     diagnostics.extend(duplicate_binding_diagnostics(db, file));
     diagnostics.extend(duplicate_type_diagnostics(db, file));
     diagnostics.extend(unknown_type_diagnostics(db, file));
+    diagnostics.extend(annotation_rule_diagnostics(db, file));
 
     diagnostics.sort_by_key(|diagnostic| (diagnostic.range.start(), diagnostic.range.end()));
     diagnostics
@@ -273,6 +332,133 @@ fn unknown_type_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
             }
         })
         .collect()
+}
+
+/// Vocabulary-dependent annotation rules: check-depth refusals, the
+/// atomic-element requirement of `[]` / `[named]` vector types, and `@new`
+/// naming an alias. The depth and vector findings carry the typing code —
+/// like the checks they stand in for, they disappear when typing is off.
+fn annotation_rule_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
+    let parsed = parse(db, file);
+    let mut diagnostics = Vec::new();
+    let mut definitions: std::collections::BTreeMap<String, crate::annotations::NamedDefinition> =
+        std::collections::BTreeMap::new();
+    // Names declared more than once across the package have no single
+    // winning definition; alias-based judgments would be arbitrary, and the
+    // duplicate-declaration error already reports the real mistake.
+    let mut ambiguous: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    if let Some(files) = crate::ProjectFiles::try_get(db) {
+        for (name, definition) in crate::project_type_definitions(db, files) {
+            definitions.insert(name.text(db).to_owned(), definition.clone());
+        }
+        let mut counts: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+        for &project_file in files.files(db) {
+            if *project_file.kind(db) != DocumentKind::Package {
+                continue;
+            }
+            for (name, _) in type_declaration_sites(db, project_file) {
+                *counts.entry(name.as_str()).or_default() += 1;
+            }
+        }
+        ambiguous.extend(
+            counts
+                .into_iter()
+                .filter(|(_, count)| *count >= 2)
+                .map(|(name, _)| name.to_owned()),
+        );
+    }
+    for definition in crate::file_type_definitions(db, file) {
+        definitions.insert(definition.name.text(db).to_owned(), definition);
+    }
+    let stub_nominals: std::collections::BTreeSet<String> = crate::stubs::stubs(db)
+        .map(|library| library.nominals.iter().cloned().collect())
+        .unwrap_or_default();
+
+    for node in parsed
+        .syntax_node()
+        .descendants()
+        .filter(|node| node.kind() == syntax::SyntaxKind::ANNOTATION)
+    {
+        let annotation = crate::annotations::lower_annotation(db, &node);
+        for (message, range) in &annotation.typing_errors {
+            diagnostics.push(Diagnostic {
+                range: *range,
+                severity: Severity::Error,
+                code: "type-mismatch",
+                message: message.clone(),
+                related: Vec::new(),
+            });
+        }
+        for (element, range) in &annotation.vector_elements {
+            if vector_element_atomic(db, *element, &definitions, &stub_nominals) {
+                continue;
+            }
+            let mut renderer = TypeRenderer::default();
+            let rendered = renderer.render(db, *element);
+            diagnostics.push(Diagnostic {
+                range: *range,
+                severity: Severity::Error,
+                code: "type-mismatch",
+                message: format!(
+                    "the element of a `[]` vector type must be an atomic type, found `{rendered}` — for a list of these, write `list[{rendered}]`"
+                ),
+                related: Vec::new(),
+            });
+        }
+        if let Some((name, _, range)) = &annotation.new_nominal
+            && !ambiguous.contains(name.text(db))
+            && definitions
+                .get(name.text(db))
+                .is_some_and(|definition| definition.alias)
+        {
+            diagnostics.push(Diagnostic {
+                range: *range,
+                severity: Severity::Error,
+                code: "annotation",
+                message: format!(
+                    "`@new` requires a nominal type declared with `@type`, but `{}` is an alias.",
+                    name.text(db)
+                ),
+                related: Vec::new(),
+            });
+        }
+    }
+    diagnostics
+}
+
+/// Whether a vector element type is atomic: an atomic scalar, a type
+/// parameter (its use adds the atomic bound), tolerance types, or an alias
+/// expanding to one. Nominals are opaque — never atomic — and an undeclared
+/// name stays silent here (the unknown-type error already reports it).
+fn vector_element_atomic<'db>(
+    db: &'db dyn Db,
+    element: Ty<'db>,
+    definitions: &std::collections::BTreeMap<String, crate::annotations::NamedDefinition<'db>>,
+    stub_nominals: &std::collections::BTreeSet<String>,
+) -> bool {
+    let mut expanding: Vec<String> = Vec::new();
+    let mut current = element;
+    loop {
+        return match current.kind(db) {
+            TyKind::Scalar(_) | TyKind::Rigid(_) | TyKind::Unknown | TyKind::Any => true,
+            TyKind::Named(name, _) => {
+                let name = name.text(db);
+                match definitions.get(name) {
+                    Some(definition) if definition.alias => {
+                        if expanding.iter().any(|seen| seen == name) {
+                            return false;
+                        }
+                        expanding.push(name.to_owned());
+                        current = definition.body;
+                        continue;
+                    }
+                    Some(_) => false,
+                    None => !stub_nominals.contains(name),
+                }
+            }
+            _ => false,
+        };
+    }
 }
 
 /// The built-in type names annotations may spell, as typo-suggestion
@@ -1286,6 +1472,38 @@ mod tests {
         assert!(
             rendered.iter().any(|line| line.contains("syntax-error")),
             "expected a syntax error: {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn nesting_caps_split_by_depth() {
+        let deep = |levels: usize| {
+            format!(
+                "#: {}integer{}\nvalue <- 1L\n",
+                "list[".repeat(levels),
+                "]".repeat(levels)
+            )
+        };
+        let db = RootDatabase::default();
+        // Past the check cap but under the parse cap: a typing-class refusal,
+        // and the payload drop keeps the mismatch from also firing.
+        let checked = SourceFile::new(&db, deep(140), DocumentKind::Package);
+        ProjectFiles::new(&db, vec![checked]);
+        let rendered = render_all(&db, checked);
+        assert_eq!(rendered.len(), 1, "one finding only: {rendered:?}");
+        assert!(
+            rendered[0].contains("type-mismatch") && rendered[0].contains("more than 128"),
+            "expected the check-depth refusal: {rendered:?}"
+        );
+
+        let db = RootDatabase::default();
+        let refused = SourceFile::new(&db, deep(200), DocumentKind::Package);
+        ProjectFiles::new(&db, vec![refused]);
+        let rendered = render_all(&db, refused);
+        assert_eq!(rendered.len(), 1, "one finding only: {rendered:?}");
+        assert!(
+            rendered[0].contains("annotation") && rendered[0].contains("more than 160"),
+            "expected the shape refusal: {rendered:?}"
         );
     }
 

@@ -52,6 +52,23 @@ const ORACLE_DEFICIT_CASES: &[&str] = &[
 /// these cases are accepted wholesale, and a stale entry fails.
 const ACCEPTED_DIFFERENCE_CASES: &[(&str, &str)] = &[
     (
+        "typing::form__applied_type_parameter_is_refused",
+        "the rewrite refuses the whole violating block, so the alias it declares \
+         never enters the vocabulary (no `Outer` completion, no `Wrap` \
+         navigation); the oracle keeps the declaration while erroring",
+    ),
+    (
+        "typing::dangling__definitions_and_strict_toggles_need_no_target",
+        "the oracle serves hover on the `off` argument token of a `@strict off` \
+         toggle; the rewrite's annotation hover covers type tokens only",
+    ),
+    (
+        "typing::vectors__structural_vector_element_is_refused",
+        "the oracle cannot parse a structural type under a `[]` suffix and treats \
+         the item as unannotated (value-typed hover range, inferred inlay hint); \
+         the rewrite parses and applies the declared annotation",
+    ),
+    (
         "typing::higher_order__any_callee_arguments_are_not_checked",
         "the oracle hints a binding from its INTERNAL value type (`-> Any`) while \
          the exported scheme says Unknown; the rewrite hints only scheme-consistent \

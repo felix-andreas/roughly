@@ -37,7 +37,13 @@ const SUITES: &[&str] = &[
 /// Cases where the oracle itself is wrong and the rewrite is correct, with
 /// the reason each divergence is accepted. Stale entries (cases that start
 /// matching) fail the test.
-const ACCEPTED_DIVERGENCES: &[(&str, &str)] = &[];
+const ACCEPTED_DIVERGENCES: &[(&str, &str)] = &[(
+    "typecheck::generic_vector_elements__vector_suffix_rejects_non_atomic_element",
+    "both stacks refuse the non-atomic vector element with the same wording, but the oracle blames \
+     the alias declaration (its check hits the violation while expanding the alias) where the \
+     rewrite blames the `Person[]` use site — a strictly better range that containment cannot \
+     credit because it lies outside the oracle's span",
+)];
 
 /// Currently a triage instrument, not a gate: ~2% of cases surface known
 /// rewrite gaps itemized in the backlog (expression-level annotations,

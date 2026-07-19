@@ -357,10 +357,91 @@ pub fn package_scheme_exists(db: &dyn Db, name: &str) -> bool {
     })
 }
 
-/// The annotation region immediately preceding an item (only trivia between),
-/// as a position-independent green subtree. Annotations are siblings of the
-/// item statement in the file tree, so attachment happens here, not inside
-/// `item_syntax`.
+/// Where a top-level `#:` annotation's target expression is, if it has one.
+/// An annotation applies only to the expression starting on the very next
+/// line: a blank line, an interposed plain comment, or the end of the file
+/// break the association (and earn a diagnostic when the block needed a
+/// target).
+pub enum AnnotationTarget {
+    Attached(syntax::SyntaxNode),
+    /// An element follows, but only after one or more blank lines.
+    BlankLineSeparated,
+    /// Nothing attachable follows: end of file, or a plain comment or
+    /// another annotation region interposes.
+    Dangling,
+}
+
+/// Each top-level `ANNOTATION` child of the root with its attachment. The
+/// single source of the association rule — both annotation application
+/// (`item_annotation_syntax`) and the dangling-annotation diagnostics read
+/// this.
+pub fn top_level_annotations(
+    root: &syntax::SyntaxNode,
+) -> Vec<(syntax::SyntaxNode, AnnotationTarget)> {
+    let mut associations: Vec<(syntax::SyntaxNode, AnnotationTarget)> = Vec::new();
+    let mut pending: Option<(syntax::SyntaxNode, usize)> = None;
+    for child in root.children_with_tokens() {
+        match child {
+            rowan::NodeOrToken::Node(node) if node.kind() == syntax::SyntaxKind::ANNOTATION => {
+                if let Some((previous, newlines)) = pending.take() {
+                    let target = if newlines >= 2 {
+                        AnnotationTarget::BlankLineSeparated
+                    } else {
+                        AnnotationTarget::Dangling
+                    };
+                    associations.push((previous, target));
+                }
+                pending = Some((node, 0));
+            }
+            rowan::NodeOrToken::Node(node) => {
+                if let Some((annotation, newlines)) = pending.take() {
+                    let attachable = syntax::ast::is_expression_kind(node.kind())
+                        || node.kind() == syntax::SyntaxKind::ERROR;
+                    let target = if newlines >= 2 {
+                        AnnotationTarget::BlankLineSeparated
+                    } else if attachable {
+                        AnnotationTarget::Attached(node)
+                    } else {
+                        AnnotationTarget::Dangling
+                    };
+                    associations.push((annotation, target));
+                }
+            }
+            rowan::NodeOrToken::Token(token) => match token.kind() {
+                syntax::SyntaxKind::WHITESPACE => {}
+                syntax::SyntaxKind::NEWLINE => {
+                    if let Some((_, newlines)) = pending.as_mut() {
+                        *newlines += 1;
+                    }
+                }
+                syntax::SyntaxKind::COMMENT => {
+                    if let Some((annotation, newlines)) = pending.take() {
+                        let target = if newlines >= 2 {
+                            AnnotationTarget::BlankLineSeparated
+                        } else {
+                            AnnotationTarget::Dangling
+                        };
+                        associations.push((annotation, target));
+                    }
+                }
+                _ => {
+                    if let Some((annotation, _)) = pending.take() {
+                        associations.push((annotation, AnnotationTarget::Dangling));
+                    }
+                }
+            },
+        }
+    }
+    if let Some((annotation, _)) = pending {
+        associations.push((annotation, AnnotationTarget::Dangling));
+    }
+    associations
+}
+
+/// The annotation region attached to an item (see [`top_level_annotations`]
+/// for the association rule), as a position-independent green subtree.
+/// Annotations are siblings of the item statement in the file tree, so
+/// attachment happens here, not inside `item_syntax`.
 #[salsa::tracked(returns(clone))]
 pub fn item_annotation_syntax<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<ItemSyntax> {
     let parse = parse(db, *item.file(db));
@@ -372,34 +453,30 @@ pub fn item_annotation_syntax<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<I
         item.name(db).clone(),
         *item.disambiguator(db),
     );
-    let mut pending_annotation: Option<syntax::SyntaxNode> = None;
-    for child in root.children_with_tokens() {
-        match child {
-            rowan::NodeOrToken::Node(node) if node.kind() == syntax::SyntaxKind::ANNOTATION => {
-                pending_annotation = Some(node);
-            }
-            rowan::NodeOrToken::Node(node)
-                if syntax::ast::is_expression_kind(node.kind())
-                    || node.kind() == syntax::SyntaxKind::ERROR =>
-            {
-                let (kind, name) = classify_top_level(&node);
-                let counter = counts.entry((kind, name.clone())).or_insert(0);
-                let disambiguator = *counter;
-                *counter += 1;
-                if (kind, name, disambiguator) == target {
-                    return pending_annotation.map(|node| ItemSyntax(node.green().into()));
-                }
-                pending_annotation = None;
-            }
-            rowan::NodeOrToken::Token(token)
-                if matches!(
-                    token.kind(),
-                    syntax::SyntaxKind::WHITESPACE | syntax::SyntaxKind::NEWLINE
-                ) => {}
-            _ => pending_annotation = None,
+    let mut item_node: Option<syntax::SyntaxNode> = None;
+    for node in root.children() {
+        if !syntax::ast::is_expression_kind(node.kind()) && node.kind() != syntax::SyntaxKind::ERROR
+        {
+            continue;
+        }
+        let (kind, name) = classify_top_level(&node);
+        let counter = counts.entry((kind, name.clone())).or_insert(0);
+        let disambiguator = *counter;
+        *counter += 1;
+        if (kind, name, disambiguator) == target {
+            item_node = Some(node);
+            break;
         }
     }
-    None
+    let item_node = item_node?;
+    top_level_annotations(&root)
+        .into_iter()
+        .find_map(|(annotation, target)| match target {
+            AnnotationTarget::Attached(node) if node == item_node => {
+                Some(ItemSyntax(annotation.green().into()))
+            }
+            _ => None,
+        })
 }
 
 /// The ordered project file set (package files first, in path order — the
@@ -474,8 +551,9 @@ pub fn file_typing_directives(
     (mode, invalid)
 }
 
-/// All `@type` / `@alias` definitions in a file's annotations, wherever they
-/// appear.
+/// All `@type` / `@alias` definitions in a file's top-level annotations.
+/// Definition blocks below the top level are refused (diagnosed at the
+/// block), so they never enter the vocabulary.
 #[salsa::tracked(returns(clone))]
 pub fn file_type_definitions<'db>(
     db: &'db dyn Db,
@@ -485,7 +563,7 @@ pub fn file_type_definitions<'db>(
     let root = parse.syntax_node();
     let mut definitions = Vec::new();
     for node in root
-        .descendants()
+        .children()
         .filter(|node| node.kind() == syntax::SyntaxKind::ANNOTATION)
     {
         definitions.extend(annotations::lower_annotation(db, &node).definitions);

@@ -80,6 +80,18 @@ const ACCEPTED_DIVERGENCES: &[(&str, &str)] = &[
         "unknown_names__unknown_generic_application",
         "the rewrite's unknown-type-name diagnostic has no oracle counterpart in the compared classes — legacy's type resolution warns through its naming class, which the differential excludes",
     ),
+    (
+        "new_shape__new_on_alias_is_refused",
+        "legacy reports `@new` on an alias through its naming class, which the differential excludes; the rewrite reports it in the annotation class",
+    ),
+    (
+        "vectors__alias_vector_element_must_be_atomic",
+        "both stacks refuse the non-atomic vector element with the same wording, but the oracle blames the alias declaration (its check hits the violation while expanding the alias) where the rewrite blames the `Person[]` use site — outside the oracle span, so containment cannot credit it",
+    ),
+    (
+        "vectors__structural_vector_element_is_refused",
+        "the legacy type grammar cannot parse a structural type under a `[]` suffix inside `fn(...)` and reports a parse error; the rewrite parses the shape and reports the actual vector-element rule",
+    ),
 ];
 
 /// Allowlist entries justified by an oracle PANIC (a `debug_assert` in the

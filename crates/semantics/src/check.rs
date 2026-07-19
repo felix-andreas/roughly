@@ -249,7 +249,7 @@ pub fn check_item_with_annotation<'db>(
             present
                 .new_nominal
                 .iter()
-                .flat_map(|(_, arguments)| arguments.iter().copied()),
+                .flat_map(|(_, arguments, _)| arguments.iter().copied()),
         );
         let mut cycle = None;
         for ty in mentioned {
@@ -296,7 +296,7 @@ pub fn check_item_with_annotation<'db>(
             (ExpressionKind::Assign { value, .. }, _) => {
                 let root_ty = context.infer(root);
                 let value_ty = context.recorded.get(value).copied().unwrap_or(root_ty);
-                scheme = if let Some((new_name, new_arguments)) =
+                scheme = if let Some((new_name, new_arguments, _)) =
                     annotation.and_then(|a| a.new_nominal.clone())
                 {
                     Some(context.check_new_nominal(new_name, &new_arguments, *value, value_ty))

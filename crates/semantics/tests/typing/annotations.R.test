@@ -112,3 +112,169 @@ origin <- list(v = 1)
 origin: list{v: double}
 3..32 error[annotation] the type name `Point` is declared more than once — `@type` and `@alias` declarations share one project-global namespace.
 37..59 error[annotation] the type name `Point` is declared more than once — `@type` and `@alias` declarations share one project-global namespace.
+
+#==== form
+#---- param_after_return_is_refused
+#: @return {integer}
+#: @param count {integer}
+render <- function(count) count
+#++++
+render: <T> fn(count: T) -> T
+24..46 error[annotation] `@param` directives must appear before `@return` or `@returns` in the same `#:` block.
+
+#---- multiple_returns_are_refused
+#: @param count {integer}
+#: @return {integer}
+#: @returns {character}
+render <- function(count) count
+#++++
+render: <T> fn(count: T) -> T
+50..70 error[annotation] cannot use more than one `@return` or `@returns` directive in the same `#:` block.
+
+#---- forall_after_param_is_refused
+#: @param count {integer}
+#: @forall T
+render <- function(count) count
+#++++
+render: <T> fn(count: T) -> T
+29..38 error[annotation] `@forall` directives must appear before `@param`, `@return`, or `@returns` in the same `#:` block.
+
+#---- duplicate_forall_parameter_is_refused
+#: @forall T
+#: @forall T
+#: @param value {T}
+#: @return {T}
+f <- function(value) value
+#++++
+f: <T> fn(value: T) -> T
+24..29 error[annotation] duplicate type parameter name `T` in expanded function annotation.
+
+#---- duplicate_compact_binder_is_refused
+#: <T, T> fn(x: T) -> T
+f <- function(x) x
+#++++
+f: <T> fn(x: T) -> T
+7..8 error[annotation] duplicate type parameter name `T` in `<...>`.
+
+#---- duplicate_definition_parameter_is_refused
+#: @type Pair<T, T> {list{a: T, b: T}}
+value <- 1L
+#++++
+value: integer
+17..18 error[annotation] duplicate type parameter name `T` in named type definition.
+
+#---- unknown_constraint_name_is_refused
+#: <T: frobnicate> fn(x: T) -> T
+f <- function(x) x
+#++++
+f: <T> fn(x: T) -> T
+7..17 error[annotation] unknown type-parameter constraint `frobnicate`; the available constraints are `numeric` and `atomic`.
+
+#---- applied_type_parameter_is_refused
+#: @alias Wrap<T> {list{v: T}}
+
+#: @alias Outer<Wrap> {Wrap<integer>}
+value <- 1L
+#++++
+value: integer
+55..68 error[annotation] `Wrap` is a type parameter here and takes no type arguments.
+
+#==== dangling
+#---- empty_annotation_is_refused
+#:
+value <- 1L
+#++++
+value: integer
+0..2 error[annotation] A `#:` typing comment must include a type expression.
+
+#---- annotation_at_end_of_file_is_refused
+value <- 1L
+#: integer
+#++++
+value: integer
+12..22 error[annotation] A `#:` typing comment must be followed immediately by an expression.
+
+#---- blank_line_breaks_the_annotation
+#: integer
+
+value <- "s"
+#++++
+value: character
+0..10 error[annotation] A `#:` typing comment cannot be separated from its expression by an empty line.
+
+#---- comment_between_annotation_and_expression_is_refused
+#: integer
+# note
+value <- 1L
+#++++
+value: integer
+0..10 error[annotation] A `#:` typing comment must be followed immediately by an expression.
+
+#---- expanded_annotation_separated_by_blank_line_is_refused
+#: @param count {integer}
+
+render <- function(count) count
+#++++
+render: <T> fn(count: T) -> T
+0..25 error[annotation] A `#:` typing comment cannot be separated from its expression by an empty line.
+
+#---- definitions_and_strict_toggles_need_no_target
+#: @type Person {list{name: character}}
+
+#: @strict off
+
+value <- 1L
+#++++
+value: integer
+
+#==== new_shape
+#---- new_requires_a_nominal_reference
+#: @new integer
+value <- 1L
+#++++
+value: integer
+8..15 error[annotation] expected a nominal type reference after `@new`.
+
+#---- new_on_alias_is_refused
+#: @alias Meters {double}
+
+#: @new Meters
+h <- 1.8
+#++++
+h: double
+35..41 error[annotation] `@new` requires a nominal type declared with `@type`, but `Meters` is an alias.
+
+#==== vectors
+#---- alias_vector_element_must_be_atomic
+#: @alias Person {list{name: character}}
+
+#: fn(x: Person[]) -> NULL
+f <- function(x) NULL
+#++++
+f: fn(x: Person[]) -> NULL
+51..59 error[type-mismatch] the element of a `[]` vector type must be an atomic type, found `Person` — for a list of these, write `list[Person]`
+
+#---- structural_vector_element_is_refused
+#: fn(x: list{name: character}[]) -> NULL
+f <- function(x) NULL
+#++++
+f: fn(x: list{name: character}[]) -> NULL
+9..32 error[type-mismatch] the element of a `[]` vector type must be an atomic type, found `list{name: character}` — for a list of these, write `list[list{name: character}]`
+
+#---- atomic_alias_and_binder_vector_elements_are_fine
+#: @alias Id {integer}
+
+#: <T> fn(x: T[], y: Id[]) -> integer[]
+f <- function(x, y) y
+#++++
+f: <T> fn(x: T[], y: Id[]) -> integer[]
+
+#==== placement
+#---- type_definition_below_top_level_is_refused
+value <- {
+  #: @type Person {list{name: character}}
+  1L
+}
+#++++
+value: integer
+13..52 error[annotation] Type definition blocks are only allowed at the top level of a file.

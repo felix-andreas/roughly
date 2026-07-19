@@ -17,9 +17,19 @@ Consecutive `#:` lines with no blank line between them are treated as a single a
 
 Most annotation blocks are attached to the following binding or expression.
 
+Attachment requires adjacency: the annotated expression must start on the line directly after the
+block. It is an error when a block that needs a target has none, and the annotation then does not
+apply:
+
+- a blank line between the block and the expression ("cannot be separated from its expression by
+  an empty line")
+- a plain `#` comment between the block and the expression, or no expression following at all
+  ("must be followed immediately by an expression")
+- a block with no content beyond the `#:` marker ("must include a type expression")
+
 A block consisting only of `@type` and `@alias` lines is instead a definition block.
 
-Definition blocks are not attached to the following binding or expression. They only provide a compact way to write several top-level `@type` or `@alias` declarations together.
+Definition blocks are not attached to the following binding or expression. They only provide a compact way to write several top-level `@type` or `@alias` declarations together. Definition blocks and `@strict` toggles stand alone, so the adjacency rules above do not apply to them.
 
 There are four annotation forms:
 
@@ -38,6 +48,15 @@ Additional block rules:
 - a block may contain an expanded function annotation made of multiple `@param` and `@return` / `@returns` lines
 - a block may contain one or more `@type` and `@alias` lines
 - compact, expanded, and definition forms cannot be mixed in the same block
+
+A block that violates a shape rule — form mixing, directive ordering, a duplicate or unknown type
+parameter, a non-nominal `@new` payload, the nesting caps below — is refused whole: it reports its
+error and carries no typing payload, so a broken annotation never produces follow-on findings.
+
+Annotation types are capped at 128 nesting levels: a deeper type is refused for checking ("nested
+too deeply to check"), and past 160 levels the annotation shape itself is refused. The check-level
+refusal is a typing finding (it disappears with `# typing: off`); the shape refusal always
+reports.
 
 Examples:
 
@@ -687,6 +706,10 @@ value <- list(name = "bob", age = 20)
 identity_person <- function(value) value
 ```
 
+Definition blocks are only allowed at the top level of a file: a `@type` or `@alias` block inside
+a function body or any other nested position is an error, and the definition does not enter the
+vocabulary.
+
 Definitions are project-global rather than block-local.
 
 That means:
@@ -730,8 +753,11 @@ A bound that can no longer be satisfied — binding an element variable to a non
 requiring a `character` element to be numeric — is a type error at the expression that imposed it.
 
 Writing `X[]` where `X` is neither an atomic type nor a type parameter (a record, a function, a
-nominal type) is an annotation error: vectors hold atomic elements only, and the diagnostic points
-at the `list[X]` spelling for a list of such values.
+nominal type) is an error: vectors hold atomic elements only, and the diagnostic points at the
+`list[X]` spelling for a list of such values. An alias element expands first, so `Id[]` with
+`@alias Id {integer}` is fine while an alias of a record is refused at the `[]` use site. The
+finding is a typing finding (it disappears with `# typing: off`), and the annotation still
+applies otherwise — hover and navigation keep the declared shape.
 
 Named generic aliases and nominal types are applied with angle brackets.
 
