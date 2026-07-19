@@ -17,6 +17,7 @@ pub mod naming;
 pub mod stubs;
 pub mod types;
 
+use std::collections::BTreeSet;
 use syntax::Parse;
 use syntax::ast::AstNode as _;
 
@@ -667,13 +668,8 @@ pub fn conditional_slot_items<'db>(
             if *item.kind(db) != ItemKind::Statement {
                 continue;
             }
-            let Some(naming) = item_naming(db, item) else {
-                continue;
-            };
-            for binding in naming.bindings.values() {
-                if binding.kind == naming::BindingKind::TopLevel {
-                    writers.entry(binding.name.clone()).or_default().push(item);
-                }
+            for name in item_top_level_names(db, item) {
+                writers.entry(name.clone()).or_default().push(item);
             }
         }
     }
@@ -754,6 +750,42 @@ pub fn package_definitions<'db>(
     winners
 }
 
+/// The non-local names an item's body reads (bare and `pkg::`-qualified),
+/// as a small per-item projection: whole-project graph walks depend on each
+/// item's read *set* instead of its full naming, so a body edit that shifts
+/// ranges without changing any read name backdates here and the walks stay
+/// green instead of re-executing per keystroke.
+#[salsa::tracked(returns(ref))]
+pub fn item_interface_reads<'db>(db: &'db dyn Db, item: Item<'db>) -> BTreeSet<String> {
+    let Some(naming) = item_naming(db, item) else {
+        return BTreeSet::new();
+    };
+    let mut reads: BTreeSet<String> = naming.non_locals.values().cloned().collect();
+    reads.extend(
+        naming
+            .namespace_reads
+            .values()
+            .filter_map(|read| read.name.clone()),
+    );
+    reads
+}
+
+/// An item's top-level binding names — the projection cross-item slot
+/// resolution keys on, with the same backdating firewall as
+/// `item_interface_reads`.
+#[salsa::tracked(returns(ref))]
+pub fn item_top_level_names<'db>(db: &'db dyn Db, item: Item<'db>) -> BTreeSet<String> {
+    let Some(naming) = item_naming(db, item) else {
+        return BTreeSet::new();
+    };
+    naming
+        .bindings
+        .values()
+        .filter(|binding| binding.kind == naming::BindingKind::TopLevel)
+        .map(|binding| binding.name.clone())
+        .collect()
+}
+
 /// The interface-reference SCCs of the package's definition items, from the
 /// static name graph: an edge runs from each item to the winner of every
 /// global name its body reads. Only *cyclic* groups are recorded — groups
@@ -792,19 +824,8 @@ pub fn interface_sccs<'db>(db: &'db dyn Db, files: ProjectFiles) -> InterfaceScc
     }
     let mut edges: Vec<Vec<usize>> = vec![Vec::new(); nodes.len()];
     for (index, &item) in nodes.iter().enumerate() {
-        let Some(naming) = item_naming(db, item) else {
-            continue;
-        };
-        for name in naming.non_locals.values() {
+        for name in item_interface_reads(db, item) {
             if let Some(target) = winners.get(name)
-                && let Some(&target_index) = position.get(target)
-            {
-                edges[index].push(target_index);
-            }
-        }
-        for read in naming.namespace_reads.values() {
-            if let Some(name) = &read.name
-                && let Some(target) = winners.get(name)
                 && let Some(&target_index) = position.get(target)
             {
                 edges[index].push(target_index);
@@ -1147,11 +1168,7 @@ impl<'db> SalsaGlobals<'db> {
                 ItemKind::Function | ItemKind::Value => item.name(self.db).as_deref() == Some(name),
                 // A statement item binds the name through a conditional
                 // top-level write (the document-slot model).
-                ItemKind::Statement => item_naming(self.db, **item).is_some_and(|naming| {
-                    naming.bindings.values().any(|binding| {
-                        binding.kind == naming::BindingKind::TopLevel && binding.name == name
-                    })
-                }),
+                ItemKind::Statement => item_top_level_names(self.db, **item).contains(name),
             })
             .copied()
     }

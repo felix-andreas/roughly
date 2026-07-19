@@ -74,6 +74,12 @@ Analysis is incremental at **item** granularity on salsa:
   single exported truth. Member checks inside the fixpoint never re-enter
   `item_check`, so no salsa cycle forms; salsa's own cycle recovery remains
   only as a backstop for reference edges the static graph cannot see.
+- Whole-project walks read **per-item projections**, not full naming:
+  `item_interface_reads` (the read-name set feeding `interface_sccs`) and
+  `item_top_level_names` (the binding names feeding conditional-slot
+  resolution) are small tracked queries whose values survive body edits that
+  only shift ranges — the common keystroke backdates the projection and the
+  project-wide graph walks stay green instead of re-executing.
 - Types are **interned** (id equality, no deep clones). Deep resolution over
   the interned type DAG is memoized per binding epoch with
   cycle-cut-to-`Unknown` semantics; the decision log records the design.
