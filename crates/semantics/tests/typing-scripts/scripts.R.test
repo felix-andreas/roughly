@@ -66,7 +66,7 @@ f: <T> fn(p: T) -> T
 g: fn(p: Unknown) -> Unknown
 h: Unknown
 26..45 warning[unused] `h` is assigned but never used.
-42..43 error[type-mismatch] this call passes 0 positional arguments, but the function only takes 1
+42..43 error[type-mismatch] this call supplies 0 arguments, but the function requires 1 — a required argument is missing
 
 #==== resolution
 #---- use_before_any_definition_is_unresolved
@@ -110,7 +110,7 @@ print(g(1L))
 g: Unknown
 h: Unknown
 g: <T> fn(x: T) -> T
-16..17 error[type-mismatch] this call passes 0 positional arguments, but the function only takes 1
+16..17 error[type-mismatch] this call supplies 0 arguments, but the function requires 1 — a required argument is missing
 
 #==== conditional_slots
 #---- loop_binding_resolves_a_later_read

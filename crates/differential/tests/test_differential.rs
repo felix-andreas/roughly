@@ -85,6 +85,18 @@ const ACCEPTED_DIVERGENCES: &[(&str, &str)] = &[
         "legacy reports `@new` on an alias through its naming class, which the differential excludes; the rewrite reports it in the annotation class",
     ),
     (
+        "generic_arity__applied_arity_must_match",
+        "legacy classes generic-application arity as a syntax error, which the differential excludes; the rewrite reports it in the annotation class",
+    ),
+    (
+        "generic_arity__non_generic_takes_no_arguments",
+        "legacy classes generic-application arity as a syntax error, which the differential excludes; the rewrite reports it in the annotation class",
+    ),
+    (
+        "generic_arity__bare_generic_reference_must_be_applied",
+        "legacy classes generic-application arity as a syntax error, which the differential excludes; the rewrite reports it in the annotation class",
+    ),
+    (
         "vectors__alias_vector_element_must_be_atomic",
         "both stacks refuse the non-atomic vector element with the same wording, but the oracle blames the alias declaration (its check hits the violation while expanding the alias) where the rewrite blames the `Person[]` use site — outside the oracle span, so containment cannot credit it",
     ),

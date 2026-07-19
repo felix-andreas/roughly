@@ -123,17 +123,25 @@ impl<'db> InferenceTable<'db> {
         &self.entries[self.find(var).0 as usize]
     }
 
-    /// Whether `ty` is a nominal reference no vocabulary declares — neither
-    /// the project's `@type`/`@alias` table nor the stub corpus. Such a name
-    /// is a typo the unknown-type annotation diagnostic reports; the
-    /// relations treat it like `Unknown` so it never cascades.
+    /// Whether `ty` is an UNUSABLE nominal reference: a name no vocabulary
+    /// declares (neither the project's `@type`/`@alias` table nor the stub
+    /// corpus), or a declared name applied with the wrong number of type
+    /// arguments. Both states already carry their own annotation diagnostic
+    /// (unknown type name / generic arity); the relations treat the type
+    /// like `Unknown` so the one mistake never cascades.
     pub(crate) fn undeclared_nominal(&self, db: &'db dyn Db, ty: Ty<'db>) -> bool {
-        let TyKind::Named(name, _) = ty.kind(db) else {
+        let TyKind::Named(name, arguments) = ty.kind(db) else {
             return false;
         };
-        !self.definitions.contains_key(name)
-            && !crate::stubs::stubs(db)
-                .is_some_and(|library| library.nominals.contains(name.text(db)))
+        match self.definitions.get(name) {
+            // A wrong argument count includes the bare use of a generic
+            // (`Box` for a one-parameter `Box<T>`) — `@new` is unaffected,
+            // its representation check infers arguments without the
+            // relations.
+            Some(definition) => definition.parameters.len() != arguments.len(),
+            None => !crate::stubs::stubs(db)
+                .is_some_and(|library| library.nominals.contains(name.text(db))),
+        }
     }
 
     /// Shallow-resolve: follow variables to their binding, without walking

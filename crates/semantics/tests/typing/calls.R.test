@@ -66,7 +66,7 @@ f <- function() {
 }
 #++++
 f: Unknown
-44..45 error[type-mismatch] this call passes 1 positional argument, but the function only takes 2
+44..45 error[type-mismatch] this call supplies 1 argument, but the function requires 2 — a required argument is missing
 
 #---- defaulted_formal_may_stay_unfilled
 f <- function() {

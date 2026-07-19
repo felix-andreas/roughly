@@ -410,6 +410,72 @@ fn annotation_rule_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic>
                 related: Vec::new(),
             });
         }
+        // Generic-application arity: an applied name must be a generic with
+        // exactly that many parameters; a BARE reference to a generic must be
+        // applied — except under `@new`, where an unapplied generic infers
+        // its arguments through the representation check (documented).
+        let declared_arity = |name: &str| {
+            definitions
+                .get(name)
+                .map(|definition| definition.parameters.len())
+                .or_else(|| stub_nominals.contains(name).then_some(0))
+        };
+        for (name, count, range) in &annotation.applied_references {
+            let Some(arity) = declared_arity(name) else {
+                continue;
+            };
+            if arity == 0 {
+                diagnostics.push(Diagnostic {
+                    range: *range,
+                    severity: Severity::Error,
+                    code: "annotation",
+                    message: format!(
+                        "`{name}` is not a generic type — it takes no type arguments."
+                    ),
+                    related: Vec::new(),
+                });
+            } else if arity != *count {
+                diagnostics.push(Diagnostic {
+                    range: *range,
+                    severity: Severity::Error,
+                    code: "annotation",
+                    message: format!(
+                        "generic type `{name}` expects {arity} type {}, but found {count}.",
+                        plural(arity, "argument", "arguments"),
+                    ),
+                    related: Vec::new(),
+                });
+            }
+        }
+        for (name, range) in &annotation.nominal_references {
+            if annotation
+                .applied_references
+                .iter()
+                .any(|(_, _, applied)| applied == range)
+            {
+                continue;
+            }
+            if let Some((_, _, new_range)) = &annotation.new_nominal
+                && new_range.contains_range(*range)
+            {
+                continue;
+            }
+            let Some(arity) = declared_arity(name) else {
+                continue;
+            };
+            if arity > 0 {
+                diagnostics.push(Diagnostic {
+                    range: *range,
+                    severity: Severity::Error,
+                    code: "annotation",
+                    message: format!(
+                        "generic type `{name}` expects {arity} type {}, but found 0.",
+                        plural(arity, "argument", "arguments"),
+                    ),
+                    related: Vec::new(),
+                });
+            }
+        }
         if let Some((name, _, range)) = &annotation.new_nominal
             && !ambiguous.contains(name.text(db))
             && definitions
@@ -1147,14 +1213,32 @@ fn render_type_error_message(db: &dyn Db, error: &TypeError<'_>) -> String {
                 renderer.render(db, *found)
             )
         }
-        TypeErrorKind::ArityMismatch { expected, found } => format!(
-            "this call passes {found} positional {}, but the function only takes {expected}",
-            plural(*found, "argument", "arguments"),
-        ),
+        TypeErrorKind::ArityMismatch { expected, found } => {
+            if found < expected {
+                format!(
+                    "this call supplies {found} {}, but the function requires {expected} — a required argument is missing",
+                    plural(*found, "argument", "arguments"),
+                )
+            } else {
+                format!(
+                    "this call passes {found} positional {}, but the function only takes {expected}",
+                    plural(*found, "argument", "arguments"),
+                )
+            }
+        }
         TypeErrorKind::NamedArgumentMismatch {
             expected_parameters,
             actual_arguments,
         } => {
+            let mut seen = std::collections::BTreeSet::new();
+            if let Some(duplicate) = actual_arguments
+                .iter()
+                .find(|name| !seen.insert(name.as_str()))
+            {
+                return format!(
+                    "this call names the argument `{duplicate}` more than once — R matches each named parameter at most once"
+                );
+            }
             let arguments = format!(
                 "this call names {} {}",
                 plural(actual_arguments.len(), "an argument", "arguments"),

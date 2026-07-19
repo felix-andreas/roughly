@@ -749,6 +749,16 @@ That means:
 
 #### Type parameters and generic application
 
+A generic application must match its declaration's arity, checked against the project vocabulary:
+
+- applying the wrong number of type arguments (`Box<integer, double>` for a one-parameter
+  `Box<T>`) is an error at the applied name
+- applying type arguments to a non-generic declaration (`Meters<integer>`) is an error
+- a bare reference to a generic (`Box` without arguments) is an error everywhere except after
+  `@new`, where an unapplied generic infers its arguments through the representation check
+- a mis-applied name compares like `Unknown` in the relations afterwards, so the one arity error
+  never cascades into value-level mismatches
+
 Type parameters may appear inside structural type expressions and function types.
 
 Examples:

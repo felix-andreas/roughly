@@ -51,6 +51,10 @@ pub struct Annotation<'db> {
     /// element resolves to an atomic alias needs the project vocabulary, so
     /// the judgment lives with the diagnostics, not the lowering.
     pub vector_elements: Vec<(Ty<'db>, TextRange)>,
+    /// Generic applications (`Name<ARGS>`) the block lowers, as (name,
+    /// argument count, name-token range): the vocabulary-side arity check
+    /// lives with the diagnostics, like the vector-element rule.
+    pub applied_references: Vec<(String, usize, TextRange)>,
     /// Every named-type reference the block lowers (`TyKind::Named` mints),
     /// with the referencing token's range: primitives and in-scope binders
     /// are excluded here already, so an entry is exactly a name that must
@@ -76,6 +80,7 @@ pub fn lower_annotation<'db>(db: &'db dyn Db, node: &SyntaxNode) -> Annotation<'
         db,
         binders: Vec::new(),
         nominal_references: Vec::new(),
+        applied_references: Vec::new(),
         errors: Vec::new(),
         vector_elements: Vec::new(),
         depth: 0,
@@ -299,6 +304,7 @@ pub fn lower_annotation<'db>(db: &'db dyn Db, node: &SyntaxNode) -> Annotation<'
     // Assemble the expanded form into a function scheme when directives
     // declared one and no compact type did.
     annotation.nominal_references = std::mem::take(&mut lowering.nominal_references);
+    annotation.applied_references = std::mem::take(&mut lowering.applied_references);
     annotation.vector_elements = std::mem::take(&mut lowering.vector_elements);
 
     if saw_expanded && annotation.declared.is_none() && (!params.is_empty() || ret.is_some()) {
@@ -449,6 +455,8 @@ struct Lowering<'db> {
     /// Named-type references minted so far, with the referencing token's
     /// range (see [`Annotation::nominal_references`]).
     nominal_references: Vec<(String, TextRange)>,
+    /// Generic applications (see [`Annotation::applied_references`]).
+    applied_references: Vec<(String, usize, TextRange)>,
     /// Shape violations found while lowering (see [`Annotation::errors`]).
     errors: Vec<(String, TextRange)>,
     /// Vector element types with their vector node's range (see
@@ -662,7 +670,7 @@ impl<'db> Lowering<'db> {
                     self.nominal_references
                         .push((name.clone(), name_node.text_range()));
                 }
-                let arguments = node
+                let arguments: Vec<Ty<'db>> = node
                     .children()
                     .find(|c| c.kind() == SyntaxKind::TYPE_ARG_LIST)
                     .map(|list| {
@@ -672,6 +680,15 @@ impl<'db> Lowering<'db> {
                             .collect()
                     })
                     .unwrap_or_default();
+                if let Some(name_node) = &name_node
+                    && !name.is_empty()
+                {
+                    self.applied_references.push((
+                        name.clone(),
+                        arguments.len(),
+                        name_node.text_range(),
+                    ));
+                }
                 Ty::new(self.db, TyKind::Named(Name::new(self.db, name), arguments))
             }
             SyntaxKind::TYPE_FUNCTION => self.lower_function_type(node),
