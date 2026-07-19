@@ -284,6 +284,42 @@ fn check_flags_unused_imports_when_opted_in() {
     );
 }
 
+// The shadow lints are off by default and fire only when opted in: a
+// top-level binding over a `base` name reports `shadows-builtin`, one over
+// another stub namespace's name reports `shadows-namespace` naming the
+// shadowed symbol.
+#[test]
+fn check_flags_builtin_shadows_when_opted_in() {
+    let files: &[(&str, &str)] = &[("R/main.R", "mean <- function(x) x\nsd <- 1\n")];
+
+    let default_run = roughly(project(files).path(), &["check", "."]);
+    assert_eq!(
+        exit_code(&default_run),
+        0,
+        "stderr: {}",
+        stderr(&default_run)
+    );
+
+    let opted_in = project(&[
+        files[0],
+        (
+            "roughly.toml",
+            "[lint]\nshadows-builtin = \"warn\"\nshadows-namespace = \"warn\"\n",
+        ),
+    ]);
+    let output = roughly(opted_in.path(), &["check", "."]);
+    let rendered = stderr(&output);
+    assert_eq!(exit_code(&output), 1, "stderr: {rendered}");
+    assert!(
+        rendered.contains("Top-level binding `mean` shadows a builtin."),
+        "expected the shadows-builtin warning, got: {rendered}"
+    );
+    assert!(
+        rendered.contains("Top-level binding `sd` shadows `stats::sd`."),
+        "expected the shadows-namespace warning, got: {rendered}"
+    );
+}
+
 #[test]
 fn check_min_severity_error_ignores_warnings() {
     let directory = project(&[("warn.R", "x = 1\n")]);

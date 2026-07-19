@@ -1,5 +1,5 @@
 //! Style lints: syntax-level checks over the parse tree plus the
-//! naming-driven unused-parameter lint.
+//! naming-driven unused-parameter and shadow lints.
 //!
 //! The legacy stack also carried a `missing-comma` lint compensating for
 //! tree-sitter silently accepting `f(1 2)`; the hand parser rejects that
@@ -50,6 +50,14 @@ pub struct LintConfig {
     /// Default-off: a package may `importFrom` a name for re-export or a side
     /// effect, and usage detection is a conservative token scan.
     pub unused_import: LintLevel,
+    /// Default-off: rebinding a `base` name at top level is often deliberate
+    /// (an S3 method like `print <- ...`, masking in a script), so a project
+    /// opts in explicitly.
+    pub shadows_builtin: LintLevel,
+    /// Default-off: the same masking rationale for names from the non-`base`
+    /// stub namespaces (`stats::filter`, `utils::head`), which resolve bare
+    /// exactly like builtins.
+    pub shadows_namespace: LintLevel,
 }
 
 /// Every lint finding of one file, in position order. Pure syntax walks plus
@@ -77,8 +85,74 @@ pub fn lint_file(db: &dyn Db, file: SourceFile, config: &LintConfig) -> Vec<Diag
             }
         }
     }
+    shadow_lints(db, file, config, &mut diagnostics);
     diagnostics.sort_by_key(|diagnostic| (diagnostic.range.start(), diagnostic.range.end()));
     diagnostics
+}
+
+/// A top-level binding whose name the stub corpus already resolves bare
+/// wins over the stub for every read in the project: `base` names report
+/// `shadows-builtin`, names declared by another stub namespace report
+/// `shadows-namespace` (both default-off — rebinding is often deliberate,
+/// an S3 method or script masking).
+fn shadow_lints(
+    db: &dyn Db,
+    file: SourceFile,
+    config: &LintConfig,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let builtin_severity = opt_in_severity(config.shadows_builtin);
+    let namespace_severity = opt_in_severity(config.shadows_namespace);
+    if builtin_severity.is_none() && namespace_severity.is_none() {
+        return;
+    }
+    let Some(library) = crate::stubs::stubs(db) else {
+        return;
+    };
+    let is_builtin = |name: &str| {
+        library
+            .exports_by_namespace
+            .get("base")
+            .is_some_and(|exports| exports.contains(name))
+    };
+    for span in item_spans(db, file) {
+        let Some(naming) = item_naming(db, span.item) else {
+            continue;
+        };
+        for binding in naming.bindings.values() {
+            if binding.kind != crate::naming::BindingKind::TopLevel {
+                continue;
+            }
+            let range = TextRange::new(
+                binding.range.start() + span.range.start(),
+                binding.range.end() + span.range.start(),
+            );
+            if is_builtin(&binding.name) {
+                if let Some(severity) = &builtin_severity {
+                    diagnostics.push(Diagnostic {
+                        range,
+                        severity: severity.clone(),
+                        code: "shadows-builtin",
+                        message: format!("Top-level binding `{}` shadows a builtin.", binding.name),
+                        related: Vec::new(),
+                    });
+                }
+            } else if let Some(severity) = &namespace_severity
+                && let Some(namespace) = crate::stubs::declaring_namespace(db, &binding.name)
+            {
+                diagnostics.push(Diagnostic {
+                    range,
+                    severity: severity.clone(),
+                    code: "shadows-namespace",
+                    message: format!(
+                        "Top-level binding `{}` shadows `{namespace}::{}`.",
+                        binding.name, binding.name
+                    ),
+                    related: Vec::new(),
+                });
+            }
+        }
+    }
 }
 
 fn syntax_lints(root: &SyntaxNode, config: &LintConfig, diagnostics: &mut Vec<Diagnostic>) {

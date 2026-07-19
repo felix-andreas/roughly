@@ -53,3 +53,29 @@ clean
 f <- function(a, b = a) b
 #++++
 clean
+
+#==== shadows
+#---- top_level_builtin_rebinding_warns
+mean <- function(x) x
+#++++
+0..4 warning[shadows-builtin] Top-level binding `mean` shadows a builtin.
+
+#---- top_level_namespace_name_warns
+sd <- 1
+head <- function(x) x
+#++++
+0..2 warning[shadows-namespace] Top-level binding `sd` shadows `stats::sd`.
+8..12 warning[shadows-namespace] Top-level binding `head` shadows `utils::head`.
+
+#---- s3_method_dot_names_are_not_shadows
+print.myclass <- function(x, ...) x
+#++++
+clean
+
+#---- local_rebinding_is_fine
+f <- function() {
+  mean <- 1
+  mean
+}
+#++++
+clean

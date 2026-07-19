@@ -1,7 +1,8 @@
 //! Lint fixture suite: each case runs `lints::lint_file` on one package file
 //! and renders every finding. The `lints` directory runs the default config;
-//! the `lints-style` directory opts into `naming-style = "snake_case"` and
-//! `unused-parameter = "warn"` (both off by default). `ROUGHLY_BLESS=1`
+//! the `lints-style` directory opts into `naming-style = "snake_case"`,
+//! `unused-parameter = "warn"`, `shadows-builtin = "warn"`, and
+//! `shadows-namespace = "warn"` (all off by default). `ROUGHLY_BLESS=1`
 //! accepts new output; `FIXTURE_FILTER=group__case` runs one case.
 
 use semantics::diagnostics::Severity;
@@ -48,6 +49,8 @@ fn lint_style_fixtures() {
     let config = LintConfig {
         naming_style: Some(NameStyle::Snake),
         unused_parameter: LintLevel::Warn,
+        shadows_builtin: LintLevel::Warn,
+        shadows_namespace: LintLevel::Warn,
         ..LintConfig::default()
     };
     let suite = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/lints-style");

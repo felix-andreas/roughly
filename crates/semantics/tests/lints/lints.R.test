@@ -68,3 +68,9 @@ clean
 f <- function(unusedParam) 1
 #++++
 clean
+
+#---- shadow_lints_are_off_by_default
+mean <- function(x) x
+sd <- 1
+#++++
+clean

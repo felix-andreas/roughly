@@ -59,6 +59,15 @@ Semantics checks enforce coding conventions and best practices that won't necess
   `name` appears in no checked source. Off unless enabled (`[lint] unused-import = "warn"`); usage is
   a conservative token scan (a name used via `pkg::name` or an operator import like `%>%` counts), so
   it never false-positives on a real use, and whole-namespace `import(pkg)` is not checked
+- **`shadows-builtin`** *(off by default)*: Flags a top-level binding whose name `base` exports
+  (`mean <- function(x) ...`) — every bare read in the project now resolves to the binding instead
+  of the builtin. Off unless enabled (`[lint] shadows-builtin = "warn"`) because rebinding a base
+  name is often deliberate: an S3 method definition, or intentional masking in a script. Dotted S3
+  method names (`print.myclass`) are not base exports and are never flagged
+- **`shadows-namespace`** *(off by default)*: The same check for names declared by the non-`base`
+  stub namespaces, which resolve bare exactly like builtins; the message names the shadowed symbol
+  (``Top-level binding `sd` shadows `stats::sd`.``). Enable with
+  `[lint] shadows-namespace = "warn"`
 
 Example:
 ```r

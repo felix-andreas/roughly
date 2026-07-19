@@ -52,6 +52,8 @@ boolean-shorthand = "error"
 trailing-comma = "warn"
 unused-parameter = "warn"  # default off: opt in to flag never-used function parameters
 unused-import = "warn"     # default off: opt in to flag never-used NAMESPACE imports
+shadows-builtin = "warn"   # default off: opt in to flag top-level bindings over base names
+shadows-namespace = "warn" # default off: same for names from other stub namespaces
 ```
 
 `unused-parameter` is **off by default** — R signatures legitimately carry ignored formals (an S3
