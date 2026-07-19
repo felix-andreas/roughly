@@ -233,6 +233,14 @@ Definite assignment:
   variable but warns that the name might be undefined (introduced only in conditionally executed
   code)
 - a read no write can reach at all does not resolve to the variable (see the shadowing rule above)
+- a **top-level** variable's unwritten path is different: at run time it reaches the enclosing
+  environment, so the read observes the name's cross-item binding — in a script, the nearest
+  earlier statement's binding; in a package, the name's definition elsewhere in the package. A
+  loop's first iteration and a rebinding statement's right-hand side therefore read the earlier
+  binding and its type joins into the slot like any other reaching write: after `p <- "word"`,
+  the body of `while (cond) p <- p - 1L` is a type error on the first iteration's `character`
+  read, and after `n <- 1L`, `n <- n + 0.5` types the rebinding as `double`. A name with no
+  known cross-item binding (or only a self-referential one) stays tolerated as `Unknown`.
 
 Unused (dead-store) analysis follows from the same reaching sets when the `unused` check is
 enabled: an assignment whose written value no read can observe on any path warns

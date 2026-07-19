@@ -153,3 +153,32 @@ print(out)
 #++++
 x: integer
 out: Unknown
+
+#==== loop_carried_reads
+#---- rebinding_reads_the_nearest_earlier_binding
+p <- "word"
+p <- p - 1L
+#++++
+p: character
+p: Unknown
+12..23 warning[unused] `p` is assigned but never used.
+17..18 error[type-mismatch] expected a numeric value (`integer` or `double`), found `character`
+
+#---- loop_carried_read_starts_from_the_earlier_binding
+p <- "word"
+while (TRUE) p <- p - 1L
+#++++
+p: character
+30..31 error[type-mismatch] expected a numeric value (`integer` or `double`), found `character`
+
+#---- sequential_rebinding_chains_types
+n <- 1L
+n <- n + 1L
+n <- n + 0.5
+final <- function() n
+#++++
+n: integer
+n: integer
+n: double
+final: fn() -> double
+33..54 warning[unused] `final` is assigned but never used.

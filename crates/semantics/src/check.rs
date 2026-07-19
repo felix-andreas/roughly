@@ -252,6 +252,7 @@ pub fn check_item_with_annotation<'db>(
         forward_captured: rustc_hash::FxHashSet::default(),
         capture_joins: FxHashMap::default(),
         capture_repass_needed: false,
+        pre_materialized: FxHashMap::default(),
         no_default_formals: rustc_hash::FxHashSet::default(),
     };
     // An annotation whose type mentions a cyclically expanding alias is
@@ -742,6 +743,11 @@ struct Checker<'db, 'a> {
     /// The current body wrote a forward-captured slot: its closures were
     /// inferred against an incomplete join, so the body re-checks once.
     capture_repass_needed: bool,
+    /// Top-level slots whose unwritten path resolved to the name's
+    /// cross-item binding: the observed type is the slot's PRE-state, not a
+    /// body write, so loop passes re-establish it after their rollback (a
+    /// loop's first iteration keeps reading the earlier binding).
+    pre_materialized: FxHashMap<BindingId, Ty<'db>>,
     /// Formal-parameter slots with no default: a `missing(name)` guard on
     /// one marks its true edge read-erroring.
     no_default_formals: rustc_hash::FxHashSet<BindingId>,
@@ -1345,12 +1351,40 @@ impl<'db> Checker<'db, '_> {
             // resolves to the running join of the frame's writes — the
             // closure runs later, when they have happened (the letrec shape);
             // the enclosing body re-checks once when the join completes
-            // after this read. Everything else tolerates as Unknown.
+            // after this read. A top-level slot's unwritten path reaches the
+            // enclosing frame instead: the read observes the name's
+            // cross-item binding (a loop's first iteration, a rebinding
+            // statement's right-hand side), same as the unused check's
+            // cross-item-read rule. The observed type is materialized as the
+            // slot's entry so a loop join keeps it as the pre-loop state.
+            // Everything else tolerates as Unknown.
             None => {
                 if self.naming.captured_slots.contains(&slot) {
                     self.forward_captured.insert(slot);
                     if let Some(&join) = self.capture_joins.get(&slot) {
                         return join;
+                    }
+                } else if let Some(binding) = self.naming.bindings.get(&slot)
+                    && binding.kind == crate::naming::BindingKind::TopLevel
+                {
+                    let name = binding.name.clone();
+                    if let Some(scheme) = self
+                        .globals
+                        .and_then(|globals| globals.scheme(&name, false))
+                    {
+                        let instantiated = self.instantiate(&scheme);
+                        // An Unknown cross-item binding (or a self-cycle's
+                        // recovery value) adds nothing over the tolerant
+                        // read, and materializing it would absorb the real
+                        // body writes at the loop join.
+                        if !matches!(
+                            self.table.resolve(self.db, instantiated).kind(self.db),
+                            TyKind::Unknown
+                        ) {
+                            self.environment.set(slot, EnvEntry::Mono(instantiated));
+                            self.pre_materialized.insert(slot, instantiated);
+                            return instantiated;
+                        }
                     }
                 }
                 self.unknown()
@@ -1800,6 +1834,15 @@ impl<'db> Checker<'db, '_> {
                 .filter(|(slot, _)| loop_variable.is_none_or(|(loop_slot, _)| *slot != loop_slot))
                 .collect();
             self.environment.rollback(mark);
+            // A read this pass resolved through the name's cross-item
+            // binding discovered the slot's PRE-loop state (the first
+            // iteration's view); establish it before joining so the body's
+            // writes join into it instead of replacing an absent entry.
+            for (&slot, &ty) in &self.pre_materialized {
+                if self.environment.get(slot).is_none() {
+                    self.environment.set(slot, EnvEntry::Mono(ty));
+                }
+            }
             let changed = self.join_writes_reporting(&writes);
             if changed.is_empty() {
                 if runs_at_least_once {

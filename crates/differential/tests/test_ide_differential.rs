@@ -52,6 +52,28 @@ const ORACLE_DEFICIT_CASES: &[&str] = &[
 /// these cases are accepted wholesale, and a stale entry fails.
 const ACCEPTED_DIFFERENCE_CASES: &[(&str, &str)] = &[
     (
+        "typing::scoping__loop_carried_read_starts_from_the_outer_binding",
+        "a package-level name bound by several items is one document slot in the \
+         rewrite: references span every writer and definition targets the \
+         name's primary definer, while the oracle isolates each item's binding \
+         (renaming only one writer would change program meaning)",
+    ),
+    (
+        "typing::scoping__loop_carried_read_continues_the_outer_type",
+        "same document-slot model: cross-item references and primary-definer \
+         definition for a name bound by several items",
+    ),
+    (
+        "typing::scoping__rebinding_statement_reads_the_earlier_binding",
+        "same document-slot model: cross-item references and primary-definer \
+         definition for a name bound by several items",
+    ),
+    (
+        "typing::scoping__accumulator_seeded_by_an_earlier_item",
+        "same document-slot model: cross-item references and primary-definer \
+         definition for a name bound by several items",
+    ),
+    (
         "typing::form__applied_type_parameter_is_refused",
         "the rewrite refuses the whole violating block, so the alias it declares \
          never enters the vocabulary (no `Outer` completion, no `Wrap` \
@@ -111,12 +133,6 @@ const ACCEPTED_DIFFERENCE_CASES: &[(&str, &str)] = &[
         "the rewrite resolves the forward-captured read the oracle leaves \
          unresolved (navigation additions), and the two differ on \
          active-parameter guessing at the resulting call",
-    ),
-    (
-        "typing-scripts::conditional_slots__loop_reading_its_carried_variable_stays_alive",
-        "the carried loop variable types Unknown in the rewrite (its conditional \
-         slot exports no scheme), so the Unknown-carrying inlay hint the oracle \
-         shows is withheld",
     ),
     (
         "typing-scripts::reads_that_keep_bindings_alive__masked_read_is_a_use",

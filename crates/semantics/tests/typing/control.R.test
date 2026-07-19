@@ -198,6 +198,43 @@ report <- function() total
 #++++
 report: fn() -> integer
 
+#---- loop_carried_read_starts_from_the_outer_binding
+p <- "word"
+while (TRUE) p <- p - 1L
+#++++
+p: character
+30..31 error[type-mismatch] expected a numeric value (`integer` or `double`), found `character`
+
+#---- loop_carried_read_continues_the_outer_type
+n <- 10L
+while (n > 0L) n <- n - 1L
+after <- function() n
+#++++
+n: integer
+after: fn() -> integer
+
+#---- rebinding_statement_reads_the_earlier_binding
+p <- "word"
+p <- p - 1L
+#++++
+p: character
+p: Unknown
+0..1 warning[duplicate] Top-level binding `p` is overwritten by a later top-level binding in this package.
+12..13 warning[duplicate] Top-level binding `p` overwrites an earlier top-level binding in this package.
+
+#---- self_referential_first_writer_stays_tolerated
+x <- x + 1
+#++++
+x: Unknown
+
+#---- accumulator_seeded_by_an_earlier_item
+total <- 0L
+for (i in 1:3) total <- total + i
+report <- function() total
+#++++
+total: integer
+report: fn() -> integer
+
 #---- shadowed_outer_binding_is_dead_despite_the_capture
 f <- function() {
   x <- "outer"
