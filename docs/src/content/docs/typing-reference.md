@@ -221,6 +221,11 @@ Top-level `@type` and `@alias` declarations share one project-global namespace.
 - duplicate type names are errors regardless of file or declaration kind
 - every declaration participating in a duplicate-name conflict is erroneous
 - type parameters are local binders and shadow project-global type names
+- a type reference that resolves to nothing — not a built-in type, an in-scope binder, a project
+  `@type`/`@alias` declaration, or a stub-declared class — is an error at the referencing token
+  (with a nearest-name hint when a close match exists); the undeclared name then compares like
+  `Unknown` everywhere, so the typo is reported exactly once and never cascades into value-level
+  mismatches
 
 All current `@type` and `@alias` declarations are top-level and project-global.
 
@@ -358,6 +363,9 @@ Trusted coercions can hide real mistakes and should be used only when the progra
 - if the annotation succeeds, the annotated binding or expression is then treated as having type `NOMINAL_TYPE`
 - if the annotated value already has type `NOMINAL_TYPE`, the annotation is allowed and has no further effect
 - `@new` is an annotation form, not a type expression, so it cannot appear inside compact type syntax or expanded function annotations
+- `@new` is the ONLY nominal introduction: a checked annotation (`#: Person`) on a structural
+  value is a type error even when the value matches the representation — the checked form asserts
+  the value already HAS the nominal type, it does not mint it
 
 Examples:
 

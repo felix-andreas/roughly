@@ -209,10 +209,86 @@ pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
     }
     diagnostics.extend(duplicate_binding_diagnostics(db, file));
     diagnostics.extend(duplicate_type_diagnostics(db, file));
+    diagnostics.extend(unknown_type_diagnostics(db, file));
 
     diagnostics.sort_by_key(|diagnostic| (diagnostic.range.start(), diagnostic.range.end()));
     diagnostics
 }
+
+/// Errors for `#:` type references no vocabulary declares: a name in an
+/// annotation must be a built-in type (excluded at lowering already), an
+/// in-scope binder (likewise), a project `@type`/`@alias` declaration, or a
+/// stub-declared class. Anything else is a typo the checker would otherwise
+/// silently treat as an opaque nominal — the classic case is a misspelled
+/// record field type inside a `@type` body.
+fn unknown_type_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
+    let parsed = parse(db, file);
+    let mut references: Vec<(String, TextRange)> = Vec::new();
+    for node in parsed
+        .syntax_node()
+        .descendants()
+        .filter(|node| node.kind() == syntax::SyntaxKind::ANNOTATION)
+    {
+        references.extend(crate::annotations::lower_annotation(db, &node).nominal_references);
+    }
+    if references.is_empty() {
+        return Vec::new();
+    }
+
+    let mut known: std::collections::BTreeSet<String> = crate::stubs::stubs(db)
+        .map(|library| library.nominals.iter().cloned().collect())
+        .unwrap_or_default();
+    if let Some(files) = crate::ProjectFiles::try_get(db) {
+        for name in crate::project_type_definitions(db, files).keys() {
+            known.insert(name.text(db).to_owned());
+        }
+    }
+    // A script's own declarations shadow the project namespace; for a
+    // package file this adds nothing the project map lacks.
+    for definition in crate::file_type_definitions(db, file) {
+        known.insert(definition.name.text(db).to_owned());
+    }
+
+    references
+        .into_iter()
+        .filter(|(name, _)| !known.contains(name))
+        .map(|(name, range)| {
+            let suggestion = nearest_name(
+                &name,
+                known
+                    .iter()
+                    .map(String::as_str)
+                    .chain(ANNOTATION_PRIMITIVES.iter().copied()),
+            )
+            .map(|nearest| format!(" Did you mean `{nearest}`?"))
+            .unwrap_or_default();
+            Diagnostic {
+                range,
+                severity: Severity::Error,
+                code: "annotation",
+                message: format!(
+                    "I do not know the type `{name}`. It is not a built-in type, a declared `@type` or `@alias` name, or a class from the standard-library stubs.{suggestion}"
+                ),
+                related: Vec::new(),
+            }
+        })
+        .collect()
+}
+
+/// The built-in type names annotations may spell, as typo-suggestion
+/// candidates (lowering resolves them before the unknown-name check, so they
+/// never appear as references).
+const ANNOTATION_PRIMITIVES: &[&str] = &[
+    "Any",
+    "Unknown",
+    "NULL",
+    "logical",
+    "integer",
+    "double",
+    "complex",
+    "character",
+    "raw",
+];
 
 /// The named top-level definition sites of one package file, in item order:
 /// each name with its binding-name range (file-absolute).

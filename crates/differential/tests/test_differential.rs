@@ -68,6 +68,18 @@ const ACCEPTED_DIVERGENCES: &[(&str, &str)] = &[
         "reads_that_keep_bindings_alive__pipe_read_is_a_use",
         "legacy does not model reads inside `|>` pipelines as uses and wrongly calls the piped binding dead",
     ),
+    (
+        "unknown_names__misspelled_type_inside_a_type_body",
+        "the rewrite's unknown-type-name diagnostic has no oracle counterpart in the compared classes — legacy's type resolution warns through its naming class, which the differential excludes",
+    ),
+    (
+        "unknown_names__unknown_type_in_a_checked_annotation",
+        "the rewrite's unknown-type-name diagnostic has no oracle counterpart in the compared classes — legacy's type resolution warns through its naming class, which the differential excludes",
+    ),
+    (
+        "unknown_names__unknown_generic_application",
+        "the rewrite's unknown-type-name diagnostic has no oracle counterpart in the compared classes — legacy's type resolution warns through its naming class, which the differential excludes",
+    ),
 ];
 
 /// Allowlist entries justified by an oracle PANIC (a `debug_assert` in the

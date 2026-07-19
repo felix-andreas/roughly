@@ -22,8 +22,8 @@
 //! the budget.
 
 use differential::{
-    filter_legacy_slot_tolerance, filter_model_divergences, filter_oracle_deficits, findings_match,
-    legacy_findings, new_findings, new_stack_facts,
+    filter_legacy_slot_tolerance, filter_model_divergences, filter_oracle_deficits,
+    filter_unknown_type_additions, findings_match, legacy_findings, new_findings, new_stack_facts,
 };
 use semantics::DocumentKind;
 use std::collections::BTreeMap;
@@ -86,6 +86,9 @@ const TEMPLATES: &[&str] = &[
     "#: @param x {integer}\n#: @return {integer}\n{n} <- function(x) x",
     "#: @type Bad {integer}\n#: integer\n{n} <- 1L",
     "#: integer\n#: character\n{n} <- 1L",
+    "#: Instype\n{n} <- 1L",
+    "#: @type Shape {list{part: Instype}}\n\n#: @new Shape\n{n} <- list(part = 1)",
+    "#: fn(x: Instype) -> integer\n{n} <- function(x) x",
     "{n} <- with({m}, x + y)",
     "{n} <- stats::sd(c(1, 2))",
     "{n} <- nosuchpkg::mystery()",
@@ -160,10 +163,11 @@ fn run_arm(kind: DocumentKind, document_path: &str, budget: usize, seed: u64) {
         compared += 1;
         let facts = new_stack_facts(&source, kind);
         let new = filter_legacy_slot_tolerance(new, &legacy, &facts, &mut deficit_rollup);
-        let (legacy, accepted_names) =
+        let new = filter_unknown_type_additions(new, &mut deficit_rollup);
+        let (legacy, accepted) =
             filter_oracle_deficits(legacy, &new, Some(&facts), &mut deficit_rollup);
         let (legacy, new) =
-            filter_model_divergences(legacy, new, &facts, &accepted_names, &mut deficit_rollup);
+            filter_model_divergences(legacy, new, &facts, &accepted, &mut deficit_rollup);
         let mut wording = Vec::new();
         if findings_match(&legacy, &new, &mut wording) {
             matching += 1;

@@ -643,3 +643,17 @@ Decision, one rule per read kind:
 The oracle's frame model differs by construction: one settled slot per name (no sequence), the slot minted before the statement's value resolves, forward captures unresolved, pipe reads not counted as uses, and an occurs-check that rejects some valid self-referential rebindings. Where the models disagree, the rewrite follows R's runtime and the typing reference, and the differential accepts the divergence explicitly: fixture-arm and ide-arm case allowlists with reasons, and the fuzz arm's narrow filters (site-scoped oracle deficits, in-statement slot tolerance, and unpaired type findings over the transitive closure of *unstable names* — multiply-bound, self-referential, or forward-captured). Every acceptance is rollup-counted so drift stays visible.
 
 Impact: correctness — scripts get the unresolved class for the first time (spec-mandated, previously silently absent), duplicate `@type`/`@alias` names now error at every site, and six fuzz-found gaps are fixed with fixtures pinning each; simplicity — one `deferred` bit threaded through `GlobalEnv` instead of a second resolver; incremental analysis — resolution facts stay per-item salsa queries (`frame_slot_positions` is one small per-file map).
+
+# Decision record: undeclared type names error once at the reference and compare like `Unknown`
+
+**Status:** decided and implemented (agent-owned decision under the delegated ownership mandate). Closes the reported gap that a misspelled nominal inside a `@type` body (and every other annotation position) was silently lowered to an opaque nominal.
+
+Chosen shape, three pieces with one source of truth each:
+
+- **Recording:** annotation lowering (`annotations::lower_annotation`) records every `TyKind::Named` mint with the referencing token's range (`Annotation::nominal_references`). Primitives and in-scope binders never reach the record because lowering resolves them first — so binder scoping stays single-sourced instead of being re-derived by a diagnostic walk.
+- **Reporting:** `unknown_type_diagnostics` checks the recorded references against the project's `@type`/`@alias` declarations (plus the file's own for scripts) and the stub corpus's nominal vocabulary, erroring at the precise token with a nearest-name hint (`Instument` → "Did you mean `Instrument`?"). Forward references stay legal — the vocabulary is position-independent.
+- **Tolerance:** an undeclared nominal compares like `Unknown` at the relation level (`unify`, `compatible`, and the operator checks' `structural()` projection all consult one `undeclared_nominal` predicate), so the typo is reported exactly once and never cascades into value-level mismatches, call-site errors in other items, or operator noise.
+
+Along the way the declared-annotation check was found to silently skip `Named`, `Record`, and `Tuple` declarations (a positive-list gate meant for tolerance had become a hole): `#: Point` on a structural value minted the nominal without `@new`, contradicting the nominal-introduction contract and the oracle. The gate is now a negative list (`Unknown`/`Any` only), which both enforces the `@new` discipline at declared sites and checks record/tuple declarations for the first time. The typing reference states both contracts.
+
+Impact: correctness — the reported bug class is closed with fixtures and fuzz templates guarding it; simplicity — one predicate instead of per-site suppression guards; incremental analysis — the diagnostic is a per-file pass over already-lowered annotations.

@@ -37,6 +37,12 @@ pub struct Annotation<'db> {
     /// definition forms cannot share a `#:` block). An invalid block carries
     /// no typing payload — only this refusal, worded for the diagnostic.
     pub invalid: Option<&'static str>,
+    /// Every named-type reference the block lowers (`TyKind::Named` mints),
+    /// with the referencing token's range: primitives and in-scope binders
+    /// are excluded here already, so an entry is exactly a name that must
+    /// resolve through the project's `@type`/`@alias` declarations or the
+    /// stub corpus's nominal vocabulary.
+    pub nominal_references: Vec<(String, TextRange)>,
     pub range: TextRange,
 }
 
@@ -55,6 +61,7 @@ pub fn lower_annotation<'db>(db: &'db dyn Db, node: &SyntaxNode) -> Annotation<'
     let mut lowering = Lowering {
         db,
         binders: Vec::new(),
+        nominal_references: Vec::new(),
     };
     let mut annotation = Annotation {
         range: node.text_range(),
@@ -191,6 +198,8 @@ pub fn lower_annotation<'db>(db: &'db dyn Db, node: &SyntaxNode) -> Annotation<'
 
     // Assemble the expanded form into a function scheme when directives
     // declared one and no compact type did.
+    annotation.nominal_references = std::mem::take(&mut lowering.nominal_references);
+
     if saw_expanded && annotation.declared.is_none() && (!params.is_empty() || ret.is_some()) {
         let named: Vec<RecordField<'db>> = params
             .iter()
@@ -329,6 +338,9 @@ struct Lowering<'db> {
     db: &'db dyn Db,
     /// In-scope rigid binder names.
     binders: Vec<Name<'db>>,
+    /// Named-type references minted so far, with the referencing token's
+    /// range (see [`Annotation::nominal_references`]).
+    nominal_references: Vec<(String, TextRange)>,
 }
 
 impl<'db> Lowering<'db> {
@@ -470,12 +482,18 @@ impl<'db> Lowering<'db> {
                 Ty::new(self.db, TyKind::Record(fields))
             }
             SyntaxKind::TYPE_APPLY => {
-                let name = node
-                    .children()
-                    .find(|c| c.kind() == SyntaxKind::NAME)
+                let name_node = node.children().find(|c| c.kind() == SyntaxKind::NAME);
+                let name = name_node
+                    .clone()
                     .and_then(syntax::ast::Name::cast)
                     .and_then(|name| name.text())
                     .unwrap_or_default();
+                if let Some(name_node) = &name_node
+                    && !name.is_empty()
+                {
+                    self.nominal_references
+                        .push((name.clone(), name_node.text_range()));
+                }
                 let arguments = node
                     .children()
                     .find(|c| c.kind() == SyntaxKind::TYPE_ARG_LIST)
@@ -514,6 +532,8 @@ impl<'db> Lowering<'db> {
         if self.binders.contains(&name) {
             return Ty::new(self.db, TyKind::Rigid(name));
         }
+        self.nominal_references
+            .push((text.to_owned(), token.text_range()));
         Ty::new(self.db, TyKind::Named(name, Vec::new()))
     }
 

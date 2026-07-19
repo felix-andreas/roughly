@@ -123,6 +123,19 @@ impl<'db> InferenceTable<'db> {
         &self.entries[self.find(var).0 as usize]
     }
 
+    /// Whether `ty` is a nominal reference no vocabulary declares — neither
+    /// the project's `@type`/`@alias` table nor the stub corpus. Such a name
+    /// is a typo the unknown-type annotation diagnostic reports; the
+    /// relations treat it like `Unknown` so it never cascades.
+    pub(crate) fn undeclared_nominal(&self, db: &'db dyn Db, ty: Ty<'db>) -> bool {
+        let TyKind::Named(name, _) = ty.kind(db) else {
+            return false;
+        };
+        !self.definitions.contains_key(name)
+            && !crate::stubs::stubs(db)
+                .is_some_and(|library| library.nominals.contains(name.text(db)))
+    }
+
     /// Shallow-resolve: follow variables to their binding, without walking
     /// into structure.
     pub fn shallow_resolve(&self, db: &'db dyn Db, ty: Ty<'db>) -> Ty<'db> {
@@ -512,6 +525,15 @@ impl<'db> InferenceTable<'db> {
             (TyKind::Any, _) | (_, TyKind::Any) | (TyKind::Unknown, _) | (_, TyKind::Unknown) => {
                 Ok(())
             }
+            // An undeclared nominal — a name neither the project's type
+            // table nor the stub corpus declares — already carries its own
+            // unknown-type annotation error; comparisons treat it like
+            // `Unknown` so the typo never cascades.
+            (TyKind::Named(..), _) | (_, TyKind::Named(..))
+                if self.undeclared_nominal(db, a) || self.undeclared_nominal(db, b) =>
+            {
+                Ok(())
+            }
             (TyKind::Vector(left), TyKind::Vector(right))
             | (TyKind::NamedVector(left), TyKind::NamedVector(right))
             | (TyKind::List(left), TyKind::List(right))
@@ -715,6 +737,10 @@ impl<'db> InferenceTable<'db> {
         if matches!(actual.kind(db), TyKind::Var(_)) || matches!(expected.kind(db), TyKind::Var(_))
         {
             return self.unify(db, actual, expected).is_ok();
+        }
+        // An undeclared nominal compares like `Unknown` — see `unify`.
+        if self.undeclared_nominal(db, actual) || self.undeclared_nominal(db, expected) {
+            return true;
         }
         match (actual.kind(db).clone(), expected.kind(db).clone()) {
             // A union value must be accepted in every shape it can take, so

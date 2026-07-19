@@ -303,21 +303,19 @@ pub fn check_item_with_annotation<'db>(
                 } else {
                     match annotation.and_then(|a| a.declared.clone()) {
                         // A declared non-function type (or a trusted one):
-                        // the declaration is the contract.
+                        // the declaration is the contract, and the value must
+                        // satisfy it. A declared NOMINAL is deliberately part
+                        // of that: `#: Point` on a structural value errors —
+                        // `@new` is the only nominal introduction. Unknown
+                        // and Any declarations are tolerance floors with
+                        // nothing to check.
                         Some(declared) => {
-                            if annotation.is_some_and(|a| !a.trusted) {
+                            if annotation.is_some_and(|a| !a.trusted)
+                                && !matches!(declared.body.kind(db), TyKind::Unknown | TyKind::Any)
+                            {
                                 let expected = declared.body;
-                                if matches!(
-                                    declared.body.kind(db),
-                                    TyKind::Scalar(_)
-                                        | TyKind::Null
-                                        | TyKind::Vector(_)
-                                        | TyKind::List(_)
-                                        | TyKind::Union(_)
-                                ) {
-                                    let range = module.expression(*value).range;
-                                    context.unify_or_report(range, expected, value_ty);
-                                }
+                                let range = module.expression(*value).range;
+                                context.unify_or_report(range, expected, value_ty);
                             }
                             Some(declared)
                         }
@@ -3587,14 +3585,19 @@ impl<'db> Checker<'db, '_> {
     /// Resolve, then project non-alias nominals to their representation —
     /// operators and indexing need a structural shape, and a nominal value is
     /// compatible with its representation. Opaque nominals (no
-    /// representation) stay `Named`; the loop bound guards recursive
-    /// representations.
+    /// representation) stay `Named`, but an UNDECLARED nominal — a typo the
+    /// unknown-type diagnostic already reports — floors to `Unknown` so the
+    /// operator checks never cascade against it. The loop bound guards
+    /// recursive representations.
     fn structural(&mut self, ty: Ty<'db>) -> Ty<'db> {
         let mut current = self.table.resolve(self.db, ty);
         for _ in 0..16 {
             let TyKind::Named(name, arguments) = current.kind(self.db) else {
                 break;
             };
+            if self.table.undeclared_nominal(self.db, current) {
+                return Ty::new(self.db, TyKind::Unknown);
+            }
             match self.table.representation(self.db, *name, arguments) {
                 Some(representation) => {
                     current = self.table.resolve(self.db, representation);

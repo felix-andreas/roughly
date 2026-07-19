@@ -235,6 +235,15 @@ pub fn new_stack_facts(source: &str, kind: DocumentKind) -> NewStackFacts {
     }
 }
 
+/// The oracle deficits one comparison accepted: names whose unresolved
+/// findings were forward-capture deficits, and the ranges of legacy type
+/// findings dropped under the Unknown-tolerance rule.
+#[derive(Default)]
+pub struct AcceptedDeficits {
+    pub names: Vec<String>,
+    pub unknown_tolerance_ranges: Vec<(usize, usize)>,
+}
+
 /// Accepts unpaired TYPE findings on either side that sit in the territory
 /// where the two stacks' resolution models legitimately diverge, so the fuzz
 /// arm neither reproduces oracle bugs nor fails on intended rewrite
@@ -251,6 +260,10 @@ pub fn new_stack_facts(source: &str, kind: DocumentKind) -> NewStackFacts {
 ///   deficits — the oracle leaves those reads `Unknown`, so every downstream
 ///   type check silently passes where the rewrite, having resolved the
 ///   capture, checks for real;
+/// - names defined by an item whose legacy finding was accepted under the
+///   Unknown-tolerance rule — the oracle failed that item and exports
+///   `Unknown` for its binding, while the rewrite exports the declared
+///   contract, so downstream reads check for real only on the rewrite side;
 ///
 /// closed transitively over "the name's defining item reads an unstable
 /// name". A type finding (either side) with no intersecting counterpart in
@@ -264,16 +277,25 @@ pub fn filter_model_divergences(
     legacy: Vec<Finding>,
     new: Vec<Finding>,
     facts: &NewStackFacts,
-    accepted_deficit_names: &[String],
+    accepted: &AcceptedDeficits,
     deficit_rollup: &mut BTreeMap<String, usize>,
 ) -> (Vec<Finding>, Vec<Finding>) {
     let mut unstable: std::collections::BTreeSet<String> = facts
         .multibound
         .iter()
         .chain(facts.self_referential.iter())
-        .chain(accepted_deficit_names.iter())
+        .chain(accepted.names.iter())
         .cloned()
         .collect();
+    for &(start, end) in &accepted.unknown_tolerance_ranges {
+        if let Some(index) = facts
+            .item_spans
+            .iter()
+            .position(|&(item_start, item_end)| item_start <= start && end <= item_end)
+        {
+            unstable.extend(facts.item_defines[index].iter().cloned());
+        }
+    }
     loop {
         let mut grew = false;
         for (index, defines) in facts.item_defines.iter().enumerate() {
@@ -379,15 +401,16 @@ pub fn filter_model_divergences(
 ///   inside its range, is that floor.
 ///
 /// Returns the filtered legacy findings plus the names whose unresolved
-/// findings were accepted as forward-capture deficits (consumed by
+/// findings were accepted as forward-capture deficits and the ranges of
+/// accepted Unknown-tolerance drops (consumed by
 /// [`filter_model_divergences`]'s unstable-name closure).
 pub fn filter_oracle_deficits(
     legacy: Vec<Finding>,
     new: &[Finding],
     facts: Option<&NewStackFacts>,
     deficit_rollup: &mut BTreeMap<String, usize>,
-) -> (Vec<Finding>, Vec<String>) {
-    let mut accepted_unresolved: Vec<String> = Vec::new();
+) -> (Vec<Finding>, AcceptedDeficits) {
+    let mut accepted = AcceptedDeficits::default();
     let kept: Vec<Finding> = legacy
         .into_iter()
         .filter(|finding| {
@@ -404,7 +427,7 @@ pub fn filter_oracle_deficits(
                 });
                 if resolved_by_new {
                     *deficit_rollup.entry(name.to_owned()).or_default() += 1;
-                    accepted_unresolved.push(name.to_owned());
+                    accepted.names.push(name.to_owned());
                 }
                 return !resolved_by_new;
             }
@@ -422,6 +445,9 @@ pub fn filter_oracle_deficits(
                     *deficit_rollup
                         .entry("(Unknown-tolerant type check)".to_owned())
                         .or_default() += 1;
+                    accepted
+                        .unknown_tolerance_ranges
+                        .push((finding.1, finding.2));
                     return false;
                 }
             }
@@ -446,7 +472,7 @@ pub fn filter_oracle_deficits(
             if !read_by_new {
                 return true;
             }
-            let forward_captured = accepted_unresolved.iter().any(|accepted| accepted == name);
+            let forward_captured = accepted.names.iter().any(|accepted| accepted == name);
             if forward_captured {
                 *deficit_rollup
                     .entry(format!("{name} (unused)"))
@@ -463,7 +489,28 @@ pub fn filter_oracle_deficits(
             true
         })
         .collect();
-    (filtered, accepted_unresolved)
+    (filtered, accepted)
+}
+
+/// Accepts the rewrite's unknown-type-name diagnostics: legacy models the
+/// same finding only through its naming class, which the differential
+/// excludes by construction, so a NEW-only annotation finding of this shape
+/// can never pair. Each accepted drop is counted in `deficit_rollup`.
+pub fn filter_unknown_type_additions(
+    new: Vec<Finding>,
+    deficit_rollup: &mut BTreeMap<String, usize>,
+) -> Vec<Finding> {
+    new.into_iter()
+        .filter(|finding| {
+            if finding.0 != "annotation" || !finding.3.starts_with("I do not know the type") {
+                return true;
+            }
+            *deficit_rollup
+                .entry("(unknown-type diagnostic, rewrite side)".to_owned())
+                .or_default() += 1;
+            false
+        })
+        .collect()
 }
 
 /// Accepts the oracle's within-statement slot tolerance: the legacy frame
