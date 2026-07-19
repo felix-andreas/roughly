@@ -322,6 +322,32 @@ impl Context<'_> {
             }
             ExpressionKind::Call { callee, arguments } => {
                 self.resolve(*callee);
+                // `library(pkg)` / `require(pkg)` / `help(topic)` quote a
+                // bare positional first argument: the name is the package or
+                // topic name, not a value reference. The rule is syntactic
+                // (a rebound `library` does not change it), and only the
+                // bare-name first-positional form quotes — a string, a named
+                // first argument, or a qualified callee is an ordinary call.
+                let quoting_callee = matches!(
+                    &self.module.expression(*callee).kind,
+                    ExpressionKind::NameRef(name) if matches!(name.as_str(), "library" | "require" | "help")
+                );
+                if quoting_callee
+                    && let Some(first) = arguments.first()
+                    && first.name.is_none()
+                    && let Some(value) = first.value
+                    && matches!(
+                        self.module.expression(value).kind,
+                        ExpressionKind::NameRef(_)
+                    )
+                {
+                    for argument in arguments.iter().skip(1) {
+                        if let Some(value) = argument.value {
+                            self.resolve(value);
+                        }
+                    }
+                    return;
+                }
                 // The base masking family evaluates every argument after the
                 // data inside the data's frame; a locally defined function of
                 // the same name masks nothing.
@@ -895,7 +921,14 @@ impl Context<'_> {
 
     fn collect_unused(&mut self) {
         for write in &self.writes {
-            if write.reportable && !write.used {
+            // A `.`- or `_`-prefixed name is conventionally an intentional
+            // hold-over (hidden helpers, ignored results); the convention
+            // opts it out of dead-store reporting.
+            if write.reportable
+                && !write.used
+                && !write.name.starts_with('.')
+                && !write.name.starts_with('_')
+            {
                 self.naming.unused_assignments.push(UnusedAssignment {
                     name: write.name.clone(),
                     range: write.range,

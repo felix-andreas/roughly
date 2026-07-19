@@ -134,7 +134,10 @@ fn collect_fixture_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-fn parse_fixture_file(path: &Path, text: String) -> FixtureFile {
+/// Parse one fixture file. Public for harnesses that pre-filter which files
+/// to consume (the legacy-corpus differential skips multi-document
+/// composites the shared single-file format cannot express).
+pub fn parse_fixture_file(path: &Path, text: String) -> FixtureFile {
     let mut cases = Vec::new();
     let mut group: Option<String> = None;
     let mut case: Option<String> = None;

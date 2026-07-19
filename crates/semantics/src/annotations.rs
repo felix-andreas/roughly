@@ -26,6 +26,10 @@ pub struct Annotation<'db> {
     pub parameter_names: Vec<(String, Ty<'db>, bool)>,
     /// `@type` / `@alias` definitions carried by this annotation.
     pub definitions: Vec<NamedDefinition<'db>>,
+    /// Each definition's declaring directive range, parallel to
+    /// `definitions` — kept out of `NamedDefinition` so the interface maps
+    /// built from definitions stay position-independent.
+    pub definition_sites: Vec<TextRange>,
     /// `@new Name` / `@new Name<ARGS>` — the annotated value checks against
     /// the nominal's representation and the binding takes the nominal type.
     pub new_nominal: Option<(Name<'db>, Vec<Ty<'db>>)>,
@@ -89,6 +93,7 @@ pub fn lower_annotation<'db>(db: &'db dyn Db, node: &SyntaxNode) -> Annotation<'
                             lowering.lower_named_definition(&child, directive == "alias")
                         {
                             annotation.definitions.push(definition);
+                            annotation.definition_sites.push(child.text_range());
                         }
                     }
                     "forall" => {

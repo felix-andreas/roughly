@@ -431,13 +431,10 @@ pub fn filter_oracle_deficits(
                 }
                 return !resolved_by_new;
             }
-            if finding.0 == "type"
-                && finding
-                    .3
-                    .split("found")
-                    .nth(1)
-                    .is_some_and(|found| found.contains("Unknown"))
-            {
+            // Either side mentioning `Unknown` marks the oracle checking a
+            // non-fact: rejecting an Unknown-carrying value, or checking a
+            // value against a declared `Unknown`.
+            if finding.0 == "type" && finding.3.contains("Unknown") {
                 let new_has_counterpart = new.iter().any(|(class, start, end, _)| {
                     *class == "type" && *start >= finding.1 && *end <= finding.2
                 });

@@ -304,18 +304,32 @@ pub fn check_item_with_annotation<'db>(
                     match annotation.and_then(|a| a.declared.clone()) {
                         // A declared non-function type (or a trusted one):
                         // the declaration is the contract, and the value must
-                        // satisfy it. A declared NOMINAL is deliberately part
-                        // of that: `#: Point` on a structural value errors —
-                        // `@new` is the only nominal introduction. Unknown
-                        // and Any declarations are tolerance floors with
-                        // nothing to check.
+                        // satisfy it under the directional compatibility
+                        // relation — the value flows into the declared type,
+                        // exactly like an argument into a parameter, so
+                        // member-into-union, scalar-into-vector, and
+                        // nominal-representation projection all apply. A
+                        // declared NOMINAL is deliberately still strict the
+                        // other way: `#: Point` on a structural value errors —
+                        // `@new` is the only nominal introduction. Unknown and
+                        // Any declarations are tolerance floors with nothing
+                        // to check.
                         Some(declared) => {
                             if annotation.is_some_and(|a| !a.trusted)
                                 && !matches!(declared.body.kind(db), TyKind::Unknown | TyKind::Any)
                             {
                                 let expected = declared.body;
                                 let range = module.expression(*value).range;
-                                context.unify_or_report(range, expected, value_ty);
+                                let resolved_value = context.table.resolve(db, value_ty);
+                                if !context.table.compatible(db, resolved_value, expected) {
+                                    context.errors.push(TypeError {
+                                        range,
+                                        kind: TypeErrorKind::Mismatch {
+                                            expected: context.table.resolve(db, expected),
+                                            found: context.table.resolve(db, resolved_value),
+                                        },
+                                    });
+                                }
                             }
                             Some(declared)
                         }

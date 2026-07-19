@@ -392,8 +392,8 @@ fn duplicate_binding_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnosti
 }
 
 /// The `@type` / `@alias` declaration sites of one package file, in
-/// declaration order: each declared name with the range of its annotation
-/// block.
+/// declaration order: each declared name with the range of its declaring
+/// directive.
 #[salsa::tracked(returns(ref))]
 fn type_declaration_sites(db: &dyn Db, file: SourceFile) -> Vec<(String, TextRange)> {
     let parsed = parse(db, file);
@@ -403,8 +403,13 @@ fn type_declaration_sites(db: &dyn Db, file: SourceFile) -> Vec<(String, TextRan
         .descendants()
         .filter(|node| node.kind() == syntax::SyntaxKind::ANNOTATION)
     {
-        for definition in crate::annotations::lower_annotation(db, &node).definitions {
-            sites.push((definition.name.text(db).to_owned(), node.text_range()));
+        let annotation = crate::annotations::lower_annotation(db, &node);
+        for (definition, range) in annotation
+            .definitions
+            .iter()
+            .zip(annotation.definition_sites.iter())
+        {
+            sites.push((definition.name.text(db).to_owned(), *range));
         }
     }
     sites
@@ -817,7 +822,9 @@ fn script_unused_bindings(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
     }
     definers
         .into_iter()
-        .filter(|definer| !definer.used)
+        .filter(|definer| {
+            !definer.used && !definer.name.starts_with('.') && !definer.name.starts_with('_')
+        })
         .map(|definer| Diagnostic {
             range: definer.range,
             severity: Severity::Warning,

@@ -93,7 +93,16 @@ accepted class named in a rollup:
   settled-slot frame model and the rewrite's sequential/last-wins model legitimately differ,
   plus the rewrite's NULL-union strictness the oracle collapses to `Unknown` before reaching.
 
-A fourth, ignored-by-default arm compares the stacks over the real-file corpus
+An ignored-by-default arm sweeps the FROZEN STACK'S OWN fixture corpus
+(`cargo test -p differential --release -- --ignored legacy_corpus_differential`): every
+single-file case input from the legacy `typecheck`/`naming`/`type_syntax`/`diagnostics`/
+`unused`/`realworld` suites runs through both stacks with the shared policy — years of
+accumulated shapes the rewrite's suites do not spell out, compared without porting a single
+legacy expectation (the oracle recomputes its findings, so legacy renderings never constrain
+the rewrite). It is a triage instrument until the rewrite gaps its sweep itemized in the
+backlog close, then it becomes a default gate.
+
+A further ignored-by-default arm compares the stacks over the real-file corpus
 (`cargo test -p differential -- --ignored differential_corpus`, after `scripts/fetch-corpus.sh`):
 every corpus `.R` file both parsers accept runs through both pipelines with the same matching
 policy — files with syntax errors on either side are counted and skipped, since parity is scoped
