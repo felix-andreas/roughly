@@ -397,6 +397,30 @@ fn check_loads_valid_override_stubs_silently() {
     assert_eq!(exit_code(&output), 0, "stderr: {}", stderr(&output));
 }
 
+// Every shipped overload set ends in an `Any` catch-all, so the
+// no-candidate-accepts error is reachable only through a project override
+// whose candidates all constrain; this pins the message.
+#[test]
+fn check_reports_no_matching_overload() {
+    let directory = project(&[
+        ("R/main.R", "answer <- pick(\"word\")\n"),
+        (
+            "stubs/project.Rtypes",
+            "pick : fn(x: integer) -> integer\npick : fn(x: double) -> double\n",
+        ),
+        ("roughly.toml", "[check]\ntyping = true\n"),
+    ]);
+    let output = roughly(directory.path(), &["check", "."]);
+    let rendered = stderr(&output);
+    assert_eq!(exit_code(&output), 1, "stderr: {rendered}");
+    assert!(
+        rendered.contains(
+            "no overload of `pick` matches these arguments — I tried all 2 declared signatures"
+        ),
+        "expected the no-overload finding, got: {rendered}"
+    );
+}
+
 #[test]
 fn check_override_stub_types_apply() {
     let directory = project(&[

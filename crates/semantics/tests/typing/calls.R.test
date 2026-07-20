@@ -200,3 +200,25 @@ mixed_apply: <T: numeric> fn(x: T) -> T
 bad: Unknown
 ok: integer
 117..121 error[type-mismatch] expected a numeric value (`integer` or `double`), found `character`
+
+#---- undetermined_argument_uses_the_general_candidate
+wrap <- function(x) sum(x)
+#++++
+wrap: <T> fn(x: T) -> Any
+
+#---- corpus_overload_sets_end_in_a_general_candidate
+f <- function() cumsum("word")
+#++++
+f: fn() -> Any
+
+#---- overloaded_name_as_a_value_sees_the_first_declaration
+folder <- cumsum
+#++++
+folder: fn(x: Any) -> Any
+
+#---- local_binding_disables_the_overload_set
+cumsum <- function(x) "shadowed"
+f <- function() cumsum(1L)
+#++++
+cumsum: <T> fn(x: T) -> character
+f: fn() -> character

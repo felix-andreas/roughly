@@ -444,3 +444,50 @@ value <- {
 #++++
 value: integer
 13..52 error[annotation] Type definition blocks are only allowed at the top level of a file.
+
+#---- named_parameters_pair_by_name_not_order
+#: fn(a: integer, b: character) -> character
+f <- function(b, a) paste0(b, a)
+#++++
+f: fn(a: integer, b: character) -> character
+
+#---- annotation_may_not_rename_a_parameter
+#: fn(count: integer) -> integer
+f <- function(n) n
+#++++
+f: Unknown
+38..51 error[type-mismatch] this annotation names a parameter `count`, but the function does not define one — annotation parameter names must match the function's parameter names
+
+#---- callback_parameter_contravariance
+#: fn(callback: fn(x: integer) -> integer) -> integer
+apply_it <- function(callback) callback(1L)
+
+#: fn(x: integer | NULL) -> integer
+wider <- function(x) if (is.null(x)) 0L else x
+use_wider <- function() apply_it(wider)
+
+#: fn(callback: fn(x: integer | NULL) -> integer) -> integer
+apply_wide <- function(callback) callback(NULL)
+#: fn(x: integer) -> integer
+narrow <- function(x) x
+use_narrow <- function() apply_wide(narrow)
+#++++
+apply_it: fn(callback: fn(x: integer) -> integer) -> integer
+wider: fn(x: integer | NULL) -> integer
+use_wider: fn() -> integer
+apply_wide: fn(callback: fn(x: integer | NULL) -> integer) -> integer
+narrow: fn(x: integer) -> integer
+use_narrow: Unknown
+421..427 error[type-mismatch] expected `fn(x: integer | NULL) -> integer`, found `fn(x: integer) -> integer`
+
+#---- variadic_and_fixed_arity_never_pair
+#: fn(callback: fn(...: integer) -> integer) -> integer
+apply_variadic <- function(callback) callback(1L, 2L)
+#: fn(x: integer) -> integer
+fixed <- function(x) x
+use_fixed <- function() apply_variadic(fixed)
+#++++
+apply_variadic: fn(callback: fn(...: integer) -> integer) -> integer
+fixed: fn(x: integer) -> integer
+use_fixed: Unknown
+201..206 error[type-mismatch] expected `fn(...: integer) -> integer`, found `fn(x: integer) -> integer`

@@ -171,3 +171,13 @@ g <- function() c(TRUE, FALSE) && TRUE
 f: fn(a: logical, b: logical) -> logical
 g: Unknown
 43..57 error[type-mismatch] expected `logical`, found `logical[]`
+
+#---- unary_minus_generalizes
+f <- function(x) -x
+#++++
+f: <T: numeric> fn(x: T) -> T
+
+#---- division_by_literal_keeps_the_parameter_numeric
+f <- function(x) x / 2
+#++++
+f: <T: numeric> fn(x: T) -> double

@@ -1313,8 +1313,10 @@ call site:
   courtesy — so a name whose only fitting candidate wants `integer` still accepts `foo(1)`
 - when no candidate accepts the arguments, the call is a type error naming the overloaded callee and
   how many signatures were tried, with the first candidate's failure as the concrete hint
-- every non-call use of an overloaded name (passing it as a value, hover) sees the **first**
-  declaration
+- every non-call use of an overloaded name (passing it as a value, hover) sees the **last**
+  declaration — by corpus convention the most general one, the same candidate undetermined
+  arguments fall back to, so a value-use never carries a narrower contract than the calls it
+  might make
 
 Only a plain or namespace-qualified stub name can be overloaded. A local or package binding that
 shadows the name disables its overload set — the binding wins everywhere, calls included.
