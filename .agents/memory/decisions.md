@@ -499,7 +499,7 @@ The parser is the foundation of everything; it must be **extremely well tested �
 
 ## Constraints carried over
 
-Differential discipline is non-negotiable at every phase; the typing semantics contract (`typing-reference.md`) is unchanged by the rewrite; work stays on the current feature branch; no new pull requests; full-shape invasive changes with fallout fixed in one sweep (see AGENTS.md "Do not think like a human"). Docs are phase deliverables, not afterthoughts: `architecture.md` carries a status note now (the in-house engine is the *current shipped* architecture; this record is the decided direction) and is rewritten at cutover; `structure.md` is replaced when `analysis-legacy` stops being the shape of the code; `testing.md` gains the new harness contract when that harness exists — each in the same session as the change it documents (AGENTS.md).
+Differential discipline is non-negotiable at every phase; the typing semantics contract (`typing-reference.md`) is unchanged by the rewrite; work lands directly on `main` (user directive); no new pull requests; full-shape invasive changes with fallout fixed in one sweep (see AGENTS.md "Do not think like a human"). Docs are phase deliverables, not afterthoughts: `architecture.md` carries a status note now (the in-house engine is the *current shipped* architecture; this record is the decided direction) and is rewritten at cutover; `structure.md` is replaced when `analysis-legacy` stops being the shape of the code; `testing.md` gains the new harness contract when that harness exists — each in the same session as the change it documents (AGENTS.md).
 
 ## Appendix: operational notes for the rewrite (so no session re-derives them)
 
