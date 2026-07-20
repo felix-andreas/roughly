@@ -59,14 +59,14 @@ marked ⚠️ are planned but not yet available.
   - Lint rules — *[full list](/linter#semantics-checks)*
   - Unresolved names — a name nothing defines, an unknown `pkg::` namespace, or a name a package
     does not export, with "did you mean" typo hints (errors under
-    [strict mode](/typing-reference#strict-mode))
+    [strict mode](/typing/reference#strict-mode))
   - Unused local variables — *on by default; opt out via `[check] unused = false`*
   - Type errors and function-call argument mismatches — *opt-in via `[check] typing = true`*
 
 Type *inference* runs by default and powers hover and inlay hints with no configuration. The
 `[check]` switches above only control what `roughly check` reports. See the
-[Typing guide](/typing) for the inference model — structural and nominal types, function
-types, unions, and generics with bounds, all written in [`#:` comments](/typing).
+[Typing guide](/typing/guide) for the inference model — structural and nominal types, function
+types, unions, and generics with bounds, all written in [`#:` comments](/typing/guide).
 
 ### Diagnostics delivery
 

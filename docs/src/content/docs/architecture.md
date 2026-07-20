@@ -4,7 +4,7 @@ description: Implementation architecture of Roughly's analysis stack — the han
 ---
 
 This document is the authoritative implementation architecture for Roughly. The
-[Typing Reference](/typing-reference) is the authoritative user-facing typing
+[Typing Reference](/typing/reference) is the authoritative user-facing typing
 contract; this page defines the implementation boundaries that realize it.
 
 ## Crate graph

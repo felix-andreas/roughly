@@ -14,7 +14,7 @@ regular R.
 
 This page is a guide: it introduces the type system one concept at a time, in the order
 you will meet them in real code. For the full, precise semantics — every coercion,
-operator, and annotation rule — see the [Typing Reference](/typing-reference).
+operator, and annotation rule — see the [Typing Reference](/typing/reference).
 
 ## Start without annotations
 
@@ -169,7 +169,7 @@ f <- function(x) {
 `is.null`, the `is.character`/`is.numeric`/`is.integer`/`is.double`/`is.logical`
 family, `is.function`, and `is.list` all narrow, negation (`!is.null(x)`) swaps the
 branches, and an early exit (`return`, `stop`) carries the surviving type past the
-`if`, as above. The [typing reference](/typing-reference#guard-narrowing) lists the
+`if`, as above. The [typing reference](/typing/reference#guard-narrowing) lists the
 exact rules and limits.
 
 ## The gradual boundary: `Any` and `Unknown`
@@ -399,7 +399,7 @@ A short mental model that explains most behavior you will see:
 
 ## Where to go next
 
-- [Typing Reference](/typing-reference) — the authoritative semantics: every type
+- [Typing Reference](/typing/reference) — the authoritative semantics: every type
   form, operator rule, coercion, and annotation, precisely specified.
 - [Stdlib Stubs](/stdlib-stubs) — how the standard library is typed and how to
   override it per project.

@@ -14,7 +14,7 @@ and not-exported warnings) are supported. Still **proposed / not yet built**: th
 (per-project introspection, §7), R-version keying of the embedded corpus (§8), the stubtest CI
 validator, and structural (non-opaque) `@type` declarations in `.Rtypes`. Sections below mark which
 is which. The authoritative typing contract remains the
-[Typing Reference](/typing-reference); this note describes how the standard library feeds that
+[Typing Reference](/typing/reference); this note describes how the standard library feeds that
 contract.
 :::
 
@@ -82,7 +82,7 @@ contain interior dots (`data.frame`), and a project's own `@type`/`@alias` of th
 the stub type. Consumers of these values keep `Any` parameters (R coerces liberally); the nominals
 tighten *returns*. `$`, `[`, and `[[` on an opaque nominal yield `Unknown` instead of erroring —
 `df$amount` and `df[rows, ]` stay usable, with each access surfaced under strict mode (see the
-[Typing Reference](/typing-reference#nominal-types)). Structural `@type NAME {REPRESENTATION}`
+[Typing Reference](/typing/reference#nominal-types)). Structural `@type NAME {REPRESENTATION}`
 declarations are not expressible in `.Rtypes` — opaque nominals are the stub form.
 
 ### Cross-ecosystem note
@@ -123,7 +123,7 @@ A call to the name commits the **first candidate that accepts the arguments** (s
 `integer` and `sum(1.5, 2.5)` is `double`); the call-site selection rules — probe isolation, the
 unresolved-argument fallback to the last candidate, the two-round literal courtesy, and the no-match
 error — are specified in the Typing Reference under
-[Overload sets](/typing-reference#overload-sets). Non-call uses of the name (passing it as a
+[Overload sets](/typing/reference#overload-sets). Non-call uses of the name (passing it as a
 value) see the first candidate, so the corpus orders each set most-specific first and ends it with
 the most general candidate — conventionally an `Any` fallback, which also keeps mixtures the
 candidates cannot express (`sum(TRUE, 1L)`) from erroring. A project override that redeclares a name
@@ -217,7 +217,7 @@ Two former rows of this table have closed: the type-preserving reductions declar
 [overload sets](#overloads-and-generics), and the element-preserving functions (`rev`, `sort`,
 `unique`, `head`, `tail`, `sample`, `rep`, the set operations) declare generic `T[]` signatures —
 the `T[]` suffix carries the atomic-element bound specified in the Typing Reference under
-[Type parameters](/typing-reference#type-parameters-and-generic-application). Shape-mirroring
+[Type parameters](/typing/reference#type-parameters-and-generic-application). Shape-mirroring
 functions whose *atomic changes* with the input (`nchar`, `toupper` returning the input's shape)
 remain scalar-claim.
 
@@ -250,7 +250,7 @@ override winning a name's type never un-exports it from its declaring namespace.
 - `pkg::name` resolves against the same flat map: the qualified read has the stub's type exactly
   like the bare name, and the per-namespace export table powers the validation warnings (unknown
   namespace; name not exported by that namespace) specified in the Typing Reference under
-  [Namespace access](/typing-reference#namespace-access).
+  [Namespace access](/typing/reference#namespace-access).
 
 ### Conditional namespaces
 

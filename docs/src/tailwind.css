@@ -15,3 +15,13 @@
 Add additional Tailwind styles to this file:
 https://tailwindcss.com/docs/adding-custom-styles#using-custom-css
 */
+
+/*
+The theme's right-sidebar ToC is a custom element (`display: inline` by
+default), so its own `overflow: auto; height: 100%` rules never take effect
+and a long table of contents crops at the viewport instead of scrolling.
+Making it a block restores the intended behavior.
+*/
+starlight-toc {
+	display: block;
+}

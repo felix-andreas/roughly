@@ -72,13 +72,9 @@ For one-off exceptions, prefer a [suppression comment](/linter#suppressing-diagn
 
 Type *inference* always runs — it powers editor features such as hover types, inlay hints, and signature help regardless of these settings. The `[check]` flags only control which diagnostics `roughly check` and your editor surface, so a project that has not adopted annotations is not flooded with messages.
 
-- `typing` — report `type-error` diagnostics, including function-call argument mismatches. See the [Typing guide](/typing). Default `false`. A single file can opt in or out with a top-level `# typing:` comment.
+- `typing` — report `type-error` diagnostics, including function-call argument mismatches. See the [Typing guide](/typing/guide). Default `false`. A single file can opt in or out with a top-level `# typing:` comment.
 - `unused` — report assignments whose value is never read (`unused` diagnostics): locals inside functions everywhere, and top-level script bindings no later statement or nested function reads. **Default `true`** — set `unused = false` to opt out.
-- `strict` — report each site with a genuinely undetermined (`Unknown`) type — an unsupported construct or a reference to a binding with no known type. See [strict mode](/typing-reference#strict-mode). Default `false`. A single file can override both switches with a top-level `# typing: on|off|strict` comment (see [the per-file directive](/typing-reference#per-file-directive)).
-
-## Debugging — top-level `debug`
-
-- `debug` — surface internal analysis facts, such as a "Debug" section in editor hovers showing the lowered representation. A developer aid for working on Roughly itself. Default `false`.
+- `strict` — report each site with a genuinely undetermined (`Unknown`) type — an unsupported construct or a reference to a binding with no known type. See [strict mode](/typing/reference#strict-mode). Default `false`. A single file can override both switches with a top-level `# typing: on|off|strict` comment (see [the per-file directive](/typing/reference#per-file-directive)).
 
 ## Invalid Configuration
 

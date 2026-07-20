@@ -6,6 +6,11 @@ import starlightThemeBlack from 'starlight-theme-black'
 
 // https://astro.build/config
 export default defineConfig({
+	// The typing pages moved under /typing/; published links keep working.
+	redirects: {
+		'/typing': '/typing/guide',
+		'/typing-reference': '/typing/reference',
+	},
 	integrations: [
 		starlight({
 			title: 'Roughly',
@@ -33,8 +38,8 @@ export default defineConfig({
 				{
 					label: 'Typing',
 					items: [
-						{ slug: 'typing' },
-						{ slug: 'typing-reference' },
+						{ slug: 'typing/guide' },
+						{ slug: 'typing/reference' },
 						{ slug: 'stdlib-stubs' },
 					],
 				},
@@ -62,7 +67,7 @@ export default defineConfig({
 						},
 						{
 							label: 'Typing',
-							link: '/typing',
+							link: '/typing/guide',
 						},
 						{
 							label: 'Linter',

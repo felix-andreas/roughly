@@ -73,6 +73,15 @@ The real-world corpus some suites and all measurement instruments use is fetched
 `scripts/corpus-manifest.txt`). The performance and memory instruments live in
 `legacy/differential/tests/test_stats.rs` and are documented on the [Testing](/testing) page.
 
+## Debug mode
+
+`roughly server --debug` surfaces internal analysis facts in the editor — hovers gain a "Debug"
+section with the Lowering, Naming, and Parsing views of the expression under the cursor.
+`ROUGHLY_DEBUG=1` in the server's environment is the equivalent for setups where editing the
+server's arguments is awkward; the flag takes precedence. This is deliberately **not** a
+`roughly.toml` key: the config file is user-facing contract, and this switch is an aid for people
+working on Roughly itself.
+
 ## Diagnosing a slow workspace
 
 `roughly debug analysis-stats [path]` runs the full analysis pipeline over a workspace through the
