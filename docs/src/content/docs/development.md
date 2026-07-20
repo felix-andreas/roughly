@@ -34,6 +34,21 @@ Zed).
 
 ## Build and test
 
+The repo-root `justfile` names every day-to-day action; `just` (with no arguments) lists them.
+The ones that matter most:
+
+```sh
+just gate                # the per-slice gate: battery + clippy -D warnings + fmt check
+just battery             # every suite of both stacks (the differential arms included)
+just fixture <group__case>          # one focused fixture case
+just bless -p semantics --test ...  # re-bless fixture expectations (review the diff!)
+just fuzz-differential   # the seeded cross-stack fuzz arm (FUZZ_ITERS scales)
+just corpus-differential # the real-file corpus instrument (fetch the corpus first)
+just stats <path>        # the workspace performance diagnosis
+```
+
+The raw commands, for environments without `just`:
+
 ```sh
 cargo build                                   # the product crate (workspace default member)
 cargo test                                    # the product crate's suites

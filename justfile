@@ -14,14 +14,63 @@ rofy *args:
 test *args:
     cargo test -- --nocapture {{ args }}
 
-test-docs:
-    cargo test --test test_format -- --no-capture docs
+# The full per-slice gate: every suite of both stacks (differential arms
+# included), clippy at -D warnings, and a formatting check. Green gate =
+# landable change.
+gate: battery clippy fmt-check
 
-test-analysis filter="" *args:
-    FIXTURE_FILTER={{ filter }} cargo nextest run -p analysis --test test_fixtures {{ args }}
+# The workspace test battery. `rofy` needs a local R installation and
+# `zed_roughly` a wasm toolchain, so this and CI exclude them.
+battery *args:
+    cargo test --workspace --exclude rofy --exclude zed_roughly {{ args }}
 
-bench *args:
-    cargo test --release -p analysis --test test_benchmark -- --ignored --nocapture {{ args }}
+clippy:
+    cargo clippy --workspace --exclude rofy --exclude zed_roughly --all-targets -- -D warnings
+
+fmt-check:
+    cargo fmt --all --check
+
+# One focused fixture case, e.g.
+#   just fixture pipes__pipe_chains_type_end_to_end
+#   just fixture datatable__declared_dependency_activates_the_stub test_typing_fixtures
+# (`binary` is the suite's test target; testing.md lists them per crate.)
+fixture case binary="test_typing_fixtures" package="semantics":
+    FIXTURE_FILTER={{ case }} cargo test -p {{ package }} --test {{ binary }} -- --nocapture
+
+# Re-bless fixture expectations for the given test selection, e.g.
+#   just bless -p semantics --test test_typing_fixtures
+bless *args:
+    ROUGHLY_BLESS=1 cargo test {{ args }}
+
+# Regenerate docs/formatter.md from the template through the shipping formatter.
+format-docs:
+    ROUGHLY_BLESS=1 cargo test -p format --test test_format_docs
+
+# Seeded fuzz arms beyond the bounded passes already inside `cargo test -p
+# semantics`: the cross-stack fuzz differential and the deep single-stack run.
+# `FUZZ_ITERS` scales both budgets.
+fuzz-differential *args:
+    cargo test -p differential --test test_fuzz_differential {{ args }}
+
+fuzz-deep:
+    cargo test -p semantics --test test_fuzz fuzz_deep -- --ignored --nocapture
+
+# Coverage-guided libFuzzer targets (parse | format | semantics) — nightly
+# toolchain; seed the corpus first with scripts/seed-fuzz-corpus.sh.
+fuzz-run target="semantics" *args:
+    cargo +nightly fuzz run {{ target }} {{ args }}
+
+# The real-file corpus instruments (fetch once with scripts/fetch-corpus.sh):
+# review material, not gates — only new-stack panics fail.
+corpus-differential:
+    cargo test -p differential -- --ignored differential_corpus --nocapture
+
+corpus-format-differential:
+    cargo test -p differential --test test_format_differential -- --ignored --nocapture
+
+# The workspace performance diagnosis (phase timings, memory, typing bursts).
+stats path=".":
+    cargo run -q -p roughly -- debug analysis-stats {{ path }}
 
 docs:
     cd docs && bun dev
@@ -144,8 +193,15 @@ publish-github $version:
     #!/usr/bin/env bash
     set -euo pipefail
 
+    # `release-kind` is the single source of truth for the channel: alpha/beta
+    # versions (and the bare git revisions `publish-commit` uses) are marked
+    # pre-release on GitHub exactly as they are on the marketplace.
+    prerelease_flag=""
+    if [ "$(just release-kind $version)" = "pre-release" ]; then
+    	prerelease_flag="--prerelease"
+    fi
     git push
-    gh release create $version \
+    gh release create $version $prerelease_flag \
     	"release/$version/roughly-x86_64-unknown-linux-gnu.tar.gz#Roughly CLI (linux-x64)" \
     	"release/$version/roughly-aarch64-apple-darwin.tar.gz#Roughly CLI (darwin-arm64)" \
     	"release/$version/roughly-x86_64-pc-windows-gnu.zip#Roughly CLI (win32-x64)" \
