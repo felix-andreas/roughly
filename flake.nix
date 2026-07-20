@@ -70,8 +70,8 @@
               (craneLib.fileset.commonCargoSources unfilteredRoot)
               # Non-Rust files pulled in by `include_str!` / tests that
               # `commonCargoSources` filters out and must be added explicitly.
-              ./crates/analysis/stubs
-              ./crates/roughly/tests/format
+              ./crates/semantics/stubs
+              ./crates/format/tests/format
             ];
           };
 
