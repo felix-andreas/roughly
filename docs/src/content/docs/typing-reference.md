@@ -2266,16 +2266,22 @@ The class is a real type: it flows through chains (`DT[a > 1][, .(m = mean(b)), 
 Column-level knowledge (element types, membership checks, `:=` evolution) is deliberately out of
 scope for now.
 
-#### The data.table stub namespace is conditional
+#### Conditional stub namespaces: data.table and dplyr
 
-Shipped stubs for `data.table` (the `data.table` nominal, `fread`, the `set*()` family, and the
-rest of the high-traffic surface) exist but do **not** join the resolution universe by default —
-R does not attach data.table by default either, and its names must not steal typo warnings in
-projects that never use it. The namespace activates when the project declares the package —
-a `DESCRIPTION` dependency field or any `NAMESPACE` `import`/`importFrom` naming it — or when
-any project file attaches it with a `library()` / `require()` / `requireNamespace()` /
-`loadNamespace()` call whose package argument is a literal name or string. While inactive, the
-namespace behaves exactly like any package the stub corpus does not describe.
+Shipped stubs for `data.table` (the `data.table` nominal, `fread`, the `set*()` family) and
+`dplyr` (the `@masked` verb set, joins, the tidy-select helpers and verb vocabulary) exist but do
+**not** join the resolution universe by default — R does not attach these packages by default
+either, and their names must not steal typo warnings in projects that never use them. A
+conditional namespace activates when the project declares the package — a `DESCRIPTION`
+dependency field or any `NAMESPACE` `import`/`importFrom` naming it — when any project file
+attaches it with a `library()` / `require()` / `requireNamespace()` / `loadNamespace()` call
+whose package argument is a literal name or string, or when the project ships its own
+`stubs/<pkg>.Rtypes` override for the namespace. While inactive, the namespace behaves exactly
+like any package the stub corpus does not describe.
+
+The shipped dplyr verbs preserve their data argument's class (`<T> fn(.data: T, ...) -> T`), so
+a native-pipe chain keeps its class end to end — `fread(path) |> mutate(r = a / b)` stays a
+`data.table` — while every column reference inside the verbs' `...` stays masked.
 
 A project `.Rtypes` stub can declare its own masking function with the `@masked` attribute —
 the way to teach Roughly a dplyr-style verb:
@@ -2287,8 +2293,10 @@ mutate : @masked fn(.data: Any, ...: Any) -> Any
 
 Calls to a `@masked` name (bare or `pkg::name`) evaluate the arguments the `...` rest parameter
 absorbs inside the data's frame: bare names there are column references. Arguments matching the
-declared formals (`.data` above) resolve normally, a locally defined function of the same name
-masks nothing, and `@masked` on a non-variadic declaration is a stub error.
+formals declared before the `...` (`.data` above) resolve normally, by position or by name; a
+declaration whose only parameter is `...` (`join_by : @masked fn(...: Any) -> Any`) masks every
+argument. A locally defined function of the same name masks nothing, and `@masked` on a
+non-variadic declaration is a stub error.
 
 For dynamic bindings outside any recognized mask, the ecosystem-standard escape hatch works: a
 top-level `globalVariables(c("a", "b"))` / `utils::globalVariables(...)` call (literal string

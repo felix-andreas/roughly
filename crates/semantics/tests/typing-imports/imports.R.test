@@ -35,7 +35,7 @@ f: <T> fn(x: T) -> Unknown
 #description Imports: dplyr
 f <- function(d) dplyr::mutate(d, x = 1)
 #++++
-f: <T> fn(d: T) -> Unknown
+f: <T> fn(d: T) -> T
 
 #---- undeclared_namespaces_still_warn
 f <- function(d) dplyr::mutate(d, x = 1)
@@ -47,7 +47,7 @@ f: <T> fn(d: T) -> Unknown
 #namespace importFrom(dplyr, mutate)
 f <- function(d) dplyr::filter(d)
 #++++
-f: <T> fn(d: T) -> Unknown
+f: <T> fn(d: T) -> T
 
 #==== datatable
 #---- declared_dependency_activates_the_stub
@@ -120,3 +120,40 @@ wrong <- function(path) fread(path)[, .(m = 1)]
 #++++
 wrong: Unknown
 91..114 error[type-mismatch] expected `integer`, found `data.table`
+
+#==== dplyr
+#---- verbs_mask_columns_and_preserve_the_class
+#description Imports: dplyr
+report <- function(df) {
+  df |> filter(cyl > 4) |> mutate(ratio = mpg / wt)
+}
+#++++
+report: <T> fn(df: T) -> T
+
+#---- verbs_keep_a_data_table_typed_subject
+#description Imports: data.table, dplyr
+enrich <- function(path) fread(path) |> mutate(r = a / b)
+#++++
+enrich: fn(path: character) -> data.table
+
+#---- join_by_masks_every_argument
+#description Imports: dplyr
+spec <- function() join_by(id == key)
+merged <- function(a, b) left_join(a, b, by = spec())
+#++++
+spec: fn() -> Any
+merged: <T, U> fn(a: T, b: U) -> T
+
+#---- select_helpers_and_verb_vocabulary_resolve
+#description Imports: dplyr
+pick_cols <- function(df) select(df, starts_with("mpg"), everything())
+counts <- function(df) summarise(df, total = n())
+#++++
+pick_cols: <T> fn(df: T) -> T
+counts: <T> fn(df: T) -> T
+
+#---- inactive_dplyr_stays_dark
+f <- function(df) mutate(df, x = 1)
+#++++
+f: <T> fn(df: T) -> Unknown
+18..24 warning[unresolved] I could not resolve `mutate` in this package, its imports, or builtins.

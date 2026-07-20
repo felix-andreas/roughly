@@ -254,16 +254,19 @@ override winning a name's type never un-exports it from its declaring namespace.
 
 ### Conditional namespaces
 
-Some shipped stubs describe packages R does **not** attach by default — today `data.table`. Folding
-them in unconditionally would let `fread` resolve (and steal a typo warning) in projects that never
-use data.table, so a conditional namespace joins the assembly only when the project uses the
-package:
+Some shipped stubs describe packages R does **not** attach by default — today `data.table` and
+`dplyr`. Folding them in unconditionally would let `fread` or `mutate` resolve (and steal a typo
+warning) in projects that never use them, so a conditional namespace joins the assembly only when
+the project uses the package:
 
 - a `DESCRIPTION` dependency field (`Depends`/`Imports`/`Suggests`/`Enhances`) names it, or any
   `NAMESPACE` `import`/`importFrom` uses it as a source, or
 - any project file attaches or loads it — a `library()` / `require()` / `requireNamespace()` /
   `loadNamespace()` call whose package argument is a literal name or string, anywhere in the file
-  (the signal script workspaces have, since only packages carry metadata files).
+  (the signal script workspaces have, since only packages carry metadata files), or
+- the project ships its own `stubs/<pkg>.Rtypes` override for the namespace — writing one is
+  itself the clearest declaration that the project uses the package, and the override then folds
+  over the shipped declarations as usual.
 
 While inactive the namespace is simply absent: its names warn as unresolved, `pkg::` reads behave
 like any stub-less package, and its `@type` nominals are unknown type names. The hosts keep the

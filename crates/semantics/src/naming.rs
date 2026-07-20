@@ -22,7 +22,7 @@
 //! the unused-parameter lint.
 
 use crate::hir::{Argument, AssignSpelling, ExprId, ExpressionKind, Module, UnaryOperator};
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use std::collections::{BTreeMap, BTreeSet};
 use syntax::TextRange;
 
@@ -114,16 +114,18 @@ pub struct ItemNaming {
 /// Resolve one item's HIR. The item's own top-level assignment target (if any)
 /// becomes a `TopLevel` binding; everything below follows the slot model.
 pub fn resolve_item(module: &Module) -> ItemNaming {
-    resolve_item_with_masked_verbs(module, &FxHashSet::default())
+    resolve_item_with_masked_verbs(module, &FxHashMap::default())
 }
 
-/// Like [`resolve_item`], with the stub corpus's `@masked` verb names: a call
-/// to one of them (bare or `pkg::name`, unless locally shadowed) evaluates
-/// every argument after the data in the data's frame, so those reads stay
-/// quiet like the base masking family's.
+/// Like [`resolve_item`], with the stub corpus's `@masked` verbs: a call to
+/// one of them (bare or `pkg::name`, unless locally shadowed) evaluates the
+/// arguments its `...` absorbs in the data's frame, so those reads stay
+/// quiet like the base masking family's. Each verb maps to the names of its
+/// formals declared before the `...` — the data arguments, which resolve
+/// normally by position or name; an empty list masks every argument.
 pub fn resolve_item_with_masked_verbs(
     module: &Module,
-    masked_verbs: &FxHashSet<String>,
+    masked_verbs: &FxHashMap<String, Vec<String>>,
 ) -> ItemNaming {
     let mut context = Context {
         module,
@@ -202,8 +204,10 @@ struct AssignmentWrite {
 
 struct Context<'a> {
     module: &'a Module,
-    /// Stub-declared `@masked` verb names (dplyr-style data-masking `...`).
-    masked_verbs: &'a FxHashSet<String>,
+    /// Stub-declared `@masked` verbs (dplyr-style data-masking `...`),
+    /// mapped to the formal names declared before the `...` — the data
+    /// arguments, which resolve normally.
+    masked_verbs: &'a FxHashMap<String, Vec<String>>,
     next_binding: u32,
     scopes: Vec<Scope>,
     /// Loop re-walks must mint no new ids: one binding per (site, name).
@@ -366,35 +370,58 @@ impl Context<'_> {
                     }
                     return;
                 }
-                // The base masking family evaluates every argument after the
-                // data inside the data's frame; a locally defined function of
-                // the same name masks nothing.
-                let masking_family = match &self.module.expression(*callee).kind {
-                    ExpressionKind::NameRef(name) => {
-                        (matches!(name.as_str(), "with" | "within" | "subset" | "transform")
-                            || self.masked_verbs.contains(name))
-                            && !self.naming.resolutions.contains_key(callee)
-                    }
-                    // Namespace access cannot be shadowed by a local binding.
-                    ExpressionKind::Namespace {
-                        name: Some(name), ..
-                    } => self.masked_verbs.contains(name),
-                    _ => false,
-                };
-                if masking_family {
-                    let mut argument_iter = arguments.iter();
-                    if let Some(data) = argument_iter.next()
-                        && let Some(value) = data.value
+                // A masking call evaluates the arguments its `...` absorbs
+                // inside the data's frame; arguments matching the declared
+                // data formals (by position or name) resolve normally. The
+                // base family takes one data argument (`data` for the
+                // `with` pair, `x` for `subset`/`transform`); a locally
+                // defined function of the same name masks nothing.
+                let masking_family: Option<Vec<&str>> = match &self.module.expression(*callee).kind
+                {
+                    ExpressionKind::NameRef(name)
+                        if !self.naming.resolutions.contains_key(callee) =>
                     {
-                        self.resolve(value);
-                    }
-                    self.quiet_depth += 1;
-                    for argument in argument_iter {
-                        if let Some(value) = argument.value {
-                            self.resolve(value);
+                        match name.as_str() {
+                            "with" | "within" => Some(vec!["data"]),
+                            "subset" | "transform" => Some(vec!["x"]),
+                            _ => self
+                                .masked_verbs
+                                .get(name)
+                                .map(|leading| leading.iter().map(String::as_str).collect()),
                         }
                     }
-                    self.quiet_depth -= 1;
+                    // Namespace access cannot be shadowed by a local
+                    // binding.
+                    ExpressionKind::Namespace {
+                        name: Some(name), ..
+                    } => self
+                        .masked_verbs
+                        .get(name)
+                        .map(|leading| leading.iter().map(String::as_str).collect()),
+                    _ => None,
+                };
+                if let Some(leading) = masking_family {
+                    let mut positional_index = 0;
+                    for argument in arguments {
+                        let data_argument = match &argument.name {
+                            Some(name) => leading.contains(&name.as_str()),
+                            None => {
+                                let index = positional_index;
+                                positional_index += 1;
+                                index < leading.len()
+                            }
+                        };
+                        let Some(value) = argument.value else {
+                            continue;
+                        };
+                        if data_argument {
+                            self.resolve(value);
+                        } else {
+                            self.quiet_depth += 1;
+                            self.resolve(value);
+                            self.quiet_depth -= 1;
+                        }
+                    }
                 } else {
                     self.resolve_arguments(arguments);
                 }

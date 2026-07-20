@@ -28,8 +28,12 @@ pub struct StubLibrary<'db> {
     pub schemes: FxHashMap<String, Vec<TypeScheme<'db>>>,
     /// Opaque nominal type names (`@type data.frame`).
     pub nominals: FxHashSet<String>,
-    /// Variadic functions whose `...` arguments are data-masked.
-    pub masked: FxHashSet<String>,
+    /// Variadic functions whose `...` arguments are data-masked, mapped to
+    /// the names of the formals declared BEFORE the `...`: arguments
+    /// matching those formals (by position or name) resolve normally, and
+    /// everything the rest parameter absorbs is masked. An empty list means
+    /// every argument masks (`join_by(...)`-style vocabulary).
+    pub masked: FxHashMap<String, Vec<String>>,
     /// Declared names per namespace. Declaration-level, not winner-level: a
     /// later source overriding a name's type does not un-export it from the
     /// namespace that declared it.
@@ -80,6 +84,7 @@ pub fn shipped_stub_sources() -> Vec<(String, String)> {
         ("graphics", include_str!("../stubs/graphics.Rtypes")),
         ("grDevices", include_str!("../stubs/grDevices.Rtypes")),
         ("data.table", include_str!("../stubs/data.table.Rtypes")),
+        ("dplyr", include_str!("../stubs/dplyr.Rtypes")),
     ]
     .into_iter()
     .map(|(namespace, text)| (namespace.to_owned(), text.to_owned()))
@@ -88,16 +93,28 @@ pub fn shipped_stub_sources() -> Vec<(String, String)> {
 
 /// Shipped namespaces R does not attach by default: their declarations join
 /// the library only when the project declares or attaches the package
-/// (`metadata::namespace_active`), so `fread` never resolves — and never
-/// steals a typo warning — in a project that does not use data.table.
-pub const CONDITIONAL_NAMESPACES: &[&str] = &["data.table"];
+/// (`metadata::namespace_active`), so `fread` and `mutate` never resolve —
+/// and never steal a typo warning — in a project that does not use them.
+pub const CONDITIONAL_NAMESPACES: &[&str] = &["data.table", "dplyr"];
 
 /// Parse and lower every stub source into the interned library.
 #[salsa::tracked(returns(ref))]
 pub fn stub_library<'db>(db: &'db dyn Db, sources: StubSources) -> StubLibrary<'db> {
+    // A namespace declared by more than one source carries a PROJECT
+    // override on top of the shipped file — and writing `stubs/dplyr.Rtypes`
+    // is itself the clearest declaration that the project uses the package,
+    // so it activates the conditional namespace like metadata would.
+    let mut seen_namespaces: FxHashSet<&str> = FxHashSet::default();
+    let mut project_overridden: FxHashSet<&str> = FxHashSet::default();
+    for (namespace, _) in sources.sources(db) {
+        if !seen_namespaces.insert(namespace.as_str()) {
+            project_overridden.insert(namespace.as_str());
+        }
+    }
     let mut library = StubLibrary::default();
     for (namespace, text) in sources.sources(db) {
         if CONDITIONAL_NAMESPACES.contains(&namespace.as_str())
+            && !project_overridden.contains(namespace.as_str())
             && !crate::metadata::namespace_active(db, namespace)
         {
             continue;
@@ -130,13 +147,18 @@ pub fn stub_library<'db>(db: &'db dyn Db, sources: StubSources) -> StubLibrary<'
             if name.is_empty() || !is_stub_name(name) {
                 continue;
             }
-            if let Some(rest) = type_text.strip_prefix("@masked") {
+            let masked = if let Some(rest) = type_text.strip_prefix("@masked") {
                 type_text = rest.trim_start();
-                library.masked.insert(name.to_owned());
-            }
+                true
+            } else {
+                false
+            };
             let Some(scheme) = lower_type_text(db, type_text) else {
                 continue;
             };
+            if masked && let Some(leading) = masked_leading_formals(db, &scheme) {
+                library.masked.insert(name.to_owned(), leading);
+            }
             namespace_exports.insert(name.to_owned());
             if seen_here.insert(name) {
                 library.schemes.insert(name.to_owned(), vec![scheme]);
@@ -146,6 +168,25 @@ pub fn stub_library<'db>(db: &'db dyn Db, sources: StubSources) -> StubLibrary<'
         }
     }
     library
+}
+
+/// The names of a masked declaration's formals before its `...`, in
+/// declaration order — the arguments that resolve normally at a masked call
+/// (the data arguments). `None` when the scheme is not a variadic function
+/// (the declaration-level error `stub_source_problems` reports; the loader
+/// simply skips the mask).
+fn masked_leading_formals(db: &dyn Db, scheme: &TypeScheme<'_>) -> Option<Vec<String>> {
+    let crate::types::TyKind::Function(function) = scheme.body.kind(db) else {
+        return None;
+    };
+    let variadic = function.variadic.as_ref()?;
+    let leading = function.named.get(..variadic.preceding_named)?;
+    Some(
+        leading
+            .iter()
+            .map(|field| field.name.text(db).to_owned())
+            .collect(),
+    )
 }
 
 /// The library assembled from the singleton input (`None` when unset).

@@ -113,17 +113,23 @@ zero false positives.
 3. Column vocabulary + membership checks (idea 3, gated on question 3's
    row-type design), with `:=` evolution under the lower-bound model (idea 2).
 
-## dplyr (second)
+## dplyr (second) — verb level SHIPPED
 
-- The verb set is already suppressed via `@masked`. Contracts (step 1) give the
-  data-argument/masked-argument pairing; membership checks then reuse the same
-  column-vocabulary machinery, with `.data$x` / `.env$x` pronouns resolving
-  exactly.
-- Result shapes are *harder* than data.table's: `mutate` extends, `summarise`
-  collapses groups, `select` projects — each needs record extension/projection
-  on the row type. Same machinery as `:=` evolution, but per-verb in stubs, not
-  in bracket syntax.
-- Tidy-eval injection (`!!`, `{{ }}`, `across()`) stays refused indefinitely.
+- **Shipped:** a conditional `dplyr` stub namespace declares the verb set
+  `@masked` with class-preserving signatures (`<T> fn(.data: T, ...) -> T`),
+  joins preserving the left class, `join_by` as a zero-formal mask (every
+  argument is a column reference), and the tidy-select/verb vocabulary. The
+  `@masked` contract is formal-aware (the formals declared before `...`
+  resolve normally, by position or name — the data-argument pairing the
+  contract-language step wanted is in the stub grammar already). With the
+  native-pipe desugar, `fread(path) |> mutate(r = a / b)` keeps its class end
+  to end.
+- Remaining: column *membership* checks reuse the future column-vocabulary
+  machinery, with `.data$x` / `.env$x` pronouns resolving exactly; per-verb
+  result shapes on row types (`mutate` extends, `summarise` collapses,
+  `select` projects) come with design question 3.
+- Tidy-eval injection (`!!`, `{{ }}`) stays refused indefinitely (`across()`
+  is declared `Any` and its arguments stay masked).
 
 ## ompr / builder EDSLs (suppress only)
 

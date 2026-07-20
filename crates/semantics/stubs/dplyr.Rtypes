@@ -1,0 +1,90 @@
+# dplyr — a CONDITIONAL namespace (like data.table): these declarations join
+# resolution only when the project declares dplyr (DESCRIPTION/NAMESPACE) or a
+# file attaches it (`library(dplyr)` family).
+#
+# The verbs are `@masked`: the arguments their `...` absorbs evaluate inside
+# the data's frame, so bare column names there are never "unresolved", while
+# the declared `.data` argument resolves normally. Verbs preserve the data
+# argument's class (`<T> ... -> T`), which keeps native-pipe chains typed end
+# to end. Tidy-eval injection (`!!`, `{{ }}`) is out of static reach — those
+# arguments simply stay masked.
+
+filter : @masked <T> fn(.data: T, ...: Any) -> T
+mutate : @masked <T> fn(.data: T, ...: Any) -> T
+transmute : @masked <T> fn(.data: T, ...: Any) -> T
+select : @masked <T> fn(.data: T, ...: Any) -> T
+arrange : @masked <T> fn(.data: T, ...: Any) -> T
+summarise : @masked <T> fn(.data: T, ...: Any) -> T
+summarize : @masked <T> fn(.data: T, ...: Any) -> T
+reframe : @masked <T> fn(.data: T, ...: Any) -> T
+group_by : @masked <T> fn(.data: T, ...: Any) -> T
+ungroup : @masked <T> fn(x: T, ...: Any) -> T
+rowwise : @masked <T> fn(data: T, ...: Any) -> T
+distinct : @masked <T> fn(.data: T, ...: Any) -> T
+count : @masked <T> fn(x: T, ...: Any) -> T
+add_count : @masked <T> fn(x: T, ...: Any) -> T
+tally : @masked <T> fn(x: T, ...: Any) -> T
+slice : @masked <T> fn(.data: T, ...: Any) -> T
+slice_head : @masked <T> fn(.data: T, ...: Any) -> T
+slice_tail : @masked <T> fn(.data: T, ...: Any) -> T
+slice_min : @masked <T> fn(.data: T, ...: Any) -> T
+slice_max : @masked <T> fn(.data: T, ...: Any) -> T
+slice_sample : @masked <T> fn(.data: T, ...: Any) -> T
+rename : @masked <T> fn(.data: T, ...: Any) -> T
+rename_with : @masked <T> fn(.data: T, ...: Any) -> T
+relocate : @masked <T> fn(.data: T, ...: Any) -> T
+pull : @masked fn(.data: Any, ...: Any) -> Any
+glimpse : <T> fn(x: T, ...: Any) -> T
+bind_rows : fn(...: Any) -> Any
+bind_cols : fn(...: Any) -> Any
+
+# Joins preserve the left side's class; `by =` takes strings or `join_by()`,
+# whose arguments are all column references (zero data formals — everything
+# masks).
+left_join : @masked <T> fn(x: T, y: Any, ...: Any) -> T
+right_join : @masked <T> fn(x: T, y: Any, ...: Any) -> T
+inner_join : @masked <T> fn(x: T, y: Any, ...: Any) -> T
+full_join : @masked <T> fn(x: T, y: Any, ...: Any) -> T
+semi_join : @masked <T> fn(x: T, y: Any, ...: Any) -> T
+anti_join : @masked <T> fn(x: T, y: Any, ...: Any) -> T
+cross_join : @masked <T> fn(x: T, y: Any, ...: Any) -> T
+join_by : @masked fn(...: Any) -> Any
+
+# Vocabulary used inside verbs (legal there; calling them outside a verb is a
+# runtime error R reports, not a resolution question).
+n : fn() -> integer
+row_number : fn([x]: Any) -> integer[]
+min_rank : fn(x: Any) -> integer[]
+dense_rank : fn(x: Any) -> integer[]
+percent_rank : fn(x: Any) -> double[]
+cume_dist : fn(x: Any) -> double[]
+ntile : fn([x]: Any, [n]: integer) -> integer[]
+desc : fn(x: Any) -> Any
+lag : <T> fn(x: T, [n]: integer, [default]: Any, ...: Any) -> T
+lead : <T> fn(x: T, [n]: integer, [default]: Any, ...: Any) -> T
+nth : fn(x: Any, n: integer, ...: Any) -> Any
+n_distinct : fn(...: Any, [na.rm]: logical) -> integer
+if_else : <T> fn(condition: logical | logical[], true: T, false: T, ...: Any) -> T
+if_else : fn(condition: Any, true: Any, false: Any, ...: Any) -> Any
+case_when : fn(...: Any) -> Any
+case_match : fn(.x: Any, ...: Any) -> Any
+coalesce : fn(...: Any) -> Any
+between : fn(x: Any, left: Any, right: Any) -> logical[]
+near : fn(x: Any, y: Any, [tol]: double) -> logical[]
+first : fn(x: Any, ...: Any) -> Any
+last : fn(x: Any, ...: Any) -> Any
+across : fn(...: Any) -> Any
+pick : fn(...: Any) -> Any
+c_across : fn(...: Any) -> Any
+
+# tidy-select helpers, called inside `select()`/`across()` masks.
+starts_with : fn(match: character | character[], ...: Any) -> Any
+ends_with : fn(match: character | character[], ...: Any) -> Any
+contains : fn(match: character | character[], ...: Any) -> Any
+matches : fn(match: character | character[], ...: Any) -> Any
+num_range : fn(prefix: character, range: integer[], ...: Any) -> Any
+all_of : fn(x: character | character[]) -> Any
+any_of : fn(x: character | character[], ...: Any) -> Any
+everything : fn() -> Any
+last_col : fn([offset]: integer, ...: Any) -> Any
+where : fn(predicate: Any) -> Any
