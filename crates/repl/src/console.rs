@@ -81,8 +81,10 @@ impl Console {
 }
 
 fn history_file() -> Option<std::path::PathBuf> {
-    let home = std::env::var_os("HOME")?;
-    let directory = std::path::Path::new(&home).join(".local/share/roughly");
+    // Per-platform data directory (XDG on Linux, Application Support on
+    // macOS, roaming AppData on Windows). Persistence is best-effort: on
+    // failure the editor falls back to in-memory history for the session.
+    let directory = dirs::data_dir()?.join("roughly");
     std::fs::create_dir_all(&directory).ok()?;
     Some(directory.join("history.txt"))
 }

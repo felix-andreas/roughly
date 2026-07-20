@@ -8,6 +8,7 @@ publish = false
 path = "src/repl.rs"
 
 [dependencies]
+dirs = "6"
 libc = "0.2"
 libloading = "0.8"
 nu-ansi-term.workspace = true
