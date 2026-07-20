@@ -222,3 +222,10 @@ f <- function() cumsum(1L)
 #++++
 cumsum: <T> fn(x: T) -> character
 f: fn() -> character
+
+#---- optional_display_formals_work_directly_and_as_callbacks
+f <- function() nchar("word", type = "bytes")
+g <- function() lapply(list("a", "bb"), nchar)
+#++++
+f: fn() -> integer
+g: fn() -> list[integer]
