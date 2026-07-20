@@ -25,8 +25,16 @@ The workspace also contains the **frozen legacy stack** (`legacy/analysis-legacy
 implementation, kept in-tree as the cross-implementation oracle and benchmark baseline for
 `legacy/differential`, which runs every fixture suite through both stacks and compares findings. Do
 not extend the legacy stack, and never share or abstract code between the two stacks — data files
-may be duplicated freely instead. **`crates/rofy`** is a separate experimental R REPL embedding R
-through `extendr`; it is not part of the language-tool pipeline.
+may be duplicated freely instead.
+
+**`crates/repl`** backs `roughly repl`, an interactive R console that embeds the system R
+**without any build-time link dependency**: the R shared library is located (`R_HOME`, or
+`R RHOME` from `PATH`) and loaded at runtime, so the whole workspace builds and its unit tests run
+on machines with no R at all. Only *running* the console needs R. Its end-to-end tests
+(`cargo test -p roughly --test test_repl_e2e`) drive the real binary through a pseudo-terminal and
+skip cleanly where no R exists — run them locally before touching the REPL. The predecessor
+experiment (`legacy/rofy`, which linked R at build time through `extendr`) stays frozen until the
+new console reaches feature parity.
 
 The analysis design is documented in [Architecture](/architecture) and the file layout in
 [Structure](/structure). The editor extensions live under `editors/` (`code` for VS Code, `zed` for

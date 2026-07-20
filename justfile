@@ -72,6 +72,11 @@ corpus-format-differential:
 stats path=".":
     cargo run -q -p roughly -- debug analysis-stats {{ path }}
 
+# The REPL's end-to-end tests: drive `roughly repl` through a pty against the
+# system R. Local-only — they skip (green) on machines without R.
+repl-e2e:
+    cargo test -p roughly --test test_repl_e2e -- --nocapture
+
 docs:
     cd docs && bun dev
 

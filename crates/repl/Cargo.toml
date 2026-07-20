@@ -1,0 +1,18 @@
+[package]
+name = "repl"
+edition = "2024"
+version.workspace = true
+publish = false
+
+[lib]
+path = "src/repl.rs"
+
+[dependencies]
+libc = "0.2"
+libloading = "0.8"
+nu-ansi-term.workspace = true
+reedline.workspace = true
+syntax = { path = "../syntax" }
+
+[dev-dependencies]
+portable-pty = "0.9"

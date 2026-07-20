@@ -35,9 +35,10 @@
 - **Move the typing pages to nested URLs (user ask):** `typing` → `typing/guide` and `typing-reference` → `typing/reference`. Needs: the content files relocated/re-slugged, every internal link updated (other docs pages AND any links emitted from code — grep the crates for `/typing-reference` anchors, e.g. in diagnostics or hover text), sidebar config, and redirects from the old URLs so existing links keep working.
 - (The landing-page hero animation is user-owned — do not touch.)
 
-## Open — REPL (user-initiated, design settled, implementation unscheduled)
+## Open — REPL (v1 shipped; the analysis wiring is the open rung)
 
-- **A first-class REPL replacing rofy, with NO build-time R linkage** — the full design lives in `repl-design.md`: a hand-curated runtime-binding crate (dlopen + eager per-symbol resolution, `has::` probes for version tolerance, two-phase init around `setup_Rmainloop`), a console host driving R's real REPL through the ReadConsole hook with our parser feeding one expression per read, and the analyzer wired in behind the idle-task seam (typed completions unioned with live-session facts, pre-eval diagnostics). Testing needs one-process-per-test for embedded R; CI keeps R-requiring tests excluded like rofy's.
+- **v1 SHIPPED** (`crates/repl` behind `roughly repl`; `repl-design.md` has the architecture and status): runtime-loaded R (no build-time link — the workspace builds R-less everywhere), reedline console inside the ReadConsole hook, lexer highlighting, conservative completeness with R's continuation as the safety net, SIGINT interrupt routing, pty e2e in the roughly crate (skip-if-no-R, LOCAL-ONLY by user decision — run `cargo test -p roughly --test test_repl_e2e` on a machine with R before REPL-touching changes; no agent container has R, so e2e has never run in-container).
+- **Open — the rung that makes it better than a stock console:** analysis-backed completions (ide completions over the session-as-script, unioned with live-session facts through an idle seam), pre-evaluation diagnostics on pending input, hover on the input line. Then: Windows support, graphics-device story (versioned mirror structs, see the design record).
 
 ## Post-beta (explicitly out of scope for now)
 

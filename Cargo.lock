@@ -1451,6 +1451,8 @@ dependencies = [
  "ide",
  "ignore",
  "indoc",
+ "portable-pty",
+ "repl",
  "salsa",
  "semantics",
  "serde",

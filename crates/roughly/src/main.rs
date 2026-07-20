@@ -28,6 +28,18 @@ fn main() -> ExitCode {
             .unwrap_or_default(),
     );
 
+    // The REPL must run on the MAIN thread: embedded R assumes it owns the
+    // thread it initializes on (stack checking, signal expectations).
+    if matches!(cli.command, Command::Repl) {
+        return match repl::run() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("error: {error}");
+                ExitCode::from(2)
+            }
+        };
+    }
+
     // Commands run on a thread with an explicit large stack rather than the
     // main thread: recursive tree walks need more than a constrained
     // `ulimit -s` main stack provides on the deepest trees the grammar
@@ -61,6 +73,7 @@ fn main() -> ExitCode {
                 exit_code(roughly::stats::analysis_stats(path.as_deref()).map(|()| Outcome::Clean))
             }
         },
+        Command::Repl => unreachable!("handled on the main thread above"),
     };
     std::thread::Builder::new()
         .name("roughly-command".to_owned())
@@ -139,6 +152,8 @@ enum Command {
         #[clap(long, default_value_t = false)]
         debug: bool,
     },
+    /// Start an interactive R console (finds and embeds the system R)
+    Repl,
     /// Debugging and development commands
     #[command(subcommand)]
     Debug(Debug),
