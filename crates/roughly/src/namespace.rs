@@ -1,96 +1,13 @@
-//! R package `NAMESPACE` files are plain R call syntax (`import(pkg)`,
-//! `importFrom(pkg, name)`), so they parse with the ordinary grammar; this
-//! module recognizes the import directives and validates the imported names
-//! against the stub corpus's namespaces. Resolution semantics are
-//! deliberately unchanged — stubbed names already resolve bare — so the value
-//! here is catching import typos against namespaces the stubs actually know.
+//! Host-side NAMESPACE validation: warnings at the import site and the
+//! `unused-import` lint. Parsing lives in `semantics::metadata` (the same
+//! parse also feeds the `PackageMetadata` input so imports resolve bare
+//! reads); this module renders the problems a host reports.
 
 use semantics::diagnostics::{Diagnostic, Severity};
 use semantics::lints::LintLevel;
+pub use semantics::metadata::{NamespaceImport, parse_namespace_imports};
 use std::collections::BTreeSet;
-use syntax::{SyntaxKind, SyntaxNode, TextRange};
-
-pub struct NamespaceImport {
-    pub namespace: String,
-    /// `None` for a whole-namespace `import(pkg)`; `Some` for one
-    /// `importFrom(pkg, name)` name.
-    pub name: Option<String>,
-    pub range: TextRange,
-}
-
-/// The `import`/`importFrom` directives of a NAMESPACE source, in file order.
-/// Directives R would reject (a malformed file, non-name arguments) are
-/// skipped rather than reported: R itself is the authority on NAMESPACE
-/// syntax, and this pass only wants the import facts.
-pub fn parse_namespace_imports(source: &str) -> Vec<NamespaceImport> {
-    let parse = syntax::parse(source);
-    let mut imports = Vec::new();
-    for node in parse.syntax_node().children() {
-        if node.kind() != SyntaxKind::CALL_EXPR {
-            continue;
-        }
-        let Some(callee) = node
-            .children()
-            .find(|child| child.kind() != SyntaxKind::ARGUMENT_LIST)
-        else {
-            continue;
-        };
-        if callee.kind() != SyntaxKind::NAME {
-            continue;
-        }
-        // A named argument (`except = ...`) keeps its name before the value;
-        // the value is the argument's last expression child either way.
-        let values: Vec<SyntaxNode> = node
-            .children()
-            .find(|child| child.kind() == SyntaxKind::ARGUMENT_LIST)
-            .map(|list| {
-                list.children()
-                    .filter(|child| child.kind() == SyntaxKind::ARGUMENT)
-                    .filter_map(|argument| {
-                        argument
-                            .children()
-                            .filter(|child| syntax::ast::is_expression_kind(child.kind()))
-                            .last()
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        match callee.text().to_string().as_str() {
-            "import" => {
-                // `import(pkg, ...)` may list several namespaces; `except =`
-                // keyword arguments are not name values and fall out of the
-                // extraction below.
-                for value in values {
-                    if let Some((namespace, range)) = name_argument(&value) {
-                        imports.push(NamespaceImport {
-                            namespace,
-                            name: None,
-                            range,
-                        });
-                    }
-                }
-            }
-            "importFrom" => {
-                let mut values = values.into_iter();
-                let Some((namespace, _)) = values.next().and_then(|value| name_argument(&value))
-                else {
-                    continue;
-                };
-                for value in values {
-                    if let Some((name, range)) = name_argument(&value) {
-                        imports.push(NamespaceImport {
-                            namespace: namespace.clone(),
-                            name: Some(name),
-                            range,
-                        });
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    imports
-}
+use syntax::SyntaxKind;
 
 /// One warning per `importFrom(pkg, name)` whose namespace the export table
 /// knows but whose name it does not list — the same fact `pkg::name`
@@ -182,26 +99,6 @@ pub fn collect_used_tokens(source: &str, out: &mut BTreeSet<String>) {
                 }
             }
         }
-    }
-}
-
-/// A directive argument that names something: a bare identifier or a string
-/// literal (R accepts both spellings in NAMESPACE files).
-fn name_argument(value: &SyntaxNode) -> Option<(String, TextRange)> {
-    match value.kind() {
-        SyntaxKind::NAME => Some((value.text().to_string(), value.text_range())),
-        SyntaxKind::LITERAL => {
-            let token = value
-                .children_with_tokens()
-                .filter_map(|element| element.into_token())
-                .find(|token| token.kind() == SyntaxKind::STRING)?;
-            let text = token.text();
-            let content = text
-                .trim_start_matches(['"', '\''])
-                .trim_end_matches(['"', '\'']);
-            Some((content.to_owned(), value.text_range()))
-        }
-        _ => None,
     }
 }
 

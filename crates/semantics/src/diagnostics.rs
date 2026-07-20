@@ -238,6 +238,7 @@ pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
             if crate::package_scheme_exists(db, name)
                 || super_globals(db, file).contains(name)
                 || declared_global_variable(db, name)
+                || crate::metadata::imported_bare(db, name)
             {
                 continue;
             }
@@ -736,6 +737,9 @@ fn duplicate_type_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> 
 /// namespace does not declare. No stub corpus means no validation.
 fn namespace_read_message(db: &dyn Db, read: &crate::naming::NamespaceRead) -> Option<String> {
     match crate::stubs::namespace_known(db, &read.package)? {
+        // A declared dependency without stubs is a real package the corpus
+        // simply does not describe — its reads stay quiet, not "unknown".
+        false if crate::metadata::declared_dependency(db, &read.package) => None,
         false => Some(format!("unknown package namespace `{}`.", read.package)),
         true => {
             let name = read.name.as_ref()?;

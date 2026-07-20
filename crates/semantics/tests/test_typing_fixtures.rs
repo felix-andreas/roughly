@@ -24,16 +24,49 @@ fn render_as(source: &str, kind: DocumentKind) -> String {
     semantics::stubs::install_shipped_stubs(&db);
     let file = SourceFile::new(&db, source.to_owned(), kind);
     ProjectFiles::new(&db, vec![file]);
+    render_file(&db, file)
+}
 
+/// Package-metadata cases: leading `#namespace ` lines form the NAMESPACE
+/// source and `#description ` lines the DESCRIPTION source (both stay in the
+/// analyzed text as ordinary comments, so ranges are honest). The suite is
+/// new-stack only — the oracle has no package-metadata concept — so it is
+/// deliberately absent from the differential fixture arm.
+fn render_with_metadata(source: &str) -> String {
+    let db = RootDatabase::default();
+    semantics::stubs::install_shipped_stubs(&db);
+    let mut namespace_source = String::new();
+    let mut description_source = String::new();
+    for line in source.lines() {
+        if let Some(rest) = line.strip_prefix("#namespace ") {
+            namespace_source.push_str(rest);
+            namespace_source.push('\n');
+        } else if let Some(rest) = line.strip_prefix("#description ") {
+            description_source.push_str(rest);
+            description_source.push('\n');
+        }
+    }
+    let imports = semantics::metadata::parse_namespace_imports(&namespace_source);
+    semantics::metadata::PackageMetadata::new(
+        &db,
+        semantics::metadata::normalized_imports(&imports),
+        semantics::metadata::parse_description_dependencies(&description_source),
+    );
+    let file = SourceFile::new(&db, source.to_owned(), DocumentKind::Package);
+    ProjectFiles::new(&db, vec![file]);
+    render_file(&db, file)
+}
+
+fn render_file(db: &RootDatabase, file: SourceFile) -> String {
     let mut output = String::new();
-    for item in item_tree(&db, file) {
-        if !matches!(*item.kind(&db), ItemKind::Function | ItemKind::Value) {
+    for item in item_tree(db, file) {
+        if !matches!(*item.kind(db), ItemKind::Function | ItemKind::Value) {
             continue;
         }
-        let Some(name) = item.name(&db).clone() else {
+        let Some(name) = item.name(db).clone() else {
             continue;
         };
-        let Some(check) = item_check(&db, item) else {
+        let Some(check) = item_check(db, item) else {
             continue;
         };
         let Some(scheme) = check.scheme else {
@@ -42,10 +75,10 @@ fn render_as(source: &str, kind: DocumentKind) -> String {
         let mut renderer = TypeRenderer::default();
         output.push_str(&name);
         output.push_str(": ");
-        output.push_str(&renderer.render_scheme(&db, &scheme));
+        output.push_str(&renderer.render_scheme(db, &scheme));
         output.push('\n');
     }
-    for diagnostic in file_diagnostics(&db, file) {
+    for diagnostic in file_diagnostics(db, file) {
         let severity = match diagnostic.severity {
             Severity::Error => "error",
             Severity::Warning => "warning",
@@ -65,6 +98,12 @@ fn render_as(source: &str, kind: DocumentKind) -> String {
 fn typing_fixtures() {
     let suite = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/typing");
     syntax::testing::run_fixture_suite(&suite, &render);
+}
+
+#[test]
+fn typing_import_fixtures() {
+    let suite = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/typing-imports");
+    syntax::testing::run_fixture_suite(&suite, &render_with_metadata);
 }
 
 /// The same pipeline over script documents: one sequential top-down scope.

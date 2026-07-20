@@ -400,6 +400,7 @@ impl Worker {
             prime_queue: VecDeque::new(),
         };
         worker.install_stubs();
+        worker.install_metadata();
         worker.load_workspace_sources();
 
         let result = initialize_result(encoding, worker.experimental_features);
@@ -438,6 +439,61 @@ impl Worker {
             }
         }
         semantics::stubs::StubSources::new(&self.db, sources);
+    }
+
+    /// The current NAMESPACE/DESCRIPTION facts: the open NAMESPACE buffer
+    /// wins over the on-disk file; DESCRIPTION is read from disk (it is not
+    /// a tracked document — saves arrive through the file watcher).
+    fn current_metadata(
+        &self,
+    ) -> (
+        Vec<(String, Option<String>)>,
+        std::collections::BTreeSet<String>,
+    ) {
+        let namespace_path = self.workspace_root.join("NAMESPACE");
+        let namespace_text = self
+            .namespace_documents
+            .get(&namespace_path)
+            .cloned()
+            .or_else(|| std::fs::read_to_string(&namespace_path).ok());
+        let imports = namespace_text
+            .as_deref()
+            .map(|text| {
+                semantics::metadata::normalized_imports(
+                    &semantics::metadata::parse_namespace_imports(text),
+                )
+            })
+            .unwrap_or_default();
+        let dependencies = std::fs::read_to_string(self.workspace_root.join("DESCRIPTION"))
+            .ok()
+            .map(|text| semantics::metadata::parse_description_dependencies(&text))
+            .unwrap_or_default();
+        (imports, dependencies)
+    }
+
+    fn install_metadata(&mut self) {
+        let (imports, dependencies) = self.current_metadata();
+        semantics::metadata::PackageMetadata::new(&self.db, imports, dependencies);
+    }
+
+    /// Re-derives the metadata input; on a real change every file's
+    /// resolution universe moved, so all diagnostics refresh.
+    fn refresh_metadata(&mut self) {
+        let (imports, dependencies) = self.current_metadata();
+        let Some(metadata) = semantics::metadata::PackageMetadata::try_get(&self.db) else {
+            semantics::metadata::PackageMetadata::new(&self.db, imports, dependencies);
+            self.refresh_all_diagnostics();
+            return;
+        };
+        let changed = metadata.imports(&self.db) != &imports
+            || metadata.dependencies(&self.db) != &dependencies;
+        if !changed {
+            return;
+        }
+        use salsa::Setter;
+        metadata.set_imports(&mut self.db).to(imports);
+        metadata.set_dependencies(&mut self.db).to(dependencies);
+        self.refresh_all_diagnostics();
     }
 
     fn load_workspace_sources(&mut self) {
@@ -720,6 +776,7 @@ impl Worker {
         if Worker::is_namespace_document(&path) {
             self.namespace_documents
                 .insert(path.clone(), params.text_document.text.clone());
+            self.refresh_metadata();
             if !self.supports_pull_diagnostics {
                 let diagnostics = self.namespace_diagnostics(&params.text_document.text);
                 let uri = self.document_uri(&path);
@@ -772,6 +829,7 @@ impl Worker {
             let updated = self.apply_content_changes(text, &params.content_changes);
             self.namespace_documents
                 .insert(path.clone(), updated.clone());
+            self.refresh_metadata();
             if !self.supports_pull_diagnostics {
                 let diagnostics = self.namespace_diagnostics(&updated);
                 let uri = self.document_uri(&path);
@@ -875,9 +933,12 @@ impl Worker {
         let Some(path) = self.document_path(&params.text_document.uri) else {
             return;
         };
-        if self.stub_documents.remove(&path).is_some()
-            || self.namespace_documents.remove(&path).is_some()
-        {
+        if self.stub_documents.remove(&path).is_some() {
+            return;
+        }
+        if self.namespace_documents.remove(&path).is_some() {
+            // The closed buffer reverts to the on-disk NAMESPACE.
+            self.refresh_metadata();
             return;
         }
         self.open_documents.remove(&path);
@@ -907,12 +968,19 @@ impl Worker {
 
     fn did_change_watched_files(&mut self, params: lsp_types::DidChangeWatchedFilesParams) {
         let mut config_changed = false;
+        let mut metadata_changed = false;
         for change in &params.changes {
             let Ok(path) = change.uri.to_file_path() else {
                 continue;
             };
             // Matched by file name, not full path: tolerates symlinked roots
             // and case-normalizing clients.
+            if path
+                .file_name()
+                .is_some_and(|name| name == "NAMESPACE" || name == "DESCRIPTION")
+            {
+                metadata_changed = true;
+            }
             if path
                 .file_name()
                 .is_some_and(|name| name == CONFIG_FILE_NAME)
@@ -956,6 +1024,11 @@ impl Worker {
                 }
             }
         }
+        if metadata_changed {
+            // No-op when the parsed facts are unchanged; refreshes all
+            // diagnostics itself otherwise.
+            self.refresh_metadata();
+        }
         if config_changed {
             self.refresh_all_diagnostics();
         }
@@ -987,6 +1060,13 @@ impl Worker {
                 glob_pattern: lsp_types::GlobPattern::Relative(lsp_types::RelativePattern {
                     base_uri: lsp_types::OneOf::Right(self.document_uri(&self.workspace_root)),
                     pattern: CONFIG_FILE_NAME.to_owned(),
+                }),
+                kind: None,
+            },
+            lsp_types::FileSystemWatcher {
+                glob_pattern: lsp_types::GlobPattern::Relative(lsp_types::RelativePattern {
+                    base_uri: lsp_types::OneOf::Right(self.document_uri(&self.workspace_root)),
+                    pattern: "{NAMESPACE,DESCRIPTION}".to_owned(),
                 }),
                 kind: None,
             },

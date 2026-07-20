@@ -177,6 +177,29 @@ type (`for (i in 1:3) total <- i` then `report <- function() total` types `repor
 `fn() -> integer`), in scripts under the same sequential/deferred visibility as named
 definitions.
 
+### Package imports (`NAMESPACE` and `DESCRIPTION`)
+
+Hosts read the package's `NAMESPACE` and `DESCRIPTION` files at the package root; their facts
+extend the resolution universe package-wide. Analysis without them (a single file, a project
+with neither file) behaves as if both were empty.
+
+- `importFrom(pkg, name)` makes `name` a known bare read: it is never reported unresolved. The
+  read types as the stub corpus's declaration for the name when one exists and `Unknown`
+  otherwise. Import typos are validated once at the import site — an `importFrom` naming
+  something a stub-described namespace does not export warns there — never at every use site.
+- `import(pkg)` of a namespace the stub corpus describes makes exactly `pkg`'s exports known
+  bare reads. When no stubs describe `pkg`, its export set is unknowable, so every
+  otherwise-unresolved bare read in the package is tolerated rather than guessed at (the
+  zero-false-positive rule); unresolved-name detection for such packages resumes when stubs
+  for `pkg` exist.
+- A `pkg::name` read of a namespace the stub corpus does not know warns about an unknown
+  namespace **unless** `pkg` is part of the package's declared universe: a `DESCRIPTION`
+  dependency (`Depends`, `Imports`, `Suggests`, or `Enhances`) or the source namespace of any
+  `NAMESPACE` import. Declared-but-undescribed namespaces stay quiet and their reads type
+  `Unknown`.
+- A read satisfied only by an import still counts as a use for liveness, and strict mode
+  attributes its `Unknown` exactly like any other undetermined reference.
+
 ### Replacement-form assignment
 
 A replacement-form assignment (`x$field <- v`, `x[["name"]] <- v`, `x[[key]] <- v`, `x@slot <- v`)

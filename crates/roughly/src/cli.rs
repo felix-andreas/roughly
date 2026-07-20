@@ -164,6 +164,15 @@ pub fn check(
             .as_deref()
             .map(namespace::parse_namespace_imports)
             .unwrap_or_default();
+        let dependencies = std::fs::read_to_string(root.join("DESCRIPTION"))
+            .ok()
+            .map(|source| semantics::metadata::parse_description_dependencies(&source))
+            .unwrap_or_default();
+        semantics::metadata::PackageMetadata::new(
+            &db,
+            semantics::metadata::normalized_imports(&namespace_imports),
+            dependencies,
+        );
 
         let r_path = root.join("R");
         let mut used_tokens = BTreeSet::new();

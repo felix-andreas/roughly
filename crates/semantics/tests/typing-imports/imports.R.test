@@ -1,0 +1,50 @@
+#==== bare_reads
+#---- import_from_makes_a_bare_read_known
+#namespace importFrom(data.table, setDT)
+f <- function(x) setDT(x)
+#++++
+f: <T> fn(x: T) -> Unknown
+
+#---- unimported_names_still_warn
+f <- function(x) setDT(x)
+#++++
+f: <T> fn(x: T) -> Unknown
+17..22 warning[unresolved] I could not resolve `setDT` in this package, its imports, or builtins.
+
+#---- import_from_covers_operator_spellings
+#namespace importFrom(rlang, "%||%")
+f <- function(a, b) a %||% b
+#++++
+f: <T, U> fn(a: T, b: U) -> Unknown
+
+#---- whole_import_without_stubs_tolerates_any_read
+#namespace import(data.table)
+f <- function(x) rbindlist(x)
+#++++
+f: <T> fn(x: T) -> Unknown
+
+#---- whole_import_with_stubs_checks_the_export_set
+#namespace import(stats)
+f <- function(x) zzz_not_exported(x)
+#++++
+f: <T> fn(x: T) -> Unknown
+42..58 warning[unresolved] I could not resolve `zzz_not_exported` in this package, its imports, or builtins.
+
+#==== namespace_reads
+#---- declared_dependency_quiets_an_unknown_namespace
+#description Imports: dplyr
+f <- function(d) dplyr::mutate(d, x = 1)
+#++++
+f: <T> fn(d: T) -> Unknown
+
+#---- undeclared_namespaces_still_warn
+f <- function(d) dplyr::mutate(d, x = 1)
+#++++
+f: <T> fn(d: T) -> Unknown
+17..30 warning[unresolved] unknown package namespace `dplyr`.
+
+#---- an_import_source_counts_as_declared
+#namespace importFrom(dplyr, mutate)
+f <- function(d) dplyr::filter(d)
+#++++
+f: <T> fn(d: T) -> Unknown

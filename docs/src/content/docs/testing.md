@@ -39,6 +39,12 @@ expectations and `FIXTURE_FILTER=group__case` runs one case. Suites:
   sequential top-down scope)
 - `crates/semantics/tests/typing-strict` — the strict stream: the per-file typing mode and
   the `strict`-code diagnostics appended after the ordinary rendering
+- `crates/semantics/tests/typing-imports` — package-metadata cases: leading `#namespace `
+  lines form the case's NAMESPACE source and `#description ` lines its DESCRIPTION source,
+  installed as the `PackageMetadata` input before rendering. The directive lines stay in the
+  analyzed text as ordinary comments, so expectation offsets are honest. This suite is
+  new-stack only — the oracle has no package-metadata concept — and is deliberately absent
+  from the differential fixture arm
 - `crates/format/tests/format` — the formatter golden suite (ported from the legacy suite):
   each case's source formats to the expected block, and the runner re-formats the output to
   assert idempotence on every case; a case whose expectation is a refusal renders the
