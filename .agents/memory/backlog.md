@@ -17,6 +17,8 @@
 
 - (Design forks all DECIDED — two-flexible comparison stays unconstrained without a third constraint kind, union compatibility commits flexibles at first use in program order, NAMESPACE bare-resolution stays ungated; decisions.md has the three records.)
 - Overload candidates when touched: `is`, `extends`, `grep(value =)`, `cor` (vector vs matrix — needs matrix nominals). `Date`/`POSIXct` arithmetic refuses loudly today — revisit if real code makes it noisy.
+- **NAMESPACE / DESCRIPTION awareness (user ask: `importFrom` should work).** Today `crates/roughly/src/namespace.rs` parses `import`/`importFrom` only for the unknown-import / unused-import problems at the CLI/server layer; the semantics crate resolves bare names against the whole stub corpus regardless of what the package imports, and DESCRIPTION (`Imports:`/`Depends:`) is never read. Target: feed the package's declared imports into semantics so `importFrom(pkg, name)` makes `name` resolvable with its stub type (and `import(pkg)` the whole namespace), and read DESCRIPTION as the authority on which namespaces `pkg::` calls may touch. Keep the existing "bare resolution stays ungated" decision as the fallback for packages without a NAMESPACE; revisit gating once imports actually feed resolution.
+- **Missing-comma parse recovery (rust-analyzer style).** A missing `,` between call arguments / formals today surfaces as an `expected …` error at the *next* token, often on the following line. Recover like rust-analyzer: detect the element boundary and report `` expected `,` `` at the end of the previous element, then continue parsing the list so downstream elements still analyze.
 
 ## Open — editor & polish
 
@@ -28,6 +30,7 @@
 - **Parallel cold pass: measure on real hardware before optimizing further.** The investigation (`crates/roughly/examples/parallel_probe.rs` is the reproduction tool) found: (a) the long-recorded "4 workers buy only 1.2x" was mostly a measurement artifact — this container's 4 vCPUs deliver only ~1.8x of lock-free native compute at 4 threads (~1.2x at 2), so no in-container parallel number is meaningful; (b) the one real structural serializer was `interface_sccs` demanding naming for every item inside one salsa query (25-51% of cold wall depending on package shape) — fixed by the CLI's parallel per-item naming warm before the fan-out (mgcv cold pass 0.99s → 0.80s even in the throttled container); (c) salsa's same-query blocking is negligible (53 blocks per 5,657 executions) and the interface DAG is wide (ggplot2: 1,198 items, depth 22), so no fixpoint-scheduling work is warranted until a real-hardware measurement says otherwise.
 - **Coverage-guided fuzzing landed** (`fuzz/` crate, testing.md documents the workflow): libFuzzer targets `parse`, `format`, and `semantics` over the exported invariant batteries plus `scripts/seed-fuzz-corpus.sh`; the lint layer is folded into the semantics battery (everything-on config), closing the last unfuzzed stage. First sessions found and fixed nine formatter bugs and two splice-equivalence bugs (a middle ending mid-construct must refuse suffix reuse; an empty-suffix splice must not rebase the old end-of-file error) — all pinned in per-harness `REGRESSIONS` batteries. Remaining: a scheduled deep-fuzz run on real CI hardware, and an `llvm-cov` coverage report (recipe in testing.md; skipped in-container for disk).
 - CI: the widened whole-workspace workflow is staged in `.github/pending-ci.yml` — a human must `git mv` it into `.github/workflows/` (automated tokens lack workflow scope). Until then CI gates only the product crate's own suites; the workspace battery runs locally per slice. Authoritative perf numbers need the CI runner.
+- **Port `analysis-stats` to the new stack (user ask).** The legacy CLI had `roughly stats` (`crates/roughly-legacy/src/stats.rs`): workspace-wide cold-analysis phase timings with per-phase marginal cost and resident-set growth, slowest-files-by-typecheck ranking, and an incremental keystroke probe. The new CLI only has `check`/`fmt`/`server`/`debug ast`. Rebuild it as `roughly debug stats` on the engine's own query phases (parse → lower → name → interfaces → check), reusing the measurement approach already in `crates/differential/tests/test_stats.rs` and the probe examples.
 
 ## Open — website & docs
 
@@ -39,7 +42,7 @@
 - S3 dispatch modeling (`UseMethod`) — prerequisite for honest `print`/`summary`/`plot`.
 - data.frame column-level typing; matrix dimensionality; real S4 typing.
 - Traits/typeclasses (tripwire: the third constraint kind).
-- NAMESPACE-aware imports (`import()`/`importFrom()` checking), CRAN stub auto-generation via R introspection, R-version-keyed corpora, stubtest validation (R-dependent).
+- CRAN stub auto-generation via R introspection, R-version-keyed corpora, stubtest validation (R-dependent). (NAMESPACE/DESCRIPTION awareness moved to Open — semantics by user ask.)
 
 ## Shipped ledger (one line each; rationale in `decisions.md`, contracts in the docs site)
 
