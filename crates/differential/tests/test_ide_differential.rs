@@ -80,6 +80,11 @@ const ACCEPTED_DIFFERENCE_CASES: &[(&str, &str)] = &[
          oracle leaves the item untyped and offers no inlay hint",
     ),
     (
+        "typing::exported_constraints__forwarded_dots_disable_arity_checking",
+        "the rewrite resolves a `...` formal as a real binding (definition and \
+         references on the dots), which the oracle does not model",
+    ),
+    (
         "typing::form__applied_type_parameter_is_refused",
         "the rewrite refuses the whole violating block, so the alias it declares \
          never enters the vocabulary (no `Outer` completion, no `Wrap` \

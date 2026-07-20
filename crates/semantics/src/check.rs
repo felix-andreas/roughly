@@ -763,6 +763,10 @@ struct CallArgument<'db> {
     /// The argument is a whole-number double literal (`1`, `2.0`) — eligible
     /// for the literal-as-integer courtesy.
     whole_double: bool,
+    /// The argument is the enclosing function's bare `...`: it forwards an
+    /// unknown number of arguments (possibly zero), so the call cannot be
+    /// arity-checked and the argument matches no parameter itself.
+    forwards_dots: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3355,11 +3359,19 @@ impl<'db> Checker<'db, '_> {
                 let whole_double = argument
                     .value
                     .is_some_and(|value| self.is_whole_double(value));
+                let forwards_dots = argument.name.is_none()
+                    && argument.value.is_some_and(|value| {
+                        matches!(
+                            &self.module.expression(value).kind,
+                            ExpressionKind::NameRef(name) if name == "..."
+                        )
+                    });
                 CallArgument {
                     name: argument.name.clone(),
                     ty,
                     range: argument_range,
                     whole_double,
+                    forwards_dots,
                 }
             })
             .collect()
@@ -3530,6 +3542,9 @@ impl<'db> Checker<'db, '_> {
             let mut pre_rest_slots = pre_rest_remaining;
             let mut forwarded = Vec::new();
             for (index, argument) in arguments.iter().enumerate() {
+                if argument.forwards_dots {
+                    continue;
+                }
                 match &argument.name {
                     Some(name) => {
                         let declared_index = function.named.iter().position(|field| {
@@ -3562,7 +3577,11 @@ impl<'db> Checker<'db, '_> {
             Vec::new()
         };
 
+        let forwards_dots = arguments.iter().any(|argument| argument.forwards_dots);
         for argument in arguments {
+            if argument.forwards_dots {
+                continue;
+            }
             match &argument.name {
                 Some(name) => {
                     let position = remaining_named
@@ -3665,7 +3684,7 @@ impl<'db> Checker<'db, '_> {
                                 argument.whole_double,
                             )?;
                         }
-                    } else {
+                    } else if !forwards_dots {
                         return Err(TypeError {
                             range: callee_range,
                             kind: TypeErrorKind::ArityMismatch {
@@ -3678,8 +3697,9 @@ impl<'db> Checker<'db, '_> {
             }
         }
 
-        if next_positional != function.positional.len()
-            || remaining_named.iter().any(|field| !field.optional)
+        if !forwards_dots
+            && (next_positional != function.positional.len()
+                || remaining_named.iter().any(|field| !field.optional))
         {
             return Err(TypeError {
                 range: callee_range,

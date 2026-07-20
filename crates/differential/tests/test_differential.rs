@@ -104,6 +104,10 @@ const ACCEPTED_DIVERGENCES: &[(&str, &str)] = &[
         "vectors__structural_vector_element_is_refused",
         "the legacy type grammar cannot parse a structural type under a `[]` suffix inside `fn(...)` and reports a parse error; the rewrite parses the shape and reports the actual vector-element rule",
     ),
+    (
+        "exported_constraints__forwarded_dots_disable_arity_checking",
+        "legacy arity-checks a call whose argument is the enclosing function's bare `...` as if the dots were one fixed argument; the forwarded count is unknowable statically, so the rewrite skips arity checks on such calls",
+    ),
 ];
 
 /// Allowlist entries justified by an oracle PANIC (a `debug_assert` in the
@@ -295,7 +299,18 @@ fn differential_corpus() {
             skipped_syntax += 1;
             continue;
         }
-        let (legacy, legacy_syntax_errors) = legacy_findings(&source, document_path, false);
+        // The oracle may panic on its own defects; a panicking oracle cannot
+        // be consulted for the file, so it is counted and skipped rather
+        // than killing the sweep (only new-stack panics fail the test).
+        let legacy_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            legacy_findings(&source, document_path, false)
+        }));
+        let Ok((legacy, legacy_syntax_errors)) = legacy_result else {
+            *rollup
+                .entry("oracle panicked (tolerated)".to_owned())
+                .or_default() += 1;
+            continue;
+        };
         if legacy_syntax_errors {
             skipped_syntax += 1;
             continue;

@@ -1268,6 +1268,12 @@ A function call is a type error when:
 - too many arguments are provided **and the callee has no rest parameter**
 - an argument value is incompatible with the corresponding parameter type
 
+A call argument that is the enclosing function's bare `...` (the forwarding idiom,
+`function(x, ...) helper(x, ...)`) forwards an **unknown number** of arguments — possibly zero —
+so such a call skips both arity checks: neither missing-required nor too-many-arguments can be
+decided statically, and the `...` argument itself matches no parameter. The call's concrete
+arguments are still checked against their parameters as usual.
+
 Argument checking is compatibility-based, not exact-equality-based:
 
 - the ordinary coercions defined in this document apply at parameter positions, for example scalar-like `T` into array-like `T[]` and `T` or `NULL` into `T | NULL`

@@ -111,8 +111,8 @@ policy — files with syntax errors on either side are counted and skipped, sinc
 to inputs both stacks parse cleanly. Its report (`target/differential-corpus.txt`) leads with a
 frequency rollup of divergent messages, so one gap repeated across hundreds of files reads as one
 line. Per-file panic guards on both sides keep one crash from killing the sweep: a new-stack
-panic is recorded and fails the test; a legacy (oracle) panic is tolerated per case only when
-allowlisted.
+panic is recorded and fails the test; a legacy (oracle) panic means the oracle cannot be
+consulted for that file, so it is counted in the rollup and the file skipped.
 
 ### The per-position IDE differential
 

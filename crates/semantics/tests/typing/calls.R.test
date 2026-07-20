@@ -229,3 +229,12 @@ g <- function() lapply(list("a", "bb"), nchar)
 #++++
 f: fn() -> integer
 g: fn() -> list[integer]
+
+#---- forwarded_dots_disable_arity_checking
+two <- function(a, b) a + b
+wrap <- function(...) two(...)
+partial <- function(x, ...) two(x, ...)
+#++++
+two: <T: numeric> fn(a: T, b: T) -> T
+wrap: <T: numeric> fn(...: Any) -> T
+partial: <T: numeric> fn(x: T, ...: Any) -> T
