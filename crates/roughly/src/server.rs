@@ -28,12 +28,12 @@ use syntax::{SyntaxKind, TextRange, TextSize};
 use tokio::sync::oneshot;
 use tower::ServiceBuilder;
 
-pub fn run(experimental_features: ExperimentalFeatures) {
-    run_async(experimental_features);
+pub fn run(experimental_features: ExperimentalFeatures, debug: bool) {
+    run_async(experimental_features, debug);
 }
 
 #[tokio::main(flavor = "current_thread")]
-async fn run_async(experimental_features: ExperimentalFeatures) {
+async fn run_async(experimental_features: ExperimentalFeatures, debug: bool) {
     install_panic_hook();
     let runtime = tokio::runtime::Handle::current();
 
@@ -45,6 +45,7 @@ async fn run_async(experimental_features: ExperimentalFeatures) {
         let seed = WorkerSeed {
             client: client.clone(),
             experimental_features,
+            debug,
             cancel: cancel.clone(),
             idle_interrupt: idle_interrupt.clone(),
             runtime: runtime.clone(),
@@ -133,6 +134,11 @@ enum Job {
 struct WorkerSeed {
     client: ClientSocket,
     experimental_features: ExperimentalFeatures,
+    /// The developer switch (`roughly server --debug`, or `ROUGHLY_DEBUG=1`):
+    /// surfaces internal analysis facts such as the hover debug sections.
+    /// Deliberately NOT a `roughly.toml` key — the config file is user-facing
+    /// contract, and this is an aid for people working on Roughly itself.
+    debug: bool,
     cancel: CancelHandle,
     idle_interrupt: Arc<AtomicBool>,
     runtime: tokio::runtime::Handle,
@@ -288,6 +294,8 @@ struct Worker {
     current_token: salsa::CancellationToken,
     idle_interrupt: Arc<AtomicBool>,
     experimental_features: ExperimentalFeatures,
+    /// The developer switch (see [`WorkerSeed::debug`]).
+    debug: bool,
     encoding: PositionEncoding,
     supports_pull_diagnostics: bool,
     supports_diagnostic_refresh: bool,
@@ -396,6 +404,7 @@ impl Worker {
             current_token,
             idle_interrupt: seed.idle_interrupt,
             experimental_features: seed.experimental_features,
+            debug: seed.debug,
             encoding,
             supports_pull_diagnostics,
             supports_diagnostic_refresh,
@@ -1602,7 +1611,7 @@ impl LanguageServer for ServerState {
             let hover = worker
                 .cancellable(|worker| ide::hover(&worker.db, files, file, offset))
                 .unwrap_or_default();
-            let debug = if worker.config.debug {
+            let debug = if worker.debug {
                 worker
                     .cancellable(|worker| ide::hover_debug(&worker.db, file, offset))
                     .unwrap_or_default()

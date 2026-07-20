@@ -15,9 +15,6 @@ pub struct Config {
     pub format: format::Config,
     pub lint: LintConfig,
     pub check: CheckConfig,
-    /// Surfaces internal analysis facts (the hover debug sections). A
-    /// developer aid, off by default.
-    pub debug: bool,
 }
 
 /// Which diagnostic classes are published. Every class is computed on demand
@@ -226,7 +223,6 @@ pub struct ConfigToml {
     pub format: format::Config,
     pub lint: LintConfig,
     pub check: CheckConfig,
-    pub debug: bool,
 }
 
 impl ConfigToml {
@@ -241,7 +237,6 @@ impl ConfigToml {
             format: self.format,
             lint: self.lint,
             check: self.check,
-            debug: self.debug,
         }
     }
 }
@@ -326,7 +321,6 @@ mod tests {
         assert_eq!(config.lint.naming_style, None);
         assert!(config.check.unused, "unused warnings are on by default");
         assert!(!config.check.typing);
-        assert!(!config.debug);
     }
 
     #[test]

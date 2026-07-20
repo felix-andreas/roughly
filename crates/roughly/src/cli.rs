@@ -726,8 +726,8 @@ pub fn fmt(
     })
 }
 
-pub fn server(experimental_features: ExperimentalFeatures) {
-    crate::server::run(experimental_features);
+pub fn server(experimental_features: ExperimentalFeatures, debug: bool) {
+    crate::server::run(experimental_features, debug);
 }
 
 pub fn ast(path: &Path) -> Result<(), CommandError> {

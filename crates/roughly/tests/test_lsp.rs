@@ -72,9 +72,10 @@ fn build_test_client(
     })
 }
 
-fn spawn_server(server_cwd: &Path, envs: &[(&str, &str)]) -> tokio::process::Child {
+fn spawn_server(server_cwd: &Path, envs: &[(&str, &str)], args: &[&str]) -> tokio::process::Child {
     tokio::process::Command::new(env!("CARGO_BIN_EXE_roughly"))
         .arg("server")
+        .args(args)
         .current_dir(server_cwd)
         .envs(envs.iter().copied())
         .stdin(Stdio::piped())
@@ -216,6 +217,16 @@ async fn setup_test_with_env(
     capabilities: ClientCapabilities,
     envs: &[(&str, &str)],
 ) -> TestContext {
+    setup_test_with_env_and_args(create_r_directory, initial_files, capabilities, envs, &[]).await
+}
+
+async fn setup_test_with_env_and_args(
+    create_r_directory: bool,
+    initial_files: &[(&str, &str)],
+    capabilities: ClientCapabilities,
+    envs: &[(&str, &str)],
+    args: &[&str],
+) -> TestContext {
     let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
     // The server process runs with the temp ROOT as its cwd while the client
     // announces the `workspace` subdirectory as the workspace root, so every
@@ -240,7 +251,7 @@ async fn setup_test_with_env(
     let (mainloop, mut server) =
         build_test_client(diagnostics_sender, refresh_sender, messages_sender);
 
-    let mut child = spawn_server(&server_cwd, envs);
+    let mut child = spawn_server(&server_cwd, envs, args);
     let stdout = child.stdout.take().expect("missing stdout").compat();
     let stdin = child.stdin.take().expect("missing stdin").compat_write();
     let mainloop_handle = tokio::spawn(async move {
@@ -2035,7 +2046,7 @@ async fn ancestor_config_governs_a_workspace_without_its_own() {
     let (messages_sender, messages_receiver) = mpsc::unbounded_channel();
     let (mainloop, mut server) =
         build_test_client(diagnostics_sender, refresh_sender, messages_sender);
-    let mut child = spawn_server(temp_dir.path(), &[]);
+    let mut child = spawn_server(temp_dir.path(), &[], &[]);
     let stdout = child.stdout.take().expect("missing stdout").compat();
     let stdin = child.stdin.take().expect("missing stdin").compat_write();
     let mainloop_handle = tokio::spawn(async move {
@@ -2428,14 +2439,16 @@ async fn hover_shows_definition_summaries() {
     let stub = hover_markdown(&mut context, 3, 11).await;
     assert!(stub.contains("From the `base` package."), "{stub}");
 
-    // Debug sections stay hidden without the config flag.
+    // Debug sections stay hidden without the developer switch.
     assert!(!global.contains("### Debug"), "{global}");
     context.shutdown().await;
 }
 
 #[tokio::test]
-async fn debug_config_adds_hover_debug_sections() {
-    let mut context = setup_test(&[("roughly.toml", "debug = true\n")]).await;
+async fn debug_flag_adds_hover_debug_sections() {
+    let mut context =
+        setup_test_with_env_and_args(true, &[], ClientCapabilities::default(), &[], &["--debug"])
+            .await;
     let uri = context
         .open("R/debug.R", "count <- 1L\nuse <- count\n")
         .await;
