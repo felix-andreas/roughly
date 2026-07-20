@@ -35,6 +35,10 @@
 - **Move the typing pages to nested URLs (user ask):** `typing` → `typing/guide` and `typing-reference` → `typing/reference`. Needs: the content files relocated/re-slugged, every internal link updated (other docs pages AND any links emitted from code — grep the crates for `/typing-reference` anchors, e.g. in diagnostics or hover text), sidebar config, and redirects from the old URLs so existing links keep working.
 - (The landing-page hero animation is user-owned — do not touch.)
 
+## Open — REPL (user-initiated, design settled, implementation unscheduled)
+
+- **A first-class REPL replacing rofy, with NO build-time R linkage** — the full design lives in `repl-design.md`: a hand-curated runtime-binding crate (dlopen + eager per-symbol resolution, `has::` probes for version tolerance, two-phase init around `setup_Rmainloop`), a console host driving R's real REPL through the ReadConsole hook with our parser feeding one expression per read, and the analyzer wired in behind the idle-task seam (typed completions unioned with live-session facts, pre-eval diagnostics). Testing needs one-process-per-test for embedded R; CI keeps R-requiring tests excluded like rofy's.
+
 ## Post-beta (explicitly out of scope for now)
 
 - Tags / discriminated unions via a compiler-known stdlib `match` (design in `typing-design.md` first).
