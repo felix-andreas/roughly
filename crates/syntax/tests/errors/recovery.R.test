@@ -4,10 +4,10 @@ first <- 1
 oops <- sum(1 2)
 second <- 2
 #++++
-error: expected `,` or `)` in this argument list, found number
- --> 2:15
+error: missing `,` between these arguments
+ --> 2:14
   | oops <- sum(1 2)
-  |               ^
+  |              ^
 
 #---- broken_annotation_keeps_code_clean
 #: fn(x: integer ->

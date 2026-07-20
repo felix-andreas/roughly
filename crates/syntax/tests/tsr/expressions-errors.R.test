@@ -112,8 +112,9 @@ SOURCE_FILE@0..97
         NAME@2..3
           IDENT@2..3 "x"
         WHITESPACE@3..4 " "
-      ERROR@4..5
-        IDENT@4..5 "y"
+      ARGUMENT@4..5
+        NAME@4..5
+          IDENT@4..5 "y"
       R_PAREN@5..6 ")"
   NEWLINE@6..7 "\n"
   SUBSET_EXPR@7..15
@@ -125,8 +126,9 @@ SOURCE_FILE@0..97
         NAME@11..12
           IDENT@11..12 "x"
         WHITESPACE@12..13 " "
-      ERROR@13..14
-        IDENT@13..14 "y"
+      ARGUMENT@13..14
+        NAME@13..14
+          IDENT@13..14 "y"
       R_BRACKET@14..15 "]"
   NEWLINE@15..16 "\n"
   SUBSET2_EXPR@16..26
@@ -138,8 +140,9 @@ SOURCE_FILE@0..97
         NAME@21..22
           IDENT@21..22 "x"
         WHITESPACE@22..23 " "
-      ERROR@23..24
-        IDENT@23..24 "y"
+      ARGUMENT@23..24
+        NAME@23..24
+          IDENT@23..24 "y"
       R_BRACKET@24..25 "]"
       R_BRACKET@25..26 "]"
   NEWLINE@26..27 "\n"
@@ -158,8 +161,9 @@ SOURCE_FILE@0..97
         NAME@33..34
           IDENT@33..34 "y"
         WHITESPACE@34..35 " "
-      ERROR@35..36
-        IDENT@35..36 "z"
+      ARGUMENT@35..36
+        NAME@35..36
+          IDENT@35..36 "z"
       R_PAREN@36..37 ")"
   NEWLINE@37..38 "\n"
   SUBSET_EXPR@38..49
@@ -176,8 +180,9 @@ SOURCE_FILE@0..97
         NAME@45..46
           IDENT@45..46 "y"
         WHITESPACE@46..47 " "
-      ERROR@47..48
-        IDENT@47..48 "z"
+      ARGUMENT@47..48
+        NAME@47..48
+          IDENT@47..48 "z"
       R_BRACKET@48..49 "]"
   NEWLINE@49..50 "\n"
   SUBSET2_EXPR@50..63
@@ -194,8 +199,9 @@ SOURCE_FILE@0..97
         NAME@58..59
           IDENT@58..59 "y"
         WHITESPACE@59..60 " "
-      ERROR@60..61
-        IDENT@60..61 "z"
+      ARGUMENT@60..61
+        NAME@60..61
+          IDENT@60..61 "z"
       R_BRACKET@61..62 "]"
       R_BRACKET@62..63 "]"
   NEWLINE@63..64 "\n"
@@ -212,8 +218,9 @@ SOURCE_FILE@0..97
         NAME@69..70
           IDENT@69..70 "x"
         WHITESPACE@70..71 " "
-      ERROR@71..72
-        IDENT@71..72 "y"
+      ARGUMENT@71..72
+        NAME@71..72
+          IDENT@71..72 "y"
       R_PAREN@72..73 ")"
   NEWLINE@73..74 "\n"
   SUBSET_EXPR@74..84
@@ -228,8 +235,9 @@ SOURCE_FILE@0..97
         NAME@80..81
           IDENT@80..81 "x"
         WHITESPACE@81..82 " "
-      ERROR@82..83
-        IDENT@82..83 "y"
+      ARGUMENT@82..83
+        NAME@82..83
+          IDENT@82..83 "y"
       R_BRACKET@83..84 "]"
   NEWLINE@84..85 "\n"
   SUBSET2_EXPR@85..97
@@ -244,19 +252,20 @@ SOURCE_FILE@0..97
         NAME@92..93
           IDENT@92..93 "x"
         WHITESPACE@93..94 " "
-      ERROR@94..95
-        IDENT@94..95 "y"
+      ARGUMENT@94..95
+        NAME@94..95
+          IDENT@94..95 "y"
       R_BRACKET@95..96 "]"
       R_BRACKET@96..97 "]"
-err: 4..5: expected `,` or `)` in this argument list, found identifier
-err: 13..14: expected `,` or `]` in this argument list, found identifier
-err: 23..24: expected `,` or `]` in this argument list, found identifier
-err: 35..36: expected `,` or `)` in this argument list, found identifier
-err: 47..48: expected `,` or `]` in this argument list, found identifier
-err: 60..61: expected `,` or `]` in this argument list, found identifier
-err: 71..72: expected `,` or `)` in this argument list, found identifier
-err: 82..83: expected `,` or `]` in this argument list, found identifier
-err: 94..95: expected `,` or `]` in this argument list, found identifier
+err: 3..3: missing `,` between these arguments
+err: 12..12: missing `,` between these arguments
+err: 22..22: missing `,` between these arguments
+err: 34..34: missing `,` between these arguments
+err: 46..46: missing `,` between these arguments
+err: 59..59: missing `,` between these arguments
+err: 70..70: missing `,` between these arguments
+err: 81..81: missing `,` between these arguments
+err: 93..93: missing `,` between these arguments
 
 #---- not_a_parenthesized_expression_1_ts_error
 ()

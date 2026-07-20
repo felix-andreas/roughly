@@ -22,10 +22,19 @@ error: expected a function body
 #---- function_parameter_separator
 f <- function(x y) x
 #++++
-error: expected `,` or `)` in the parameter list, found identifier
- --> 1:17
+error: missing `,` between these parameters
+ --> 1:16
   | f <- function(x y) x
-  |                 ^
+  |                ^
+
+#---- function_parameter_separator_across_lines
+f <- function(x
+              y) x
+#++++
+error: missing `,` between these parameters
+ --> 1:16
+  | f <- function(x
+  |                ^
 
 #---- function_missing_default
 f <- function(x = ) x
@@ -55,10 +64,27 @@ error: expected a parameter name, found number
 #---- call_missing_comma
 total <- sum(1 2)
 #++++
-error: expected `,` or `)` in this argument list, found number
- --> 1:16
+error: missing `,` between these arguments
+ --> 1:15
   | total <- sum(1 2)
-  |                ^
+  |               ^
+
+#---- call_missing_comma_across_lines
+total <- sum(alpha
+             beta)
+#++++
+error: missing `,` between these arguments
+ --> 1:19
+  | total <- sum(alpha
+  |                   ^
+
+#---- call_separator_junk_still_recovers
+total <- sum(1; 2)
+#++++
+error: expected `,` or `)` in this argument list, found `;`
+ --> 1:15
+  | total <- sum(1; 2)
+  |               ^
 
 #---- call_unclosed_nested
 wrap <- f(g(1, h(2)

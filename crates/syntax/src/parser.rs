@@ -203,6 +203,24 @@ impl Parser<'_> {
         self.errors.push(error);
     }
 
+    /// The empty range just past the last significant token before the
+    /// current position — where a missing separator belongs. Anchoring there
+    /// keeps the report on the line of the element it follows instead of on
+    /// whatever line the next element starts.
+    fn separator_gap(&self) -> TextRange {
+        let end = (0..self.pos)
+            .rev()
+            .find(|&index| {
+                !matches!(
+                    self.tokens[index].kind,
+                    SyntaxKind::WHITESPACE | SyntaxKind::COMMENT | SyntaxKind::NEWLINE
+                )
+            })
+            .map(|index| self.token_range(index).end())
+            .unwrap_or_else(|| self.token_range(self.pos).start());
+        TextRange::empty(end)
+    }
+
     /// Describe the current token for an "expected …, found …" message.
     fn describe_current(&self) -> String {
         match self.current() {
@@ -1059,6 +1077,49 @@ impl Parser<'_> {
 
     /// Prefix operators and primary expressions. Quiet on failure: consumes and
     /// emits nothing, returns false.
+    /// Whether `kind` can begin an expression — kept in lockstep with the
+    /// entry set of `primary` (plus the sign/not/formula prefixes it
+    /// dispatches to `unary`).
+    fn starts_expression(kind: SyntaxKind) -> bool {
+        matches!(
+            kind,
+            SyntaxKind::IDENT
+                | SyntaxKind::DOTS
+                | SyntaxKind::DOTDOTI
+                | SyntaxKind::UNDERSCORE
+                | SyntaxKind::INTEGER
+                | SyntaxKind::DOUBLE
+                | SyntaxKind::COMPLEX
+                | SyntaxKind::STRING
+                | SyntaxKind::RAW_STRING
+                | SyntaxKind::TRUE_KW
+                | SyntaxKind::FALSE_KW
+                | SyntaxKind::NULL_KW
+                | SyntaxKind::INF_KW
+                | SyntaxKind::NAN_KW
+                | SyntaxKind::NA_KW
+                | SyntaxKind::NA_INTEGER_KW
+                | SyntaxKind::NA_REAL_KW
+                | SyntaxKind::NA_COMPLEX_KW
+                | SyntaxKind::NA_CHARACTER_KW
+                | SyntaxKind::MINUS
+                | SyntaxKind::PLUS
+                | SyntaxKind::BANG
+                | SyntaxKind::TILDE
+                | SyntaxKind::QUESTION
+                | SyntaxKind::L_PAREN
+                | SyntaxKind::L_BRACE
+                | SyntaxKind::IF_KW
+                | SyntaxKind::FOR_KW
+                | SyntaxKind::WHILE_KW
+                | SyntaxKind::REPEAT_KW
+                | SyntaxKind::FUNCTION_KW
+                | SyntaxKind::BACKSLASH
+                | SyntaxKind::BREAK_KW
+                | SyntaxKind::NEXT_KW
+        )
+    }
+
     fn primary(&mut self) -> bool {
         let Some(kind) = self.current() else {
             return false;
@@ -1348,6 +1409,15 @@ impl Parser<'_> {
                     self.eat_trivia(true);
                     if self.at(SyntaxKind::COMMA) {
                         self.bump();
+                    } else if matches!(
+                        self.current(),
+                        Some(SyntaxKind::IDENT | SyntaxKind::DOTS | SyntaxKind::DOTDOTI)
+                    ) {
+                        // A parameter name right after a complete parameter:
+                        // the separator was forgotten. Report the missing `,`
+                        // in the gap and let the loop parse the name as the
+                        // next parameter.
+                        self.error_at(self.separator_gap(), "missing `,` between these parameters");
                     } else if !matches!(self.current(), None | Some(SyntaxKind::R_PAREN)) {
                         let description = self.describe_current();
                         self.error_here(format!(
@@ -1407,8 +1477,20 @@ impl Parser<'_> {
                     self.bump();
                     expect_argument = true;
                 }
-                Some(_) => {
+                Some(kind) => {
                     if !expect_argument {
+                        // A token that starts a new argument right after a
+                        // complete one means the separator was forgotten:
+                        // report the missing `,` in the gap and keep parsing
+                        // the list normally.
+                        if Self::starts_expression(kind) {
+                            self.error_at(
+                                self.separator_gap(),
+                                "missing `,` between these arguments",
+                            );
+                            self.argument(closer);
+                            continue;
+                        }
                         let description = self.describe_current();
                         self.error_here(format!(
                             "expected `,` or {} in this argument list, found {description}",
