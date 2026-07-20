@@ -167,48 +167,68 @@ pub fn normalized_imports(imports: &[NamespaceImport]) -> Vec<(String, Option<St
 }
 
 /// Package names from a DESCRIPTION source's `Depends`, `Imports`,
-/// `Suggests`, and `Enhances` fields. DCF format: a field starts at column
-/// zero as `Name: value` and continues over indented lines; entries are
-/// comma-separated package names with optional version constraints in
-/// parentheses. `R` itself is a version pin, not a package.
+/// `Suggests`, and `Enhances` fields: entries are comma-separated package
+/// names with optional version constraints in parentheses. `R` itself is a
+/// version pin, not a package.
 pub fn parse_description_dependencies(source: &str) -> BTreeSet<String> {
     let mut dependencies = BTreeSet::new();
-    let mut collecting = false;
-    for line in source.lines() {
-        let continuation = line.starts_with([' ', '\t']);
-        if !continuation {
-            collecting = false;
-            if let Some((field, rest)) = line.split_once(':') {
-                if matches!(
-                    field.trim(),
-                    "Depends" | "Imports" | "Suggests" | "Enhances"
-                ) {
-                    collecting = true;
-                    collect_dependency_entries(rest, &mut dependencies);
-                }
+    for (field, text) in dcf_fields(source) {
+        if !matches!(field, "Depends" | "Imports" | "Suggests" | "Enhances") {
+            continue;
+        }
+        for entry in text.split(',') {
+            let name = entry.split('(').next().unwrap_or_default().trim();
+            if name.is_empty() || name == "R" {
                 continue;
             }
-        }
-        if collecting {
-            collect_dependency_entries(line, &mut dependencies);
+            dependencies.insert(name.to_owned());
         }
     }
     dependencies
 }
 
-fn collect_dependency_entries(text: &str, dependencies: &mut BTreeSet<String>) {
-    for entry in text.split(',') {
-        let name = entry
-            .split('(')
-            .next()
-            .unwrap_or_default()
-            .trim()
-            .trim_end_matches(',');
-        if name.is_empty() || name == "R" {
-            continue;
-        }
-        dependencies.insert(name.to_owned());
+/// The `Collate` field's file names in declared order — the package's source
+/// collation. `Collate.unix` applies when plain `Collate` is absent
+/// (Windows-only collation is not modeled). Entries are whitespace-separated
+/// and conventionally quoted. Empty when neither field is present.
+pub fn parse_description_collate(source: &str) -> Vec<String> {
+    let mut collate = Vec::new();
+    let mut unix_collate = Vec::new();
+    for (field, text) in dcf_fields(source) {
+        let target = match field {
+            "Collate" => &mut collate,
+            "Collate.unix" => &mut unix_collate,
+            _ => continue,
+        };
+        target.extend(
+            text.split_whitespace()
+                .map(|entry| entry.trim_matches(['"', '\'']).to_owned())
+                .filter(|name| !name.is_empty()),
+        );
     }
+    if collate.is_empty() {
+        unix_collate
+    } else {
+        collate
+    }
+}
+
+/// The `(field, value)` pairs of a DCF source: a field starts at column zero
+/// as `Name: value` and continues over indented lines, joined here with a
+/// space.
+fn dcf_fields(source: &str) -> Vec<(&str, String)> {
+    let mut fields: Vec<(&str, String)> = Vec::new();
+    for line in source.lines() {
+        if line.starts_with([' ', '\t']) {
+            if let Some((_, value)) = fields.last_mut() {
+                value.push(' ');
+                value.push_str(line.trim());
+            }
+        } else if let Some((field, rest)) = line.split_once(':') {
+            fields.push((field.trim(), rest.trim().to_owned()));
+        }
+    }
+    fields
 }
 
 /// A directive argument that names something: a bare identifier or a string
@@ -249,5 +269,21 @@ mod tests {
         let dependencies =
             parse_description_dependencies("Package: demo\nTitle: Imports: not-a-field\n");
         assert!(dependencies.is_empty());
+    }
+
+    #[test]
+    fn collate_preserves_declared_order() {
+        let collate = parse_description_collate(
+            "Package: demo\nCollate:\n    'zzz.R'\n    \"aaa.R\"\n    mmm.R\nTitle: demo\n",
+        );
+        assert_eq!(collate, ["zzz.R", "aaa.R", "mmm.R"]);
+    }
+
+    #[test]
+    fn collate_unix_applies_only_without_plain_collate() {
+        let unix_only = parse_description_collate("Collate.unix: 'b.R' 'a.R'\n");
+        assert_eq!(unix_only, ["b.R", "a.R"]);
+        let both = parse_description_collate("Collate: 'x.R'\nCollate.unix: 'y.R'\n");
+        assert_eq!(both, ["x.R"]);
     }
 }

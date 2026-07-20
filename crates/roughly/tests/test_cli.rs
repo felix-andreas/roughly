@@ -441,6 +441,70 @@ fn check_override_stub_types_apply() {
 }
 
 #[test]
+fn check_namespace_imports_resolve_bare_reads() {
+    let unimported = project(&[("R/main.R", "f <- function(x) rbindlist(x)\n")]);
+    let output = roughly(unimported.path(), &["check", "."]);
+    let rendered = stderr(&output);
+    assert_eq!(exit_code(&output), 1, "stderr: {rendered}");
+    assert!(
+        rendered.contains("could not resolve `rbindlist`"),
+        "expected the unresolved warning without an import, got: {rendered}"
+    );
+
+    let imported = project(&[
+        ("R/main.R", "f <- function(x) rbindlist(x)\n"),
+        ("NAMESPACE", "importFrom(data.table, rbindlist)\n"),
+    ]);
+    let output = roughly(imported.path(), &["check", "."]);
+    let rendered = stderr(&output);
+    assert_eq!(exit_code(&output), 0, "stderr: {rendered}");
+}
+
+#[test]
+fn check_description_dependencies_quiet_namespace_reads() {
+    let declared = project(&[
+        ("R/main.R", "f <- function(d) dplyr::mutate(d)\n"),
+        ("DESCRIPTION", "Package: demo\nImports: dplyr\n"),
+    ]);
+    let output = roughly(declared.path(), &["check", "."]);
+    let rendered = stderr(&output);
+    assert_eq!(exit_code(&output), 0, "stderr: {rendered}");
+}
+
+#[test]
+fn check_collate_order_decides_the_package_winner() {
+    // Both files bind `value`; the reader errors only when the character
+    // binding wins. Path order makes `b.R` the later writer; the Collate
+    // order reverses that, so the integer binding wins and the reader is
+    // clean. Duplicate-binding warnings fire either way — the error
+    // severity floor keeps the assertion on the type finding alone.
+    let base: &[(&str, &str)] = &[
+        ("R/a.R", "value <- 1L\n"),
+        ("R/b.R", "value <- \"word\"\n"),
+        ("R/use.R", "f <- function() value + 1L\n"),
+        ("roughly.toml", "[check]\ntyping = true\n"),
+    ];
+    let path_ordered = project(base);
+    let output = roughly(
+        path_ordered.path(),
+        &["check", ".", "--min-severity", "error"],
+    );
+    let rendered = stderr(&output);
+    assert_eq!(exit_code(&output), 1, "stderr: {rendered}");
+    assert!(
+        rendered.contains("expected a numeric value"),
+        "expected the reader to see the character winner, got: {rendered}"
+    );
+
+    let mut with_collate = base.to_vec();
+    with_collate.push(("DESCRIPTION", "Package: demo\nCollate: 'b.R' 'a.R'\n"));
+    let collated = project(&with_collate);
+    let output = roughly(collated.path(), &["check", ".", "--min-severity", "error"]);
+    let rendered = stderr(&output);
+    assert_eq!(exit_code(&output), 0, "stderr: {rendered}");
+}
+
+#[test]
 fn check_without_r_files_exits_two() {
     let directory = project(&[]);
     let output = roughly(directory.path(), &["check"]);

@@ -302,11 +302,20 @@ struct Worker {
     open_documents: HashSet<PathBuf>,
     stub_documents: HashMap<PathBuf, String>,
     namespace_documents: HashMap<PathBuf, String>,
+    /// The DESCRIPTION `Collate` file names, in declared order.
+    collate_order: Vec<String>,
     virtual_document_uris: HashMap<PathBuf, lsp_types::Url>,
     /// Documents owed a settled (full) diagnostics publish, most recent last.
     pending_semantic_publishes: Vec<PathBuf>,
     /// Workspace files to warm at idle time; results are never published.
     prime_queue: VecDeque<PathBuf>,
+}
+
+/// The parsed NAMESPACE/DESCRIPTION facts a workspace currently declares.
+struct WorkspaceMetadata {
+    imports: Vec<(String, Option<String>)>,
+    dependencies: std::collections::BTreeSet<String>,
+    collate: Vec<String>,
 }
 
 impl Worker {
@@ -395,6 +404,7 @@ impl Worker {
             open_documents: HashSet::new(),
             stub_documents: HashMap::new(),
             namespace_documents: HashMap::new(),
+            collate_order: Vec::new(),
             virtual_document_uris: HashMap::new(),
             pending_semantic_publishes: Vec::new(),
             prime_queue: VecDeque::new(),
@@ -444,12 +454,7 @@ impl Worker {
     /// The current NAMESPACE/DESCRIPTION facts: the open NAMESPACE buffer
     /// wins over the on-disk file; DESCRIPTION is read from disk (it is not
     /// a tracked document — saves arrive through the file watcher).
-    fn current_metadata(
-        &self,
-    ) -> (
-        Vec<(String, Option<String>)>,
-        std::collections::BTreeSet<String>,
-    ) {
+    fn current_metadata(&self) -> WorkspaceMetadata {
         let namespace_path = self.workspace_root.join("NAMESPACE");
         let namespace_text = self
             .namespace_documents
@@ -464,36 +469,63 @@ impl Worker {
                 )
             })
             .unwrap_or_default();
-        let dependencies = std::fs::read_to_string(self.workspace_root.join("DESCRIPTION"))
-            .ok()
-            .map(|text| semantics::metadata::parse_description_dependencies(&text))
+        let description_text = std::fs::read_to_string(self.workspace_root.join("DESCRIPTION"));
+        let dependencies = description_text
+            .as_deref()
+            .map(semantics::metadata::parse_description_dependencies)
             .unwrap_or_default();
-        (imports, dependencies)
+        let collate = description_text
+            .as_deref()
+            .map(semantics::metadata::parse_description_collate)
+            .unwrap_or_default();
+        WorkspaceMetadata {
+            imports,
+            dependencies,
+            collate,
+        }
     }
 
     fn install_metadata(&mut self) {
-        let (imports, dependencies) = self.current_metadata();
-        semantics::metadata::PackageMetadata::new(&self.db, imports, dependencies);
+        let metadata = self.current_metadata();
+        self.collate_order = metadata.collate;
+        semantics::metadata::PackageMetadata::new(
+            &self.db,
+            metadata.imports,
+            metadata.dependencies,
+        );
     }
 
     /// Re-derives the metadata input; on a real change every file's
-    /// resolution universe moved, so all diagnostics refresh.
+    /// resolution universe moved, so all diagnostics refresh. A `Collate`
+    /// change reorders the project instead.
     fn refresh_metadata(&mut self) {
-        let (imports, dependencies) = self.current_metadata();
+        let current = self.current_metadata();
+        let collate_changed = current.collate != self.collate_order;
+        if collate_changed {
+            self.collate_order = current.collate;
+            self.rebuild_project_files();
+        }
         let Some(metadata) = semantics::metadata::PackageMetadata::try_get(&self.db) else {
-            semantics::metadata::PackageMetadata::new(&self.db, imports, dependencies);
+            semantics::metadata::PackageMetadata::new(
+                &self.db,
+                current.imports,
+                current.dependencies,
+            );
             self.refresh_all_diagnostics();
             return;
         };
-        let changed = metadata.imports(&self.db) != &imports
-            || metadata.dependencies(&self.db) != &dependencies;
-        if !changed {
-            return;
+        let facts_changed = metadata.imports(&self.db) != &current.imports
+            || metadata.dependencies(&self.db) != &current.dependencies;
+        if facts_changed {
+            use salsa::Setter;
+            metadata.set_imports(&mut self.db).to(current.imports);
+            metadata
+                .set_dependencies(&mut self.db)
+                .to(current.dependencies);
         }
-        use salsa::Setter;
-        metadata.set_imports(&mut self.db).to(imports);
-        metadata.set_dependencies(&mut self.db).to(dependencies);
-        self.refresh_all_diagnostics();
+        if facts_changed || collate_changed {
+            self.refresh_all_diagnostics();
+        }
     }
 
     fn load_workspace_sources(&mut self) {
@@ -523,16 +555,30 @@ impl Worker {
         self.rebuild_project_files();
     }
 
-    /// Recomputes the `ProjectFiles` input: package documents first,
-    /// ascending by workspace-relative path, then scripts — the order the
-    /// last-writer-wins symbol index and the CLI agree on.
+    /// Recomputes the `ProjectFiles` input: package documents first — in
+    /// DESCRIPTION `Collate` order when declared (unlisted files after the
+    /// listed ones), then ascending by workspace-relative path — then
+    /// scripts; the order the last-writer-wins symbol index and the CLI
+    /// agree on.
     fn rebuild_project_files(&mut self) {
         use salsa::Setter;
         let r_path = self.workspace_root.join("R");
+        let collate_rank: HashMap<&str, usize> = self
+            .collate_order
+            .iter()
+            .enumerate()
+            .map(|(rank, name)| (name.as_str(), rank))
+            .collect();
         let mut ordered: Vec<(&PathBuf, &SourceFile)> = self.files.iter().collect();
         ordered.sort_by_key(|(path, _)| {
+            let rank = path
+                .file_name()
+                .and_then(|name| collate_rank.get(name.to_string_lossy().as_ref()))
+                .copied()
+                .unwrap_or(usize::MAX);
             (
                 !path.starts_with(&r_path),
+                rank,
                 path.strip_prefix(&self.workspace_root)
                     .unwrap_or(path)
                     .to_string_lossy()

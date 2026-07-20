@@ -10,7 +10,7 @@ use console::style;
 use ignore::Walk;
 use semantics::diagnostics::{Diagnostic, Severity};
 use semantics::{DocumentKind, ProjectFiles, RootDatabase, SourceFile};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy)]
@@ -164,10 +164,20 @@ pub fn check(
             .as_deref()
             .map(namespace::parse_namespace_imports)
             .unwrap_or_default();
-        let dependencies = std::fs::read_to_string(root.join("DESCRIPTION"))
-            .ok()
-            .map(|source| semantics::metadata::parse_description_dependencies(&source))
+        let description_source = std::fs::read_to_string(root.join("DESCRIPTION")).ok();
+        let dependencies = description_source
+            .as_deref()
+            .map(semantics::metadata::parse_description_dependencies)
             .unwrap_or_default();
+        let collate = description_source
+            .as_deref()
+            .map(semantics::metadata::parse_description_collate)
+            .unwrap_or_default();
+        let collate_rank: HashMap<&str, usize> = collate
+            .iter()
+            .enumerate()
+            .map(|(rank, name)| (name.as_str(), rank))
+            .collect();
         semantics::metadata::PackageMetadata::new(
             &db,
             semantics::metadata::normalized_imports(&namespace_imports),
@@ -192,15 +202,22 @@ pub fn check(
             checked.push((path, source));
         }
 
-        // Feed the project in the server's order — package files first,
-        // ascending by root-relative path — so the last-writer-wins symbol
-        // index selects the same winners. Diagnostics still print in
-        // discovery order below.
+        // Feed the project in the server's order — package files first, in
+        // DESCRIPTION `Collate` order when declared (unlisted files after the
+        // listed ones), then ascending by root-relative path — so the
+        // last-writer-wins symbol index selects the same winners.
+        // Diagnostics still print in discovery order below.
         let mut ordered: Vec<usize> = (0..checked.len()).collect();
         ordered.sort_by_key(|index| {
             let path = &checked[*index].0;
+            let rank = path
+                .file_name()
+                .and_then(|name| collate_rank.get(name.to_string_lossy().as_ref()))
+                .copied()
+                .unwrap_or(usize::MAX);
             (
                 !path.starts_with(&r_path),
+                rank,
                 path.strip_prefix(&root)
                     .unwrap_or(path)
                     .to_string_lossy()
