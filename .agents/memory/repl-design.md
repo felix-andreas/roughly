@@ -6,7 +6,8 @@ subcommand packaging, reedline + nu-ansi-term kept, rofy frozen under
 layer, the ReadConsole-hosted reedline console with lexer highlighting and
 conservative completeness, SIGINT interrupt routing, pty e2e tests
 (skip-if-no-R) in the roughly crate. Not yet: analysis-backed completions and
-pre-eval diagnostics (the next rung), Windows, graphics devices.
+pre-eval diagnostics (the next rung), the headless runner (section below),
+Windows, graphics devices.
 
 User-initiated: integrate a first-class REPL into roughly — the successor to the
 `rofy` experiment — **without any build-time link dependency on R**. This
@@ -94,10 +95,13 @@ symbol by name, with per-symbol optionality:
   eval requests, and idle work — with a periodic tick that runs R's input
   handlers so background R machinery (help server, event-loop packages) stays
   live. Feed R **one expression per read**, parsed and split by US first.
-- **Cross-thread R access:** closures shipped to the R thread over an idle
-  channel and executed only when R is parked at a prompt (rendezvous handoff,
-  panics ferried back). This is the seam the analysis engine uses to consult
-  the live session.
+- **One thread touches R — by construction.** The editor runs inside the
+  ReadConsole hook, so the console and R share the main thread and no
+  cross-thread marshaling layer exists. The analysis rung keeps it that way:
+  analysis may run on background threads, but live-session facts (loaded
+  namespaces, `ls()` of the global env, frame columns) are fetched only while
+  R is parked at a prompt, on the main thread, between reads — background
+  threads never call into R.
 - **Interrupts:** block SIGINT everywhere except the R thread; an interrupt
   request sets `R_interrupts_pending` (Unix via the signal, Windows via
   `UserBreak`) and R honors it at its next check; while waiting on input we
@@ -108,6 +112,36 @@ symbol by name, with per-symbol optionality:
   `extern "C-unwind"` throughout. Output capture is two-layer: the
   WriteConsoleEx hook for R-level output, plus fd-level dup/pipe capture for
   C `printf` output that bypasses R's console.
+
+## No kernel protocol (settled)
+
+The reference architecture this design was verified against is a notebook
+kernel: its frontend lives in another process, so it carries a wire protocol
+(message sockets, serialization, signing, ordering, heartbeats), comm
+channels for UI surfaces, and — the structural consequence — a marshaling
+layer that ships work from protocol threads onto the R thread at safe
+points. None of that applies here, and dropping it is a settled decision,
+not a v1 gap: the frontend is in-process (the editor runs inside the
+ReadConsole hook), so exactly one thread ever touches R and the "protocol"
+is a function call. If a remote or GUI frontend is ever wanted, it becomes a
+second frontend over the runtime layer (`libr.rs`) with its own process
+shape — IPC does not get threaded through the console. Editor integration
+is already the LSP's job.
+
+## Headless runner (planned)
+
+`roughly run script.R` — execute a file through the same embedded runtime
+with no editor: batch semantics (`R_Interactive = 0`), output through the
+same WriteConsoleEx plumbing, SIGINT honored, and R's error/exit state
+propagated as the process exit code. Two candidate mechanisms, choice open:
+a second tiny ReadConsole frontend that feeds the file (chunked exactly like
+accepted console input) and answers end-of-input at EOF, or R's own batch
+driver via init args (`--no-echo --file=...`); decide by which preserves
+Rscript-compatible echo/autoprint semantics with less surface. Beyond
+convenience, the runner is the execution backend for running TypedR files
+directly — `roughly run foo.tR` = typecheck, compile in memory, execute —
+the standalone-script story the TypedR proposal's package-centric
+compilation model does not cover (see `typedr-design.md`).
 
 ## What makes it better than rofy (the roughly integration)
 

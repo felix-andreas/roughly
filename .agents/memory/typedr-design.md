@@ -229,3 +229,9 @@ formatter + fixtures + fuzz)
   or rely on the line map + readable output alone.
 - Package metadata: does `TypedR/` need a DESCRIPTION field (a
   `Config/roughly/...` entry) so R tooling ignores it cleanly everywhere?
+- Standalone scripts: the compilation model above is package-centric
+  (committed twins under `R/`), but `roughly run foo.tR` — typecheck,
+  compile in memory, execute through the embedded runtime — would give
+  TypedR a script story with no generated file on disk. The execution
+  backend is the REPL's planned headless runner (`repl-design.md`); decide
+  whether standalone `.tR` scripts land with it or with a dialect phase.

@@ -38,7 +38,7 @@
 ## Open — REPL (v1 shipped; the analysis wiring is the open rung)
 
 - **v1 SHIPPED** (`crates/repl` behind `roughly repl`; `repl-design.md` has the architecture and status): runtime-loaded R (no build-time link — the workspace builds R-less everywhere), reedline console inside the ReadConsole hook, lexer highlighting, conservative completeness with R's continuation as the safety net, SIGINT interrupt routing, pty e2e in the roughly crate (skip-if-no-R, LOCAL-ONLY by user decision — run `cargo test -p roughly --test test_repl_e2e` on a machine with R before REPL-touching changes; no agent container has R, so e2e has never run in-container).
-- **Open — the rung that makes it better than a stock console:** analysis-backed completions (ide completions over the session-as-script, unioned with live-session facts through an idle seam), pre-evaluation diagnostics on pending input, hover on the input line. Then: Windows support, graphics-device story (versioned mirror structs, see the design record).
+- **Open — the rung that makes it better than a stock console:** analysis-backed completions (ide completions over the session-as-script, unioned with live-session facts through an idle seam), pre-evaluation diagnostics on pending input, hover on the input line. Then: the headless runner (`roughly run` — batch execution over the same runtime layer with exit-code propagation; later the direct-execution backend for TypedR scripts — see `repl-design.md`), Windows support, graphics-device story (versioned mirror structs, see the design record).
 
 ## Post-beta (explicitly out of scope for now)
 
