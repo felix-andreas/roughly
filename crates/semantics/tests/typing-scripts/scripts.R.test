@@ -144,7 +144,7 @@ y <- x |> print()
 print(y)
 #++++
 x: integer
-y: Unknown
+y: integer
 
 #---- masked_read_is_a_use
 x <- 1L

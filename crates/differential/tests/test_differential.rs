@@ -136,6 +136,14 @@ const ACCEPTED_DIVERGENCES: &[(&str, &str)] = &[
         "exported_constraints__forwarded_dots_disable_arity_checking",
         "legacy arity-checks a call whose argument is the enclosing function's bare `...` as if the dots were one fixed argument; the forwarded count is unknowable statically, so the rewrite skips arity checks on such calls",
     ),
+    (
+        "pipes__pipe_argument_errors_blame_the_piped_value",
+        "the oracle never modeled `|>` (opaque operator, silent Unknown); the rewrite lowers the pipe as the call R itself rewrites it to and checks the piped argument",
+    ),
+    (
+        "pipes__placeholder_without_the_piped_first_argument_is_missing_an_argument",
+        "the oracle never modeled `|>` (opaque operator, silent Unknown); the rewrite lowers the placeholder form as R does and reports the genuinely missing required argument",
+    ),
 ];
 
 /// Allowlist entries justified by an oracle PANIC (a `debug_assert` in the
@@ -353,6 +361,9 @@ fn differential_corpus() {
             continue;
         };
         let (legacy, _) = filter_oracle_deficits(legacy, &new, None, &mut oracle_deficit_rollup);
+        let facts = differential::new_stack_facts(&source, DocumentKind::Package);
+        let (legacy, new) =
+            differential::filter_pipe_opacity(legacy, new, &facts, &mut oracle_deficit_rollup);
         let mut wording = Vec::new();
         if findings_match(&legacy, &new, &mut wording) {
             matching += 1;

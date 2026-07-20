@@ -1,24 +1,24 @@
 #==== origins
 #---- unsupported_constructs_are_origins
-piped <- function(x) x |> length()
+special <- function(a, b) a %in% b
 formula_model <- function() y ~ x
 elementwise <- function(a, b) a & b
 #++++
-piped: <T> fn(x: T) -> Unknown
+special: <T, U> fn(a: T, b: U) -> Unknown
 formula_model: fn() -> Unknown
 elementwise: <T, U> fn(a: T, b: U) -> Unknown
-21..34 error[strict] strict mode: this expression has an undetermined type (`Unknown`)
+26..34 error[strict] strict mode: this expression has an undetermined type (`Unknown`)
 63..68 error[strict] strict mode: this expression has an undetermined type (`Unknown`)
 99..104 error[strict] strict mode: this expression has an undetermined type (`Unknown`)
 
 #---- assignment_value_phrasing
 f <- function(x) {
-  result <- x |> length()
+  result <- x %in% letters
   result
 }
 #++++
 f: <T> fn(x: T) -> Unknown
-31..44 error[strict] strict mode: could not determine the type of `result`; add a type annotation
+31..45 error[strict] strict mode: could not determine the type of `result`; add a type annotation
 
 #---- dollar_on_an_unresolved_variable
 f <- function(node) node$value

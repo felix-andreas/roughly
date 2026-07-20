@@ -46,6 +46,17 @@ const ORACLE_DEFICIT_CASES: &[&str] = &[
     // The oracle offers no navigation on pipeline reads; the rewrite
     // connects them to their declaration.
     "typing-scripts::reads_that_keep_bindings_alive__pipe_read_is_a_use",
+    // The oracle models `|>` as an opaque operator; the rewrite desugars it
+    // into the call R rewrites it to, so navigation connects piped reads and
+    // newly-typed bindings gain inlay hints (pure additions).
+    "typing::pipes__pipe_lowers_to_first_argument_call",
+    "typing::pipes__pipe_chains_type_end_to_end",
+    "typing::pipes__pipe_argument_errors_blame_the_piped_value",
+    "typing::pipes__pipe_named_placeholder_receives_the_value",
+    "typing::pipes__placeholder_without_the_piped_first_argument_is_missing_an_argument",
+    "typing::pipes__pipe_into_a_namespaced_callee",
+    "typing::pipes__non_call_pipe_stays_opaque",
+    "typing::pipes__positional_placeholder_stays_opaque",
     // The oracle never defined `[` on vectors, so its items stay untyped and
     // hint nothing; the rewrite types vector subsetting and hints the
     // schemes (pure additions).

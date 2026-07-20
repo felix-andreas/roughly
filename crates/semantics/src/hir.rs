@@ -511,6 +511,12 @@ impl Lowering {
             return self.missing(range);
         };
 
+        if operator_token.kind() == SyntaxKind::PIPE_GREATER
+            && let Some(call) = self.lower_pipe(lhs.clone(), rhs.clone(), range)
+        {
+            return call;
+        }
+
         match operator_token.kind() {
             // Assignments normalize to target/value regardless of spelling.
             SyntaxKind::LESS_MINUS | SyntaxKind::EQ | SyntaxKind::LESS2_MINUS => {
@@ -597,7 +603,58 @@ impl Lowering {
         }
     }
 
+    /// `x |> f(y)` is sugar R's own parser rewrites to `f(x, y)` before
+    /// evaluation, so the pipe lowers AS that call and naming, typing, and
+    /// every IDE feature see the real semantics. R accepts only a call on
+    /// the right-hand side, and a `_` placeholder only as the whole value of
+    /// exactly one named argument (which then receives the piped value
+    /// instead of the first positional slot). Anything else — a non-call
+    /// right-hand side, a positional or repeated `_` — is an R error, so
+    /// those pipes keep the opaque-operator lowering (`None`) rather than
+    /// guessing.
+    fn lower_pipe(
+        &mut self,
+        lhs: Option<SyntaxNode>,
+        rhs: Option<SyntaxNode>,
+        range: TextRange,
+    ) -> Option<ExprId> {
+        let call = rhs.filter(|node| node.kind() == SyntaxKind::CALL_EXPR)?;
+        let shape = pipe_shape(&call)?;
+        let piped = self.lower_optional(lhs, range);
+        let callee = call
+            .children()
+            .find(|child| child.kind() != SyntaxKind::ARGUMENT_LIST);
+        let callee = self.lower_optional(callee, range);
+        let substitute = match shape {
+            PipeShape::FirstArgument => None,
+            PipeShape::NamedPlaceholder(index) => Some((index, piped)),
+        };
+        let mut arguments = self.lower_arguments_substituting(&call, substitute);
+        if matches!(shape, PipeShape::FirstArgument) {
+            arguments.insert(
+                0,
+                Argument {
+                    name: None,
+                    value: Some(piped),
+                },
+            );
+        }
+        Some(self.allocate(ExpressionKind::Call { callee, arguments }, range))
+    }
+
     fn lower_arguments(&mut self, node: &SyntaxNode) -> Vec<Argument> {
+        self.lower_arguments_substituting(node, None)
+    }
+
+    /// Argument lowering with an optional pipe-placeholder substitution: the
+    /// argument at `substitute`'s index takes the given (already lowered)
+    /// value instead of lowering its own — the `_` token never becomes an
+    /// expression, so nothing dangles in the arena.
+    fn lower_arguments_substituting(
+        &mut self,
+        node: &SyntaxNode,
+        substitute: Option<(usize, ExprId)>,
+    ) -> Vec<Argument> {
         let Some(list) = node
             .children()
             .find(|child| child.kind() == SyntaxKind::ARGUMENT_LIST)
@@ -608,7 +665,8 @@ impl Lowering {
             .filter(|child| child.kind() == SyntaxKind::ARGUMENT)
             .collect::<Vec<_>>()
             .iter()
-            .map(|argument| {
+            .enumerate()
+            .map(|(index, argument)| {
                 let name = argument
                     .children()
                     .find(|child| {
@@ -621,6 +679,14 @@ impl Lowering {
                             .any(|token| token.kind() == SyntaxKind::EQ)
                     })
                     .and_then(|tag| field_name_text(&tag));
+                if let Some((placeholder, piped)) = substitute
+                    && placeholder == index
+                {
+                    return Argument {
+                        name,
+                        value: Some(piped),
+                    };
+                }
                 let value_node = {
                     let mut expressions = Self::child_expressions(argument);
                     if name.is_some() {
@@ -798,6 +864,63 @@ fn unary_operator(kind: SyntaxKind) -> Option<UnaryOperator> {
         _ => return None,
     };
     Some(operator)
+}
+
+/// Where a pipe's piped value goes in the right-hand call.
+enum PipeShape {
+    FirstArgument,
+    /// The argument index whose `_` placeholder value the piped value
+    /// replaces.
+    NamedPlaceholder(usize),
+}
+
+/// Classifies the right-hand call of a `|>` by R's placeholder rules:
+/// no `_` anywhere means first-argument insertion; exactly one `_`, sitting
+/// as the whole value of a named argument of THIS call, receives the piped
+/// value; every other `_` use (positional, repeated, nested in a
+/// subexpression, or as an argument tag) is an R error — `None`, and the
+/// pipe stays an opaque operator.
+fn pipe_shape(call: &SyntaxNode) -> Option<PipeShape> {
+    let underscores: Vec<syntax::SyntaxToken> = call
+        .descendants_with_tokens()
+        .filter_map(|element| element.into_token())
+        .filter(|token| token.kind() == SyntaxKind::UNDERSCORE)
+        .collect();
+    let [token] = underscores.as_slice() else {
+        return underscores.is_empty().then_some(PipeShape::FirstArgument);
+    };
+    let name = token
+        .parent()
+        .filter(|node| node.kind() == SyntaxKind::NAME)?;
+    let argument = name
+        .parent()
+        .filter(|node| node.kind() == SyntaxKind::ARGUMENT)?;
+    let list = argument
+        .parent()
+        .filter(|node| node.kind() == SyntaxKind::ARGUMENT_LIST)?;
+    if list.parent().as_ref() != Some(call) {
+        return None;
+    }
+    let named = argument
+        .children_with_tokens()
+        .filter_map(|element| element.into_token())
+        .any(|token| token.kind() == SyntaxKind::EQ);
+    // The `_` must be the argument's VALUE: with a tag present, the value is
+    // the second expression child.
+    let is_value = argument
+        .children()
+        .filter(|child| syntax::ast::is_expression_kind(child.kind()))
+        .nth(1)
+        .as_ref()
+        == Some(&name);
+    if !named || !is_value {
+        return None;
+    }
+    let index = list
+        .children()
+        .filter(|child| child.kind() == SyntaxKind::ARGUMENT)
+        .position(|candidate| candidate == argument)?;
+    Some(PipeShape::NamedPlaceholder(index))
 }
 
 fn binary_operator(kind: SyntaxKind) -> Option<BinaryOperator> {

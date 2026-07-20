@@ -4783,9 +4783,7 @@ fn is_data_table(db: &dyn Db, subject: Ty<'_>) -> bool {
 /// `.()`/`list()` select. Every other `j` — a bare column, a computed value,
 /// `with =` forms — has a result shape only column knowledge could name.
 fn data_table_keeps_class(module: &Module, arguments: &[Argument]) -> bool {
-    let mut positional = arguments
-        .iter()
-        .filter(|argument| argument.name.is_none());
+    let mut positional = arguments.iter().filter(|argument| argument.name.is_none());
     let j = arguments
         .iter()
         .find(|argument| argument.name.as_deref() == Some("j"))

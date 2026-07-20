@@ -237,3 +237,52 @@ partial <- function(x, ...) two(x, ...)
 two: <T: numeric> fn(a: T, b: T) -> T
 wrap: <T: numeric> fn(...: Any) -> T
 partial: <T: numeric> fn(x: T, ...: Any) -> T
+
+#==== pipes
+#---- pipe_lowers_to_first_argument_call
+f <- function(x) x |> length()
+#++++
+f: <T> fn(x: T) -> integer
+
+#---- pipe_chains_type_end_to_end
+f <- function(x) x |> length() |> sqrt()
+#++++
+f: <T> fn(x: T) -> double
+
+#---- pipe_argument_errors_blame_the_piped_value
+half <- function(n) n / 2
+f <- function() "text" |> half()
+#++++
+half: <T: numeric> fn(n: T) -> double
+f: Unknown
+42..48 error[type-mismatch] expected a numeric value (`integer` or `double`), found `character`
+
+#---- pipe_named_placeholder_receives_the_value
+scale_by <- function(value, factor) value * factor
+f <- function(x) x |> scale_by(2, factor = _)
+#++++
+scale_by: <T: numeric> fn(value: T, factor: T) -> T
+f: fn(x: double) -> double
+
+#---- placeholder_without_the_piped_first_argument_is_missing_an_argument
+scale_by <- function(value, factor) value * factor
+f <- function() 2 |> scale_by(factor = _)
+#++++
+scale_by: <T: numeric> fn(value: T, factor: T) -> T
+f: Unknown
+72..80 error[type-mismatch] this call supplies 1 argument, but the function requires 2 — a required argument is missing
+
+#---- pipe_into_a_namespaced_callee
+f <- function(x) x |> stats::sd()
+#++++
+f: <T> fn(x: T) -> double
+
+#---- non_call_pipe_stays_opaque
+f <- function(x, g) x |> g
+#++++
+f: <T, U> fn(x: T, g: U) -> Unknown
+
+#---- positional_placeholder_stays_opaque
+f <- function(x) x |> paste(_, "a")
+#++++
+f: <T> fn(x: T) -> Unknown

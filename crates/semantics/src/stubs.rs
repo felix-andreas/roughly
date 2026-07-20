@@ -431,8 +431,12 @@ mod tests {
     fn library_call_attaches_a_conditional_namespace() {
         let mut db = RootDatabase::default();
         let sources = install_shipped_stubs(&db);
-        let metadata =
-            crate::metadata::PackageMetadata::new(&db, Vec::new(), Default::default(), Default::default());
+        let metadata = crate::metadata::PackageMetadata::new(
+            &db,
+            Vec::new(),
+            Default::default(),
+            Default::default(),
+        );
         let file = SourceFile::new(
             &db,
             "library(data.table)\nprint(fread(\"x.csv\"))\n".to_owned(),

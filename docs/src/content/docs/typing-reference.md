@@ -328,9 +328,10 @@ body:
 - conditional top-level writes (inside a top-level `if`/`for`/`while`/`repeat`) create the
   document's variable slot exactly as in package files: later reads in the same document resolve
   to it (the slot exports no scheme yet, so such reads type `Unknown`)
-- a masked read (`with`, data.table indexing) or a read inside an opaque operator (`|>`, `&`,
-  user `%op%`s) is never reported unresolved, but it counts as a use — it keeps the binding it
-  would fall back to alive for the unused check, and navigation (goto, references) connects it
+- a masked read (`with`, data.table indexing) or a read inside an opaque operator (`&`, user
+  `%op%`s, a pipe R would reject) is never reported unresolved, but it counts as a use — it keeps
+  the binding it would fall back to alive for the unused check, and navigation (goto, references)
+  connects it (a well-formed `|>` is not opaque: it types as the call it desugars to)
 
 Scripts are typechecked like package files: they check against package-global value schemes and
 project-global types, plus their own script-local bindings and type declarations.
@@ -1296,6 +1297,19 @@ A call argument that is the enclosing function's bare `...` (the forwarding idio
 so such a call skips both arity checks: neither missing-required nor too-many-arguments can be
 decided statically, and the `...` argument itself matches no parameter. The call's concrete
 arguments are still checked against their parameters as usual.
+
+#### The native pipe
+
+`x |> f(y)` is syntax R's own parser rewrites to `f(x, y)` before evaluation, and it types as
+exactly that call: the piped value becomes the first positional argument, every call rule above
+applies (arity, argument compatibility, overload selection), chains compose left to right, and a
+type error on the piped value blames the left-hand expression. The `_` placeholder follows R's
+rule — legal only as the whole value of exactly one **named** argument, which then receives the
+piped value *instead of* the first positional slot (`x |> lm(y ~ z, data = _)` is
+`lm(y ~ z, data = x)`; note `2 |> f(tag = _)` supplies only `tag`, so other required parameters
+really are missing). A pipe R itself would reject — a right-hand side that is not a call, a
+positional or repeated `_`, a `_` nested inside a subexpression — is not guessed at: it stays an
+opaque operator (silent `Unknown`, quiet reads).
 
 Argument checking is compatibility-based, not exact-equality-based:
 

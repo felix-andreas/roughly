@@ -23,7 +23,8 @@
 
 use differential::{
     filter_legacy_slot_tolerance, filter_model_divergences, filter_oracle_deficits,
-    filter_unknown_type_additions, findings_match, legacy_findings, new_findings, new_stack_facts,
+    filter_pipe_opacity, filter_unknown_type_additions, findings_match, legacy_findings,
+    new_findings, new_stack_facts,
 };
 use semantics::DocumentKind;
 use std::collections::BTreeMap;
@@ -170,6 +171,7 @@ fn run_arm(kind: DocumentKind, document_path: &str, budget: usize, seed: u64) {
             filter_oracle_deficits(legacy, &new, Some(&facts), &mut deficit_rollup);
         let (legacy, new) =
             filter_model_divergences(legacy, new, &facts, &accepted, &mut deficit_rollup);
+        let (legacy, new) = filter_pipe_opacity(legacy, new, &facts, &mut deficit_rollup);
         let mut wording = Vec::new();
         if findings_match(&legacy, &new, &mut wording) {
             matching += 1;

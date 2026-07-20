@@ -172,6 +172,16 @@ pub struct NewStackFacts {
     multibound: std::collections::BTreeSet<String>,
     /// Names whose defining item reads the name itself.
     self_referential: std::collections::BTreeSet<String>,
+    /// Spans of native-pipe (`|>`) binary expressions. The oracle treats the
+    /// operator as opaque — quiet reads, silent `Unknown` — while the
+    /// rewrite desugars it into the call R itself rewrites it to, so
+    /// findings inside these spans have no cross-stack counterpart by
+    /// construction.
+    pipe_spans: Vec<(usize, usize)>,
+    /// Names appearing inside those pipe spans: real (resolved, checked)
+    /// reads on the rewrite, invisible as uses to the oracle — the oracle
+    /// wrongly calls such bindings dead.
+    pipe_read_names: std::collections::BTreeSet<String>,
 }
 
 pub fn new_stack_facts(source: &str, kind: DocumentKind) -> NewStackFacts {
@@ -224,6 +234,31 @@ pub fn new_stack_facts(source: &str, kind: DocumentKind) -> NewStackFacts {
         .filter(|(_, count)| *count >= 2)
         .map(|(name, _)| name)
         .collect();
+    let mut pipe_read_names = std::collections::BTreeSet::new();
+    let pipe_spans = semantics::parse(&db, file)
+        .syntax_node()
+        .descendants()
+        .filter(|node| {
+            node.kind() == syntax::SyntaxKind::BINARY_EXPR
+                && node
+                    .children_with_tokens()
+                    .filter_map(|element| element.into_token())
+                    .any(|token| token.kind() == syntax::SyntaxKind::PIPE_GREATER)
+        })
+        .map(|node| {
+            for name in node
+                .descendants()
+                .filter(|child| child.kind() == syntax::SyntaxKind::NAME)
+            {
+                pipe_read_names.insert(name.text().to_string());
+            }
+            let range = node.text_range();
+            (
+                u32::from(range.start()) as usize,
+                u32::from(range.end()) as usize,
+            )
+        })
+        .collect();
     NewStackFacts {
         item_spans,
         earliest_slot,
@@ -232,7 +267,46 @@ pub fn new_stack_facts(source: &str, kind: DocumentKind) -> NewStackFacts {
         item_defines,
         multibound,
         self_referential,
+        pipe_spans,
+        pipe_read_names,
     }
+}
+
+/// Accepts findings on either side that sit inside a native-pipe (`|>`)
+/// expression. The oracle models the pipe as an opaque operator, so inside a
+/// pipe span the stacks legitimately see different worlds: the rewrite
+/// resolves and type-checks the desugared call (extra unresolved and type
+/// findings with no oracle counterpart), and blame anchored inside the pipe
+/// can move. Matched pairs inside a span drop symmetrically, so the filter
+/// never flips a match into a divergence. Every drop is counted under
+/// `pipe-opacity`.
+pub fn filter_pipe_opacity(
+    legacy: Vec<Finding>,
+    new: Vec<Finding>,
+    facts: &NewStackFacts,
+    deficit_rollup: &mut BTreeMap<String, usize>,
+) -> (Vec<Finding>, Vec<Finding>) {
+    if facts.pipe_spans.is_empty() {
+        return (legacy, new);
+    }
+    let keep = |findings: Vec<Finding>, deficit_rollup: &mut BTreeMap<String, usize>| {
+        findings
+            .into_iter()
+            .filter(|finding| {
+                let inside = facts
+                    .pipe_spans
+                    .iter()
+                    .any(|&(start, end)| start <= finding.1 && finding.2 <= end);
+                if inside {
+                    *deficit_rollup.entry("pipe-opacity".to_owned()).or_default() += 1;
+                }
+                !inside
+            })
+            .collect()
+    };
+    let legacy = keep(legacy, deficit_rollup);
+    let new = keep(new, deficit_rollup);
+    (legacy, new)
 }
 
 /// The oracle deficits one comparison accepted: names whose unresolved
@@ -453,7 +527,8 @@ pub fn filter_model_divergences(
 /// - The oracle does not model reads inside `|>` pipelines (and other opaque
 ///   operators) as uses, so it calls bindings dead that a pipeline reads. A
 ///   legacy-only unused finding whose name the new side saw in a quiet read
-///   is that deficit (requires `facts`).
+///   — or read for real inside a desugared pipe — is that deficit (requires
+///   `facts`).
 /// - The rewrite's tolerance floor treats `Unknown` as an absent fact (not a
 ///   checkable claim), while the oracle sometimes rejects Unknown-carrying
 ///   values (`list{Unknown}` against `list[T] | T[]`). A legacy-only type
@@ -553,7 +628,9 @@ pub fn filter_oracle_deficits(
                     .or_default() += 1;
                 return false;
             }
-            let quiet_read = facts.is_some_and(|facts| facts.quiet_read_names.contains(name));
+            let quiet_read = facts.is_some_and(|facts| {
+                facts.quiet_read_names.contains(name) || facts.pipe_read_names.contains(name)
+            });
             if quiet_read {
                 *deficit_rollup
                     .entry(format!("{name} (quiet read)"))
