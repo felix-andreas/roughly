@@ -917,6 +917,7 @@ impl Parser<'_> {
                 _ => {}
             }
 
+            let statement_start = self.pos;
             if !self.expression(0) {
                 match self.current() {
                     Some(SyntaxKind::ELSE_KW) => self.error_here(
@@ -948,10 +949,19 @@ impl Parser<'_> {
                     // this whole broken region; re-reporting its tail as
                     // "unexpected ..." would double up on one mistake.
                     if kind != SyntaxKind::ERROR_TOKEN && !self.statement_had_lexer_error {
-                        let description = self.describe_current();
-                        self.error_here(format!(
-                            "unexpected {description} after this expression; expected a newline or `;`"
-                        ));
+                        // `return x` deserves better than the generic
+                        // boundary error: `return` reads like a keyword but
+                        // is a function in R, and the fix is parentheses.
+                        if self.statement_ends_with_bare_return(statement_start)
+                            && Self::starts_expression(kind)
+                        {
+                            self.error_here("`return` needs parentheses: `return(x)`");
+                        } else {
+                            let description = self.describe_current();
+                            self.error_here(format!(
+                                "unexpected {description} after this expression; expected a newline or `;`"
+                            ));
+                        }
                     }
                     self.start(SyntaxKind::ERROR);
                     self.recover_to_statement_boundary(terminator);
@@ -959,6 +969,43 @@ impl Parser<'_> {
                 }
             }
         }
+    }
+
+    /// Whether the statement whose tokens began at `start` ENDS in the bare
+    /// name `return` — the classic missing-parentheses mistake (`return x`,
+    /// `f <- function() return TRUE`). It earns a targeted message because
+    /// `return` reads like a keyword but is a function in R. A `return`
+    /// reached through an access operator (`x$return`, `pkg::return`) is an
+    /// ordinary field or export, not the builtin, and keeps the generic
+    /// error.
+    fn statement_ends_with_bare_return(&self, start: usize) -> bool {
+        let mut last: Option<(usize, SyntaxKind)> = None;
+        let mut before: Option<SyntaxKind> = None;
+        for (offset, token) in self
+            .tokens
+            .get(start..self.pos)
+            .unwrap_or_default()
+            .iter()
+            .enumerate()
+        {
+            if matches!(
+                token.kind,
+                SyntaxKind::WHITESPACE | SyntaxKind::COMMENT | SyntaxKind::NEWLINE
+            ) {
+                continue;
+            }
+            before = last.map(|(_, kind)| kind);
+            last = Some((offset, token.kind));
+        }
+        let Some((last_offset, last_kind)) = last else {
+            return false;
+        };
+        last_kind == SyntaxKind::IDENT
+            && self.token_str(start + last_offset) == "return"
+            && !matches!(
+                before,
+                Some(SyntaxKind::DOLLAR | SyntaxKind::AT | SyntaxKind::COLON2 | SyntaxKind::COLON3)
+            )
     }
 
     fn recover_to_statement_boundary(&mut self, terminator: Option<SyntaxKind>) {

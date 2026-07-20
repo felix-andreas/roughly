@@ -101,3 +101,38 @@ error: expected a body after `repeat`
  --> 1:7
   | repeat
   |       ^
+
+#==== return
+#---- return_value_needs_parentheses
+f <- function(x) {
+  return x
+}
+#++++
+error: `return` needs parentheses: `return(x)`
+ --> 2:10
+  |   return x
+  |          ^
+
+#---- return_with_a_literal_needs_parentheses
+f <- function() return TRUE
+#++++
+error: `return` needs parentheses: `return(x)`
+ --> 1:24
+  | f <- function() return TRUE
+  |                        ^^^^
+
+#---- return_calls_and_bare_return_are_clean
+f <- function(x) return(x)
+g <- function() return
+#++++
+no errors
+
+#---- return_before_a_non_expression_keeps_the_generic_error
+f <- function() {
+  return , 1
+}
+#++++
+error: unexpected `,` after this expression; expected a newline or `;`
+ --> 2:10
+  |   return , 1
+  |          ^
