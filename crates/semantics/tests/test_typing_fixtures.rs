@@ -33,7 +33,7 @@ fn render_as(source: &str, kind: DocumentKind) -> String {
 /// new-stack only — the oracle has no package-metadata concept — so it is
 /// deliberately absent from the differential fixture arm.
 fn render_with_metadata(source: &str) -> String {
-    let db = RootDatabase::default();
+    let mut db = RootDatabase::default();
     semantics::stubs::install_shipped_stubs(&db);
     let mut namespace_source = String::new();
     let mut description_source = String::new();
@@ -47,13 +47,22 @@ fn render_with_metadata(source: &str) -> String {
         }
     }
     let imports = semantics::metadata::parse_namespace_imports(&namespace_source);
-    semantics::metadata::PackageMetadata::new(
+    let metadata = semantics::metadata::PackageMetadata::new(
         &db,
         semantics::metadata::normalized_imports(&imports),
         semantics::metadata::parse_description_dependencies(&description_source),
+        Default::default(),
     );
     let file = SourceFile::new(&db, source.to_owned(), DocumentKind::Package);
     ProjectFiles::new(&db, vec![file]);
+    // Attach facts flow exactly as in the hosts: scanned from the analyzed
+    // sources, so `library(data.table)` cases activate the conditional
+    // namespace with no fixture-only side channel.
+    let attached = semantics::metadata::attached_union(&db, [file]);
+    if !attached.is_empty() {
+        use salsa::Setter;
+        metadata.set_attached(&mut db).to(attached);
+    }
     render_file(&db, file)
 }
 

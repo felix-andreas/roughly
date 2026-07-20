@@ -6,7 +6,8 @@
 //! declares an opaque stub nominal; repeating a name within one source
 //! appends an ordered overload candidate; a later source replaces a name's
 //! whole set. The assembled library is derived from a set-once singleton
-//! input, so stub text never participates in per-edit invalidation.
+//! input plus the package-metadata input (which activates the conditional
+//! namespaces), so stub text never participates in per-edit invalidation.
 
 use crate::Db;
 use crate::annotations::lower_annotation;
@@ -67,8 +68,9 @@ pub fn namespace_exports(db: &dyn Db, package: &str, name: &str) -> bool {
     })
 }
 
-/// The shipped stdlib corpus (base + default-attached packages), embedded
-/// from this crate's own `stubs/` directory.
+/// The shipped stdlib corpus (base + default-attached packages, plus the
+/// conditional namespaces), embedded from this crate's own `stubs/`
+/// directory.
 pub fn shipped_stub_sources() -> Vec<(String, String)> {
     [
         ("base", include_str!("../stubs/base.Rtypes")),
@@ -77,17 +79,29 @@ pub fn shipped_stub_sources() -> Vec<(String, String)> {
         ("methods", include_str!("../stubs/methods.Rtypes")),
         ("graphics", include_str!("../stubs/graphics.Rtypes")),
         ("grDevices", include_str!("../stubs/grDevices.Rtypes")),
+        ("data.table", include_str!("../stubs/data.table.Rtypes")),
     ]
     .into_iter()
     .map(|(namespace, text)| (namespace.to_owned(), text.to_owned()))
     .collect()
 }
 
+/// Shipped namespaces R does not attach by default: their declarations join
+/// the library only when the project declares or attaches the package
+/// (`metadata::namespace_active`), so `fread` never resolves — and never
+/// steals a typo warning — in a project that does not use data.table.
+pub const CONDITIONAL_NAMESPACES: &[&str] = &["data.table"];
+
 /// Parse and lower every stub source into the interned library.
 #[salsa::tracked(returns(ref))]
 pub fn stub_library<'db>(db: &'db dyn Db, sources: StubSources) -> StubLibrary<'db> {
     let mut library = StubLibrary::default();
     for (namespace, text) in sources.sources(db) {
+        if CONDITIONAL_NAMESPACES.contains(&namespace.as_str())
+            && !crate::metadata::namespace_active(db, namespace)
+        {
+            continue;
+        }
         let namespace_exports = library
             .exports_by_namespace
             .entry(namespace.clone())
@@ -386,6 +400,60 @@ mod tests {
             "sum keeps its ordered overload candidates"
         );
         assert_eq!(library.schemes["length"].len(), 1);
+    }
+
+    #[test]
+    fn conditional_namespace_is_dark_without_activation() {
+        let db = RootDatabase::default();
+        let sources = install_shipped_stubs(&db);
+        let library = stub_library(&db, sources);
+        assert!(!library.schemes.contains_key("fread"));
+        assert!(!library.nominals.contains("data.table"));
+        assert!(!library.exports_by_namespace.contains_key("data.table"));
+    }
+
+    #[test]
+    fn declared_dependency_activates_a_conditional_namespace() {
+        let db = RootDatabase::default();
+        let sources = install_shipped_stubs(&db);
+        crate::metadata::PackageMetadata::new(
+            &db,
+            Vec::new(),
+            ["data.table".to_owned()].into(),
+            Default::default(),
+        );
+        let library = stub_library(&db, sources);
+        assert!(library.schemes.contains_key("fread"));
+        assert!(library.nominals.contains("data.table"));
+    }
+
+    #[test]
+    fn library_call_attaches_a_conditional_namespace() {
+        let mut db = RootDatabase::default();
+        let sources = install_shipped_stubs(&db);
+        let metadata =
+            crate::metadata::PackageMetadata::new(&db, Vec::new(), Default::default(), Default::default());
+        let file = SourceFile::new(
+            &db,
+            "library(data.table)\nprint(fread(\"x.csv\"))\n".to_owned(),
+            DocumentKind::Script,
+        );
+        ProjectFiles::new(&db, vec![file]);
+        let attached = crate::metadata::attached_union(&db, [file]);
+        assert_eq!(
+            attached.iter().collect::<Vec<_>>(),
+            ["data.table"],
+            "the library() call must be scanned"
+        );
+        use salsa::Setter;
+        metadata.set_attached(&mut db).to(attached);
+        let library = stub_library(&db, sources);
+        assert!(library.schemes.contains_key("fread"));
+        let diagnostics = file_diagnostics(&db, file);
+        assert!(
+            diagnostics.is_empty(),
+            "an attached conditional namespace resolves its exports: {diagnostics:?}"
+        );
     }
 
     #[test]

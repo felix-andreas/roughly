@@ -2217,16 +2217,51 @@ could-not-resolve warning, no strict origin.
 
 Recognized masks:
 
+- a single `[` bracket whose subject types as the **`data.table` nominal** masks all of its index
+  arguments, whatever they look like — with the subject's class known, `DT[speed > 20]` and
+  `DT[, x]` are column references even though they carry no syntactic marker
 - a `[` call carrying an unambiguous **data.table signature** — a `by =` / `keyby =` argument, a
   `:=` column assignment, a `.()` list call, or a `.SD` / `.N` / `.I` / `.BY` / `.GRP` / `.EACHI`
-  special — masks all of that bracket's index arguments, and the whole bracket expression types as
-  `Unknown` (base indexing rules do not judge `[.data.table`)
+  special — masks all of that bracket's index arguments even when the subject's type is unknown
 - the base masking family `with()`, `within()`, `subset()`, `transform()` masks every argument
   after the data (a locally defined function of the same name masks nothing)
 
 Names inside a mask that *do* resolve — a local variable used in `j`, a standard-library function
-like `sum` — keep their ordinary resolution and typing. Base-R indexing (`m[i, j]`) carries no
-data.table marker and keeps full lexical checking.
+like `sum` — keep their ordinary resolution and typing (data.table itself falls back to the
+lexical scope for names that are not columns). Base-R indexing (`m[i, j]`) carries no data.table
+marker and keeps full lexical checking. Nested function bodies written inside a masked argument
+are masked too: a closure created in `j` is created inside the data's frame.
+
+#### data.table result classes
+
+A bracket with a signature but an unknown subject types as `Unknown` — base indexing rules do not
+judge `[.data.table`. When the subject IS the `data.table` nominal, the result **class** follows
+from the bracket's own syntax even though columns are unknown. With `j` the second positional
+slot (or a `j =` argument):
+
+| bracket shape | result |
+| --- | --- |
+| no `j`, or an empty `j` slot — `DT[i]`, `DT[on = …]` | the subject's class (row filters and joins return tables) |
+| `j` is a `:=` call — `DT[, x := …]`, `` DT[, `:=`(a = …) ] `` | the subject's class, returned invisibly |
+| `j` is a `.()` or `list()` call — `DT[, .(m = mean(x))]` | the subject's class |
+| any `j` with a `by =` / `keyby =` argument — `DT[, sum(x), by = g]` | the subject's class (grouped results always assemble into a table) |
+| anything else — a bare column (`DT[, x]`), an ungrouped computed `j`, `with =` forms | `Unknown` (a strict-mode origin; the shape would need column knowledge) |
+
+The class is a real type: it flows through chains (`DT[a > 1][, .(m = mean(b)), by = g]` keeps
+`data.table` end to end), satisfies or violates annotations, and constrains call arguments.
+Column-level knowledge (element types, membership checks, `:=` evolution) is deliberately out of
+scope for now.
+
+#### The data.table stub namespace is conditional
+
+Shipped stubs for `data.table` (the `data.table` nominal, `fread`, the `set*()` family, and the
+rest of the high-traffic surface) exist but do **not** join the resolution universe by default —
+R does not attach data.table by default either, and its names must not steal typo warnings in
+projects that never use it. The namespace activates when the project declares the package —
+a `DESCRIPTION` dependency field or any `NAMESPACE` `import`/`importFrom` naming it — or when
+any project file attaches it with a `library()` / `require()` / `requireNamespace()` /
+`loadNamespace()` call whose package argument is a literal name or string. While inactive, the
+namespace behaves exactly like any package the stub corpus does not describe.
 
 A project `.Rtypes` stub can declare its own masking function with the `@masked` attribute —
 the way to teach Roughly a dplyr-style verb:

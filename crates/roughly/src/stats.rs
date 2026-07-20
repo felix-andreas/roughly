@@ -114,13 +114,14 @@ pub fn analysis_stats(target: Option<&Path>) -> Result<(), CommandError> {
     let rss_baseline = resident_set_bytes();
     let mut db = RootDatabase::default();
     semantics::stubs::StubSources::new(&db, stub_sources);
-    semantics::metadata::PackageMetadata::new(
+    let metadata = semantics::metadata::PackageMetadata::new(
         &db,
         semantics::metadata::normalized_imports(&namespace_imports),
         description_source
             .as_deref()
             .map(semantics::metadata::parse_description_dependencies)
             .unwrap_or_default(),
+        std::collections::BTreeSet::new(),
     );
     let mut records: Vec<FileRecord> = Vec::with_capacity(entries.len());
     let mut package_count = 0usize;
@@ -168,6 +169,15 @@ pub fn analysis_stats(target: Option<&Path>) -> Result<(), CommandError> {
         parse_total += start.elapsed();
     }
     let rss_after_parse = resident_set_bytes();
+    // Attach facts ride the parse memos just warmed; they must land before
+    // the naming stage so conditional stub namespaces resolve exactly as the
+    // real hosts see them.
+    let attached =
+        semantics::metadata::attached_union(&db, records.iter().map(|record| record.file));
+    if !attached.is_empty() {
+        use salsa::Setter;
+        metadata.set_attached(&mut db).to(attached);
+    }
     let mut lower_total = Duration::ZERO;
     let mut item_count = 0usize;
     for record in &records {

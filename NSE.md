@@ -13,9 +13,17 @@ designs get drafted before they graduate into that record or the typing referenc
 - `masked_subsets` (naming): a `[` bracket carrying an unambiguous data.table
   signature — `by =`/`keyby =`, a `:=` call, `.()`, or a `.SD`-family special
   (`.SD`, `.N`, `.I`, `.BY`, `.GRP`, `.EACHI`) — masks its index arguments;
-  the whole bracket types `Unknown`.
+  with an unknown subject the whole bracket types `Unknown`.
 - The stub corpus's `@masked` verb set: variadic callees whose `...` is
   data-masked (dplyr verbs, the `with()` family).
+- **Idea 1 below is SHIPPED** (typing-reference "Data-masked evaluation" is the
+  contract; the decision record has the shape): a conditional `data.table`
+  stub namespace (active only when the project declares or attaches the
+  package) gives values the `data.table` class; a bracket whose subject IS
+  that nominal masks all its index reads (typed-subject masking — no
+  syntactic marker needed) and classifies its result by `j`'s syntax
+  (filters/joins/`:=`/`.()`/`list()`/grouped `j` keep the class; the rest
+  refuse as `Unknown`).
 
 Zero false positives, zero checking inside the mask. Every idea below must keep
 that property: unknown masking constructs stay silent, never guessed.
@@ -96,8 +104,9 @@ zero false positives.
 
 ### Suggested sequencing for data.table
 
-1. Result-shape classifier (idea 1) — no new type theory, immediate value in
-   chains; fixture group `masked_subsets` grows result-class cases.
+1. ~~Result-shape classifier (idea 1)~~ — **DONE**, including the conditional
+   stub namespace and typed-subject masking it needed to be usable (fixture
+   group `datatable` in the typing-imports suite pins the behavior).
 2. Masking contracts in the stub language (ladder step 1) so `@masked` and the
    bracket heuristic move into per-package stub metadata (`data.table`'s stub
    declares the bracket semantics and the `set*()` contracts).
@@ -126,10 +135,10 @@ on any near-term path.
 
 ## Open questions
 
-- Does the result-shape classifier live in the checker (`subset_result`
-  alongside the vector-`[` rules) or behind the stub contract language? First
-  cut: checker, since the bracket recognition already lives in naming; migrate
-  when contracts exist.
+- ~~Where does the result-shape classifier live?~~ Settled: the checker
+  (`infer_index`, next to the vector-`[` rules), keyed on the `data.table`
+  nominal; migrate into stub contracts when the contract language (step 2)
+  exists.
 - Lower-bound column sets vs. exact sets in linear regions — pick one before
   idea 3; lower-bound is the current lean.
 - Annotation syntax for row types is owned by design question 3 — NSE should

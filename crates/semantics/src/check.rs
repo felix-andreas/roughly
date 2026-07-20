@@ -156,6 +156,11 @@ pub struct ItemCheck<'db> {
     /// the declared set. Absent when no candidate matched. Signature help
     /// lists the whole declared set with the committed candidate active.
     pub selected_overloads: FxHashMap<ExprId, usize>,
+    /// Reads inside the index arguments of a bracket whose subject is a
+    /// declared `data.table`: the bracket evaluates them inside the data's
+    /// own frame, where a bare name is a column reference no lexical scope
+    /// can see — the unresolved-name warning skips these expressions.
+    pub masked_reads: rustc_hash::FxHashSet<ExprId>,
     /// The settled scheme of every name the item's TOP-LEVEL frame binds
     /// (variable-erased like the export). For a statement item this is how a
     /// conditional write (`for (i in 1:3) total <- i`) serves cross-item
@@ -247,6 +252,7 @@ pub fn check_item_with_annotation<'db>(
         rigid_constraints: FxHashMap::default(),
         recorded: FxHashMap::default(),
         selected_overloads: FxHashMap::default(),
+        masked_reads: rustc_hash::FxHashSet::default(),
         errors: Vec::new(),
         strict_origins: Vec::new(),
         overload_probe_depth: 0,
@@ -418,6 +424,7 @@ pub fn check_item_with_annotation<'db>(
         strict_origins: context.strict_origins,
         scheme,
         selected_overloads: context.selected_overloads,
+        masked_reads: context.masked_reads,
         top_level_bindings,
     }
 }
@@ -723,6 +730,7 @@ struct Checker<'db, 'a> {
     rigid_constraints: FxHashMap<Name<'db>, Constraint>,
     recorded: FxHashMap<ExprId, Ty<'db>>,
     selected_overloads: FxHashMap<ExprId, usize>,
+    masked_reads: rustc_hash::FxHashSet<ExprId>,
     errors: Vec<TypeError<'db>>,
     strict_origins: Vec<StrictOrigin>,
     /// Non-zero while a strict overload-selection round probes a candidate:
@@ -4085,14 +4093,33 @@ impl<'db> Checker<'db, '_> {
                 index_types.push(self.infer(value));
             }
         }
-        // A bracket the naming walk recognized as data.table syntax
-        // evaluates its indexes in the data's frame and returns a shape no
-        // base indexing rule covers — silent Unknown, like the masked column
-        // reads inside it.
+        let subject = self.structural(target_ty);
+        // A declared `data.table` subject makes a single bracket
+        // `[.data.table`: a query whose index arguments evaluate inside the
+        // data's own frame (their reads are column references — recorded so
+        // the unresolved warning skips them) and whose result CLASS the `j`
+        // argument's syntax decides even with the columns unknown. Shapes the
+        // classifier cannot name keep the sound-refusal Unknown.
+        if !double && is_data_table(self.db, subject) {
+            for argument in arguments {
+                if let Some(value) = argument.value {
+                    self.mask_column_reads(value);
+                }
+            }
+            return if data_table_keeps_class(self.module, arguments) {
+                subject
+            } else {
+                self.record_strict_origin(id, StrictOriginKind::UnsupportedConstruct);
+                self.unknown()
+            };
+        }
+        // A bracket the naming walk recognized as data.table syntax without
+        // a data.table-typed subject evaluates its indexes in the data's
+        // frame and returns a shape no base indexing rule covers — silent
+        // Unknown, like the masked column reads inside it.
         if self.naming.masked_subsets.contains(&id) {
             return self.unknown();
         }
-        let subject = self.structural(target_ty);
         // An Unknown/Any subject stays Unknown/Any even under an unsupported
         // index shape — the subject's own gap was already diagnosed, so
         // `m[i, j]` must not cascade an arity error. A sealed nominal
@@ -4151,6 +4178,20 @@ impl<'db> Checker<'db, '_> {
                 self.errors.push(error);
                 self.unknown()
             }
+        }
+    }
+
+    /// Records every read under a data.table bracket's index argument as a
+    /// column reference. Nested function bodies are included: a closure
+    /// written inside `j` is created in the data's frame, so its free names
+    /// also fall back to columns.
+    fn mask_column_reads(&mut self, id: ExprId) {
+        let kind = &self.module.expression(id).kind;
+        if matches!(kind, ExpressionKind::NameRef(_)) {
+            self.masked_reads.insert(id);
+        }
+        for &child in kind.child_ids().iter() {
+            self.mask_column_reads(child);
         }
     }
 
@@ -4725,6 +4766,50 @@ fn widen_error_container<'db>(mut error: TypeError<'db>, union: Ty<'db>) -> Type
         _ => {}
     }
     error
+}
+
+/// Whether an index subject resolved to the `data.table` nominal, wherever
+/// it was declared (the shipped conditional stub or a project `@type`).
+fn is_data_table(db: &dyn Db, subject: Ty<'_>) -> bool {
+    matches!(subject.kind(db), TyKind::Named(name, _) if name.text(db) == "data.table")
+}
+
+/// Whether a `[.data.table` query's result keeps the subject's class, decided
+/// purely by the bracket's argument syntax. `j` is the second positional slot
+/// (or a `j =` named argument); the class survives when `j` is absent or an
+/// empty slot (row filtering, joins), when a `by =`/`keyby =` grouping is
+/// present (grouped results always assemble into a table), or when `j` is a
+/// `:=` column assignment (the subject returned invisibly) or a
+/// `.()`/`list()` select. Every other `j` — a bare column, a computed value,
+/// `with =` forms — has a result shape only column knowledge could name.
+fn data_table_keeps_class(module: &Module, arguments: &[Argument]) -> bool {
+    let mut positional = arguments
+        .iter()
+        .filter(|argument| argument.name.is_none());
+    let j = arguments
+        .iter()
+        .find(|argument| argument.name.as_deref() == Some("j"))
+        .or_else(|| {
+            let _i = positional.next();
+            positional.next()
+        });
+    let Some(value) = j.and_then(|argument| argument.value) else {
+        return true;
+    };
+    if arguments
+        .iter()
+        .any(|argument| matches!(argument.name.as_deref(), Some("by") | Some("keyby")))
+    {
+        return true;
+    }
+    matches!(
+        &module.expression(value).kind,
+        ExpressionKind::Call { callee, .. }
+            if matches!(
+                &module.expression(*callee).kind,
+                ExpressionKind::NameRef(name) if matches!(name.as_str(), ":=" | "." | "list")
+            )
+    )
 }
 
 /// The first alias whose expansion re-enters itself while lowering `ty`, if

@@ -309,6 +309,11 @@ struct Worker {
     pending_semantic_publishes: Vec<PathBuf>,
     /// Workspace files to warm at idle time; results are never published.
     prime_queue: VecDeque<PathBuf>,
+    /// Per-file `library()`-family attach facts, non-empty sets only. Kept
+    /// current per synced/primed file — never by a whole-project sweep, so
+    /// keystroke work stays O(open documents); the idle prime fills in the
+    /// rest of the workspace shortly after startup.
+    attached_by_file: HashMap<PathBuf, std::collections::BTreeSet<String>>,
 }
 
 /// The parsed NAMESPACE/DESCRIPTION facts a workspace currently declares.
@@ -408,6 +413,7 @@ impl Worker {
             virtual_document_uris: HashMap::new(),
             pending_semantic_publishes: Vec::new(),
             prime_queue: VecDeque::new(),
+            attached_by_file: HashMap::new(),
         };
         worker.install_stubs();
         worker.install_metadata();
@@ -492,7 +498,66 @@ impl Worker {
             &self.db,
             metadata.imports,
             metadata.dependencies,
+            self.attached_union(),
         );
+    }
+
+    fn attached_union(&self) -> std::collections::BTreeSet<String> {
+        self.attached_by_file
+            .values()
+            .flat_map(|namespaces| namespaces.iter().cloned())
+            .collect()
+    }
+
+    /// Re-scans ONE file's `library()`-family attach facts (riding the parse
+    /// the surrounding sync or prime work forces anyway) and, when the
+    /// project-wide union moved, updates the metadata input — every file's
+    /// resolution universe changes with it, so all diagnostics refresh.
+    fn refresh_attached(&mut self, path: &Path) {
+        let scanned = match self.files.get(path) {
+            Some(&file) => {
+                let scan = self.cancellable(|worker| {
+                    semantics::metadata::file_attached_namespaces(&worker.db, file)
+                });
+                match scan {
+                    Ok(scanned) => scanned,
+                    // A newer edit is already queued; its own sync re-scans.
+                    Err(_) => return,
+                }
+            }
+            None => Default::default(),
+        };
+        let changed = if scanned.is_empty() {
+            self.attached_by_file.remove(path).is_some()
+        } else if self.attached_by_file.get(path) != Some(&scanned) {
+            self.attached_by_file.insert(path.to_owned(), scanned);
+            true
+        } else {
+            false
+        };
+        if !changed {
+            return;
+        }
+        let union = self.attached_union();
+        match semantics::metadata::PackageMetadata::try_get(&self.db) {
+            Some(metadata) => {
+                if metadata.attached(&self.db) == &union {
+                    return;
+                }
+                use salsa::Setter;
+                metadata.set_attached(&mut self.db).to(union);
+            }
+            None => {
+                let current = self.current_metadata();
+                semantics::metadata::PackageMetadata::new(
+                    &self.db,
+                    current.imports,
+                    current.dependencies,
+                    union,
+                );
+            }
+        }
+        self.refresh_all_diagnostics();
     }
 
     /// Re-derives the metadata input; on a real change every file's
@@ -510,6 +575,7 @@ impl Worker {
                 &self.db,
                 current.imports,
                 current.dependencies,
+                self.attached_union(),
             );
             self.refresh_all_diagnostics();
             return;
@@ -634,8 +700,13 @@ impl Worker {
             let outcome = self.cancellable(|worker| {
                 let _ = document_diagnostics(&worker.db, file, &config);
             });
-            if outcome.is_err() {
-                self.prime_queue.push_front(path);
+            match outcome {
+                Ok(()) => {
+                    // The prime is also how the startup workspace gets its
+                    // attach facts scanned without a blocking sweep.
+                    self.refresh_attached(&path);
+                }
+                Err(_) => self.prime_queue.push_front(path),
             }
         }
     }
@@ -849,6 +920,7 @@ impl Worker {
             }
         }
         self.open_documents.insert(path.clone());
+        self.refresh_attached(&path);
         if !self.supports_pull_diagnostics {
             self.publish_first_wave(&path, version);
         }
@@ -899,6 +971,7 @@ impl Worker {
         let updated = self.apply_content_changes(text, &params.content_changes);
         use salsa::Setter;
         file.set_text(&mut self.db).to(updated);
+        self.refresh_attached(&path);
         if !self.supports_pull_diagnostics {
             self.publish_first_wave(&path, version);
         }
@@ -999,6 +1072,7 @@ impl Worker {
                         use salsa::Setter;
                         file.set_text(&mut self.db).to(text);
                     }
+                    self.refresh_attached(&path);
                     return;
                 }
                 Err(error) => {
@@ -1010,11 +1084,13 @@ impl Worker {
         self.files.remove(&path);
         self.virtual_document_uris.remove(&path);
         self.rebuild_project_files();
+        self.refresh_attached(&path);
     }
 
     fn did_change_watched_files(&mut self, params: lsp_types::DidChangeWatchedFilesParams) {
         let mut config_changed = false;
         let mut metadata_changed = false;
+        let mut reloaded_documents: Vec<PathBuf> = Vec::new();
         for change in &params.changes {
             let Ok(path) = change.uri.to_file_path() else {
                 continue;
@@ -1055,20 +1131,26 @@ impl Worker {
                     Ok(text) => match self.files.get(&path) {
                         Some(&file) => {
                             file.set_text(&mut self.db).to(text);
+                            reloaded_documents.push(path.clone());
                         }
                         None => {
                             let file = SourceFile::new(&self.db, text, DocumentKind::Package);
                             self.files.insert(path.clone(), file);
                             self.rebuild_project_files();
+                            reloaded_documents.push(path.clone());
                         }
                     },
                     Err(_) => {
                         if self.files.remove(&path).is_some() {
                             self.rebuild_project_files();
+                            reloaded_documents.push(path.clone());
                         }
                     }
                 }
             }
+        }
+        for path in &reloaded_documents {
+            self.refresh_attached(path);
         }
         if metadata_changed {
             // No-op when the parsed facts are unchanged; refreshes all

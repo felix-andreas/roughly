@@ -235,7 +235,8 @@ pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
         // frame settled, so any slot in the document resolves it, including
         // the enclosing statement's own target (self-recursion).
         for (expression, name) in &naming.non_locals {
-            if crate::package_scheme_exists(db, name)
+            if check.masked_reads.contains(expression)
+                || crate::package_scheme_exists(db, name)
                 || super_globals(db, file).contains(name)
                 || declared_global_variable(db, name)
                 || crate::metadata::imported_bare(db, name)

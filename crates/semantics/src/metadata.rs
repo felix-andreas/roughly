@@ -14,7 +14,11 @@
 //!   (zero false positives over typo detection);
 //! - a `pkg::name` read of a namespace the stub corpus does not know is
 //!   tolerated when `pkg` is a declared dependency instead of warning about
-//!   an unknown namespace.
+//!   an unknown namespace;
+//! - a **conditional stub namespace** (a shipped stub for a package R does
+//!   not attach by default, e.g. `data.table`) joins the resolution universe
+//!   only when the project declares the package or a file attaches it with a
+//!   `library()`-family call — see [`namespace_active`].
 
 use crate::Db;
 use std::collections::BTreeSet;
@@ -35,6 +39,12 @@ pub struct PackageMetadata {
     /// `Enhances` fields.
     #[returns(ref)]
     pub dependencies: BTreeSet<String>,
+    /// Namespaces some project file attaches or loads with a
+    /// `library()`-family call, unioned by the host from
+    /// [`file_attached_namespaces`] — the activation signal scripts have,
+    /// since only packages carry `DESCRIPTION`/`NAMESPACE` files.
+    #[returns(ref)]
+    pub attached: BTreeSet<String>,
 }
 
 /// Whether a bare read of `name` is satisfied by the package's declared
@@ -69,6 +79,85 @@ pub fn declared_dependency(db: &dyn Db, package: &str) -> bool {
             .imports(db)
             .iter()
             .any(|(namespace, _)| namespace == package)
+}
+
+/// Whether `package`'s conditional stub namespace applies to this project:
+/// declared as a dependency or import source, or attached by some file's
+/// `library()`-family call. Reads only the metadata input, so stub assembly
+/// stays free of per-file dependencies.
+pub fn namespace_active(db: &dyn Db, package: &str) -> bool {
+    if declared_dependency(db, package) {
+        return true;
+    }
+    PackageMetadata::try_get(db).is_some_and(|metadata| metadata.attached(db).contains(package))
+}
+
+/// The attach union over a file set — how hosts assemble
+/// [`PackageMetadata`]'s attached set at load time (the server maintains it
+/// incrementally afterwards). Forces a parse of every file passed in, so
+/// hosts call it where the workspace is parsed anyway.
+pub fn attached_union(
+    db: &dyn Db,
+    files: impl IntoIterator<Item = crate::SourceFile>,
+) -> BTreeSet<String> {
+    files
+        .into_iter()
+        .flat_map(|file| file_attached_namespaces(db, file))
+        .collect()
+}
+
+/// Namespaces a source file attaches or loads at runtime: the first
+/// positional argument of `library()` / `require()` / `requireNamespace()` /
+/// `loadNamespace()` calls anywhere in the file, as a bare name or string
+/// literal (a computed name is invisible statically and stays unrecorded).
+/// Purely syntactic — a local binding shadowing `library` is not honored,
+/// which can only over-activate, and activation only ever ADDS resolution.
+#[salsa::tracked(returns(clone))]
+pub fn file_attached_namespaces(db: &dyn Db, file: crate::SourceFile) -> BTreeSet<String> {
+    let parse = crate::parse(db, file);
+    let mut attached = BTreeSet::new();
+    for node in parse.syntax_node().descendants() {
+        if node.kind() != SyntaxKind::CALL_EXPR {
+            continue;
+        }
+        let Some(callee) = node
+            .children()
+            .find(|child| child.kind() != SyntaxKind::ARGUMENT_LIST)
+        else {
+            continue;
+        };
+        if callee.kind() != SyntaxKind::NAME
+            || !matches!(
+                callee.text().to_string().as_str(),
+                "library" | "require" | "requireNamespace" | "loadNamespace"
+            )
+        {
+            continue;
+        }
+        let first_positional = node
+            .children()
+            .find(|child| child.kind() == SyntaxKind::ARGUMENT_LIST)
+            .and_then(|list| {
+                list.children()
+                    .filter(|child| child.kind() == SyntaxKind::ARGUMENT)
+                    .find(|argument| {
+                        !argument
+                            .children_with_tokens()
+                            .filter_map(|element| element.into_token())
+                            .any(|token| token.kind() == SyntaxKind::EQ)
+                    })
+            });
+        if let Some(argument) = first_positional
+            && let Some(value) = argument
+                .children()
+                .filter(|child| syntax::ast::is_expression_kind(child.kind()))
+                .last()
+            && let Some((namespace, _)) = name_argument(&value)
+        {
+            attached.insert(namespace);
+        }
+    }
+    attached
 }
 
 /// One `import`/`importFrom` directive occurrence with its source range, for

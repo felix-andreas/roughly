@@ -224,7 +224,10 @@ remain scalar-claim.
 ## 3. Loading and namespacing
 
 Stubs are **immutable, set-once inputs** — analogous to rust-analyzer's `Durability::HIGH`. They are
-loaded, parsed, and interned once, and are never invalidated by user edits.
+loaded, parsed, and interned once, and are never invalidated by ordinary user edits. The one
+deliberate exception: the assembly also reads the package-metadata input, which activates the
+[conditional namespaces](#conditional-namespaces) — a metadata flip (declaring or attaching such a
+package) rebuilds the library, which is rare and worth the full refresh it causes.
 
 The `StubLibrary` is a **flat set-once map**: `values: Symbol -> StubValue`, where each entry pairs
 the name's ordered scheme list (one scheme per declaration — see
@@ -234,10 +237,12 @@ Typing is not partitioned by namespace; alongside the flat map, a per-namespace 
 (namespace → declared names, built from every source) answers `pkg::name` validation, so an
 override winning a name's type never un-exports it from its declaring namespace.
 
-- Every shipped `.Rtypes` file (all six) is harvested into the one flat map, folded in file order —
-  a later *source* redeclaring a name replaces its whole entry (the same rule that governs project
-  overrides), while repeated declarations *within* one source build the name's overload set. All
-  shipped namespaces are thus attached to the base scope together.
+- Every shipped `.Rtypes` file is harvested into the one flat map, folded in file order — a later
+  *source* redeclaring a name replaces its whole entry (the same rule that governs project
+  overrides), while repeated declarations *within* one source build the name's overload set. The
+  six default-attached namespaces (`base`, `stats`, `utils`, `methods`, `graphics`, `grDevices`)
+  are thus attached to the base scope together; conditional namespaces join the fold only when
+  active.
 - The flat map is seeded into the per-document inference template, so every stub name resolves as a
   bare global regardless of which shipped file declared it. A name's first scheme becomes its plain
   environment binding; a multi-scheme name additionally registers its overload set for call-site
@@ -246,6 +251,25 @@ override winning a name's type never un-exports it from its declaring namespace.
   like the bare name, and the per-namespace export table powers the validation warnings (unknown
   namespace; name not exported by that namespace) specified in the Typing Reference under
   [Namespace access](/typing-reference#namespace-access).
+
+### Conditional namespaces
+
+Some shipped stubs describe packages R does **not** attach by default — today `data.table`. Folding
+them in unconditionally would let `fread` resolve (and steal a typo warning) in projects that never
+use data.table, so a conditional namespace joins the assembly only when the project uses the
+package:
+
+- a `DESCRIPTION` dependency field (`Depends`/`Imports`/`Suggests`/`Enhances`) names it, or any
+  `NAMESPACE` `import`/`importFrom` uses it as a source, or
+- any project file attaches or loads it — a `library()` / `require()` / `requireNamespace()` /
+  `loadNamespace()` call whose package argument is a literal name or string, anywhere in the file
+  (the signal script workspaces have, since only packages carry metadata files).
+
+While inactive the namespace is simply absent: its names warn as unresolved, `pkg::` reads behave
+like any stub-less package, and its `@type` nominals are unknown type names. The hosts keep the
+attach facts current per synced file (the language server re-scans only the changed document and
+fills the rest of the workspace in during idle priming), so activation never costs a whole-project
+sweep on a keystroke.
 
 ### NAMESPACE import validation
 

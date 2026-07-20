@@ -127,7 +127,7 @@ pub fn check(
             }
         }
 
-        let db = RootDatabase::default();
+        let mut db = RootDatabase::default();
         semantics::stubs::StubSources::new(&db, stub_sources);
 
         // A broken override stub silently changes what every file below
@@ -178,10 +178,11 @@ pub fn check(
             .enumerate()
             .map(|(rank, name)| (name.as_str(), rank))
             .collect();
-        semantics::metadata::PackageMetadata::new(
+        let metadata = semantics::metadata::PackageMetadata::new(
             &db,
             semantics::metadata::normalized_imports(&namespace_imports),
             dependencies,
+            BTreeSet::new(),
         );
 
         let r_path = root.join("R");
@@ -237,7 +238,12 @@ pub fn check(
             files[index] = Some(file);
             project.push(file);
         }
-        ProjectFiles::new(&db, project);
+        ProjectFiles::new(&db, project.clone());
+        let attached = semantics::metadata::attached_union(&db, project);
+        if !attached.is_empty() {
+            use salsa::Setter;
+            metadata.set_attached(&mut db).to(attached);
+        }
 
         let path_by_file: std::collections::HashMap<SourceFile, &PathBuf> = checked
             .iter()

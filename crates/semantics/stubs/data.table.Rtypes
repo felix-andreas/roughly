@@ -1,0 +1,65 @@
+# data.table — a CONDITIONAL namespace: R does not attach it by default, so these
+# declarations join resolution only when the project declares data.table
+# (DESCRIPTION/NAMESPACE) or a file attaches it (`library(data.table)` family).
+#
+# The bracket query language (`DT[i, j, by]`) is typed structurally by the
+# checker, not from stubs: a `data.table`-typed subject masks the bracket's
+# index arguments as column references, and the result class follows the `j`
+# argument's syntax. These declarations give values that class in the first
+# place, and cover the high-traffic ordinary-call surface.
+
+@type data.table
+
+data.table : fn(...: Any, [keep.rownames]: logical | character, [check.names]: logical, [key]: character, [stringsAsFactors]: logical) -> data.table
+as.data.table : fn(x: Any, [keep.rownames]: logical | character, ...: Any) -> data.table
+is.data.table : fn(x: Any) -> logical
+copy : <T> fn(x: T) -> T
+fread : fn([input]: character, [file]: character, [text]: character, [cmd]: character, ...: Any) -> data.table
+fwrite : fn(x: Any, [file]: character, ...: Any) -> NULL
+rbindlist : fn(l: Any, [use.names]: logical | character, [fill]: logical, [idcol]: character | logical) -> data.table
+
+# The set*() family mutates by reference and returns its input invisibly.
+setDT : fn(x: Any, [keep.rownames]: logical | character, [key]: character, [check.names]: logical) -> data.table
+setDF : fn(x: Any, [rownames]: character) -> data.frame
+set : fn(x: Any, [i]: integer, [j]: Any, [value]: Any) -> data.table
+setnames : fn(x: Any, old: Any, [new]: Any, [skip_absent]: logical) -> data.table
+setkey : fn(x: Any, ...: Any, [verbose]: logical, [physical]: logical) -> data.table
+setkeyv : fn(x: Any, cols: character, [verbose]: logical, [physical]: logical) -> data.table
+setindex : fn(x: Any, ...: Any) -> data.table
+setindexv : fn(x: Any, cols: Any) -> data.table
+setorder : fn(x: Any, ...: Any, [na.last]: logical) -> data.table
+setorderv : fn(x: Any, [cols]: character, [order]: integer, [na.last]: logical) -> data.table
+setcolorder : fn(x: Any, [neworder]: Any, [before]: Any, [after]: Any) -> data.table
+setattr : fn(x: Any, name: character, value: Any) -> Any
+setDTthreads : fn([threads]: integer, [restore_after_fork]: logical, [percent]: double, [throttle]: integer) -> integer
+getDTthreads : fn([verbose]: logical) -> integer
+
+# Reshaping returns tables; the formula/value arguments stay Any (their
+# column vocabulary is out of static reach).
+melt : fn(data: Any, ...: Any) -> data.table
+dcast : fn(data: Any, [formula]: Any, ...: Any) -> data.table
+merge : fn(x: Any, y: Any, ...: Any) -> data.table
+transpose : fn(l: Any, [fill]: Any, [ignore.empty]: logical, [keep.names]: character, [make.names]: Any) -> Any
+
+# Grouped/vector helpers usable outside brackets too.
+uniqueN : fn(x: Any, [by]: character, [na.rm]: logical) -> integer
+fifelse : <T> fn(test: logical | logical[], yes: T, no: T, [na]: T) -> T
+fifelse : fn(test: Any, yes: Any, no: Any, [na]: Any) -> Any
+fcase : fn(...: Any, [default]: Any) -> Any
+fcoalesce : fn(...: Any) -> Any
+nafill : fn(x: Any, [type]: character, [fill]: Any, [nan]: Any) -> Any
+setnafill : fn(x: Any, [type]: character, [fill]: Any, [nan]: Any, [cols]: Any) -> Any
+shift : fn(x: Any, [n]: integer | integer[], [fill]: Any, [type]: character, [give.names]: logical) -> Any
+frank : fn(x: Any, ...: Any, [na.last]: logical | character, [ties.method]: character) -> Any
+frankv : fn(x: Any, [cols]: Any, [order]: integer, [na.last]: logical | character, [ties.method]: character) -> Any
+chmatch : fn(x: character | character[], table: character | character[], [nomatch]: integer) -> integer[]
+tstrsplit : fn(x: Any, ...: Any, [fill]: Any, [type.convert]: Any, [keep]: Any, [names]: Any) -> list[Any]
+CJ : fn(...: Any, [sorted]: logical, [unique]: logical) -> data.table
+SJ : fn(...: Any) -> data.table
+fsetdiff : fn(x: Any, y: Any, [all]: logical) -> data.table
+funion : fn(x: Any, y: Any, [all]: logical) -> data.table
+fintersect : fn(x: Any, y: Any, [all]: logical) -> data.table
+first : fn(x: Any, [n]: integer, ...: Any) -> Any
+last : fn(x: Any, [n]: integer, ...: Any) -> Any
+between : fn(x: Any, lower: Any, upper: Any, [incbounds]: logical, [NAbounds]: Any, [check]: logical) -> logical[]
+inrange : fn(x: Any, lower: Any, upper: Any, [incbounds]: logical) -> logical[]
