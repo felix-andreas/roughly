@@ -301,7 +301,7 @@ impl Lowering {
     }
 
     fn lower_expression(&mut self, node: &SyntaxNode) -> ExprId {
-        let range = node.text_range();
+        let range = significant_range(node);
         match node.kind() {
             SyntaxKind::NAME => {
                 let text = syntax::ast::Name::cast(node.clone())
@@ -666,6 +666,33 @@ impl Lowering {
             })
             .collect()
     }
+}
+
+/// A node's range without the trailing trivia rowan attaches inside
+/// expression nodes (whitespace, newlines, comments, `#:` annotations):
+/// blame and hover ranges must cover code, not the trivia that happened to
+/// stick to the node.
+fn significant_range(node: &SyntaxNode) -> TextRange {
+    let full = node.text_range();
+    let mut end = full.end();
+    let mut token = node.last_token();
+    while let Some(current) = token {
+        if current.text_range().start() < full.start() {
+            break;
+        }
+        let trivia = matches!(
+            current.kind(),
+            SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE | SyntaxKind::COMMENT
+        ) || current
+            .parent_ancestors()
+            .any(|ancestor| ancestor.kind() == SyntaxKind::ANNOTATION);
+        if !trivia {
+            break;
+        }
+        end = current.text_range().start();
+        token = current.prev_token();
+    }
+    TextRange::new(full.start(), end.max(full.start()))
 }
 
 fn literal_kind(node: &SyntaxNode) -> LiteralKind {

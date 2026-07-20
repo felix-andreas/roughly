@@ -1293,7 +1293,7 @@ impl<'db> Checker<'db, '_> {
             .table
             .compatible(self.db, resolved_value, declared.body)
         {
-            let range = self.module.expression(value).range;
+            let range = self.blame_range(value);
             self.errors.push(TypeError {
                 range,
                 kind: TypeErrorKind::Mismatch {
@@ -1756,7 +1756,7 @@ impl<'db> Checker<'db, '_> {
         sequence: ExprId,
         body: ExprId,
     ) -> Ty<'db> {
-        let sequence_range = self.module.expression(sequence).range;
+        let sequence_range = self.blame_range(sequence);
         let inferred = self.infer(sequence);
         let resolved = self.structural(inferred);
         let element = match self.iteration_element(resolved) {
@@ -2165,7 +2165,7 @@ impl<'db> Checker<'db, '_> {
 
     /// Negation is elementwise and type-preserving.
     fn infer_unary_minus(&mut self, operand: ExprId) -> Ty<'db> {
-        let operand_range = self.module.expression(operand).range;
+        let operand_range = self.blame_range(operand);
         let inferred = self.infer(operand);
         let resolved = self.structural(inferred);
         match self.classify_numeric_operand(resolved) {
@@ -2206,7 +2206,7 @@ impl<'db> Checker<'db, '_> {
     }
 
     fn infer_unary_not(&mut self, operand: ExprId) -> Ty<'db> {
-        let operand_range = self.module.expression(operand).range;
+        let operand_range = self.blame_range(operand);
         let inferred = self.infer(operand);
         let resolved = self.structural(inferred);
         match resolved.kind(self.db) {
@@ -2284,8 +2284,18 @@ impl<'db> Checker<'db, '_> {
 
     /// The condition of `if`/`while` and the operands of `&&`/`||` must be
     /// scalar logicals; a still-flexible operand binds to `logical`.
+    /// The range to blame for the value an expression produces:
+    /// parentheses only group, so the innermost non-paren expression
+    /// carries the precise range (the oracle blames the same way).
+    fn blame_range(&self, mut id: ExprId) -> TextRange {
+        while let ExpressionKind::Paren(inner) = &self.module.expression(id).kind {
+            id = *inner;
+        }
+        self.module.expression(id).range
+    }
+
     fn expect_scalar_logical(&mut self, condition: ExprId) {
-        let condition_range = self.module.expression(condition).range;
+        let condition_range = self.blame_range(condition);
         let inferred = self.infer(condition);
         let resolved = self.structural(inferred);
         self.unify_or_report(condition_range, scalar(self.db, Atomic::Logical), resolved);
@@ -2303,8 +2313,8 @@ impl<'db> Checker<'db, '_> {
         rhs: ExprId,
         always_double: bool,
     ) -> Ty<'db> {
-        let lhs_range = self.module.expression(lhs).range;
-        let rhs_range = self.module.expression(rhs).range;
+        let lhs_range = self.blame_range(lhs);
+        let rhs_range = self.blame_range(rhs);
         let lhs_ty = self.infer(lhs);
         let rhs_ty = self.infer(rhs);
         let resolved_left = self.structural(lhs_ty);
@@ -2464,7 +2474,7 @@ impl<'db> Checker<'db, '_> {
     fn infer_colon(&mut self, lhs: ExprId, rhs: ExprId) -> Ty<'db> {
         let mut result_atomic = Atomic::Integer;
         for operand in [lhs, rhs] {
-            let operand_range = self.module.expression(operand).range;
+            let operand_range = self.blame_range(operand);
             let whole_literal = self.is_whole_double(operand);
             let inferred = self.infer(operand);
             let resolved = self.structural(inferred);
@@ -2512,8 +2522,8 @@ impl<'db> Checker<'db, '_> {
     /// and the result is `logical` shaped element-wise (a vector member
     /// compares to `logical[]`).
     fn infer_compare(&mut self, range: TextRange, lhs: ExprId, rhs: ExprId) -> Ty<'db> {
-        let lhs_range = self.module.expression(lhs).range;
-        let rhs_range = self.module.expression(rhs).range;
+        let lhs_range = self.blame_range(lhs);
+        let rhs_range = self.blame_range(rhs);
         let lhs_ty = self.infer(lhs);
         let rhs_ty = self.infer(rhs);
         let resolved_left = self.structural(lhs_ty);
@@ -2863,7 +2873,7 @@ impl<'db> Checker<'db, '_> {
                 let resolved_default = self.table.resolve(self.db, default_ty);
                 if declared && !matches!(resolved_default.kind(self.db), TyKind::Null) {
                     let whole_double = self.is_whole_double(default);
-                    let default_range = self.module.expression(default).range;
+                    let default_range = self.blame_range(default);
                     if let Err(error) =
                         self.check_argument(parameter_ty, default_ty, default_range, whole_double)
                     {
@@ -2911,7 +2921,7 @@ impl<'db> Checker<'db, '_> {
                 } => statements.last().copied().unwrap_or(*body),
                 _ => *body,
             };
-            let body_range = self.module.expression(blamed).range;
+            let body_range = self.blame_range(blamed);
             let resolved_body = self.table.resolve(self.db, body_ty);
             if !matches!(resolved_body.kind(self.db), TyKind::Unknown)
                 && !self.table.compatible(self.db, resolved_body, declared.ret)
@@ -2997,7 +3007,7 @@ impl<'db> Checker<'db, '_> {
         if let Some(ty) = self.try_overloaded_call(range, callee, arguments) {
             return ty;
         }
-        let callee_range = self.module.expression(callee).range;
+        let callee_range = self.blame_range(callee);
         let callee_ty = self.infer(callee);
         // A callee typed as literal `Any` is the sanctioned escape hatch
         // (`stop`, `warning`, `seq` — stubs whose signature is not
@@ -3034,7 +3044,7 @@ impl<'db> Checker<'db, '_> {
             let Some(value) = argument.value else {
                 continue;
             };
-            let argument_range = self.module.expression(value).range;
+            let argument_range = self.blame_range(value);
             let inferred = self.infer(value);
             let resolved = self.structural(inferred);
             if matches!(resolved.kind(self.db), TyKind::Null) {
@@ -3307,7 +3317,7 @@ impl<'db> Checker<'db, '_> {
                 if !courtesy {
                     self.overload_probe_depth += 1;
                 }
-                let callee_range = self.module.expression(callee).range;
+                let callee_range = self.blame_range(callee);
                 let outcome = self.match_arguments(range, callee_range, &function, &call_arguments);
                 if !courtesy {
                     self.overload_probe_depth -= 1;
@@ -3363,7 +3373,7 @@ impl<'db> Checker<'db, '_> {
                 let ty = argument.value.map(|value| self.infer(value));
                 let argument_range = argument
                     .value
-                    .map(|value| self.module.expression(value).range)
+                    .map(|value| self.blame_range(value))
                     .unwrap_or(range);
                 let whole_double = argument
                     .value
@@ -3986,7 +3996,7 @@ impl<'db> Checker<'db, '_> {
         value: ExprId,
         value_ty: Ty<'db>,
     ) -> TypeScheme<'db> {
-        let range = self.module.expression(value).range;
+        let range = self.blame_range(value);
         let Some(definition) = self.table.definitions.get(&name).cloned() else {
             return self.generalize(value_ty);
         };

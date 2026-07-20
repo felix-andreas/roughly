@@ -19,6 +19,18 @@ f <- function() if (1L) 2L
 f: Unknown
 20..22 error[type-mismatch] expected `logical`, found `integer`
 
+#---- condition_blame_drills_through_parens
+f <- function() if ((1L)) 2L
+#++++
+f: Unknown
+21..23 error[type-mismatch] expected `logical`, found `integer`
+
+#---- condition_blame_excludes_trailing_trivia
+f <- function(n) if (n %% 2L ) 2L
+#++++
+f: Unknown
+21..28 error[type-mismatch] expected a numeric value (`integer` or `double`), found `logical`
+
 #==== returns
 #---- early_return_unions
 f <- function(c) {
