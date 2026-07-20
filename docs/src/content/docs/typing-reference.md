@@ -1381,11 +1381,41 @@ Runtime indexing failures are not modeled by the type system.
 
 #### `[` on vectors
 
-`[` on vectors is not currently part of the supported operator semantics.
+`[` subsets a vector. The result depends on the subject's shape and on the **index's shape**:
 
-In particular, this document does not currently define `[` for scalar-like, array-like, or map-like vectors.
+- index shapes:
+  - a **scalar-like** `integer`, `double`, or `character` index selects one position — the result
+    is the scalar-like element type. This is a deliberate scalar claim: a scalar *negative* index
+    (`x[-1]`) actually drops one element and returns the rest, but a scalar result coerces into
+    every vector position, so the claim can never produce a false error downstream (the same
+    compromise the shape rules apply to flexible operands)
+  - an **array-like or map-like** numeric or character index (`x[c(1L, 3L)]`, `x[ids]`) selects
+    many positions — the result keeps the subject's vector shape
+  - a **`logical`** index of any shape is a mask (`x[x > 0]`, and a scalar `TRUE`/`FALSE` recycles
+    over the whole vector) — the result keeps the subject's vector shape
+  - `NULL` selects nothing — the result is the array-like vector of the element type
+  - an index whose shape is still undetermined (an unannotated parameter, an opaque nominal such
+    as a factor, `Unknown`, `Any`) is treated as scalar-like and left unconstrained
+  - a `complex` or `raw` index, or a list, function, or other non-vector index, is a type error
+- subject shapes, with `E` the element type:
+  - scalar-like `E`: a scalar-like index yields `E`; a vector-like or mask index yields `E[]`
+  - array-like `E[]`: a scalar-like index yields `E`; a vector-like or mask index yields `E[]`
+  - map-like `E[named]`: a scalar-like index yields `E`; a vector-like or mask index yields
+    `E[named]` — `[` keeps names, unlike arithmetic
+- a character index is allowed on **any** vector shape, not only map-like ones: R returns `NA`
+  rather than erroring when the subject has no names, and map-likeness is deliberately fragile
+  (most operations erase it), so requiring it would flag legal programs
 
-Use `[[` for supported vector indexing instead.
+Examples:
+
+- `c(1L, 2L, 3L)[2L]` is `integer`
+- `c(1L, 2L, 3L)[c(1L, 3L)]` is `integer[]`
+- `x[x > 0]` on `x: double[]` is `double[]`
+- `c(a = 1L, b = 2L)[c("a", "b")]` is `integer[named]`
+- `x[list(1)]` is a type error
+
+Out-of-range positions and missing names produce `NA` at run time — value-level outcomes the
+type system does not model, as for `[[`.
 
 #### `[` on lists
 
@@ -1415,8 +1445,6 @@ refusing here would flag ordinary code. The access is instead sound-by-refusal a
 unsupported construct under [strict mode](#strict-mode), exactly as for an opaque nominal.
 Recovering the field or element type by constraining the variable to a record-with-field or
 indexable shape is future work.
-
-Some indexing forms remain unsupported for now. In particular, this document does not currently define `[` on vectors.
 
 ### Numeric inference variables
 

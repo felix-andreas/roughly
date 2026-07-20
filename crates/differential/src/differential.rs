@@ -491,6 +491,23 @@ pub fn filter_oracle_deficits(
                 }
                 return !resolved_by_new;
             }
+            // The oracle never defined `[` on vectors and refuses it with
+            // this fixed wording; the rewrite types vector subsetting (see
+            // the typing reference's index-shape rules), so a legacy-only
+            // refusal with no new-stack finding inside its span is an
+            // oracle deficit. A new-stack finding at the site (a bad index)
+            // still compares normally.
+            if finding.0 == "type" && finding.3.contains("`[` is not supported on") {
+                let new_has_counterpart = new.iter().any(|(class, start, end, _)| {
+                    *class == "type" && *start >= finding.1 && *end <= finding.2
+                });
+                if !new_has_counterpart {
+                    *deficit_rollup
+                        .entry("(vector `[` the oracle refuses)".to_owned())
+                        .or_default() += 1;
+                    return false;
+                }
+            }
             // Either side mentioning `Unknown` marks the oracle checking a
             // non-fact: rejecting an Unknown-carrying value, or checking a
             // value against a declared `Unknown`.

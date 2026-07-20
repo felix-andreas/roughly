@@ -86,6 +86,9 @@ pub enum TypeErrorKind<'db> {
         found: Ty<'db>,
     },
     /// `[` on a value the slice rules do not cover.
+    BadVectorIndex {
+        index: Ty<'db>,
+    },
     UnsupportedSubset {
         found: Ty<'db>,
     },
@@ -773,6 +776,12 @@ struct CallArgument<'db> {
 enum OperandShape {
     Scalar,
     Vector,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VectorIndexShape {
+    ScalarLike,
+    VectorLike,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4060,9 +4069,10 @@ impl<'db> Checker<'db, '_> {
         arguments: &[Argument],
     ) -> Ty<'db> {
         let target_ty = self.infer(target);
+        let mut index_types = Vec::with_capacity(arguments.len());
         for argument in arguments {
             if let Some(value) = argument.value {
-                self.infer(value);
+                index_types.push(self.infer(value));
             }
         }
         // A bracket the naming walk recognized as data.table syntax
@@ -4123,7 +4133,7 @@ impl<'db> Checker<'db, '_> {
                 .map(|value| self.module.expression(value).kind.clone());
             self.extract_result(id, range, subject, index.as_ref())
         } else {
-            self.subset_result(id, range, subject)
+            self.subset_result(id, range, subject, index_types.first().copied())
         };
         match result {
             Ok(ty) => ty,
@@ -4241,19 +4251,20 @@ impl<'db> Checker<'db, '_> {
         }
     }
 
-    /// `[` — the list slice.
+    /// `[` — the list slice and the vector subset.
     fn subset_result(
         &mut self,
         origin: ExprId,
         range: TextRange,
         subject: Ty<'db>,
+        index: Option<Ty<'db>>,
     ) -> Result<Ty<'db>, TypeError<'db>> {
         // Member-wise over a union subject, like `[[`.
         if let TyKind::Union(members) = subject.kind(self.db).clone() {
             let mut results = Vec::with_capacity(members.len());
             for member in members {
                 let result = self
-                    .subset_result(origin, range, member)
+                    .subset_result(origin, range, member, index)
                     .map_err(|error| widen_error_container(error, subject))?;
                 results.push(result);
             }
@@ -4262,6 +4273,21 @@ impl<'db> Checker<'db, '_> {
         match subject.kind(self.db).clone() {
             TyKind::Unknown => Ok(self.unknown()),
             TyKind::Any => Ok(crate::types::any(self.db)),
+            // Vector subjects: the index's shape decides between one
+            // position (the scalar-claim element) and a sub-vector; `[`
+            // keeps map-likeness, unlike arithmetic.
+            TyKind::Scalar(_) => match self.vector_index_shape(range, index)? {
+                VectorIndexShape::ScalarLike => Ok(subject),
+                VectorIndexShape::VectorLike => Ok(Ty::new(self.db, TyKind::Vector(subject))),
+            },
+            TyKind::Vector(element) => match self.vector_index_shape(range, index)? {
+                VectorIndexShape::ScalarLike => Ok(element),
+                VectorIndexShape::VectorLike => Ok(subject),
+            },
+            TyKind::NamedVector(element) => match self.vector_index_shape(range, index)? {
+                VectorIndexShape::ScalarLike => Ok(element),
+                VectorIndexShape::VectorLike => Ok(subject),
+            },
             TyKind::List(_) | TyKind::NamedList(_) => Ok(subject),
             // A `[` slice of a fixed-shape list is a sub-list that can
             // contain any of the item types, so the element type is their
@@ -4280,6 +4306,66 @@ impl<'db> Checker<'db, '_> {
             _ => Err(TypeError {
                 range,
                 kind: TypeErrorKind::UnsupportedSubset { found: subject },
+            }),
+        }
+    }
+
+    /// How a `[` index selects from a vector: one position (a scalar-like
+    /// numeric or character index — a deliberate scalar claim, see the
+    /// typing reference) or many (vector-like and logical-mask indexes,
+    /// `NULL`). Undetermined shapes (inference variables, opaque nominals,
+    /// `Unknown`, `Any`) claim scalar and stay unconstrained; non-vector
+    /// indexes are type errors.
+    fn vector_index_shape(
+        &mut self,
+        range: TextRange,
+        index: Option<Ty<'db>>,
+    ) -> Result<VectorIndexShape, TypeError<'db>> {
+        let Some(index) = index else {
+            return Ok(VectorIndexShape::VectorLike);
+        };
+        let resolved = self.table.resolve(self.db, index);
+        self.classify_vector_index(range, resolved)
+    }
+
+    fn classify_vector_index(
+        &mut self,
+        range: TextRange,
+        index: Ty<'db>,
+    ) -> Result<VectorIndexShape, TypeError<'db>> {
+        match index.kind(self.db).clone() {
+            TyKind::Scalar(Atomic::Integer | Atomic::Double | Atomic::Character) => {
+                Ok(VectorIndexShape::ScalarLike)
+            }
+            TyKind::Scalar(Atomic::Logical) => Ok(VectorIndexShape::VectorLike),
+            TyKind::Scalar(Atomic::Complex | Atomic::Raw) => Err(TypeError {
+                range,
+                kind: TypeErrorKind::BadVectorIndex { index },
+            }),
+            TyKind::Vector(_) | TyKind::NamedVector(_) | TyKind::Null => {
+                Ok(VectorIndexShape::VectorLike)
+            }
+            TyKind::Unknown
+            | TyKind::Any
+            | TyKind::Var(_)
+            | TyKind::Rigid(_)
+            | TyKind::Named(..) => Ok(VectorIndexShape::ScalarLike),
+            TyKind::Union(members) => {
+                let mut shape = VectorIndexShape::ScalarLike;
+                for member in members {
+                    if self.classify_vector_index(range, member)? == VectorIndexShape::VectorLike {
+                        shape = VectorIndexShape::VectorLike;
+                    }
+                }
+                Ok(shape)
+            }
+            TyKind::List(_)
+            | TyKind::NamedList(_)
+            | TyKind::Tuple(_)
+            | TyKind::Record(_)
+            | TyKind::Function(_) => Err(TypeError {
+                range,
+                kind: TypeErrorKind::BadVectorIndex { index },
             }),
         }
     }

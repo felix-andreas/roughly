@@ -105,6 +105,34 @@ const ACCEPTED_DIVERGENCES: &[(&str, &str)] = &[
         "the legacy type grammar cannot parse a structural type under a `[]` suffix inside `fn(...)` and reports a parse error; the rewrite parses the shape and reports the actual vector-element rule",
     ),
     (
+        "higher_order__any_callee_arguments_are_not_checked",
+        "the oracle never defined `[` on vectors and refuses it; the rewrite types vector subsetting per the reference's index-shape rules",
+    ),
+    (
+        "vector_subsetting__scalar_index_selects_one_element",
+        "the oracle never defined `[` on vectors and refuses it; the rewrite types vector subsetting per the reference's index-shape rules",
+    ),
+    (
+        "vector_subsetting__vector_index_selects_a_sub_vector",
+        "the oracle never defined `[` on vectors and refuses it; the rewrite types vector subsetting per the reference's index-shape rules",
+    ),
+    (
+        "vector_subsetting__logical_mask_keeps_the_vector_shape",
+        "the oracle never defined `[` on vectors and refuses it; the rewrite types vector subsetting per the reference's index-shape rules",
+    ),
+    (
+        "vector_subsetting__named_subject_keeps_names_under_vector_indexes",
+        "the oracle never defined `[` on vectors and refuses it; the rewrite types vector subsetting per the reference's index-shape rules",
+    ),
+    (
+        "vector_subsetting__character_index_is_allowed_on_unnamed_vectors",
+        "the oracle never defined `[` on vectors and refuses it; the rewrite types vector subsetting per the reference's index-shape rules",
+    ),
+    (
+        "vector_subsetting__undetermined_index_claims_a_scalar",
+        "the oracle never defined `[` on vectors and refuses it; the rewrite types vector subsetting per the reference's index-shape rules",
+    ),
+    (
         "exported_constraints__forwarded_dots_disable_arity_checking",
         "legacy arity-checks a call whose argument is the enclosing function's bare `...` as if the dots were one fixed argument; the forwarded count is unknowable statically, so the rewrite skips arity checks on such calls",
     ),

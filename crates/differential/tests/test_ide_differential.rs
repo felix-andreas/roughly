@@ -46,6 +46,15 @@ const ORACLE_DEFICIT_CASES: &[&str] = &[
     // The oracle offers no navigation on pipeline reads; the rewrite
     // connects them to their declaration.
     "typing-scripts::reads_that_keep_bindings_alive__pipe_read_is_a_use",
+    // The oracle never defined `[` on vectors, so its items stay untyped and
+    // hint nothing; the rewrite types vector subsetting and hints the
+    // schemes (pure additions).
+    "typing::vector_subsetting__scalar_index_selects_one_element",
+    "typing::vector_subsetting__vector_index_selects_a_sub_vector",
+    "typing::vector_subsetting__logical_mask_keeps_the_vector_shape",
+    "typing::vector_subsetting__named_subject_keeps_names_under_vector_indexes",
+    "typing::vector_subsetting__character_index_is_allowed_on_unnamed_vectors",
+    "typing::vector_subsetting__undetermined_index_claims_a_scalar",
 ];
 
 /// Adjudicated design differences, per case with the reason; divergences in

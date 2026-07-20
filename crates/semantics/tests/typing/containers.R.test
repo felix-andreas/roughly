@@ -194,3 +194,67 @@ cell <- function(m, k) m[k, , drop = FALSE]
 #++++
 cell: Unknown
 23..43 error[type-mismatch] indexing with 2 indexes is not supported yet — Roughly does not model matrix and data.frame subsetting
+
+#==== vector_subsetting
+#---- scalar_index_selects_one_element
+f <- function() c(1L, 2L, 3L)[2L]
+g <- function() c("a", "b")[1]
+h <- function() 5L[1L]
+#++++
+f: fn() -> integer
+g: fn() -> character
+h: fn() -> integer
+
+#---- vector_index_selects_a_sub_vector
+f <- function() c(1L, 2L, 3L)[c(1L, 3L)]
+g <- function() c(1L, 2L, 3L)[1:2]
+h <- function() 5L[c(1L, 2L)]
+#++++
+f: fn() -> integer[]
+g: fn() -> integer[]
+h: fn() -> integer[]
+
+#---- logical_mask_keeps_the_vector_shape
+#: double[]
+values <- c(1.5, -2.0, 3.0)
+f <- function() values[values > 0]
+g <- function() values[TRUE]
+#++++
+values: double[]
+f: fn() -> double[]
+g: fn() -> double[]
+
+#---- named_subject_keeps_names_under_vector_indexes
+#: integer[named]
+scores <- c(a = 1L, b = 2L)
+f <- function() scores[c("a", "b")]
+g <- function() scores["a"]
+h <- function() scores[c(TRUE, FALSE)]
+#++++
+scores: integer[named]
+f: fn() -> integer[named]
+g: fn() -> integer
+h: fn() -> integer[named]
+
+#---- character_index_is_allowed_on_unnamed_vectors
+f <- function() c(1L, 2L)["a"]
+#++++
+f: fn() -> integer
+
+#---- undetermined_index_claims_a_scalar
+f <- function(x, i) {
+  #: integer[]
+  values <- c(1L, 2L)
+  values[i]
+}
+#++++
+f: <T, U> fn(x: T, i: U) -> integer
+
+#---- invalid_vector_indexes_error
+f <- function() c(1L, 2L)[list(1)]
+g <- function() c(1L, 2L)[sum]
+#++++
+f: Unknown
+g: Unknown
+16..34 error[type-mismatch] a vector cannot be indexed by `list{double}` — expected a numeric, logical, or character index
+51..65 error[type-mismatch] a vector cannot be indexed by `fn(...: Any, [na.rm]: logical) -> Any` — expected a numeric, logical, or character index

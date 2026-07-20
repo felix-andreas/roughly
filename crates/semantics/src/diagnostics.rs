@@ -1284,6 +1284,10 @@ fn render_type_error_message(db: &dyn Db, error: &TypeError<'_>) -> String {
         TypeErrorKind::UnsupportedSubset { found } => {
             format!("`[` is not supported on `{}`", renderer.render(db, *found))
         }
+        TypeErrorKind::BadVectorIndex { index } => format!(
+            "a vector cannot be indexed by `{}` — expected a numeric, logical, or character index",
+            renderer.render(db, *index)
+        ),
         TypeErrorKind::UnsupportedIndexShape { index_count } => match index_count {
             0 => "indexing with an empty index (`x[]`) is not supported yet".to_owned(),
             1 => "indexing with a named index argument is not supported yet".to_owned(),

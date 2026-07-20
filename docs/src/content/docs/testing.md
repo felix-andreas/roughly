@@ -85,7 +85,8 @@ accepted class named in a rollup:
 
 - **oracle deficits** — forward-capture unresolved/unused warnings the rewrite correctly
   resolves (site-scoped), bindings kept alive by pipeline reads the oracle does not model,
-  Unknown-tolerant type checks the oracle over-rejects;
+  Unknown-tolerant type checks the oracle over-rejects, and vector `[` refusals (the oracle
+  never defined vector subsetting; the rewrite types it);
 - **legacy slot tolerance** — use-before-write reads inside the defining statement the oracle
   misses because it mints the slot first;
 - **model divergences** — unpaired type findings over *unstable names* (multiply-bound,

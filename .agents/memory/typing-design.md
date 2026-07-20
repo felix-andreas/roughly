@@ -47,3 +47,59 @@ Forward-looking design space for Roughly's type system: questions that are **not
 **Question.** How library scoping should work: `library(pkg)` attaches, `importFrom` in NAMESPACE, search-path order, masking warnings.
 
 **Notes.** Beta ships `pkg::name` resolution against namespace-partitioned stubs. The attach/import model (what `library(dplyr)` makes visible, masking diagnostics) is undesigned; it determines when an unresolved name is *really* unresolved, so it directly feeds strict mode's usefulness on real projects.
+
+## 7. Non-standard evaluation (data masking: dplyr, data.table, EDSLs like ompr)
+
+**Question.** How far can masked expressions — names resolving against a *data* context the
+callee constructs at run time (`mutate(df, y = x * 2)`, `DT[x > 3, .(m = mean(y)), by = z]`,
+`add_variable(model, x[i], i = 1:10)`) — be statically checked, and what machinery does each
+step need?
+
+**Current state (implemented, sound-by-refusal).** Three mechanisms: `quiet_reads` in naming
+(masked-context reads are never "unresolved" but still keep definers alive), `masked_subsets`
+(brackets the naming walk recognizes as data.table syntax evaluate indexes in the data's frame;
+the whole bracket types `Unknown`), and the stub corpus's `masked` set (variadic callees whose
+`...` is data-masked, `with()`-family). Zero false positives; zero checking inside the mask.
+
+**The design ladder (each step is independently shippable):**
+
+1. **Masking contracts in the stub language.** Extend `.Rtypes` so a signature can declare
+   which argument supplies the data context and which arguments are masked by it
+   (`mutate : fn(.data: data.frame, ...: masked(.data)) -> data.frame`). Pure metadata — it
+   moves the currently hardcoded masked-callee knowledge into the corpus, per-package and
+   overridable, without new type theory.
+2. **Column vocabulary, not types.** Once data.frame carries column-level structure (design
+   question 3), a masked name can be checked for *membership* in the data argument's column
+   set plus the lexical environment — catching column typos, the most common NSE bug — while
+   masked expressions still type `Unknown`. `.data$x` / `.env$x` pronouns resolve exactly.
+3. **Typed masked expressions.** Check the masked expression in an environment extended with
+   the columns' types. The gate is the *result* type: `mutate` extends the row type, so the
+   return needs record-extension (sequential, in argument order); grouped operations
+   (`summarise`, data.table `by=`) change the frame's shape. Tidy-eval injection (`!!`,
+   `{{ var }}`) needs a column-reference kind in the type system — the expensive tail, likely
+   permanently behind explicit annotations.
+4. **EDSLs (ompr).** No data context exists — names are declared by prior builder calls
+   (`add_variable`) and live only in the model object. Generic checking is unrealistic;
+   the honest options are quiet-read suppression (today) or package-specific extensions.
+
+**Precedent.**
+
+- **R itself:** `R CMD check`'s "no visible binding for global variable" NOTE is the oldest
+  static-checker-vs-NSE collision; the ecosystem's answers — `utils::globalVariables()`
+  suppression and the `.data` pronoun — validate both the suppression baseline (step 0) and
+  explicit pronouns as the bridge to checkability.
+- **TypeScript query builders** (Prisma, Kysely, Drizzle): column sets encoded as object
+  types, masked names checked via `keyof`/mapped types — the direct analogue of step 2/3,
+  and proof the "membership first, expression types second" ladder works at ecosystem scale.
+- **F# type providers** (FSharp.Data): schemas imported at compile time generate typed
+  accessors — the strongest form of step 2's "know the columns", at the cost of a
+  compile-time data dependency.
+- **Python:** mypy/pyright deliberately do NOT type pandas columns (pandas-stubs types
+  operations, columns stay stringly); schema checking lives in runtime validators (pandera).
+  The mainstream punt marks how far the cost curve bends — and where Roughly can
+  differentiate, since steps 1-2 fit its architecture (stub contracts + structural records)
+  without new inference machinery.
+
+**Recommendation.** Steps 1-2 after data.frame columns land (question 3 gates this); step 3
+only for the pronoun/explicit forms; step 4 stays suppressed. Never regress the zero-false-
+positive property: every step must keep unknown masking constructs silent rather than guessed.
