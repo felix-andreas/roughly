@@ -70,6 +70,55 @@ f <- function() {
 #++++
 f: fn() -> list[integer | character]
 
+#---- element_extraction_on_vectors
+f <- function() c(1L, 2L)[[1L]]
+g <- function() 5L[[1L]]
+#++++
+f: fn() -> integer
+g: fn() -> integer
+
+#---- map_like_list_positional_extraction_is_precise
+#: list[named: integer]
+scores <- list(a = 1L, b = 2L)
+f <- function() scores[["a"]]
+g <- function() scores[[1L]]
+#++++
+scores: list[named: integer]
+f: fn() -> integer | NULL
+g: fn() -> integer
+
+#---- record_extraction_by_literal_position
+person <- list(name = "ada", age = 36L)
+f <- function() person[[1L]]
+g <- function() person[[2L]]
+#++++
+person: list{name: character, age: integer}
+f: fn() -> character
+g: fn() -> integer
+
+#---- backtick_field_follows_dollar_rules
+config <- list(`max size` = 10L)
+f <- function() config$`max size`
+#++++
+config: list{max size: integer}
+f: fn() -> integer
+
+#---- record_slice_unions_field_types
+person <- list(name = "ada", age = 36L)
+f <- function() person[1L]
+#++++
+person: list{name: character, age: integer}
+f: fn() -> list[named: character | integer]
+
+#---- indexing_an_unpinned_parameter_stays_unknown
+f <- function(node) node$value
+g <- function(x) x[[1L]]
+h <- function(x) x[1L]
+#++++
+f: <T> fn(node: T) -> Unknown
+g: <T> fn(x: T) -> Unknown
+h: <T> fn(x: T) -> Unknown
+
 #==== errors
 #---- position_out_of_range
 f <- function() {

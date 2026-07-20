@@ -19,7 +19,7 @@ mod reparse;
 use std::sync::Arc;
 
 pub use kind::SyntaxKind;
-pub use lexer::{Token, lex};
+pub use lexer::{Token, is_syntactic_name, lex};
 pub use rowan::{TextRange, TextSize};
 
 /// The rowan language tag for R.

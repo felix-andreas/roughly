@@ -61,6 +61,64 @@ f <- function(flag) {
 #++++
 f: fn(flag: logical) -> character
 
+#---- negated_guard_swaps_edges
+f <- function(flag) {
+  x <- if (flag) 1L else NULL
+  if (!is.null(x)) x + 1L else 0L
+}
+#++++
+f: fn(flag: logical) -> integer
+
+#---- numeric_guard_covers_both_atoms
+f <- function(flag) {
+  x <- if (flag) 1L else "s"
+  if (is.numeric(x)) x + 1L else 0L
+}
+#++++
+f: fn(flag: logical) -> integer
+
+#---- family_guard_keeps_scalar_and_vector_members
+f <- function(flag) {
+  x <- if (flag) "s" else c("a", "b")
+  if (is.character(x)) x else "z"
+}
+#++++
+f: fn(flag: logical) -> character | character[]
+
+#---- function_guard_filters
+f <- function(flag) {
+  x <- if (flag) function() 1L else 2L
+  if (is.function(x)) x() else x
+}
+#++++
+f: fn(flag: logical) -> integer
+
+#---- guard_without_a_null_member_does_not_fire
+f <- function(flag) {
+  x <- if (flag) 1L else 2L
+  if (is.null(x)) x else x + 1L
+}
+#++++
+f: fn(flag: logical) -> integer
+
+#---- field_access_guards_do_not_narrow
+f <- function(record) {
+  if (is.null(record$value)) 0L else record$value
+}
+#++++
+f: <T> fn(record: T) -> integer
+
+#---- null_test_makes_unguarded_use_a_finding
+f <- function(x) {
+  if (is.null(x)) {
+    print("missing")
+  }
+  x + 1L
+}
+#++++
+f: Unknown
+66..67 error[type-mismatch] expected a numeric value (`integer` or `double`), found `T | NULL`
+
 #==== loops
 #---- accumulator_is_stable
 f <- function() {

@@ -2199,13 +2199,23 @@ fn dollar_completions(
         Some(
             fields
                 .iter()
-                .map(|field| CompletionItem {
-                    label: field.name.text(db).to_owned(),
-                    kind: CompletionKind::Field,
-                    source: CompletionSource::Field,
-                    detail: Some(renderer.render(db, field.ty)),
-                    documentation: None,
-                    takes_arguments: None,
+                .map(|field| {
+                    // A non-syntactic field name is only insertable after `$`
+                    // in its backtick-quoted spelling.
+                    let name = field.name.text(db);
+                    let label = if syntax::is_syntactic_name(name) {
+                        name.to_owned()
+                    } else {
+                        format!("`{name}`")
+                    };
+                    CompletionItem {
+                        label,
+                        kind: CompletionKind::Field,
+                        source: CompletionSource::Field,
+                        detail: Some(renderer.render(db, field.ty)),
+                        documentation: None,
+                        takes_arguments: None,
+                    }
                 })
                 .filter(|item| search_match(&item.label, query).is_some())
                 .collect::<Vec<_>>(),

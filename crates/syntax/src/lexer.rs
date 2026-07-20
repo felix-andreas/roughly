@@ -426,6 +426,46 @@ impl Lexer<'_> {
     }
 }
 
+/// Whether `text` is a syntactic R name — usable bare, without backticks.
+/// A name starting with `.` followed by a digit (`.1`) lexes as a number,
+/// and the reserved words are not names.
+pub fn is_syntactic_name(text: &str) -> bool {
+    let mut chars = text.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !is_ident_start(first) {
+        return false;
+    }
+    if first == '.' && text.chars().nth(1).is_some_and(|c| c.is_ascii_digit()) {
+        return false;
+    }
+    if !chars.all(is_ident_continue) {
+        return false;
+    }
+    !matches!(
+        text,
+        "if" | "else"
+            | "repeat"
+            | "while"
+            | "function"
+            | "for"
+            | "next"
+            | "break"
+            | "TRUE"
+            | "FALSE"
+            | "NULL"
+            | "Inf"
+            | "NaN"
+            | "NA"
+            | "NA_integer_"
+            | "NA_real_"
+            | "NA_complex_"
+            | "NA_character_"
+            | "in"
+    )
+}
+
 fn is_ident_start(c: char) -> bool {
     c == '.' || c.is_alphabetic()
 }

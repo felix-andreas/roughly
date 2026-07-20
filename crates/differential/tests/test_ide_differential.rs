@@ -74,6 +74,12 @@ const ACCEPTED_DIFFERENCE_CASES: &[(&str, &str)] = &[
          definition for a name bound by several items",
     ),
     (
+        "typing::guards__field_access_guards_do_not_narrow",
+        "the rewrite infers and hints a scheme for a function reading a field \
+         off an unpinned parameter (`record$value` tolerates as Unknown); the \
+         oracle leaves the item untyped and offers no inlay hint",
+    ),
+    (
         "typing::form__applied_type_parameter_is_refused",
         "the rewrite refuses the whole violating block, so the alias it declares \
          never enters the vocabulary (no `Outer` completion, no `Wrap` \
