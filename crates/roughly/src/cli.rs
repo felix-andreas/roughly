@@ -425,14 +425,16 @@ fn collect_r_files(target: &Path) -> Result<Vec<PathBuf>, CommandError> {
 
 /// One project override stub under `<root>/stubs/`: its path, file stem
 /// (the namespace label), and text.
-struct ProjectStub {
-    path: PathBuf,
-    stem: String,
-    text: String,
+pub(crate) struct ProjectStub {
+    pub(crate) path: PathBuf,
+    pub(crate) stem: String,
+    pub(crate) text: String,
 }
 
 /// The project override stubs under `<root>/stubs/*.Rtypes`, in path order.
-fn discover_project_stubs(root: &Path) -> Result<Vec<ProjectStub>, (PathBuf, std::io::Error)> {
+pub(crate) fn discover_project_stubs(
+    root: &Path,
+) -> Result<Vec<ProjectStub>, (PathBuf, std::io::Error)> {
     let stubs_dir = root.join("stubs");
     let Ok(entries) = std::fs::read_dir(&stubs_dir) else {
         return Ok(Vec::new());

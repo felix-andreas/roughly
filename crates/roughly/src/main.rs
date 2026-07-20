@@ -53,6 +53,9 @@ fn main() -> ExitCode {
         }
         Command::Debug(debug) => match debug {
             Debug::Ast { path } => exit_code(cli::ast(&path).map(|()| Outcome::Clean)),
+            Debug::AnalysisStats { path } => {
+                exit_code(roughly::stats::analysis_stats(path.as_deref()).map(|()| Outcome::Clean))
+            }
         },
     };
     std::thread::Builder::new()
@@ -136,4 +139,6 @@ enum Command {
 enum Debug {
     /// Print the syntax tree for the given file
     Ast { path: PathBuf },
+    /// Analyze a workspace and report where time and memory go
+    AnalysisStats { path: Option<PathBuf> },
 }

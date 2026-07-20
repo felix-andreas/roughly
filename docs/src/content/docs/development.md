@@ -58,6 +58,17 @@ The real-world corpus some suites and all measurement instruments use is fetched
 `scripts/corpus-manifest.txt`). The performance and memory instruments live in
 `crates/differential/tests/test_stats.rs` and are documented on the [Testing](/testing) page.
 
+## Diagnosing a slow workspace
+
+`roughly debug analysis-stats [path]` runs the full analysis pipeline over a workspace through the
+same queries the language server uses and reports where the time and memory go: per-phase wall time
+with resident-set growth (load, parse, lower + naming, typecheck, diagnostics), the slowest files
+by typecheck, and an incremental typing probe on representative files (keystroke latency, item
+rechecks and resolve steps per keystroke, and the raw re-parse floor). It forces `[check] typing`
+on — a diagnosis without the type checker measures nothing interesting — and says so when the
+configuration had it off. Build with `--release` when the absolute numbers matter; a debug build
+still shows honest ratios. `roughly debug ast <file>` prints a file's syntax tree.
+
 To work on this documentation site, run `just docs` (a live preview) or `cd docs && npx astro build`.
 The formatter page (`docs/src/content/docs/formatter.md`) is generated — edit
 `crates/format/tests/formatter.template.md` and re-bless `cargo test -p format --test

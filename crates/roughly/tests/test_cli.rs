@@ -505,6 +505,28 @@ fn check_collate_order_decides_the_package_winner() {
 }
 
 #[test]
+fn analysis_stats_reports_phases_and_probe() {
+    let directory = project(&[
+        ("R/a.R", "value <- 1L\nf <- function() value + 1L\n"),
+        ("R/b.R", "g <- function(x) f() + x\n"),
+    ]);
+    let output = roughly(directory.path(), &["debug", "analysis-stats", "."]);
+    let rendered = stdout(&output);
+    assert_eq!(exit_code(&output), 0, "stderr: {}", stderr(&output));
+    for section in [
+        "cold analysis",
+        "typecheck (+interfaces)",
+        "slowest files (typecheck):",
+        "incremental (typing burst",
+    ] {
+        assert!(
+            rendered.contains(section),
+            "expected `{section}` in the report, got: {rendered}"
+        );
+    }
+}
+
+#[test]
 fn check_without_r_files_exits_two() {
     let directory = project(&[]);
     let output = roughly(directory.path(), &["check"]);
