@@ -242,7 +242,7 @@ sleeping-and-hoping. The variables exist only for this test; production runs nev
 
 ### The perf and memory witnesses
 
-`crates/differential/tests/test_stats.rs` (ignored; needs the fetched corpus and a release
+`legacy/differential/tests/test_stats.rs` (ignored; needs the fetched corpus and a release
 build) carries the measurement instruments — one process per stack reporting wall, phase
 splits, and resident/peak memory into `target/stats-{new,legacy}.txt` — and `stats_witness`,
 the CI-checkable assertion form: cold-pass wall per line, resident bytes per line, and
@@ -311,8 +311,8 @@ expectation only when the behavior or wording intentionally improved.
 
 ## The frozen legacy stack's harnesses
 
-The previous implementation stays in-tree (`crates/analysis-legacy`, `crates/engine-legacy`,
-`crates/roughly-legacy`, with its own `crates/fixtures` harness) as the cross-implementation oracle
+The previous implementation stays in-tree (`legacy/analysis-legacy`, `legacy/engine-legacy`,
+`legacy/roughly-legacy`, with its own `legacy/fixtures` harness) as the cross-implementation oracle
 the differential compares against, and as the benchmark baseline. Its suites still run —
 `cargo test -p analysis-legacy` / `-p engine-legacy` / `-p roughly-legacy`, and the workspace-wide
 battery covers them — but the stack is frozen: do not extend its fixtures or harnesses, and never

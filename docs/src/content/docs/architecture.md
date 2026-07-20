@@ -135,7 +135,7 @@ confined to that thread).
 ## Differential correctness
 
 Until the legacy stack's final deletion, the differential suites in
-`crates/differential` are the regression net: the typing fixture suites and
+`legacy/differential` are the regression net: the typing fixture suites and
 the per-position IDE sweep run through **both stacks** and compare semantic
 classes, targets, and ranges (never prose — wording is free to improve), with
 committed allowlists for adjudicated oracle defects. The real-file corpus

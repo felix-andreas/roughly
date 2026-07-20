@@ -6,9 +6,8 @@ The type checker is central: no static type checker exists for R, so Roughly def
 
 Crates:
 
-- `crates/roughly` — LSP server, CLI, formatter, and linter
-- `crates/analysis` — analysis engine: parsing, lowering, naming, type checking, and IDE queries
-- `crates/fixtures` — fixture-test harness shared by the test suites
+- `crates/` — the shipping product: `syntax` (lexer/parser, lossless rowan trees), `semantics` (the salsa-based analysis core and type checker), `format` (the formatter, syntax-only), `ide` (editor features as pure reads), `roughly` (LSP server + CLI), plus the standalone `rofy` REPL experiment
+- `legacy/` — the frozen previous implementation (`analysis-legacy`, `engine-legacy`, `roughly-legacy`, its `fixtures` harness) and `differential`, the ACTIVE cross-stack comparison harness whose arms gate every change; it lives here because every dependency edge it has points at the oracle, so the eventual legacy deletion sweep is one directory removal (its new-stack-only perf witnesses migrate out first)
 
 The project is built by AI agents driving development, with light human steering. Agents keep two written homes current: the docs site (`docs/`) holds the authoritative, user- and contributor-facing specs (they are contracts — mandatory to keep accurate), and `.agents/memory/MEMORY.md` is the agent knowledge base (engineering state, priorities, debt, and non-obvious design rationale, so they are not rediscovered). Update both in the same session as the work that changes them.
 

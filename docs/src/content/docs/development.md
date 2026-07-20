@@ -20,10 +20,10 @@ Roughly is a Rust workspace. The shipping language tool is five crates:
   completion, signature help, inlay hints, symbols, code actions.
 - **`crates/roughly`** — the product binary: the CLI (`check`, `fmt`) and the LSP server.
 
-The workspace also contains the **frozen legacy stack** (`crates/analysis-legacy`,
-`crates/engine-legacy`, `crates/roughly-legacy`, plus its `crates/fixtures` harness): the previous
+The workspace also contains the **frozen legacy stack** (`legacy/analysis-legacy`,
+`legacy/engine-legacy`, `legacy/roughly-legacy`, plus its `legacy/fixtures` harness): the previous
 implementation, kept in-tree as the cross-implementation oracle and benchmark baseline for
-`crates/differential`, which runs every fixture suite through both stacks and compares findings. Do
+`legacy/differential`, which runs every fixture suite through both stacks and compares findings. Do
 not extend the legacy stack, and never share or abstract code between the two stacks — data files
 may be duplicated freely instead. **`crates/rofy`** is a separate experimental R REPL embedding R
 through `extendr`; it is not part of the language-tool pipeline.
@@ -71,7 +71,7 @@ environment variables matter day to day:
 The real-world corpus some suites and all measurement instruments use is fetched with
 `scripts/fetch-corpus.sh` (into the gitignored `corpus/`; the resolved inventory is committed as
 `scripts/corpus-manifest.txt`). The performance and memory instruments live in
-`crates/differential/tests/test_stats.rs` and are documented on the [Testing](/testing) page.
+`legacy/differential/tests/test_stats.rs` and are documented on the [Testing](/testing) page.
 
 ## Diagnosing a slow workspace
 

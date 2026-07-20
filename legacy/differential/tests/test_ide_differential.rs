@@ -189,7 +189,7 @@ fn ide_differential() {
 
     for directory in ["typing", "typing-scripts"] {
         let suite_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../semantics/tests")
+            .join("../../crates/semantics/tests")
             .join(directory);
         let document_path = if directory == "typing" {
             "/pkg/R/case.R"

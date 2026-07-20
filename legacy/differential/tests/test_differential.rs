@@ -156,7 +156,7 @@ const ORACLE_PANIC_CASES: &[&str] = &[
 
 fn run_suite(suite: &Suite) {
     let suite_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../semantics/tests")
+        .join("../../crates/semantics/tests")
         .join(suite.directory);
     let files = syntax::testing::parse_fixture_files(&suite_dir);
     assert!(!files.is_empty(), "suite not found at {suite_dir:?}");
