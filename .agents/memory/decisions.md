@@ -753,3 +753,15 @@ Impact: correctness — the corpus differential reaches 1,523/1,523 with one adj
 **dplyr rides the existing rails.** `dplyr.Rtypes` joins `CONDITIONAL_NAMESPACES` (the data.table record's activation semantics apply unchanged): the verb set is `@masked` and class-preserving (`<T> fn(.data: T, ...) -> T` — mutate on a data.frame is a data.frame, on the data.table nominal a data.table), joins preserve the left class, `join_by` is a zero-formal mask, and the tidy-select helpers plus verb vocabulary (`n()`, `row_number()`, `if_else`, ...) are declared so they resolve inside masks. Composed with the native-pipe desugar, a masked verb call in a pipeline is just a call: `df |> filter(cyl > 4) |> mutate(r = mpg / wt)` types class-preservingly with zero unresolved-column warnings. Where dplyr names collide with attached-stub names (`filter`, `lag` in stats), source order makes the dplyr declaration win exactly when dplyr is active — matching R's own attach shadowing.
 
 **Impact.** Correctness: the documented masking contract is now the implemented one, and the dominant dplyr false-positive class (column reads in verbs, in projects without hand-written project stubs) disappears for declaring/attaching projects. Simplicity: no new mechanism — one map where a set was, one namespace entry. Incremental: unchanged (the masked map lives in the same set-once library).
+
+# Decision record: Apple SDK via SDKROOT for the zig cross-link
+
+**Status:** decided and implemented (in `flake.nix`).
+
+**Why it appeared.** Release macOS binaries are cross-linked on Linux by zig (cargo-zigbuild inside the nix build). Zig ships stubs for libSystem/libc/libm only — the pre-REPL binary linked nothing else, so the SDK-less link worked by accident. The REPL added the first Apple-framework edge: reedline → chrono(clock) → iana-time-zone → core-foundation-sys emits `-framework CoreFoundation`, which zig cannot resolve without a macOS SDK.
+
+**Shape.** `flake.nix` fetches the MacOSX 11.3 SDK (hash-pinned, from the widely used third-party mirror of Apple's SDKs) and exports `SDKROOT` for the `aarch64-apple-darwin` build only; cargo-zigbuild forwards it to zig as sysroot + framework search paths. Linux and Windows targets unchanged. Verified outside nix: the SDK-less link reproduces the exact release failure, with `SDKROOT` the same build produces a valid arm64 Mach-O.
+
+**Alternative considered and rejected:** `[patch.crates-io]`-ing iana-time-zone with an always-erring stub (safe — chrono treats it as a fallback behind `TZ`//etc/localtime, and reedline history timestamps are the only consumer). Rejected because it is whack-a-mole (only severs this one framework edge; the roadmap's macOS graphics device needs real frameworks, forcing the SDK anyway), maintains a version-tracking fork of a transitive crate forever, and leaves the SDK path unexercised if ever combined with it.
+
+**Caveat (user-facing).** The SDK tarball is a third-party redistribution of Apple's SDK; Apple's license terms on that are gray. Options if the mirror dependency becomes unwanted: vendor the tarball somewhere project-controlled, or build the mac artifact on a real macOS runner.
