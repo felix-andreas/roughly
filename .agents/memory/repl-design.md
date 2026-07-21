@@ -113,6 +113,28 @@ symbol by name, with per-symbol optionality:
   WriteConsoleEx hook for R-level output, plus fd-level dup/pipe capture for
   C `printf` output that bypasses R's console.
 
+## Console UX backlog (surveyed against the field)
+
+Parity items observed in production Rust R consoles, all compatible with our
+architecture; none block the analysis rung:
+
+- **Line-editor upgrade** (we pin an old reedline): newer versions add an
+  idle-callback hook — the natural seam for running analysis between
+  keystrokes — plus vi mode and configurable keybindings that come for free.
+  Note the editor's chrono dependency is unwanted baggage (only its default
+  prompt clock and sqlite-history timestamps use it); see the Apple-framework
+  decision record for why that matters at release time.
+- **History**: sqlite backend (an editor feature flag) and import from
+  `.Rhistory`/radian history formats — cheap onboarding win.
+- **E2e assertions**: parse pty output through a vt100 screen model instead
+  of grepping raw transcripts — robust against redraws and cursor movement.
+- **Help**: a fuzzy help browser over installed packages is table stakes in
+  the field; ours should come from the analysis stack (hover docs already
+  exist) rather than a parallel Rd pipeline.
+- **Reprex mode**, rendered through our own formatter.
+- Auto-matching brackets / smart quotes; TOML-config for colors and prompts
+  once a console config story exists.
+
 ## No kernel protocol (settled)
 
 The reference architecture this design was verified against is a notebook
