@@ -12,7 +12,10 @@
 
 use crate::ReplError;
 use std::ffi::{CStr, CString, c_char, c_int, c_uchar, c_void};
-use std::path::{Path, PathBuf};
+#[cfg(unix)]
+use std::path::Path;
+use std::path::PathBuf;
+#[cfg(unix)]
 use std::process::Command;
 
 /// `R_ReadConsole`'s C signature: fill `buffer` (capacity `length`,
@@ -49,13 +52,13 @@ pub struct RApi {
 pub static INTERRUPTS_PENDING: std::sync::atomic::AtomicPtr<c_int> =
     std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
 
+#[cfg(unix)]
 pub fn load() -> Result<RApi, ReplError> {
     let r_home = discover_r_home()?;
     let library_path = shared_library_path(&r_home)?;
     // R packages with compiled code link libR themselves; RTLD_GLOBAL makes
     // the symbols we load satisfy those packages exactly as launch-time
     // linking would.
-    #[cfg(unix)]
     let library = unsafe {
         libloading::os::unix::Library::open(
             Some(&library_path),
@@ -69,38 +72,43 @@ pub fn load() -> Result<RApi, ReplError> {
             library_path.display()
         ))
     })?;
-    #[cfg(not(unix))]
-    return Err(ReplError(
-        "the REPL is not supported on this platform yet (Unix only for now)".to_owned(),
-    ));
 
-    #[cfg(unix)]
-    {
-        let library: &'static libloading::Library = Box::leak(Box::new(library));
-        let api = RApi {
-            r_home,
-            initialize: symbol(library, &library_path, "Rf_initialize_R")?,
-            setup_mainloop: symbol(library, &library_path, "setup_Rmainloop")?,
-            run_mainloop: symbol(library, &library_path, "run_Rmainloop")?,
-            running_as_main_program: symbol(library, &library_path, "R_running_as_main_program")?,
-            signal_handlers: symbol(library, &library_path, "R_SignalHandlers")?,
-            interactive: symbol(library, &library_path, "R_Interactive")?,
-            consolefile: symbol(library, &library_path, "R_Consolefile")?,
-            outputfile: symbol(library, &library_path, "R_Outputfile")?,
-            interrupts_pending: symbol(library, &library_path, "R_interrupts_pending")?,
-            read_console_hook: symbol(library, &library_path, "ptr_R_ReadConsole")?,
-            write_console_hook: symbol(library, &library_path, "ptr_R_WriteConsole")?,
-            write_console_ex_hook: symbol(library, &library_path, "ptr_R_WriteConsoleEx")?,
-            _library: library,
-        };
-        Ok(api)
-    }
+    let library: &'static libloading::Library = Box::leak(Box::new(library));
+    let api = RApi {
+        r_home,
+        initialize: symbol(library, &library_path, "Rf_initialize_R")?,
+        setup_mainloop: symbol(library, &library_path, "setup_Rmainloop")?,
+        run_mainloop: symbol(library, &library_path, "run_Rmainloop")?,
+        running_as_main_program: symbol(library, &library_path, "R_running_as_main_program")?,
+        signal_handlers: symbol(library, &library_path, "R_SignalHandlers")?,
+        interactive: symbol(library, &library_path, "R_Interactive")?,
+        consolefile: symbol(library, &library_path, "R_Consolefile")?,
+        outputfile: symbol(library, &library_path, "R_Outputfile")?,
+        interrupts_pending: symbol(library, &library_path, "R_interrupts_pending")?,
+        read_console_hook: symbol(library, &library_path, "ptr_R_ReadConsole")?,
+        write_console_hook: symbol(library, &library_path, "ptr_R_WriteConsole")?,
+        write_console_ex_hook: symbol(library, &library_path, "ptr_R_WriteConsoleEx")?,
+        _library: library,
+    };
+    Ok(api)
+}
+
+/// Windows embedding is a different C API (`Rstart`/`R_SetParams`, `R.dll`
+/// plus its sibling DLLs) and is deliberately deferred, so the Unix loading
+/// and discovery surface is compiled out entirely on other platforms and
+/// starting the REPL reports the gap instead.
+#[cfg(not(unix))]
+pub fn load() -> Result<RApi, ReplError> {
+    Err(ReplError(
+        "the REPL is not supported on this platform yet (Unix only for now)".to_owned(),
+    ))
 }
 
 /// Resolves one symbol to the caller's type: a function type yields the
 /// function pointer, a `*mut T` type yields the global's address. The
 /// library reference is `'static` (leaked), so the returned value outliving
 /// the `Symbol` guard is sound.
+#[cfg(unix)]
 fn symbol<T: Copy>(
     library: &'static libloading::Library,
     library_path: &Path,
@@ -183,6 +191,7 @@ pub extern "C" fn sigint_to_r_flag(_signal: c_int) {
 
 /// `R_HOME` from the environment when set, else `R RHOME` from `PATH` —
 /// the same two-step every R front end uses.
+#[cfg(unix)]
 fn discover_r_home() -> Result<PathBuf, ReplError> {
     if let Ok(home) = std::env::var("R_HOME")
         && !home.is_empty()
@@ -218,6 +227,7 @@ fn discover_r_home() -> Result<PathBuf, ReplError> {
 
 /// `{R_HOME}/lib/libR.{so,dylib}`. Absence almost always means an R built
 /// without `--enable-R-shlib`; say so.
+#[cfg(unix)]
 fn shared_library_path(r_home: &Path) -> Result<PathBuf, ReplError> {
     let library_directory = r_home.join("lib");
     for name in ["libR.so", "libR.dylib"] {
@@ -249,7 +259,7 @@ pub unsafe fn prompt_text(prompt: *const c_char) -> String {
         .into_owned()
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

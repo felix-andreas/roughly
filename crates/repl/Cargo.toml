@@ -9,11 +9,13 @@ path = "src/repl.rs"
 
 [dependencies]
 dirs = "6"
-libc = "0.2"
 libloading = "0.8"
 nu-ansi-term.workspace = true
 reedline.workspace = true
 syntax = { path = "../syntax" }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 portable-pty = "0.9"

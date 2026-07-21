@@ -162,6 +162,7 @@ extern "C" fn write_console_ex(text: *const c_char, length: c_int, output_type: 
 /// Ctrl-C: while the editor runs, the terminal is raw (no signal — reedline
 /// clears the line); while R evaluates, the terminal is restored, so Ctrl-C
 /// arrives as SIGINT and the handler raises R's cooperative interrupt flag.
+#[cfg(unix)]
 fn install_sigint_handler() {
     unsafe {
         let mut action: libc::sigaction = std::mem::zeroed();
@@ -170,6 +171,11 @@ fn install_sigint_handler() {
         libc::sigaction(libc::SIGINT, &action, std::ptr::null_mut());
     }
 }
+
+/// No R session can start on non-Unix platforms (`libr::load` refuses), so
+/// there is no evaluation phase whose Ctrl-C would need translating.
+#[cfg(not(unix))]
+fn install_sigint_handler() {}
 
 struct RPrompt {
     text: String,

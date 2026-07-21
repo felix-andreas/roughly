@@ -6,6 +6,11 @@
 //! ```sh
 //! cargo test -p roughly --test test_repl_e2e -- --nocapture
 //! ```
+//!
+//! Unix only, like the console itself: on other platforms `roughly repl`
+//! refuses at startup, so an R on `PATH` would only produce false failures.
+
+#![cfg(unix)]
 
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use std::io::{Read, Write};
