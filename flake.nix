@@ -94,6 +94,24 @@
             }
           );
 
+          # The REPL's line editor transitively links the CoreFoundation
+          # framework on macOS (chrono resolves the system time zone through
+          # it). zig bundles link stubs for libSystem only, so the cross
+          # linker needs a real macOS SDK for framework resolution:
+          # cargo-zigbuild picks it up from SDKROOT and passes the framework
+          # search paths to zig.
+          macosSdk =
+            let
+              tarball = pkgs.fetchurl {
+                url = "https://github.com/joseluisq/macosx-sdks/releases/download/11.3/MacOSX11.3.sdk.tar.xz";
+                hash = "sha256-mtwTc9OHnhlz0orZ8XyQUbApMWdKPsKiSYEomJ7OLLE=";
+              };
+            in
+            pkgs.runCommand "MacOSX11.3.sdk" { } ''
+              mkdir "$out"
+              tar -xf ${tarball} --strip-components=1 -C "$out"
+            '';
+
           makeCrossArgs =
             target:
             commonArgs
@@ -110,6 +128,9 @@
               '';
 
               doCheck = false;
+            }
+            // pkgs.lib.optionalAttrs (pkgs.lib.hasSuffix "-apple-darwin" target) {
+              SDKROOT = macosSdk;
             };
 
           makeCrossArtifacts =
