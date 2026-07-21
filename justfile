@@ -178,6 +178,17 @@ release $version:
 
     cargo check
 
+    # zig cross-links the macOS binaries without an Apple SDK, so a dependency
+    # that emits `-framework ...` cannot link. Fail fast with a clear message
+    # instead of deep inside the nix build (see patches/iana-time-zone).
+    for package in core-foundation-sys core-foundation objc objc2 security-framework; do
+        if cargo tree --target aarch64-apple-darwin -p roughly -i $package > /dev/null 2>&1; then
+            echo "error: the macOS dependency graph pulls in '$package', which links an Apple framework;"
+            echo "       zig cannot link Apple frameworks without an SDK. See patches/iana-time-zone."
+            exit 1
+        fi
+    done
+
     nix build .#roughly-linux-x86_64 -o release/nix/x86_64-unknown-linux-gnu
     nix build .#roughly-macos-aarch64 -o release/nix/aarch64-apple-darwin
     nix build .#roughly-windows-x86_64 -o release/nix/x86_64-pc-windows-gnu

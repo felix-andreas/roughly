@@ -1,0 +1,13 @@
+[package]
+name = "iana-time-zone"
+version = "0.1.65"
+edition = "2021"
+publish = false
+
+[lib]
+path = "src/iana_time_zone.rs"
+
+# chrono requests this feature of the real crate; the stub accepts it as a
+# no-op so the patch satisfies the dependency requirement.
+[features]
+fallback = []

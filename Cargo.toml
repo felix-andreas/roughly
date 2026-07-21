@@ -3,6 +3,13 @@ resolver = "3"
 members = ["crates/*", "legacy/*", "editors/zed"]
 default-members = ["crates/roughly"]
 
+# The release pipeline cross-links the macOS binaries with zig, which has no
+# Apple SDK: any dependency that emits `-framework ...` fails the link. The
+# real iana-time-zone links CoreFoundation on macOS; the stub keeps the
+# product graph framework-free (see patches/iana-time-zone).
+[patch.crates-io]
+iana-time-zone = { path = "patches/iana-time-zone" }
+
 [workspace.package]
 version = "0.2.8-alpha"
 license = "UPL-1.0"
