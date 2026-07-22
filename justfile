@@ -14,9 +14,8 @@ rofy *args:
 test *args:
     cargo test -- --nocapture {{ args }}
 
-# The full per-slice gate: every suite of both stacks (differential arms
-# included), clippy at -D warnings, and a formatting check. Green gate =
-# landable change.
+# The full per-slice gate: the workspace battery, clippy at -D warnings,
+# and a formatting check. Green gate = landable change.
 gate: battery clippy fmt-check
 
 # The workspace test battery. `rofy` needs a local R installation and
@@ -46,12 +45,8 @@ bless *args:
 format-docs:
     ROUGHLY_BLESS=1 cargo test -p format --test test_format_docs
 
-# Seeded fuzz arms beyond the bounded passes already inside `cargo test -p
-# semantics`: the cross-stack fuzz differential and the deep single-stack run.
-# `FUZZ_ITERS` scales both budgets.
-fuzz-differential *args:
-    cargo test -p differential --test test_fuzz_differential {{ args }}
-
+# The seeded deep fuzz run beyond the bounded passes already inside
+# `cargo test -p semantics`; `FUZZ_ITERS` scales the budget.
 fuzz-deep:
     cargo test -p semantics --test test_fuzz fuzz_deep -- --ignored --nocapture
 
@@ -59,14 +54,6 @@ fuzz-deep:
 # toolchain; seed the corpus first with scripts/seed-fuzz-corpus.sh.
 fuzz-run target="semantics" *args:
     cargo +nightly fuzz run {{ target }} {{ args }}
-
-# The real-file corpus instruments (fetch once with scripts/fetch-corpus.sh):
-# review material, not gates — only new-stack panics fail.
-corpus-differential:
-    cargo test -p differential -- --ignored differential_corpus --nocapture
-
-corpus-format-differential:
-    cargo test -p differential --test test_format_differential -- --ignored --nocapture
 
 # The workspace performance diagnosis (phase timings, memory, typing bursts).
 stats path=".":

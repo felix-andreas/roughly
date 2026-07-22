@@ -45,7 +45,7 @@ expectations and `FIXTURE_FILTER=group__case` runs one case. Suites:
   analyzed text as ordinary comments, so expectation offsets are honest. Attach facts need no
   directive: a `library(data.table)` statement in the case source activates the conditional
   stub namespace through the same scan the hosts run. This suite is new-stack only — the
-  oracle has no package-metadata concept — and is deliberately absent from the differential
+  oracle had no package-metadata concept — and was deliberately absent from the retired differential
   fixture arm
 - `crates/format/tests/format` — the formatter golden suite (ported from the legacy suite):
   each case's source formats to the expected block, and the runner re-formats the output to
@@ -56,96 +56,16 @@ expectations and `FIXTURE_FILTER=group__case` runs one case. Suites:
   that position (hover line with its absolute range, definition target range, reference
   ranges)
 
-### The cross-stack differential gate
+### The retired identity differentials, and the benchmark harness
 
-`cargo test -p differential` runs every case of the typing, typing-scripts, and typing-strict
-suites through **both** stacks — the frozen legacy pipeline as the oracle and the rewrite's
-`file_diagnostics` / `strict_diagnostics` — and compares the semantic diagnostic classes
-(`type`, `annotation`, `unresolved`, `unused`, `strict`; syntax is excluded because the new
-parser's errors are required to be better, not identical). The harness mirrors the legacy
-publication rules: scripts are classified by path, type and strict findings honor the per-file
-typing directive over the configured default, and annotation and naming findings are always
-published. Two findings match when their class agrees and the new range equals or lies **inside** the
-legacy range — strictly tighter ranges are an intended improvement, not a divergence. Message
-text is not compared: wording is free to improve on the oracle's (the fixture suites are the
-wording contract), and pairs whose messages differ are listed in an informational "wording
-differences" report section. Cases where the oracle itself is wrong are allowlisted in the test with the reason,
-the harness flags stale allowlist entries, and each suite's test fails on any unexplained
-divergence; the per-case details land in `target/differential-<suite>.txt`.
-
-The comparison harness itself — finding extraction from each stack, the class +
-range-containment matching policy, and the accepted oracle-deficit filters — lives in the
-`differential` crate's library, shared by every arm.
-
-### The differential fuzz arm
-
-`cargo test -p differential --test test_fuzz_differential` runs seeded random programs through
-both stacks with the same matching policy (a package arm and a script arm, deterministic per
-seed, `FUZZ_ITERS` scales the budget). The fixture arm only compares sources someone thought to
-write down; this arm sweeps the space between, where a diagnostic class one stack silently lacks
-shows up as a divergence instead of going unnoticed — it is what surfaced the missing script
-unresolved checks, duplicate type-name errors, and conditional-slot semantics. Its generator is
-differential-specific: the template pool is biased toward programs that PRODUCE findings both
-stacks model, and strict mode stays off (strict attribution on recursive shapes diverges by
-design and only the fixture arm's case allowlist can express that). Divergences accepted by the
-shared filters are counted, never failed, and each filter is deliberately narrow with the
-accepted class named in a rollup:
-
-- **oracle deficits** — forward-capture unresolved/unused warnings the rewrite correctly
-  resolves (site-scoped), bindings kept alive by pipeline reads the oracle does not model,
-  Unknown-tolerant type checks the oracle over-rejects, and vector `[` refusals (the oracle
-  never defined vector subsetting; the rewrite types it);
-- **legacy slot tolerance** — use-before-write reads inside the defining statement the oracle
-  misses because it mints the slot first;
-- **model divergences** — unpaired type findings over *unstable names* (multiply-bound,
-  self-referential, or forward-captured names, closed transitively), where the oracle's
-  settled-slot frame model and the rewrite's sequential/last-wins model legitimately differ;
-  an unpaired legacy/new pair with an identical message across a def-use edge (the oracle
-  blames the defining item where the rewrite blames the reading site — one finding, two blame
-  conventions); plus the rewrite's NULL-union strictness the oracle collapses to `Unknown`
-  before reaching.
-
-A default-suite arm sweeps the FROZEN STACK'S OWN fixture corpus
-(`legacy_corpus_differential`): every single-file case input from the legacy
-`typecheck`/`naming`/`type_syntax`/`diagnostics`/`unused`/`realworld` suites runs through both
-stacks with the shared policy — years of accumulated shapes the rewrite's suites do not spell
-out, compared without porting a single legacy expectation (the oracle recomputes its findings,
-so legacy renderings never constrain the rewrite). Every case must match or carry an
-adjudicated allowlist entry with its reason; stale entries fail.
-
-A further ignored-by-default arm compares the stacks over the real-file corpus
-(`cargo test -p differential -- --ignored differential_corpus`, after `scripts/fetch-corpus.sh`):
-every corpus `.R` file both parsers accept runs through both pipelines with the same matching
-policy — files with syntax errors on either side are counted and skipped, since parity is scoped
-to inputs both stacks parse cleanly. Its report (`target/differential-corpus.txt`) leads with a
-frequency rollup of divergent messages, so one gap repeated across hundreds of files reads as one
-line. Per-file panic guards on both sides keep one crash from killing the sweep: a new-stack
-panic is recorded and fails the test; a legacy (oracle) panic means the oracle cannot be
-consulted for that file, so it is counted in the rollup and the file skipped.
-
-### The per-position IDE differential
-
-`cargo test -p differential --test test_ide_differential` runs hover, goto-definition,
-references, rename, signature help, and completion at **every byte position** of every
-typing-suite case through both stacks (plus inlay-hint anchors once per case) and compares
-targets, ranges, and label sets —
-never prose, per the wording-freedom doctrine: definitions must agree on presence with the
-rewrite's target equal to or inside one of the oracle's; reference and rename sets must be
-identical; hovers must agree on presence with the rewrite's range equal or inside the
-oracle's; signature help must agree on presence, the signature-set size, the committed
-overload index, and the active signature's active parameter; hint anchors must
-match exactly; completion label sets must match with a completion DEFICIT always a divergence
-(supersets are accepted — the rewrite's pools are deliberately richer: the type vocabulary
-inside annotations, stub namespace exports after `pkg::`, an item-wide local pool). Divergence
-classes accepted by policy are counted separately: the rewrite hovering or offering signatures
-where the oracle does not (strictly more coverage), and the rewrite declining references/rename
-on annotation type tokens with no project declaration (primitives, `fn`, binders — the oracle
-offers spelled-name matches there). Cases where the
-oracle's naming is wrong (forward capture, super-assignment, local mutual recursion) sit on a
-committed allowlist that only accepts pure additions, and adjudicated design differences (the
-rewrite hints only exported-scheme-consistent types) carry their reasons in a second list;
-both fail when stale. The test is a hard gate: any unexplained divergence fails; details land
-in `target/differential-ide.txt`.
+The rewrite was verified against the frozen previous implementation by a family of
+differential suites (typing, scripts, strict, fuzz, the legacy-corpus sweep, the real-file
+corpus arm, and a per-position IDE comparison with adjudicated divergence ledgers). That
+program is **complete and retired**: the new stack no longer proves equivalence to the
+oracle — its own fixture suites are the semantics contract, and improvements land without
+oracle adjudication. What remains of the `differential` crate is the cross-stack
+**benchmark** harness (`legacy/differential/tests/test_stats.rs`): the same corpus timed
+and memory-measured through both stacks, kept until the legacy code is deleted.
 
 ### The semantics fuzz harness
 
@@ -252,7 +172,7 @@ the measured gate numbers with headroom.
 ## Fixture format
 
 Every suite on the shipping stack runs through one harness, `syntax::testing::run_fixture_suite`
-(shared by the `syntax`, `semantics`, `format`, and `ide` crates and the differential). A `.test`
+(shared by the `syntax`, `semantics`, `format`, and `ide` crates). A `.test`
 file holds groups of cases:
 
 ```text

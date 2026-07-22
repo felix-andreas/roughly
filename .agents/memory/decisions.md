@@ -773,3 +773,13 @@ Impact: correctness — the corpus differential reaches 1,523/1,523 with one adj
 **Why.** The CLI's human renderer already has the rustc shape (severity header, `-->` location, gutter, snippet, colored carets, related notes); adopting miette would mean rebuilding a working system around a new dependency tree (fancy feature: several transitive crates plus backtrace machinery) for visuals we largely have. The actual weaknesses were fixable in-place.
 
 **What changed.** The header now carries the diagnostic code (`warning[unused]:` — exactly what a `# roughly: allow(...)` suppression must spell, so the output teaches it); multi-line spans render their first line with the underline to end-of-line plus a dim "range continues for N more lines" note (previously every spanned line printed with one dangling caret); paths render relative to the working directory. Revisit miette only if requirements grow past this shape (multi-span labels, error chains with source causes).
+
+# Decision record: the identity-parity program is retired
+
+**Status:** decided by the user, implemented.
+
+**What ended.** The differential suites that proved the rewrite equivalent to the frozen oracle — the typing/scripts/strict arms, the seeded fuzz differential, the legacy-corpus sweep, the real-file corpus arm, and the per-position IDE comparison, together with their adjudicated divergence ledgers — are deleted. The rewrite's own fixture suites are the semantics contract; improvements land on their own terms with no oracle renegotiation. The legacy ide fixture inputs worth keeping were ported first (81 cases; the port surfaced two real defects, recorded in the backlog).
+
+**What remains.** `legacy/differential` is benchmark-only: `test_stats.rs` times and memory-measures the same corpus through both stacks. It — and the legacy crates it depends on — stay until the deletion sweep the user will call for; the perf witnesses migrate to a new-stack-only home as part of that sweep.
+
+**Impact.** Every future semantic improvement costs one fixture bless instead of a fixture bless plus per-arm adjudication entries; the battery loses its slowest suites; the deletion sweep's remaining prerequisite is only the witness migration.
