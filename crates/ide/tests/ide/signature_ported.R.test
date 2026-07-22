@@ -1,0 +1,78 @@
+#==== signature_ported
+#---- positional_skips_name_consumed_parameter
+#: fn(count: integer, label: character) -> integer
+describe <- function(count, label) count
+result <- describe(label = "x", 1$0L)
+#++++
+hover 124..126: integer
+definition: none
+references: none
+rename: none
+signature: fn(count: integer, label: character) -> integer
+parameters: [count: integer] | label: character
+action: Add inferred type annotation for `result`
+  edit 92..92 -> "#: integer\n"
+action: Add inferred type annotations for the whole file
+  edit 92..92 -> "#: integer\n"
+completion (128+): break, else, FALSE, for, function, if, in, Inf
+hint @98: integer
+
+#---- pre_rest_optional_fills_positionally
+#: @trust fn([quiet]: logical, ...: character) -> character
+join <- function(quiet = FALSE, ...) ""
+text <- join(TR$0UE, "b")
+#++++
+hover 113..117: logical
+definition: none
+references: none
+rename: none
+signature: fn([quiet]: logical, ...: character) -> character
+parameters: [[quiet]: logical] | ...: character
+action: Add inferred type annotation for `text`
+  edit 100..100 -> "#: character\n"
+action: Add inferred type annotations for the whole file
+  edit 100..100 -> "#: character\n"
+completion (1): TRUE
+hint @104: character
+
+#---- lapply_open_scheme
+result <- lapply($0)
+#++++
+hover 10..18: list[T]
+definition: none
+references: none
+rename: none
+signature: fn(x: list[T] | T[], f: fn(T) -> U, ...: Any) -> list[U]
+parameters: [x: list[T] | T[]] | f: fn(T) -> U | ...: Any
+completion (128+): break, else, FALSE, for, function, if, in, Inf
+
+#---- lapply_resolved_instantiation
+result <- lapply(list(1L, 2L),$0 function(item) item)
+#++++
+hover 10..51: list[integer]
+definition: none
+references: none
+rename: none
+signature: fn(x: list[integer] | integer[], f: fn(integer) -> integer, ...: Any) -> list[integer]
+parameters: x: list[integer] | integer[] | [f: fn(integer) -> integer] | ...: Any
+action: Add inferred type annotation for `result`
+  edit 0..0 -> "#: list[integer]\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: list[integer]\n"
+completion (128+): break, else, FALSE, for, function, if, in, Inf
+hint @6: list[integer]
+
+#---- user_generic_open_call
+pick <- function(x, y) x
+value <- pick($0)
+#++++
+hover 34..40: T
+definition: none
+references: none
+rename: none
+signature: fn(x: T, y: U) -> T
+parameters: [x: T] | y: U
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: <T, U> fn(x: T, y: U) -> T\n"
+completion (128+): break, else, FALSE, for, function, if, in, Inf
+hint @4: <T, U> fn(x: T, y: U) -> T

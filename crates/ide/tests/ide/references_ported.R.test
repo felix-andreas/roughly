@@ -1,0 +1,66 @@
+#==== references_ported
+#---- namespace_rhs
+pkg::fu$0nc
+#++++
+hover 0..9: Unknown
+definition: none
+references: none
+rename: none
+signature: none
+completion (1): func
+
+#---- global_excludes_same_named_local
+val$0ue <- 1L
+result <- value
+helper <- function() {
+  value <- 99L
+  value
+}
+#++++
+hover 0..5: value: integer
+hover-definition: global 0..5
+definition 0..5
+references: 0..5*, 22..27
+rename: 2 edit(s)
+signature: none
+action: Add inferred type annotation for `value`
+  edit 0..0 -> "#: integer\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: integer\n"
+  edit 12..12 -> "#: integer\n"
+  edit 51..51 -> "  #: integer\n"
+  edit 28..28 -> "#: fn() -> integer\n"
+completion (9): value, validObject, eval, evalq, setValidity, vapply, available.packages, isVirtualClass
+hint @5: integer
+hint @18: integer
+hint @34: fn() -> integer
+hint @58: integer
+
+#---- local_excludes_same_named_global
+value <- 1L
+result <- value
+helper <- function() {
+  val$0ue <- 99L
+  value
+}
+#++++
+hover 53..58: value: integer
+hover-definition: local 53..58
+definition 53..58
+references: 53..58*, 68..73
+rename: 2 edit(s)
+signature: none
+action: Add inferred type annotation for `value`
+  edit 51..51 -> "  #: integer\n"
+action: Add inferred type annotation for `helper`
+  edit 28..28 -> "#: fn() -> integer\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: integer\n"
+  edit 12..12 -> "#: integer\n"
+  edit 51..51 -> "  #: integer\n"
+  edit 28..28 -> "#: fn() -> integer\n"
+completion (9): value, validObject, eval, evalq, setValidity, vapply, available.packages, isVirtualClass
+hint @5: integer
+hint @18: integer
+hint @34: fn() -> integer
+hint @58: integer

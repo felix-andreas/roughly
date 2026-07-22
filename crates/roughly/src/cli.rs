@@ -551,46 +551,58 @@ fn render_human_diagnostic(
     diagnostic: &Diagnostic,
     related: &[RelatedNote],
 ) {
-    log(
-        match diagnostic.severity {
-            Severity::Warning => LogLevel::Warn,
-            Severity::Error => LogLevel::Error,
-        },
-        &diagnostic.message,
-    );
+    // The header names the code — it is what a suppression comment must
+    // spell (`# roughly: allow(unused)`), so the human output teaches it.
+    let header = match diagnostic.severity {
+        Severity::Warning => style(format!("warning[{}]: ", diagnostic.code))
+            .yellow()
+            .bold(),
+        Severity::Error => style(format!("error[{}]: ", diagnostic.code)).red().bold(),
+    };
+    eprintln!("{header}{}", style(&diagnostic.message).bold());
 
     let start = index.line_column(diagnostic.range.start());
     let end = index.line_column(diagnostic.range.end());
     let gutter_width = (end.line as usize + 1).to_string().len();
+    // Paths render relative to the working directory when they are under it.
+    let display_path = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| path.strip_prefix(&cwd).ok())
+        .unwrap_or(path);
     eprintln!(
         "{}{} {}:{}:{}",
         " ".repeat(gutter_width),
         style("-->").bold().blue(),
-        path.display(),
+        display_path.display(),
         start.line + 1,
         start.column + 1
     );
 
-    for line in start.line..=end.line {
-        let line_start = index.line_start(line) as usize;
-        let line_text = &source[line_start..line_start + index.line_length(line, source) as usize];
-        eprintln!(
-            "{} {}",
-            style(format!("{:<width$}|", line + 1, width = gutter_width + 1))
-                .blue()
-                .bold(),
-            line_text
-        );
-    }
-
-    // The underline sits below the last rendered line, so it starts at the
-    // range's start column only when the range is confined to a single line.
-    let caret_column = if start.line == end.line {
-        start.column as usize
+    // A multi-line span shows its first line with the underline running to
+    // that line's end, plus a trailing-lines note — printing every spanned
+    // line with a dangling caret buried the finding on long items.
+    let first_line_start = index.line_start(start.line) as usize;
+    let first_line_text = &source
+        [first_line_start..first_line_start + index.line_length(start.line, source) as usize];
+    eprintln!(
+        "{} {}",
+        style(format!(
+            "{:<width$}|",
+            start.line + 1,
+            width = gutter_width + 1
+        ))
+        .blue()
+        .bold(),
+        first_line_text
+    );
+    let trailing_lines = (end.line - start.line) as usize;
+    let caret_column = start.column as usize;
+    let caret_end = if trailing_lines == 0 {
+        usize::max(caret_column + 1, end.column as usize)
     } else {
-        0
+        first_line_text.chars().count().max(caret_column + 1)
     };
-    let caret_width = usize::max(1, (end.column as usize).saturating_sub(caret_column));
+    let caret_width = caret_end - caret_column;
     eprintln!(
         "{}{}  {}",
         " ".repeat(gutter_width + 1),
@@ -603,6 +615,19 @@ fn render_human_diagnostic(
             }
         }
     );
+    if trailing_lines > 0 {
+        eprintln!(
+            "{} {}",
+            style(format!("{:<width$}|", "", width = gutter_width + 1))
+                .blue()
+                .bold(),
+            style(format!(
+                "... the range continues for {trailing_lines} more line{}",
+                if trailing_lines == 1 { "" } else { "s" }
+            ))
+            .dim(),
+        );
+    }
     for note in related {
         eprintln!(
             "{}{} {} {} {} {}:{}:{}",

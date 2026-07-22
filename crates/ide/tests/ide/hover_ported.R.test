@@ -1,0 +1,699 @@
+#==== hover_targets
+#---- call_result_binding
+mirror <- function(argument) argument
+value <- 1L
+res$0ult <- mirror(value)
+#++++
+hover 50..56: result: integer
+hover-definition: global 50..56
+definition 50..56
+references: 50..56*
+rename: 1 edit(s)
+signature: none
+action: Add inferred type annotation for `result`
+  edit 50..50 -> "#: integer\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: <T> fn(argument: T) -> T\n"
+  edit 38..38 -> "#: integer\n"
+  edit 50..50 -> "#: integer\n"
+completion (30): result, residuals, representation, suppressMessages, suppressPackageStartupMessages, suppressWarnings, txtProgressBar, setTxtProgressBar
+hint @6: <T> fn(argument: T) -> T
+hint @43: integer
+hint @56: integer
+
+#---- call_argument
+mirror <- function(argument) argument
+value <- 1L
+result <- mirror(val$0ue)
+#++++
+hover 67..72: value: integer
+hover-definition: global 38..43
+definition 38..43
+references: 38..43*, 67..72
+rename: 2 edit(s)
+signature: fn(argument: integer) -> integer
+parameters: [argument: integer]
+action: Add inferred type annotation for `result`
+  edit 50..50 -> "#: integer\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: <T> fn(argument: T) -> T\n"
+  edit 38..38 -> "#: integer\n"
+  edit 50..50 -> "#: integer\n"
+completion (9): value, validObject, eval, evalq, setValidity, vapply, available.packages, isVirtualClass
+hint @6: <T> fn(argument: T) -> T
+hint @43: integer
+hint @56: integer
+
+#---- binary_operator
+value <- 1L
+other <- 2L
+result <- value $0+ other
+#++++
+hover 34..47: integer
+definition: none
+references: none
+rename: none
+signature: none
+action: Add inferred type annotation for `result`
+  edit 24..24 -> "#: integer\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: integer\n"
+  edit 12..12 -> "#: integer\n"
+  edit 24..24 -> "#: integer\n"
+completion (128+): break, else, FALSE, for, function, if, in, Inf
+hint @5: integer
+hint @17: integer
+hint @30: integer
+
+#---- subset_expression
+data <- 1L
+index <- 1L
+result <- data[index]$0
+#++++
+hover 33..44: integer
+definition: none
+references: none
+rename: none
+signature: none
+action: Add inferred type annotation for `result`
+  edit 23..23 -> "#: integer\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: integer\n"
+  edit 11..11 -> "#: integer\n"
+  edit 23..23 -> "#: integer\n"
+completion (128+): break, else, FALSE, for, function, if, in, Inf
+hint @4: integer
+hint @16: integer
+hint @29: integer
+
+#---- subset2_expression
+data <- 1L
+index <- 1L
+result <- data[$0[index]]
+#++++
+hover 33..46: integer
+definition: none
+references: none
+rename: none
+signature: none
+action: Add inferred type annotation for `result`
+  edit 23..23 -> "#: integer\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: integer\n"
+  edit 11..11 -> "#: integer\n"
+  edit 23..23 -> "#: integer\n"
+completion (128+): break, else, FALSE, for, function, if, in, Inf
+hint @4: integer
+hint @16: integer
+hint @29: integer
+
+#---- dollar_expression
+data <- 1L
+result <- data$field$0
+#++++
+hover 21..31: Unknown
+definition: none
+references: none
+rename: none
+signature: none
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: integer\n"
+completion (1): field
+hint @4: integer
+
+#---- dollar_field_name
+data <- 1L
+result <- data$fie$0ld
+#++++
+hover 21..31: Unknown
+definition: none
+references: none
+rename: none
+signature: none
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: integer\n"
+completion (1): field
+hint @4: integer
+
+#---- block_expression
+value <- 1L
+block <- $0{ value }
+#++++
+hover 21..30: integer
+definition: none
+references: none
+rename: none
+signature: none
+action: Add inferred type annotation for `block`
+  edit 12..12 -> "#: integer\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: integer\n"
+  edit 12..12 -> "#: integer\n"
+completion (128+): break, else, FALSE, for, function, if, in, Inf
+hint @5: integer
+hint @17: integer
+
+#---- unary_minus
+value <- 1L
+negated <- $0-value
+#++++
+hover 23..29: integer
+definition: none
+references: none
+rename: none
+signature: none
+action: Add inferred type annotation for `negated`
+  edit 12..12 -> "#: integer\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: integer\n"
+  edit 12..12 -> "#: integer\n"
+completion (128+): break, else, FALSE, for, function, if, in, Inf
+hint @5: integer
+hint @19: integer
+
+#---- if_expression
+value <- 1L
+chooser <- i$0f (TRUE) value else 0L
+#++++
+hover 23..46: integer
+definition: none
+references: none
+rename: none
+signature: none
+action: Add inferred type annotation for `chooser`
+  edit 12..12 -> "#: integer\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: integer\n"
+  edit 12..12 -> "#: integer\n"
+completion (47): if, in, Inf, iconv, identical, identity, ifelse, image
+hint @5: integer
+hint @19: integer
+
+#---- for_expression
+items <- 2L
+result <- f$0or (item in items) item
+#++++
+hover 22..46: NULL
+definition: none
+references: none
+rename: none
+signature: none
+action: Add inferred type annotation for `result`
+  edit 12..12 -> "#: NULL\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: integer\n"
+  edit 12..12 -> "#: NULL\n"
+completion (25): F, FALSE, for, function, factor, factorial, file, file.copy
+hint @5: integer
+hint @18: NULL
+
+#---- while_expression
+value <- 1L
+loop <- wh$0ile (TRUE) value
+#++++
+hover 20..38: NULL
+definition: none
+references: none
+rename: none
+signature: none
+action: Add inferred type annotation for `loop`
+  edit 12..12 -> "#: NULL\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: integer\n"
+  edit 12..12 -> "#: NULL\n"
+completion (4): while, which, which.max, which.min
+hint @5: integer
+hint @16: NULL
+
+#---- repeat_expression
+value <- 1L
+again <- rep$0eat value
+#++++
+hover 21..33: NULL
+definition: none
+references: none
+rename: none
+signature: none
+action: Add inferred type annotation for `again`
+  edit 12..12 -> "#: NULL\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: integer\n"
+  edit 12..12 -> "#: NULL\n"
+completion (16): rep, repeat, rep_len, replace, representation, grep, grepl, strrep
+hint @5: integer
+hint @17: NULL
+
+#---- function_keyword
+value <- fun$0ction(parameter) parameter
+#++++
+hover 9..38: fn(parameter: T) -> T
+definition: none
+references: none
+rename: none
+signature: none
+action: Add inferred type annotation for `value`
+  edit 0..0 -> "#: <T> fn(parameter: T) -> T\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: <T> fn(parameter: T) -> T\n"
+completion (6): function, as.function, is.function, sys.function, match.fun, flush.console
+hint @5: <T> fn(parameter: T) -> T
+
+#---- parameter_declaration
+value <- function(para$0meter) parameter
+#++++
+hover 9..38: fn(parameter: T) -> T
+definition 18..27
+references: 18..27*, 29..38
+rename: 2 edit(s)
+signature: none
+action: Add inferred type annotation for `value`
+  edit 0..0 -> "#: <T> fn(parameter: T) -> T\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: <T> fn(parameter: T) -> T\n"
+completion (3): parameter, parent.frame, suppressPackageStartupMessages
+hint @5: <T> fn(parameter: T) -> T
+
+#==== hover_literals
+#---- null_literal
+nothing <- NU$0LL
+#++++
+hover 11..15: NULL
+definition: none
+references: none
+rename: none
+signature: none
+action: Add inferred type annotation for `nothing`
+  edit 0..0 -> "#: NULL\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: NULL\n"
+completion (1): NULL
+hint @7: NULL
+
+#---- logical_literal
+flag <- TR$0UE
+#++++
+hover 8..12: logical
+definition: none
+references: none
+rename: none
+signature: none
+action: Add inferred type annotation for `flag`
+  edit 0..0 -> "#: logical\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: logical\n"
+completion (1): TRUE
+hint @4: logical
+
+#---- double_literal
+ratio <- 1$0.5
+#++++
+hover 9..12: double
+definition: none
+references: none
+rename: none
+signature: none
+action: Add inferred type annotation for `ratio`
+  edit 0..0 -> "#: double\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: double\n"
+completion (128+): break, else, FALSE, for, function, if, in, Inf
+hint @5: double
+
+#---- string_subscript_name
+text <- "hello"
+named <- text["na$0me"]
+#++++
+hover 30..36: character
+definition: none
+references: none
+rename: none
+signature: none
+action: Add inferred type annotation for `named`
+  edit 16..16 -> "#: character\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: character\n"
+  edit 16..16 -> "#: character\n"
+completion: none
+hint @4: character
+hint @21: character
+
+#---- end_of_expression
+value <- 1L$0
+#++++
+hover 9..11: integer
+definition: none
+references: none
+rename: none
+signature: none
+action: Add inferred type annotation for `value`
+  edit 0..0 -> "#: integer\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: integer\n"
+completion (1): LETTERS
+hint @5: integer
+
+#==== hover_annotated
+#---- checked_annotation
+#: integer
+che$0cked <- 1L
+#++++
+hover 11..18: checked: integer
+hover-definition: global 11..18
+definition 11..18
+references: 11..18*
+rename: 1 edit(s)
+signature: none
+completion (9): checked, regmatches, character, chisq.test, choose, .Machine, as.character, is.character
+
+#---- if_unknown_annotation
+#: @if-unknown integer
+may$0be <- 2L
+#++++
+hover 23..28: maybe: integer
+hover-definition: global 23..28
+definition 23..28
+references: 23..28*
+rename: 1 edit(s)
+signature: none
+completion (3): maybe, mapply, summary
+hint @28: integer
+
+#---- trust_annotation
+#: @trust integer
+tru$0sted <- 3L
+#++++
+hover 18..25: trusted: integer
+hover-definition: global 18..25
+definition 18..25
+references: 18..25*
+rename: 1 edit(s)
+signature: none
+completion (8): TRUE, trusted, trunc, structure, isTRUE, attributes, capture.output, suppressPackageStartupMessages
+
+#---- new_annotation_binding
+#: @type Person {list{name: character}}
+
+#: @new Person
+per$0son <- make_person()
+#++++
+hover 56..62: person: Unknown
+hover-definition: global 56..62
+definition 56..62
+references: 56..62*
+rename: 1 edit(s)
+signature: none
+completion (8): person, toupper, packageVersion, parent.frame, suppressPackageStartupMessages, suppressWarnings, txtProgressBar, setTxtProgressBar
+
+#---- alias_declaration_tag
+#: @al$0ias Identifier {character}
+#++++
+hover 0..32: @alias Identifier {character}
+definition: none
+references: none
+rename: none
+signature: none
+completion: none
+
+#---- generic_type_declaration
+#: @type Pa$0ir<T, U> {list{first: T, second: U}}
+#++++
+hover 9..13: @type Pair<T, U> {list{first: T, second: U}}
+definition 9..13
+references: 9..13*
+rename: 1 edit(s)
+signature: none
+completion (1): Pair
+
+#---- nested_field_type
+#: list{name: character, age: inte$0ger}
+record <- make_record()
+#++++
+hover 30..37: integer
+definition: none
+references: none
+rename: none
+signature: none
+completion (1): integer
+
+#---- multi_line_annotation
+#: @type Person {list{name: character}}
+
+#: fn(
+#:   subject: Per$0son
+#: ) -> character
+greet <- function(subject) "hi"
+#++++
+hover 62..68: @type Person {list{name: character}}
+definition 9..15
+references: 9..15*, 62..68
+rename: 2 edit(s)
+signature: none
+completion (1): Person
+
+#==== hover_flow
+#---- maybe_undefined_use
+wrapper <- function(flag) {
+  if (flag) value <- 1L
+  val$0ue
+}
+#++++
+hover 54..59: value: integer
+hover-definition: local 40..45 (maybe undefined)
+definition 40..45
+references: 40..45*, 54..59
+rename: 2 edit(s)
+signature: none
+action: Add inferred type annotation for `wrapper`
+  edit 0..0 -> "#: fn(flag: logical) -> integer\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: fn(flag: logical) -> integer\n"
+completion (9): value, validObject, eval, evalq, setValidity, vapply, available.packages, isVirtualClass
+hint @7: fn(flag: logical) -> integer
+hint @45: integer
+
+#---- conditional_update_single_type
+f <- function(flag) {
+  x <- 1L
+  if (flag) {
+    x <- 2L
+  }
+  x$0
+}
+#++++
+hover 64..65: x: integer
+hover-definition: local 24..25
+definition 24..25
+references: 24..25*, 50..51*, 64..65
+rename: 3 edit(s)
+signature: none
+action: Add inferred type annotation for `f`
+  edit 0..0 -> "#: fn(flag: logical) -> integer\n"
+action: Add inferred type annotations for the whole file
+  edit 22..22 -> "  #: integer\n"
+  edit 46..46 -> "    #: integer\n"
+  edit 0..0 -> "#: fn(flag: logical) -> integer\n"
+completion (2): x, xor
+hint @1: fn(flag: logical) -> integer
+hint @25: integer
+hint @51: integer
+
+#---- conditional_retype_union
+f <- function(flag) {
+  x <- 1L
+  if (flag) {
+    x <- "two"
+  }
+  x$0
+}
+#++++
+hover 67..68: x: integer | character
+hover-definition: local 24..25
+definition 24..25
+references: 24..25*, 50..51*, 67..68
+rename: 3 edit(s)
+signature: none
+action: Add inferred type annotation for `f`
+  edit 0..0 -> "#: fn(flag: logical) -> integer | character\n"
+action: Add inferred type annotations for the whole file
+  edit 22..22 -> "  #: integer\n"
+  edit 46..46 -> "    #: character\n"
+  edit 0..0 -> "#: fn(flag: logical) -> integer | character\n"
+completion (2): x, xor
+hint @1: fn(flag: logical) -> integer | character
+hint @25: integer
+hint @51: character
+
+#---- loop_accumulator
+f <- function() {
+  total <- 0L
+  for (i in 1:3) {
+    total <- total + i
+  }
+  tot$0al
+}
+#++++
+hover 80..85: total: integer
+hover-definition: local 20..25
+definition 20..25
+references: 20..25*, 55..60*, 64..69, 80..85
+rename: 4 edit(s)
+signature: none
+action: Add inferred type annotation for `f`
+  edit 0..0 -> "#: fn() -> integer\n"
+action: Add inferred type annotations for the whole file
+  edit 18..18 -> "  #: integer\n"
+  edit 51..51 -> "    #: integer\n"
+  edit 0..0 -> "#: fn() -> integer\n"
+completion (8): total, textConnection, toString, stopifnot, getOption, getSlots, matplot, capture.output
+hint @1: fn() -> integer
+hint @25: integer
+hint @60: integer
+
+#---- if_else_union_binding
+val$0ue <- if (TRUE) 1L else "foo"
+#++++
+hover 0..5: value: integer | character
+hover-definition: global 0..5
+definition 0..5
+references: 0..5*
+rename: 1 edit(s)
+signature: none
+action: Add inferred type annotation for `value`
+  edit 0..0 -> "#: integer | character\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: integer | character\n"
+completion (9): value, validObject, eval, evalq, setValidity, vapply, available.packages, isVirtualClass
+hint @5: integer | character
+
+#---- for_element_union
+for (item in list(a = 1L, b = "two")) it$0em
+#++++
+hover 38..42: item: integer | character
+hover-definition: local 5..9
+definition 5..9
+references: 5..9*, 38..42
+rename: 2 edit(s)
+signature: none
+completion (1): item
+
+#==== hover_schemes
+#---- one_type_variable
+mirror <- function(x) x
+mir$0ror
+#++++
+hover 24..30: mirror: fn(x: T) -> T
+hover-definition: global 0..6
+definition 0..6
+references: 0..6*, 24..30
+rename: 2 edit(s)
+signature: none
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: <T> fn(x: T) -> T\n"
+completion (2): mirror, tempdir
+hint @6: <T> fn(x: T) -> T
+
+#---- two_type_variables
+pair <- function(x, y) x
+pa$0ir
+#++++
+hover 25..29: pair: fn(x: T, y: U) -> T
+hover-definition: global 0..4
+definition 0..4
+references: 0..4*, 25..29
+rename: 2 edit(s)
+signature: none
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: <T, U> fn(x: T, y: U) -> T\n"
+completion (11): pair, packageVersion, pairs, palette, par, parent.env, parent.frame, parse
+hint @4: <T, U> fn(x: T, y: U) -> T
+
+#---- numeric_constraint_displayed
+add_one <- function(x) x + 1L
+add$0_one
+#++++
+hover 30..37: add_one: fn(x: T) -> T
+hover-definition: global 0..7
+definition 0..7
+references: 0..7*, 30..37
+rename: 2 edit(s)
+signature: none
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: <T: numeric> fn(x: T) -> T\n"
+completion (5): add_one, anyDuplicated, read.delim, readRDS, standardGeneric
+hint @7: <T: numeric> fn(x: T) -> T
+
+#---- partially_inferred_function
+make <- function(x) list(x, 1L)
+ma$0ke
+#++++
+hover 32..36: make: fn(x: T) -> list{T, integer}
+hover-definition: global 0..4
+definition 0..4
+references: 0..4*, 32..36
+rename: 2 edit(s)
+signature: none
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: <T> fn(x: T) -> list{T, integer}\n"
+completion (13): make, mad, make.names, make.unique, Map, mapply, match, match.arg
+hint @4: <T> fn(x: T) -> list{T, integer}
+
+#---- parameter_never_raw_variable
+wrap <- function(first, second) sec$0ond
+#++++
+hover 32..38: second: T
+hover-definition: local 24..30
+definition 24..30
+references: 24..30*, 32..38
+rename: 2 edit(s)
+signature: none
+action: Add inferred type annotation for `wrap`
+  edit 0..0 -> "#: <T, U> fn(first: T, second: U) -> U\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: <T, U> fn(first: T, second: U) -> U\n"
+completion (14): second, intersect, selectMethod, setClass, setGeneric, setRefClass, standardGeneric, suppressPackageStartupMessages
+hint @4: <T, U> fn(first: T, second: U) -> U
+
+#==== hover_unknown
+#---- uninferable_binding
+value <- undefined_fn()
+val$0ue
+#++++
+hover 24..29: value: Unknown
+hover-definition: global 0..5
+definition 0..5
+references: 0..5*, 24..29
+rename: 2 edit(s)
+signature: none
+completion (9): value, validObject, eval, evalq, setValidity, vapply, available.packages, isVirtualClass
+
+#---- uninferable_call
+unde$0fined_fn(1L)
+#++++
+hover 0..12: undefined_fn: Unknown
+definition: none
+references: none
+rename: none
+signature: none
+completion (2): undebug, URLencode
+
+#==== hover_stubs
+#---- overloaded_stub_name
+total <- s$0um(1L, 2L)
+#++++
+hover 9..12: sum: fn(...: integer[] | logical[], [na.rm]: logical) -> integer
+hover-definition: package base (3 declaration(s), declared in stub source 0 at 13954..13957)
+definition: stub source 0 13954..13957
+references: none
+rename: none
+signature: fn(...: integer[] | logical[], [na.rm]: logical) -> integer (active)
+parameters: [...: integer[] | logical[]] | [na.rm]: logical
+signature: fn(...: double[], [na.rm]: logical) -> double
+parameters: [...: double[]] | [na.rm]: logical
+signature: fn(...: Any, [na.rm]: logical) -> Any
+parameters: [...: Any] | [na.rm]: logical
+action: Add inferred type annotation for `total`
+  edit 0..0 -> "#: integer\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: integer\n"
+completion (79): sample, sample.int, sapply, save, save.image, saveRDS, scale, scan
+hint @5: integer

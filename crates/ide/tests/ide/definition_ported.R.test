@@ -1,0 +1,146 @@
+#==== definition_ported
+#---- parameter_declaration_position
+f <- function(para$0meter) parameter
+#++++
+hover 5..34: fn(parameter: T) -> T
+definition 14..23
+references: 14..23*, 25..34
+rename: 2 edit(s)
+signature: none
+action: Add inferred type annotation for `f`
+  edit 0..0 -> "#: <T> fn(parameter: T) -> T\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: <T> fn(parameter: T) -> T\n"
+completion (3): parameter, parent.frame, suppressPackageStartupMessages
+hint @1: <T> fn(parameter: T) -> T
+
+#---- for_variable_use
+wrapper <- function(items) {
+  for (item in items) {
+    it$0em
+  }
+}
+#++++
+hover 57..61: item: Unknown
+hover-definition: local 36..40
+definition 36..40
+references: 36..40*, 57..61
+rename: 2 edit(s)
+signature: none
+action: Add inferred type annotation for `wrapper`
+  edit 0..0 -> "#: <T> fn(items: T) -> NULL\n"
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: <T> fn(items: T) -> NULL\n"
+completion (2): item, items
+hint @7: <T> fn(items: T) -> NULL
+
+#---- nested_shadow_inner_use
+wrapper <- function() {
+  value <- 1L
+  inner <- function() {
+    value <- 2L
+    val$0ue
+  }
+  value
+}
+#++++
+hover 82..87: value: integer
+hover-definition: local 66..71
+definition 66..71
+references: 66..71*, 82..87
+rename: 2 edit(s)
+signature: none
+action: Add inferred type annotation for `inner`
+  edit 38..38 -> "  #: fn() -> integer\n"
+action: Add inferred type annotation for `wrapper`
+  edit 0..0 -> "#: fn() -> integer\n"
+action: Add inferred type annotations for the whole file
+  edit 24..24 -> "  #: integer\n"
+  edit 62..62 -> "    #: integer\n"
+  edit 38..38 -> "  #: fn() -> integer\n"
+  edit 0..0 -> "#: fn() -> integer\n"
+completion (9): value, validObject, eval, evalq, setValidity, vapply, available.packages, isVirtualClass
+hint @7: fn() -> integer
+hint @31: integer
+hint @45: fn() -> integer
+hint @71: integer
+
+#---- nested_shadow_outer_use
+wrapper <- function() {
+  value <- 1L
+  inner <- function() {
+    value <- 2L
+    value
+  }
+  val$0ue
+}
+#++++
+hover 94..99: value: integer
+hover-definition: local 26..31
+definition 26..31
+references: 26..31*, 94..99
+rename: 2 edit(s)
+signature: none
+action: Add inferred type annotation for `wrapper`
+  edit 0..0 -> "#: fn() -> integer\n"
+action: Add inferred type annotations for the whole file
+  edit 24..24 -> "  #: integer\n"
+  edit 62..62 -> "    #: integer\n"
+  edit 38..38 -> "  #: fn() -> integer\n"
+  edit 0..0 -> "#: fn() -> integer\n"
+completion (9): value, validObject, eval, evalq, setValidity, vapply, available.packages, isVirtualClass
+hint @7: fn() -> integer
+hint @31: integer
+hint @45: fn() -> integer
+hint @71: integer
+
+#---- top_level_redefinition_between_uses
+value <- 1L
+val$0ue
+value <- 2L
+#++++
+hover 12..17: value: integer
+hover-definition: global 18..23
+definition 18..23
+references: 0..5*, 12..17, 18..23*
+rename: 3 edit(s)
+signature: none
+action: Add inferred type annotations for the whole file
+  edit 0..0 -> "#: integer\n"
+  edit 18..18 -> "#: integer\n"
+completion (9): value, validObject, eval, evalq, setValidity, vapply, available.packages, isVirtualClass
+hint @5: integer
+hint @23: integer
+
+#---- undefined_name
+wrapper <- function() {
+  unknown$0_value
+}
+#++++
+hover 26..39: unknown_value: Unknown
+definition: none
+references: none
+rename: none
+signature: none
+completion: none
+
+#---- equals_assignment_use
+wrapper <- function() {
+  value = 1L
+  val$0ue
+}
+#++++
+hover 39..44: value: integer
+hover-definition: local 26..31
+definition 26..31
+references: 26..31*, 39..44
+rename: 2 edit(s)
+signature: none
+action: Add inferred type annotation for `wrapper`
+  edit 0..0 -> "#: fn() -> integer\n"
+action: Add inferred type annotations for the whole file
+  edit 24..24 -> "  #: integer\n"
+  edit 0..0 -> "#: fn() -> integer\n"
+completion (9): value, validObject, eval, evalq, setValidity, vapply, available.packages, isVirtualClass
+hint @7: fn() -> integer
+hint @31: integer

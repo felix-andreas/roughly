@@ -1,0 +1,33 @@
+#==== inlay_ported
+#---- polymorphic_local_not_hinted
+compute <- function(x) {
+  doubled <- x + x
+  doubled
+}
+#++++
+hint @7: <T: numeric> fn(x: T) -> T
+
+#---- variable_typed_local_suppressed
+g <- function(x) {
+  y <- x
+  y
+}
+#++++
+hint @1: <T> fn(x: T) -> T
+
+#---- unknown_returning_function_suppressed
+mystery <- function() undefined_fn()
+#++++
+
+#---- multi_write_slot_each_write
+f <- function(flag) {
+  x <- 1L
+  if (flag) {
+    x <- "two"
+  }
+  x
+}
+#++++
+hint @1: fn(flag: logical) -> integer | character
+hint @25: integer
+hint @51: character

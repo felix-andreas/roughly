@@ -83,8 +83,8 @@ fn check_does_not_repeat_the_message_under_the_caret() {
     let message = stderr
         .lines()
         .next()
-        .and_then(|line| line.strip_prefix("error: "))
-        .unwrap_or_else(|| panic!("expected an `error:` line first, got: {stderr}"));
+        .and_then(|line| line.strip_prefix("error[syntax-error]: "))
+        .unwrap_or_else(|| panic!("expected an `error[syntax-error]:` line first, got: {stderr}"));
     assert_eq!(
         stderr.matches(message).count(),
         1,
@@ -103,8 +103,8 @@ fn check_counts_warnings_as_findings() {
     let stderr = stderr(&output);
 
     assert!(
-        stderr.contains("warning:"),
-        "expected a warning diagnostic, got: {stderr}"
+        stderr.contains("warning[unused]:"),
+        "expected a code-carrying warning diagnostic, got: {stderr}"
     );
     assert_eq!(exit_code(&output), 1, "warnings must exit 1: {stderr}");
 }
@@ -736,7 +736,7 @@ fn typing_on_and_strict_directives_opt_single_files_in() {
     let report = stderr(&output);
     assert!(report.contains("opted_in.R"), "report:\n{report}");
     assert!(
-        report.contains("error: I could not resolve `not_defined`"),
+        report.contains("error[unresolved]: I could not resolve `not_defined`"),
         "strict escalates the unresolved reference to an error:\n{report}"
     );
     assert!(!report.contains("plain.R"), "report:\n{report}");
