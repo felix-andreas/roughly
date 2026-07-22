@@ -11,7 +11,7 @@ use semantics::{Db, SourceFile, TypingMode, file_typing_mode};
 /// Suppression comments are the caller's step (applied against the source
 /// text it holds).
 pub fn document_diagnostics(db: &dyn Db, file: SourceFile, config: &Config) -> Vec<Diagnostic> {
-    let (typing_enabled, strict_enabled) = effective_typing(db, file, config.check);
+    let (typing_enabled, strict_enabled) = effective_typing(db, file, &config.check);
     let mut rendered: Vec<Diagnostic> = file_diagnostics(db, file)
         .into_iter()
         .filter(|diagnostic| match diagnostic.code {
@@ -48,7 +48,7 @@ pub fn first_wave_diagnostics(db: &dyn Db, file: SourceFile, config: &Config) ->
 /// The effective (typing, strict) publication gates: a per-file directive
 /// (`# typing: off|on|strict` or `#: @strict`) overrides the configured
 /// default.
-pub fn effective_typing(db: &dyn Db, file: SourceFile, check: CheckConfig) -> (bool, bool) {
+pub fn effective_typing(db: &dyn Db, file: SourceFile, check: &CheckConfig) -> (bool, bool) {
     match file_typing_mode(db, file) {
         Some(TypingMode::Off) => (false, false),
         Some(TypingMode::On) => (true, false),

@@ -9,7 +9,7 @@
 use crate::cli::CommandError;
 use crate::config::Config;
 use crate::diagnostics::document_diagnostics;
-use ignore::Walk;
+
 use semantics::check::CHECK_EXECUTIONS;
 use semantics::infer::RESOLVE_CALLS;
 use semantics::{DocumentKind, ProjectFiles, RootDatabase, SourceFile};
@@ -69,21 +69,11 @@ pub fn analysis_stats(target: Option<&Path>) -> Result<(), CommandError> {
 
     // Discover and order files exactly as the CLI and server do: package
     // files first — Collate order when declared, then root-relative path —
-    // then scripts.
+    // then scripts. The `[check] exclude` scope applies identically.
+    let exclude = crate::cli::exclude_matcher(&config, &target)?;
     let r_path = root.join("R");
     let mut entries: Vec<(bool, usize, String, PathBuf)> = Vec::new();
-    for entry in Walk::new(&target) {
-        let entry = entry.map_err(|error| {
-            crate::cli::error(&format!("{error}"));
-            CommandError
-        })?;
-        let path = entry.into_path();
-        if !path
-            .extension()
-            .is_some_and(|extension| extension == "R" || extension == "r")
-        {
-            continue;
-        }
+    for path in crate::cli::collect_r_files(&target, exclude.as_ref())? {
         let is_package = path.starts_with(&r_path);
         let rank = path
             .file_name()

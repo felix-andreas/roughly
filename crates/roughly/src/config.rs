@@ -10,16 +10,20 @@ use thiserror::Error;
 
 pub const CONFIG_FILE_NAME: &str = "roughly.toml";
 
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Config {
     pub format: format::Config,
     pub lint: LintConfig,
     pub check: CheckConfig,
+    /// The directory containing the loaded `roughly.toml` — the anchor for
+    /// relative patterns like `[check] exclude`. `None` for the built-in
+    /// default configuration.
+    pub source_directory: Option<PathBuf>,
 }
 
 /// Which diagnostic classes are published. Every class is computed on demand
 /// for IDE features regardless; these gate only what is reported.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct CheckConfig {
     /// Surface unused-local-binding warnings (on by default; `unused = false`
@@ -30,6 +34,11 @@ pub struct CheckConfig {
     /// Surface strict-mode diagnostics (each site originating a genuine
     /// `Unknown`), and escalate unresolved-name findings to errors.
     pub strict: bool,
+    /// Paths `check`'s directory walk skips: gitignore-style patterns
+    /// (`scripts/`, `**/generated`, `!scripts/keep.R`) anchored at the config
+    /// file's directory. Files named explicitly on the command line are
+    /// always checked.
+    pub exclude: Vec<String>,
 }
 
 impl Default for CheckConfig {
@@ -38,6 +47,7 @@ impl Default for CheckConfig {
             unused: true,
             typing: false,
             strict: false,
+            exclude: Vec::new(),
         }
     }
 }
@@ -66,7 +76,12 @@ impl Config {
     pub fn from_path(path: impl AsRef<Path>) -> Result<Config, ConfigError> {
         let path = path.as_ref();
         match std::fs::read_to_string(path) {
-            Ok(text) => Config::from_toml_str(&text).map_err(|error| error.with_path(path)),
+            Ok(text) => Config::from_toml_str(&text)
+                .map(|mut config| {
+                    config.source_directory = path.parent().map(Path::to_path_buf);
+                    config
+                })
+                .map_err(|error| error.with_path(path)),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Config::default()),
             Err(error) => Err(ConfigError::Io {
                 path: path.to_path_buf(),
@@ -215,7 +230,7 @@ fn line_and_column(text: &str, offset: usize) -> (usize, usize) {
     (line, column)
 }
 
-#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ConfigToml {
     pub case: Option<NameStyle>, // kept for backwards compatibility
@@ -237,6 +252,7 @@ impl ConfigToml {
             format: self.format,
             lint: self.lint,
             check: self.check,
+            source_directory: None,
         }
     }
 }
@@ -382,6 +398,21 @@ mod tests {
             check.contains("unknown field `stric`") && check.contains("line 3"),
             "{check}"
         );
+    }
+
+    #[test]
+    fn check_exclude_patterns_parse() {
+        let config = parse("[check]\nexclude = [\"scripts/\", \"!scripts/keep.R\"]\n");
+        assert_eq!(config.check.exclude, ["scripts/", "!scripts/keep.R"]);
+    }
+
+    #[test]
+    fn from_path_records_the_source_directory() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let config_path = directory.path().join(CONFIG_FILE_NAME);
+        std::fs::write(&config_path, "[check]\nunused = false\n").expect("write config");
+        let config = Config::from_path(&config_path).expect("config parses");
+        assert_eq!(config.source_directory.as_deref(), Some(directory.path()));
     }
 
     #[test]

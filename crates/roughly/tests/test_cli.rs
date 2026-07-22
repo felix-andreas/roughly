@@ -538,6 +538,76 @@ fn check_without_r_files_exits_two() {
     );
 }
 
+#[test]
+fn check_exclude_scopes_the_directory_walk() {
+    let directory = project(&[
+        ("roughly.toml", "[check]\nexclude = [\"scripts/\"]\n"),
+        ("top.R", "top_unused <- 1\n"),
+        ("scripts/skipped.R", "script_unused <- 2\n"),
+        ("scripts/deep/also.R", "deep_unused <- 3\n"),
+    ]);
+    let output = roughly(directory.path(), &["check", "."]);
+    let rendered = stderr(&output);
+    assert_eq!(exit_code(&output), 1, "stderr: {rendered}");
+    assert!(
+        rendered.contains("top_unused"),
+        "the non-excluded script is checked: {rendered}"
+    );
+    assert!(
+        !rendered.contains("script_unused") && !rendered.contains("deep_unused"),
+        "the excluded tree must not be walked: {rendered}"
+    );
+}
+
+#[test]
+fn check_exclude_negation_reincludes() {
+    let directory = project(&[
+        (
+            "roughly.toml",
+            "[check]\nexclude = [\"scripts/*\", \"!scripts/keep\"]\n",
+        ),
+        ("scripts/skipped.R", "script_unused <- 2\n"),
+        ("scripts/keep/kept.R", "kept_unused <- 3\n"),
+    ]);
+    let output = roughly(directory.path(), &["check", "."]);
+    let rendered = stderr(&output);
+    assert_eq!(exit_code(&output), 1, "stderr: {rendered}");
+    assert!(
+        rendered.contains("kept_unused") && !rendered.contains("script_unused"),
+        "negation re-includes the kept subtree: {rendered}"
+    );
+}
+
+#[test]
+fn check_explicit_file_bypasses_exclude() {
+    let directory = project(&[
+        ("roughly.toml", "[check]\nexclude = [\"scripts/\"]\n"),
+        ("scripts/named.R", "named_unused <- 2\n"),
+    ]);
+    let output = roughly(directory.path(), &["check", "scripts/named.R"]);
+    let rendered = stderr(&output);
+    assert_eq!(exit_code(&output), 1, "stderr: {rendered}");
+    assert!(
+        rendered.contains("named_unused"),
+        "a file named on the command line is always checked: {rendered}"
+    );
+}
+
+#[test]
+fn check_invalid_exclude_pattern_exits_two() {
+    let directory = project(&[
+        ("roughly.toml", "[check]\nexclude = [\"scripts/[\"]\n"),
+        ("top.R", "x <- 1\n"),
+    ]);
+    let output = roughly(directory.path(), &["check", "."]);
+    assert_eq!(exit_code(&output), 2, "stderr: {}", stderr(&output));
+    assert!(
+        stderr(&output).contains("invalid `[check] exclude` pattern"),
+        "the bad pattern is named: {}",
+        stderr(&output)
+    );
+}
+
 // A suppression applies to its own line and the line directly below it, so
 // the unsuppressed finding needs a blank line in between.
 #[test]

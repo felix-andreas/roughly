@@ -705,7 +705,7 @@ impl Worker {
             let Some(&file) = self.files.get(&path) else {
                 return;
             };
-            let config = self.config;
+            let config = self.config.clone();
             let outcome = self.cancellable(|worker| {
                 let _ = document_diagnostics(&worker.db, file, &config);
             });
@@ -1265,7 +1265,7 @@ impl Worker {
         let Some(&file) = self.files.get(path) else {
             return;
         };
-        let config = self.config;
+        let config = self.config.clone();
         let diagnostics = self
             .cancellable(|worker| {
                 let rendered = first_wave_diagnostics(&worker.db, file, &config);
@@ -1285,7 +1285,7 @@ impl Worker {
     /// The full (settled) diagnostic set for one tracked document.
     fn settled_diagnostics(&mut self, path: &Path) -> Option<Vec<lsp_types::Diagnostic>> {
         let &file = self.files.get(path)?;
-        let config = self.config;
+        let config = self.config.clone();
         let rendered = document_diagnostics(&self.db, file, &config);
         Some(self.finish_diagnostics(file, rendered))
     }

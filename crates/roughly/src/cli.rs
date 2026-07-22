@@ -7,7 +7,7 @@ use crate::diagnostics::{apply_suppressions, document_diagnostics};
 use crate::namespace;
 use crate::position::LineIndex;
 use console::style;
-use ignore::Walk;
+use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use semantics::diagnostics::{Diagnostic, Severity};
 use semantics::{DocumentKind, ProjectFiles, RootDatabase, SourceFile};
 use std::collections::{BTreeSet, HashMap};
@@ -97,7 +97,8 @@ pub fn check(
                 eprintln!("{err}");
                 CommandError
             })?;
-            let paths = collect_r_files(&target)?;
+            let exclude = exclude_matcher(&config, &target)?;
+            let paths = collect_r_files(&target, exclude.as_ref())?;
             Ok((target, paths, config))
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -412,8 +413,69 @@ pub fn check(
     })
 }
 
-fn collect_r_files(target: &Path) -> Result<Vec<PathBuf>, CommandError> {
-    Walk::new(target)
+/// The `[check] exclude` matcher: gitignore-style patterns anchored at the
+/// config file's directory (the walk target's directory when no config file
+/// exists). The anchor is canonicalized so matching agrees with the
+/// canonicalized walk paths — on Windows canonical paths carry the `\\?\`
+/// prefix, and a non-canonical anchor would silently never match.
+pub(crate) fn exclude_matcher(
+    config: &config::Config,
+    target: &Path,
+) -> Result<Option<Gitignore>, CommandError> {
+    if config.check.exclude.is_empty() {
+        return Ok(None);
+    }
+    let root = config.source_directory.clone().unwrap_or_else(|| {
+        if target.is_dir() {
+            target.to_path_buf()
+        } else {
+            target.parent().unwrap_or(target).to_path_buf()
+        }
+    });
+    let root = std::fs::canonicalize(&root).unwrap_or(root);
+    let mut builder = GitignoreBuilder::new(&root);
+    for pattern in &config.check.exclude {
+        if let Err(err) = builder.add_line(None, pattern) {
+            error(&format!(
+                "invalid `[check] exclude` pattern '{pattern}': {err}"
+            ));
+            return Err(CommandError);
+        }
+    }
+    match builder.build() {
+        Ok(gitignore) => Ok(Some(gitignore)),
+        Err(err) => {
+            error(&format!("invalid `[check] exclude` configuration: {err}"));
+            Err(CommandError)
+        }
+    }
+}
+
+/// Walks `target` for R sources. Excluded directories are pruned without
+/// descending; a `target` that is itself a file bypasses exclusion — a file
+/// named explicitly is always checked.
+pub(crate) fn collect_r_files(
+    target: &Path,
+    exclude: Option<&Gitignore>,
+) -> Result<Vec<PathBuf>, CommandError> {
+    let mut builder = ignore::WalkBuilder::new(target);
+    if let Some(gitignore) = exclude.filter(|_| target.is_dir()) {
+        let gitignore = gitignore.clone();
+        builder.filter_entry(move |entry| {
+            let is_dir = entry
+                .file_type()
+                .is_some_and(|file_type| file_type.is_dir());
+            let relative = entry
+                .path()
+                .strip_prefix(gitignore.path())
+                .unwrap_or_else(|_| entry.path());
+            !gitignore
+                .matched_path_or_any_parents(relative, is_dir)
+                .is_ignore()
+        });
+    }
+    builder
+        .build()
         .filter_map(|entry| match entry {
             Ok(entry) => {
                 let path = entry.into_path();
@@ -629,7 +691,9 @@ pub fn fmt(
                 error(&err.to_string());
                 CommandError
             })?;
-            let paths = collect_r_files(file)?;
+            // `[check] exclude` scopes analysis, not formatting: fmt walks
+            // everything, matching the key's name and the formatter's speed.
+            let paths = collect_r_files(file, None)?;
             Ok((paths, config))
         })
         .collect::<Result<Vec<_>, _>>()?;

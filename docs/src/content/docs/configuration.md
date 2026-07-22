@@ -33,6 +33,8 @@ typing = true
 unused = true
 # report sites with a genuinely undetermined (`Unknown`) type (default: false)
 strict = false
+# skip these paths when a directory is checked (gitignore-style patterns)
+exclude = ["scripts/"]
 ```
 
 ## Formatting — `[format]`
@@ -75,6 +77,9 @@ Type *inference* always runs — it powers editor features such as hover types, 
 - `typing` — report `type-error` diagnostics, including function-call argument mismatches. See the [Typing guide](/typing/guide). Default `false`. A single file can opt in or out with a top-level `# typing:` comment.
 - `unused` — report assignments whose value is never read (`unused` diagnostics): locals inside functions everywhere, and top-level script bindings no later statement or nested function reads. **Default `true`** — set `unused = false` to opt out.
 - `strict` — report each site with a genuinely undetermined (`Unknown`) type — an unsupported construct or a reference to a binding with no known type. See [strict mode](/typing/reference#strict-mode). Default `false`. A single file can override both switches with a top-level `# typing: on|off|strict` comment (see [the per-file directive](/typing/reference#per-file-directive)).
+- `exclude` — paths the directory walk of `roughly check` (and `roughly debug analysis-stats`) skips, as a list of gitignore-style patterns anchored at the directory containing `roughly.toml`. Use it to keep large ad-hoc trees out of analysis — for example `exclude = ["scripts/"]` in a repository where `scripts/` holds thousands of one-off files that would dominate checking time. Default: empty (everything is checked).
+  - Patterns follow gitignore rules: `scripts/` excludes that directory's whole subtree, `**/generated` matches at any depth, and a leading `!` re-includes (with git's usual caveat that children of an excluded *directory* cannot be re-included — spell the parent `scripts/*` instead of `scripts/` when you need `!scripts/keep`). Excluded directories are pruned from the walk without being traversed, so exclusion also cuts wall-clock, not just output.
+  - A file named explicitly on the command line (`roughly check scripts/one-off.R`) is always checked, and `roughly fmt` ignores `exclude` — the scope applies to analysis, not formatting. Files opened in the editor are likewise always analyzed.
 
 ## Invalid Configuration
 
