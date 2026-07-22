@@ -31,16 +31,34 @@ use std::ffi::{c_char, c_int, c_uchar};
 use std::io::Write;
 use syntax::SyntaxKind;
 
-pub fn run(api: RApi) -> Result<(), ReplError> {
-    CONSOLE.with(|console| {
-        *console.borrow_mut() = Some(Console::new());
+pub fn run(api: RApi, options: crate::RunOptions) -> Result<(), ReplError> {
+    let mut console = Console::new(options.keybindings, options.batch);
+    if let Some(path) = &options.file {
+        let script = std::fs::read_to_string(path)
+            .map_err(|error| ReplError(format!("cannot read {}: {error}", path.display())))?;
+        if options.batch {
+            // Rscript-like halt semantics without any new C surface: a
+            // top-level error quits the session with a failing status, which
+            // becomes this process's exit code.
+            console
+                .pending
+                .extend(b"options(error = function() q(status = 1, save = \"no\"))\n");
+        }
+        console.pending.extend(script.into_bytes());
+        console.pending.push_back(b'\n');
+    }
+    let interactive = !options.batch;
+    CONSOLE.with(|slot| {
+        *slot.borrow_mut() = Some(console);
     });
     install_sigint_handler();
     api.initialize(read_console, write_console_ex)?;
-    eprintln!(
-        "Roughly R console — R at {} (q() or Ctrl-D quits)",
-        api.r_home.display()
-    );
+    if interactive {
+        eprintln!(
+            "Roughly R console — R at {} (q() or Ctrl-D quits)",
+            api.r_home.display()
+        );
+    }
     api.run_main_loop();
     Ok(())
 }
@@ -57,17 +75,24 @@ struct Console {
     /// Bytes of accepted input R has not consumed yet: the read hook hands
     /// them over in buffer-sized chunks across successive calls.
     pending: VecDeque<u8>,
+    /// Batch mode: once `pending` is exhausted the session ends (EOF)
+    /// instead of prompting — `roughly run`'s driver.
+    batch: bool,
 }
 
 impl Console {
-    fn new() -> Console {
+    fn new(keybindings: crate::Keybindings, batch: bool) -> Console {
+        let edit_mode: Box<dyn reedline::EditMode> = match keybindings {
+            crate::Keybindings::Emacs => Box::new(Emacs::default()),
+            crate::Keybindings::Vi => Box::new(reedline::Vi::default()),
+        };
         let mut editor = Reedline::create()
             .with_highlighter(Box::new(LexerHighlighter))
             .with_hinter(Box::new(
                 DefaultHinter::default().with_style(Style::new().fg(Color::DarkGray)),
             ))
             .with_validator(Box::new(LexerValidator))
-            .with_edit_mode(Box::new(Emacs::default()));
+            .with_edit_mode(edit_mode);
         if let Some(history) = history_file()
             && let Ok(history) = FileBackedHistory::with_file(1000, history)
         {
@@ -76,6 +101,7 @@ impl Console {
         Console {
             editor,
             pending: VecDeque::new(),
+            batch,
         }
     }
 }
@@ -113,6 +139,9 @@ fn read_console_inner(prompt: *const c_char, buffer: *mut c_uchar, length: c_int
             return 0;
         };
         while console.pending.is_empty() {
+            if console.batch {
+                return 0;
+            }
             // R hands its hook a valid NUL-terminated prompt (or null).
             let prompt_text = unsafe { libr::prompt_text(prompt) };
             match console.editor.read_line(&RPrompt { text: prompt_text }) {

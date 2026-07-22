@@ -150,20 +150,22 @@ second frontend over the runtime layer (`libr.rs`) with its own process
 shape — IPC does not get threaded through the console. Editor integration
 is already the LSP's job.
 
-## Headless runner (planned)
+## Headless runner (v1 SHIPPED) and file pre-loading
 
-`roughly run script.R` — execute a file through the same embedded runtime
-with no editor: batch semantics (`R_Interactive = 0`), output through the
-same WriteConsoleEx plumbing, SIGINT honored, and R's error/exit state
-propagated as the process exit code. Two candidate mechanisms, choice open:
-a second tiny ReadConsole frontend that feeds the file (chunked exactly like
-accepted console input) and answers end-of-input at EOF, or R's own batch
-driver via init args (`--no-echo --file=...`); decide by which preserves
-Rscript-compatible echo/autoprint semantics with less surface. Beyond
-convenience, the runner is the execution backend for running TypedR files
-directly — `roughly run foo.tR` = typecheck, compile in memory, execute —
-the standalone-script story the TypedR proposal's package-centric
-compilation model does not cover (see `typedr-design.md`).
+`roughly run script.R` executes a file through the embedded runtime and
+exits at its end; `roughly repl --file script.R` (also `-f`) feeds the same
+script and then hands over to the interactive prompt. Mechanism (decided):
+the ReadConsole frontend feeds the script bytes exactly like accepted
+console input, and in batch mode answers end-of-input once they are
+consumed — no second driver, identical parse/eval/autoprint semantics to
+the console. Exit-code propagation without new C surface: batch mode
+prepends `options(error = function() q(status = 1, save = "no"))`, so a
+top-level error halts the script and the process exits 1 (plain-Command e2e
+tests pin exit 0 + output and exit 1 + halt; skip-if-no-R like the rest).
+Vi keybindings shipped alongside: `roughly repl --keybindings vi` (emacs
+default) — the editor's built-in vi mode, no console config story needed
+yet. Still ahead for the runner: run TypedR files directly (typecheck,
+compile in memory, execute — see `typedr-design.md`).
 
 ## What makes it better than rofy (the roughly integration)
 

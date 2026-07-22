@@ -23,8 +23,6 @@
 
 ## Open — editor & polish
 
-- **Vi mode for the REPL console (user ask — regression vs the frozen predecessor, which had it):** the console hardcodes emacs keybindings; the line editor ships vi mode. Needs an exposure decision (config key? `$EDITOR` sniff? flag?) — a console config story does not exist yet, so pick the lightest reasonable switch and document it.
-- **`roughly run` / `--file` for the REPL (user ask — promoted from the planned headless runner):** execute a file through the embedded runtime. "Do what is reasonable or both": a `run <file>` subcommand and/or `repl --file`. See the headless-runner sketch in `repl-design.md` (batch semantics, exit-code propagation, mechanism choice).
 - **CLI error rendering (user ask):** the `roughly` error messages are serviceable but not at the diagnostics bar. Evaluate `miette` (or similar) for the human rendering — adopt only if the dependency weight is small; otherwise improve the handrolled renderer. Agent's call; record the decision.
 - **`--experimental-features` visibility (user ask):** the flag is clap-global, so it renders in every subcommand's help. Keep it accepted everywhere but shown only once (root help), however clap allows that cleanly.
 - **`scripts/` to inline cargo scripts (user ask):** convert the shell/python helpers to single-file cargo scripts where they survive; delete the ones no longer needed (e.g. create-large-codebase, get-node-types.py).

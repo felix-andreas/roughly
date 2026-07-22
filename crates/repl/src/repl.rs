@@ -38,10 +38,31 @@ impl fmt::Display for ReplError {
 
 impl std::error::Error for ReplError {}
 
-/// Starts the interactive console on the CALLING thread and only returns
-/// when the R session ends (`q()`, EOF). R assumes it owns the thread it
-/// initializes on — run this from `main` without spawning.
-pub fn run() -> Result<(), ReplError> {
+/// The console's editing keybindings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Keybindings {
+    #[default]
+    Emacs,
+    Vi,
+}
+
+/// How a session starts: interactively, with a script pre-loaded before the
+/// first prompt, or as a batch run that ends at the script's end.
+#[derive(Debug, Clone, Default)]
+pub struct RunOptions {
+    pub keybindings: Keybindings,
+    /// A script fed to R before any prompt.
+    pub file: Option<std::path::PathBuf>,
+    /// End the session when the script is consumed instead of prompting
+    /// (`roughly run`): a top-level error quits with a failing status, so the
+    /// process exit code reflects the script's outcome.
+    pub batch: bool,
+}
+
+/// Starts the session on the CALLING thread and only returns when R ends
+/// (`q()`, EOF, or the end of a batch script). R assumes it owns the thread
+/// it initializes on — run this from `main` without spawning.
+pub fn run(options: RunOptions) -> Result<(), ReplError> {
     let api = libr::load()?;
-    console::run(api)
+    console::run(api, options)
 }

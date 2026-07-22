@@ -28,10 +28,23 @@ fn main() -> ExitCode {
             .unwrap_or_default(),
     );
 
-    // The REPL must run on the MAIN thread: embedded R assumes it owns the
-    // thread it initializes on (stack checking, signal expectations).
-    if matches!(cli.command, Command::Repl) {
-        return match repl::run() {
+    // Embedded R must run on the MAIN thread: it assumes it owns the thread
+    // it initializes on (stack checking, signal expectations).
+    let embedded_options = match &cli.command {
+        Command::Repl { keybindings, file } => Some(repl::RunOptions {
+            keybindings: (*keybindings).into(),
+            file: file.clone(),
+            batch: false,
+        }),
+        Command::Run { file } => Some(repl::RunOptions {
+            keybindings: repl::Keybindings::Emacs,
+            file: Some(file.clone()),
+            batch: true,
+        }),
+        _ => None,
+    };
+    if let Some(options) = embedded_options {
+        return match repl::run(options) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
                 eprintln!("error: {error}");
@@ -73,7 +86,9 @@ fn main() -> ExitCode {
                 exit_code(roughly::stats::analysis_stats(path.as_deref()).map(|()| Outcome::Clean))
             }
         },
-        Command::Repl => unreachable!("handled on the main thread above"),
+        Command::Repl { .. } | Command::Run { .. } => {
+            unreachable!("handled on the main thread above")
+        }
     };
     std::thread::Builder::new()
         .name("roughly-command".to_owned())
@@ -167,10 +182,38 @@ enum Command {
         debug: bool,
     },
     /// Start an interactive R console (finds and embeds the system R)
-    Repl,
+    Repl {
+        /// Editing keybindings for the console
+        #[clap(long, value_enum, default_value_t = ReplKeybindings::Emacs)]
+        keybindings: ReplKeybindings,
+        /// Execute this R file before the first prompt
+        #[clap(long, short)]
+        file: Option<PathBuf>,
+    },
+    /// Run an R file through the embedded R and exit (a top-level error
+    /// exits with a failing status)
+    Run {
+        /// The R file to execute
+        file: PathBuf,
+    },
     /// Debugging and development commands
     #[command(subcommand)]
     Debug(Debug),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum ReplKeybindings {
+    Emacs,
+    Vi,
+}
+
+impl From<ReplKeybindings> for repl::Keybindings {
+    fn from(keybindings: ReplKeybindings) -> repl::Keybindings {
+        match keybindings {
+            ReplKeybindings::Emacs => repl::Keybindings::Emacs,
+            ReplKeybindings::Vi => repl::Keybindings::Vi,
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]

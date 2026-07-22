@@ -198,3 +198,54 @@ fn ctrl_c_interrupts_evaluation() {
     session.expect("[1] 42");
     session.quit();
 }
+
+// Batch mode (`roughly run`) needs no terminal: plain process spawns.
+
+#[test]
+fn run_executes_a_file_and_exits_zero() {
+    if !r_available() {
+        return;
+    }
+    let directory = tempfile::tempdir().expect("temp dir");
+    let script = directory.path().join("ok.R");
+    std::fs::write(&script, "x <- 40 + 2\nprint(x)\n").expect("write script");
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_roughly"))
+        .arg("run")
+        .arg(&script)
+        .output()
+        .expect("run the binary");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "expected exit 0, got {:?}\nstdout: {stdout}\nstderr: {}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(stdout.contains("[1] 42"), "script output missing: {stdout}");
+}
+
+#[test]
+fn run_error_exits_nonzero() {
+    if !r_available() {
+        return;
+    }
+    let directory = tempfile::tempdir().expect("temp dir");
+    let script = directory.path().join("bad.R");
+    std::fs::write(&script, "stop(\"boom\")\nprint(\"unreached\")\n").expect("write script");
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_roughly"))
+        .arg("run")
+        .arg(&script)
+        .output()
+        .expect("run the binary");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "a top-level error must exit 1\nstdout: {stdout}\nstderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !stdout.contains("unreached"),
+        "the error must halt the script: {stdout}"
+    );
+}
