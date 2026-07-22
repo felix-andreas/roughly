@@ -258,21 +258,6 @@ action: Add inferred type annotations for the whole file
 completion (6): function, as.function, is.function, sys.function, match.fun, flush.console
 hint @5: <T> fn(parameter: T) -> T
 
-#---- parameter_declaration
-value <- function(para$0meter) parameter
-#++++
-hover 9..38: fn(parameter: T) -> T
-definition 18..27
-references: 18..27*, 29..38
-rename: 2 edit(s)
-signature: none
-action: Add inferred type annotation for `value`
-  edit 0..0 -> "#: <T> fn(parameter: T) -> T\n"
-action: Add inferred type annotations for the whole file
-  edit 0..0 -> "#: <T> fn(parameter: T) -> T\n"
-completion (3): parameter, parent.frame, suppressPackageStartupMessages
-hint @5: <T> fn(parameter: T) -> T
-
 #==== hover_literals
 #---- null_literal
 nothing <- NU$0LL
@@ -403,6 +388,27 @@ references: 56..62*
 rename: 1 edit(s)
 signature: none
 completion (8): person, toupper, packageVersion, parent.frame, suppressPackageStartupMessages, suppressWarnings, txtProgressBar, setTxtProgressBar
+
+#---- new_annotation_unknown_value_use
+#: @type Person {list{name: character}}
+
+#: @new Person
+person <- make_person()
+touch <- function() per$0son
+#++++
+hover 100..106: person: Person
+hover-definition: global 56..62
+definition 56..62
+references: 56..62*, 100..106
+rename: 2 edit(s)
+type-definition 9..15
+signature: none
+action: Add inferred type annotation for `touch`
+  edit 80..80 -> "#: fn() -> Person\n"
+action: Add inferred type annotations for the whole file
+  edit 80..80 -> "#: fn() -> Person\n"
+completion (8): person, toupper, packageVersion, parent.frame, suppressPackageStartupMessages, suppressWarnings, txtProgressBar, setTxtProgressBar
+hint @85: fn() -> Person
 
 #---- alias_declaration_tag
 #: @al$0ias Identifier {character}
