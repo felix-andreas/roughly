@@ -86,7 +86,24 @@
             CARGO_BUILD_TARGET = "x86_64-unknown-linux-gnu";
           };
 
-          cargoArtifactsLinux = craneLib.buildDepsOnly commonArgsLinux;
+          # The dep-only builds compile dependencies against a dummified copy
+          # of the workspace: every local .rs file is replaced by an empty
+          # stub so the dependency cache survives source edits. The
+          # [patch.crates-io] crate in patches/ must keep its REAL sources in
+          # that dummy copy — chrono compiles against it — so it is restored
+          # verbatim. Interpolating only ./patches keeps the dummy source
+          # independent of the rest of the tree, preserving the cache.
+          keepPatchesInDummySrc = ''
+            rm -rf "$out"/patches
+            cp -r --no-preserve=mode ${./patches} "$out"/patches
+          '';
+
+          cargoArtifactsLinux = craneLib.buildDepsOnly (
+            commonArgsLinux
+            // {
+              extraDummyScript = keepPatchesInDummySrc;
+            }
+          );
           packageLinux = craneLib.buildPackage (
             commonArgsLinux
             // {
@@ -122,6 +139,7 @@
             craneLib.buildDepsOnly (
               (makeCrossArgs target)
               // {
+                extraDummyScript = keepPatchesInDummySrc;
                 buildPhaseCargoCommand = "cargo zigbuild --release -p roughly";
                 checkPhaseCargoCommand = "true";
               }
