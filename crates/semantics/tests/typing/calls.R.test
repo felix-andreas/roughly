@@ -6,6 +6,22 @@ size <- function(x) length(x)
 total: <T> fn(x: T) -> Any
 size: <T> fn(x: T) -> integer
 
+#---- debugging_family_resolves
+f <- function(choices) {
+  debug(sum)
+  selected <- menu(choices)
+  confirmed <- askYesNo("proceed?")
+  if (confirmed) selected else 0L
+}
+#++++
+f: fn(choices: character | character[]) -> integer
+
+#---- error_handler_stubs_resolve
+options(error = recover)
+handler <- function() traceback()
+#++++
+handler: fn() -> Any
+
 #---- overload_picks_specific
 f <- function() cumsum(1L)
 #++++

@@ -63,3 +63,11 @@ URLencode : fn(URL: Any, [reserved]: logical, [repeated]: logical) -> character
 URLdecode : fn(URL: Any) -> character
 glob2rx : fn(pattern: Any, [trim.head]: logical, [trim.tail]: logical) -> character
 globalVariables : fn(names: character | character[], [package]: character, [add]: logical) -> character[]
+
+# Interactive debugging and console helpers.
+recover : fn() -> NULL
+traceback : fn([x]: Any, [max.lines]: Any) -> Any
+menu : fn(choices: character | character[], [graphics]: logical, [title]: Any) -> integer
+askYesNo : fn(msg: character, [default]: Any, [prompts]: Any) -> logical
+browseURL : fn(url: character, [browser]: Any, [encodeIfNeeded]: logical) -> NULL
+flush.console : fn() -> NULL

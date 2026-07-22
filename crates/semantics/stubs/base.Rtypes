@@ -570,3 +570,14 @@ q : fn([save]: character, [status]: Any, [runLast]: logical) -> Any
 # `summary` is an S3 generic whose result shape is class-dependent; `diff` is type-preserving.
 summary : Any
 diff : fn(x: Any, [lag]: Any, [differences]: Any) -> Any
+
+# Interactive debugging. All side-effecting; `debug`/`trace` take the function object itself
+# (Any-param: any callable value is legal), and the returns follow R (`NULL` invisibly, except
+# `isdebugged`'s query and `trace`'s returned name).
+browser : fn([text]: character, [condition]: Any, [expr]: Any, [skipCalls]: integer) -> NULL
+debug : fn(fun: Any, [text]: character, [condition]: Any, [signature]: Any) -> NULL
+debugonce : fn(fun: Any, [text]: character, [condition]: Any, [signature]: Any) -> NULL
+undebug : fn(fun: Any, [signature]: Any) -> NULL
+isdebugged : fn(fun: Any, [signature]: Any) -> logical
+trace : fn(what: Any, [tracer]: Any, [exit]: Any, [at]: Any, [print]: logical, [signature]: Any, [where]: Any, [edit]: Any) -> character
+untrace : fn(what: Any, [signature]: Any, [where]: Any) -> Any

@@ -33,6 +33,14 @@ struct Suite {
 /// stack is correct, with the reason each divergence is accepted.
 const ACCEPTED_DIVERGENCES: &[(&str, &str)] = &[
     (
+        "stubs__debugging_family_resolves",
+        "the shipped stub corpus grew the interactive-debugging family (debug, menu, askYesNo); the frozen oracle's corpus predates it and reports unresolved",
+    ),
+    (
+        "stubs__error_handler_stubs_resolve",
+        "the shipped stub corpus grew recover and traceback; the frozen oracle's corpus predates it and reports unresolved",
+    ),
+    (
         "scoping__forward_capture_resolves_after_repass",
         "legacy flags a forward-captured binding as unresolved and unused; the new naming pass resolves captures written later in the enclosing frame",
     ),

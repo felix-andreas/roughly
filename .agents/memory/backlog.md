@@ -13,7 +13,7 @@
  — semantics
 
 - **"Could not resolve" on S4 methods (user report):** real-project code hits unresolved-name findings on S4 method machinery. Diagnose which S4 form leaks (likely `setMethod`/`setGeneric`-defined names or methods-package exports) and fix the resolution or stub gap; zero-false-positive rule applies.
-- **Stub completeness audit (user report: `uname`, `recover` unresolved):** `recover` is a `utils` export missing from the stubs; `uname` needs diagnosis (not a base export — find its origin in the reporting project). Sweep the shipped namespaces against R's actual base/utils/stats/methods/grDevices/graphics export lists and close the gaps; add a completeness check that makes missing-export regressions visible.
+- **Stub completeness audit (remainder):** the interactive-debugging family is shipped (`recover`/`traceback`/`menu`/`askYesNo`/`browseURL`/`flush.console` in utils; `browser`/`debug`/`debugonce`/`undebug`/`isdebugged`/`trace`/`untrace` in base — fixture-pinned, differential-adjudicated). `uname` is NOT a base-family export — it comes from some package the reporting project uses; once its package is known the fix is a project stub or the DESCRIPTION-import tolerance. Still open: sweep the shipped namespaces against R's actual export lists and add a completeness check that makes missing-export regressions visible (needs an R installation or a vendored export manifest).
 
 - **Testing-parity remainder (from the user-directed assessment; the differential net and the missing-diagnostic probes are DONE and in the ledger):**
   - ide fixtures are thin (46 vs legacy's 295) but the per-position IDE differential sweeps every byte of every typing case against the oracle — keep growing typing cases and the ide surface inherits coverage.
