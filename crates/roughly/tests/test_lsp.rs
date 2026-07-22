@@ -565,6 +565,73 @@ async fn goto_definition() {
 }
 
 #[tokio::test]
+async fn goto_definition_into_stub_corpus() {
+    let mut context = setup_test(&[]).await;
+    let uri = context.open("R/stub.R", "sizes <- head(1:9)\n").await;
+    let _ = recv_diagnostics(&mut context.diagnostics_receiver, &uri, TIMEOUT).await;
+    let response = context
+        .server
+        .definition(GotoDefinitionParams {
+            text_document_position_params: position_params(&uri, 0, 10),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .expect("definition failed")
+        .expect("expected a definition into the stub corpus");
+    let GotoDefinitionResponse::Scalar(location) = response else {
+        panic!("expected a scalar definition");
+    };
+    let path = location.uri.path();
+    assert!(
+        path.ends_with("utils.Rtypes"),
+        "expected the materialized utils stub, got {path}"
+    );
+    let text = std::fs::read_to_string(
+        location
+            .uri
+            .to_file_path()
+            .expect("stub location is a file path"),
+    )
+    .expect("the materialized stub file exists on disk");
+    let line = text
+        .lines()
+        .nth(location.range.start.line as usize)
+        .expect("the location's line exists");
+    assert!(
+        line.starts_with("head :"),
+        "the location points at head's declaration, got: {line}"
+    );
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn hover_names_the_stub_declaration_site() {
+    let mut context = setup_test(&[]).await;
+    let uri = context.open("R/stubhover.R", "sizes <- head(1:9)\n").await;
+    let _ = recv_diagnostics(&mut context.diagnostics_receiver, &uri, TIMEOUT).await;
+    let hover = context
+        .server
+        .hover(HoverParams {
+            text_document_position_params: position_params(&uri, 0, 10),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("hover failed")
+        .expect("expected a hover");
+    let HoverContents::Markup(markup) = hover.contents else {
+        panic!("expected markup hover contents");
+    };
+    assert!(
+        markup.value.contains("From the `utils` package")
+            && markup.value.contains("Declared at `utils.Rtypes:"),
+        "expected the stub declaration location in: {}",
+        markup.value
+    );
+    context.shutdown().await;
+}
+
+#[tokio::test]
 async fn formatting() {
     let mut context = setup_test(&[]).await;
     let uri = context.open("R/fmt.R", "x<-1\n").await;

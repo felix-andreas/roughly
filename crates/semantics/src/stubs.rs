@@ -38,6 +38,23 @@ pub struct StubLibrary<'db> {
     /// later source overriding a name's type does not un-export it from the
     /// namespace that declared it.
     pub exports_by_namespace: FxHashMap<String, FxHashSet<String>>,
+    /// The winning declaration site per name — hover and goto-definition jump
+    /// here. For an overload set this is the first candidate's line.
+    pub declarations: FxHashMap<String, StubDeclaration>,
+}
+
+/// Where a stub name is declared: which installed source (an index into the
+/// `StubSources` order the host fed in — the host knows each index's file)
+/// and the name token's range within that source's text.
+#[derive(Debug, Clone, PartialEq, Eq, salsa::SalsaValue)]
+pub struct StubDeclaration {
+    pub source_index: usize,
+    pub range: syntax::TextRange,
+}
+
+/// The winning declaration site of `name`, when the corpus declares it.
+pub fn stub_declaration<'db>(db: &'db dyn Db, name: &str) -> Option<&'db StubDeclaration> {
+    stubs(db)?.declarations.get(name)
 }
 
 /// Whether the stub corpus knows `package` as a namespace. `None` when no
@@ -112,7 +129,7 @@ pub fn stub_library<'db>(db: &'db dyn Db, sources: StubSources) -> StubLibrary<'
         }
     }
     let mut library = StubLibrary::default();
-    for (namespace, text) in sources.sources(db) {
+    for (source_index, (namespace, text)) in sources.sources(db).iter().enumerate() {
         if CONDITIONAL_NAMESPACES.contains(&namespace.as_str())
             && !project_overridden.contains(namespace.as_str())
             && !crate::metadata::namespace_active(db, namespace)
@@ -126,16 +143,37 @@ pub fn stub_library<'db>(db: &'db dyn Db, sources: StubSources) -> StubLibrary<'
         // Names declared earlier in THIS source append candidates; a name
         // first seen in this source replaces any earlier source's set.
         let mut seen_here: FxHashSet<&str> = FxHashSet::default();
-        for raw_line in text.lines() {
+        let mut line_start = 0usize;
+        for raw_segment in text.split_inclusive('\n') {
+            let raw_line = raw_segment.trim_end_matches(['\n', '\r']);
+            let this_line_start = line_start;
+            line_start += raw_segment.len();
             let content = strip_comment(raw_line).trim();
             if content.is_empty() {
                 continue;
             }
+            // The declared name's first occurrence in the uncommented line is
+            // the name token itself (only whitespace or `@type` precede it).
+            let name_range = |name: &str| {
+                strip_comment(raw_line).find(name).map(|at| {
+                    let start = (this_line_start + at) as u32;
+                    syntax::TextRange::new(start.into(), (start + name.len() as u32).into())
+                })
+            };
             if let Some(rest) = content.strip_prefix("@type") {
                 let name = rest.trim();
                 if !name.is_empty() {
                     library.nominals.insert(name.to_owned());
                     namespace_exports.insert(name.to_owned());
+                    if let Some(range) = name_range(name) {
+                        library.declarations.insert(
+                            name.to_owned(),
+                            StubDeclaration {
+                                source_index,
+                                range,
+                            },
+                        );
+                    }
                 }
                 continue;
             }
@@ -162,6 +200,15 @@ pub fn stub_library<'db>(db: &'db dyn Db, sources: StubSources) -> StubLibrary<'
             namespace_exports.insert(name.to_owned());
             if seen_here.insert(name) {
                 library.schemes.insert(name.to_owned(), vec![scheme]);
+                if let Some(range) = name_range(name) {
+                    library.declarations.insert(
+                        name.to_owned(),
+                        StubDeclaration {
+                            source_index,
+                            range,
+                        },
+                    );
+                }
             } else if let Some(candidates) = library.schemes.get_mut(name) {
                 candidates.push(scheme);
             }
@@ -441,6 +488,22 @@ mod tests {
             "sum keeps its ordered overload candidates"
         );
         assert_eq!(library.schemes["length"].len(), 1);
+    }
+
+    #[test]
+    fn declarations_record_winning_sites() {
+        let db = RootDatabase::default();
+        let sources = install_shipped_stubs(&db);
+        let library = stub_library(&db, sources);
+        let declaration = &library.declarations["print"];
+        let (namespace, text) = &sources.sources(&db)[declaration.source_index];
+        assert_eq!(namespace, "base");
+        let range = usize::from(declaration.range.start())..usize::from(declaration.range.end());
+        assert_eq!(&text[range], "print");
+        let nominal = &library.declarations["data.frame"];
+        let (_, nominal_text) = &sources.sources(&db)[nominal.source_index];
+        let range = usize::from(nominal.range.start())..usize::from(nominal.range.end());
+        assert_eq!(&nominal_text[range], "data.frame");
     }
 
     #[test]

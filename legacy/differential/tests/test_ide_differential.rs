@@ -34,6 +34,10 @@ use syntax::TextSize;
 /// pure additions (no legacy-only losses); a stale entry (no divergence)
 /// fails so the list cannot rot.
 const ORACLE_DEFICIT_CASES: &[&str] = &[
+    // The oracle's stub corpus predates the interactive-debugging family, so
+    // it resolves nothing in these cases (no schemes, no inlay hints).
+    "typing::stubs__debugging_family_resolves",
+    "typing::stubs__error_handler_stubs_resolve",
     "typing::scoping__super_assignment_survives_the_closure",
     "typing::scoping__super_assignment_joins_as_a_union",
     "typing::scoping__forward_capture_resolves_after_repass",
@@ -362,12 +366,16 @@ fn compare_case(
                     .filter_map(|location| range_to_bytes(&line_starts, source, location.range))
                     .collect()
             });
-        let new_definition = ide::definition(&db, files, file, text_size).map(|target| {
-            (
-                usize::from(target.range.start()),
-                usize::from(target.range.end()),
-            )
-        });
+        // Stub-corpus targets are a new-stack-only capability (the oracle has
+        // no goto into stubs), so only project targets enter the comparison.
+        let new_definition =
+            ide::definition(&db, files, file, text_size).and_then(|target| match target {
+                ide::DefinitionTarget::Project(target) => Some((
+                    usize::from(target.range.start()),
+                    usize::from(target.range.end()),
+                )),
+                ide::DefinitionTarget::Stub(_) => None,
+            });
         match (&legacy_definition, &new_definition) {
             (None, None) => {}
             (Some(legacy), Some(new)) => {

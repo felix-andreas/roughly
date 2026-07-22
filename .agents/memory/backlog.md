@@ -24,7 +24,6 @@
 ## Open — editor & polish
 
 - **Unknown config keys must not kill startup (user ask):** an unrecognized configuration key/value should surface as a visible warning (editor notification; CLI note) while the tool starts with the rest of the config honored — forward compatibility for configs written against newer versions. Genuine type errors on known keys keep their current diagnostics.
-- **Nominal-type hover + goto (user ask, rust-analyzer bar):** hovering a nominal like `data.table` should say where the type is defined (stub namespace + file) and goto-definition on a type reference should jump there — including types declared in stub files, like rust-analyzer jumps into other crates' sources.
 - Hover type fences (user-confirmed: no highlighting in current editor builds): the server tags the fences `roughly-type` and the VS Code extension in-repo ships a grammar for that id — needs a released extension update to reach users. Zed renders the fence plain until its extension registers an equivalent fence language (tree-sitter grammar required); consider falling back to tagging fences `r` for Zed if that proves distant.
 
 ## Open — structure & performance

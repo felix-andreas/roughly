@@ -206,8 +206,8 @@ hint @30: fn() -> double
 f <- function() pri$0nt(1)
 #++++
 hover 16..21: print: fn(x: double, ...: Any, [digits]: Any, [quote]: logical, [right]: logical, [max]: Any, [width]: Any, [n]: Any, [na.print]: Any, [row.names]: Any) -> double
-hover-definition: package base (1 declaration(s))
-definition: none
+hover-definition: package base (1 declaration(s), declared in stub source 0 at 11715..11720)
+definition: stub source 0 11715..11720
 references: none
 rename: none
 signature: fn(x: double, ...: Any, [digits]: Any, [quote]: logical, [right]: logical, [max]: Any, [width]: Any, [n]: Any, [na.print]: Any, [row.names]: Any) -> double
@@ -279,7 +279,7 @@ action: Add inferred type annotation for `f`
   edit 0..0 -> "#: fn() -> NULL\n"
 action: Add inferred type annotations for the whole file
   edit 0..0 -> "#: fn() -> NULL\n"
-completion (47): if, in, Inf, item, iconv, identical, identity, ifelse
+completion (48): if, in, Inf, item, iconv, identical, identity, ifelse
 hint @1: fn() -> NULL
 
 #==== signature
@@ -489,7 +489,7 @@ definition: none
 references: none
 rename: none
 signature: none
-completion (5): function, as.function, is.function, sys.function, match.fun
+completion (6): function, as.function, is.function, sys.function, match.fun, flush.console
 
 #==== annotation_types
 #---- goto_type_definition
@@ -657,7 +657,7 @@ action: Add inferred type annotation for `touch`
   edit 52..52 -> "#: fn() -> UserId\n"
 action: Add inferred type annotations for the whole file
   edit 52..52 -> "#: fn() -> UserId\n"
-completion (14): uid, unclass, union, unique, uniroot, unlink, unlist, untar
+completion (16): uid, unclass, undebug, union, unique, uniroot, unlink, unlist
 hint @57: fn() -> UserId
 
 #==== actions

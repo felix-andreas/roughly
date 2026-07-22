@@ -73,17 +73,36 @@ fn render_at(
                 Some(ide::HoverDefinition::Stub {
                     namespace,
                     overloads,
-                }) => output.push_str(&format!(
-                    "hover-definition: package {namespace} ({overloads} declaration(s))\n"
-                )),
+                    declaration,
+                }) => {
+                    let declared = declaration
+                        .map(|target| {
+                            format!(
+                                ", declared in stub source {} at {}..{}",
+                                target.source_index,
+                                u32::from(target.range.start()),
+                                u32::from(target.range.end()),
+                            )
+                        })
+                        .unwrap_or_default();
+                    output.push_str(&format!(
+                        "hover-definition: package {namespace} ({overloads} declaration(s){declared})\n"
+                    ))
+                }
                 None => {}
             }
         }
         None => output.push_str("hover: none\n"),
     }
     match ide::definition(db, files, file, offset) {
-        Some(target) => output.push_str(&format!(
+        Some(ide::DefinitionTarget::Project(target)) => output.push_str(&format!(
             "definition {}..{}\n",
+            u32::from(target.range.start()),
+            u32::from(target.range.end()),
+        )),
+        Some(ide::DefinitionTarget::Stub(target)) => output.push_str(&format!(
+            "definition: stub source {} {}..{}\n",
+            target.source_index,
             u32::from(target.range.start()),
             u32::from(target.range.end()),
         )),
@@ -110,12 +129,19 @@ fn render_at(
         Some(edits) => output.push_str(&format!("rename: {} edit(s)\n", edits.len())),
         None => output.push_str("rename: none\n"),
     }
-    if let Some(target) = ide::type_definition(db, files, file, offset) {
-        output.push_str(&format!(
+    match ide::type_definition(db, files, file, offset) {
+        Some(ide::DefinitionTarget::Project(target)) => output.push_str(&format!(
             "type-definition {}..{}\n",
             u32::from(target.range.start()),
             u32::from(target.range.end()),
-        ));
+        )),
+        Some(ide::DefinitionTarget::Stub(target)) => output.push_str(&format!(
+            "type-definition: stub source {} {}..{}\n",
+            target.source_index,
+            u32::from(target.range.start()),
+            u32::from(target.range.end()),
+        )),
+        None => {}
     }
     match ide::signature_help(db, file, offset) {
         Some(help) => {

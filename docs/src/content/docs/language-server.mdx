@@ -24,7 +24,11 @@ marked ⚠️ are planned but not yet available.
   - Index of global variables and S4 / R6 classes and methods
   - Document symbol search — <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd> *in VS Code*
   - Workspace symbol search — <kbd>Ctrl</kbd> + <kbd>T</kbd> *in VS Code*
-  - Go to definition, including type names inside `#:` annotations
+  - Go to definition, including type names inside `#:` annotations — and into the
+    standard-library stubs themselves: a stub-declared name (`head`, `data.table`, …) jumps to its
+    declaration in the corresponding `.Rtypes` file, like jumping into another crate's sources in
+    rust-analyzer (shipped stubs are materialized into a per-version cache directory for this;
+    project overrides under `stubs/` open in place)
   - Go to type definition
   - Find all references
   - Document highlights (all occurrences of the symbol under the cursor)
@@ -32,8 +36,9 @@ marked ⚠️ are planned but not yet available.
 
 - **Editing**
   - Hover — the inferred type or full signature of any name (multi-line for long signatures),
-    with where the name is defined (a `path:line:column` link for locals and package globals, the
-    origin package for standard-library names, with an overload count where one applies); the
+    with where the name is defined (a `path:line:column` link for locals and package globals; the
+    origin package for standard-library names with an overload count where one applies, plus the
+    declaration's `file:line:column` inside the stub corpus); the
     top-level `debug = true` config adds internal lowering/naming/parsing sections
   - Completion for local and global variables
   - Completion for standard-library names, with their typed signatures as detail

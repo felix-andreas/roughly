@@ -43,9 +43,14 @@ pub enum HoverDefinition {
     },
     /// A project top-level definition (the name's winner).
     Global { target: NavigationTarget },
-    /// A stdlib stub name: its declaring namespace and how many overload
-    /// candidates the corpus declares for it.
-    Stub { namespace: String, overloads: usize },
+    /// A stdlib stub name: its declaring namespace, how many overload
+    /// candidates the corpus declares for it, and — when the loader recorded
+    /// one — its declaration site inside the stub corpus.
+    Stub {
+        namespace: String,
+        overloads: usize,
+        declaration: Option<StubTarget>,
+    },
 }
 
 /// One phase's internal facts for the hovered position, shown by hosts under
@@ -61,6 +66,31 @@ pub struct DebugSection {
 pub struct NavigationTarget {
     pub file: SourceFile,
     pub range: TextRange,
+}
+
+/// Where goto-definition lands: a project location, or a declaration inside
+/// the installed stub corpus. Stub sources are not project files — the host
+/// maps `source_index` (the position in the `StubSources` order it
+/// installed) to a file on disk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DefinitionTarget {
+    Project(NavigationTarget),
+    Stub(StubTarget),
+}
+
+/// A declaration site inside one installed stub source: the source's index
+/// in the installed order and the name token's range within its text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StubTarget {
+    pub source_index: usize,
+    pub range: TextRange,
+}
+
+fn stub_target(db: &dyn Db, name: &str) -> Option<StubTarget> {
+    semantics::stubs::stub_declaration(db, name).map(|declaration| StubTarget {
+        source_index: declaration.source_index,
+        range: declaration.range,
+    })
 }
 
 /// One occurrence of a symbol: a range plus whether it is a declaration
@@ -160,6 +190,7 @@ fn hover_definition<'db>(
         return Some(HoverDefinition::Stub {
             namespace: namespace.to_owned(),
             overloads,
+            declaration: stub_target(db, name),
         });
     }
     None
@@ -276,48 +307,56 @@ pub fn definition(
     files: ProjectFiles,
     file: SourceFile,
     offset: TextSize,
-) -> Option<NavigationTarget> {
+) -> Option<DefinitionTarget> {
     match target_at(db, files, file, offset)? {
         Target::Slot { item, binding } => {
             let naming = item_naming(db, item)?;
             let info = naming.bindings.get(&binding)?;
             let item_offset = item_node(db, item)?.text_range().start();
-            Some(NavigationTarget {
+            Some(DefinitionTarget::Project(NavigationTarget {
                 file,
                 range: info.range + item_offset,
-            })
+            }))
         }
         // The LAST declaration wins, matching the project definition table's
-        // fold order.
+        // fold order; a name only the stub corpus declares jumps into it.
         Target::TypeName(name) => type_name_occurrences(db, files, &name)
             .into_iter()
             .rfind(|occurrence| occurrence.is_declaration)
-            .map(|occurrence| NavigationTarget {
-                file: occurrence.file,
-                range: occurrence.range,
-            }),
+            .map(|occurrence| {
+                DefinitionTarget::Project(NavigationTarget {
+                    file: occurrence.file,
+                    range: occurrence.range,
+                })
+            })
+            .or_else(|| stub_target(db, &name).map(DefinitionTarget::Stub)),
         ref target @ Target::S4 { .. } => occurrences(db, files, target)
             .into_iter()
             .find(|occurrence| occurrence.is_declaration)
-            .map(|occurrence| NavigationTarget {
-                file: occurrence.file,
-                range: occurrence.range,
+            .map(|occurrence| {
+                DefinitionTarget::Project(NavigationTarget {
+                    file: occurrence.file,
+                    range: occurrence.range,
+                })
             }),
+        Target::StubGlobal(name) => stub_target(db, &name).map(DefinitionTarget::Stub),
         Target::Global(name) => {
             if let Some(winner) = package_definitions(db, files).get(&name) {
                 let node = item_node(db, *winner)?;
                 let range = definition_name_range(&node).unwrap_or_else(|| node.text_range());
-                return Some(NavigationTarget {
+                return Some(DefinitionTarget::Project(NavigationTarget {
                     file: *winner.file(db),
                     range,
-                });
+                }));
             }
-            occurrences(db, files, &Target::Global(name))
+            occurrences(db, files, &Target::Global(name.clone()))
                 .into_iter()
                 .find(|occurrence| occurrence.is_declaration)
-                .map(|occurrence| NavigationTarget {
-                    file: occurrence.file,
-                    range: occurrence.range,
+                .map(|occurrence| {
+                    DefinitionTarget::Project(NavigationTarget {
+                        file: occurrence.file,
+                        range: occurrence.range,
+                    })
                 })
         }
     }
@@ -1073,7 +1112,7 @@ pub fn type_definition(
     files: ProjectFiles,
     file: SourceFile,
     offset: TextSize,
-) -> Option<NavigationTarget> {
+) -> Option<DefinitionTarget> {
     let position = position_in_item(db, file, offset)?;
     let check = item_check(db, position.item)?;
     let (_, ty) = position
@@ -1087,10 +1126,13 @@ pub fn type_definition(
     type_name_occurrences(db, files, &name)
         .into_iter()
         .rfind(|occurrence| occurrence.is_declaration)
-        .map(|occurrence| NavigationTarget {
-            file: occurrence.file,
-            range: occurrence.range,
+        .map(|occurrence| {
+            DefinitionTarget::Project(NavigationTarget {
+                file: occurrence.file,
+                range: occurrence.range,
+            })
         })
+        .or_else(|| stub_target(db, &name).map(DefinitionTarget::Stub))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1775,6 +1817,7 @@ fn annotation_type_hover(
                 .find(|definition| definition.name.text(db) == cursor.name)
         })
         .flatten();
+    let project_declared = definition.is_some();
     let line = match definition {
         Some(definition) => {
             let mut renderer = TypeRenderer::default();
@@ -1797,10 +1840,29 @@ fn annotation_type_hover(
         }
         None => cursor.name.clone(),
     };
+    // A name the project does not declare but the stub corpus does (a
+    // nominal like `data.table`) hovers with its declaring package and the
+    // declaration site, mirroring the expression path's stub summaries.
+    let stub_definition = if !project_declared && cursor.navigable {
+        semantics::stubs::stubs(db)
+            .is_some_and(|library| library.nominals.contains(&cursor.name))
+            .then(|| {
+                semantics::stubs::declaring_namespace(db, &cursor.name).map(|namespace| {
+                    HoverDefinition::Stub {
+                        namespace: namespace.to_owned(),
+                        overloads: 0,
+                        declaration: stub_target(db, &cursor.name),
+                    }
+                })
+            })
+            .flatten()
+    } else {
+        None
+    };
     Some(Hover {
         range: cursor.range,
         lines: vec![line],
-        definition: None,
+        definition: stub_definition,
     })
 }
 
@@ -2626,6 +2688,9 @@ enum Target<'db> {
     Global(String),
     /// A `@type`/`@alias` name inside `#:` annotations.
     TypeName(String),
+    /// A name only the stub corpus declares: navigable into the corpus, but
+    /// with no project occurrences (references stay empty, rename refuses).
+    StubGlobal(String),
     /// An S4 class or generic named in a string literal.
     S4 { name: String, kind: S4Kind },
 }
@@ -2637,11 +2702,14 @@ fn target_at<'db>(
     offset: TextSize,
 ) -> Option<Target<'db>> {
     if let Some(cursor) = annotation_type_at(db, file, offset) {
-        // Primitive type names have no project declaration to navigate to.
+        // Primitive type names have no declaration to navigate to; project
+        // `@type`/`@alias` declarations and stub-declared nominals do.
         let declared = cursor.navigable
-            && type_name_occurrences(db, files, &cursor.name)
+            && (type_name_occurrences(db, files, &cursor.name)
                 .iter()
-                .any(|occurrence| occurrence.is_declaration);
+                .any(|occurrence| occurrence.is_declaration)
+                || semantics::stubs::stubs(db)
+                    .is_some_and(|library| library.nominals.contains(&cursor.name)));
         return declared.then_some(Target::TypeName(cursor.name));
     }
 
@@ -2669,10 +2737,17 @@ fn target_at<'db>(
             .get(&expression)
             .or_else(|| naming.quiet_reads.get(&expression))
         {
-            // Only project-defined names have occurrences to offer; stub and
-            // unresolved names resolve nowhere.
-            let defined = global_declaration_exists(db, files, name);
-            return defined.then(|| Target::Global(name.clone()));
+            // Project-defined names have occurrences to offer; a name only
+            // the stub corpus declares navigates into the corpus (goto only —
+            // no occurrences, so references stay empty and rename refuses).
+            // Unresolved names resolve nowhere.
+            if global_declaration_exists(db, files, name) {
+                return Some(Target::Global(name.clone()));
+            }
+            if semantics::stubs::stub_declaration(db, name).is_some() {
+                return Some(Target::StubGlobal(name.clone()));
+            }
+            return None;
         }
     }
 
@@ -2722,6 +2797,7 @@ fn global_declaration_exists(db: &dyn Db, files: ProjectFiles, name: &str) -> bo
 fn occurrences(db: &dyn Db, files: ProjectFiles, target: &Target<'_>) -> Vec<Occurrence> {
     let mut result = Vec::new();
     match target {
+        Target::StubGlobal(_) => {}
         Target::Slot { item, binding } => {
             if let Some(node) = item_node(db, *item) {
                 slot_occurrences(

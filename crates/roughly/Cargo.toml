@@ -19,6 +19,7 @@ path = "src/main.rs"
 
 [dependencies]
 clap.workspace = true
+dirs = "6"
 console.workspace = true
 ignore.workspace = true
 salsa.workspace = true

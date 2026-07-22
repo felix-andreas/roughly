@@ -1454,6 +1454,7 @@ dependencies = [
  "async-lsp",
  "clap",
  "console",
+ "dirs",
  "format",
  "futures",
  "ide",

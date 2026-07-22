@@ -309,6 +309,11 @@ struct Worker {
     files: HashMap<PathBuf, SourceFile>,
     open_documents: HashSet<PathBuf>,
     stub_documents: HashMap<PathBuf, String>,
+    /// On-disk file per installed stub source, aligned with the `StubSources`
+    /// order: shipped sources point at their materialized cache copies,
+    /// project overrides at their real `stubs/*.Rtypes` files. `None` when
+    /// materialization failed — locations degrade, features never fail.
+    stub_source_paths: Vec<Option<PathBuf>>,
     namespace_documents: HashMap<PathBuf, String>,
     /// The DESCRIPTION `Collate` file names, in declared order.
     collate_order: Vec<String>,
@@ -417,6 +422,7 @@ impl Worker {
             files: HashMap::new(),
             open_documents: HashSet::new(),
             stub_documents: HashMap::new(),
+            stub_source_paths: Vec::new(),
             namespace_documents: HashMap::new(),
             collate_order: Vec::new(),
             virtual_document_uris: HashMap::new(),
@@ -434,6 +440,7 @@ impl Worker {
 
     fn install_stubs(&mut self) {
         let mut sources = semantics::stubs::shipped_stub_sources();
+        self.stub_source_paths = materialize_shipped_stubs(&sources);
         let stubs_dir = self.workspace_root.join("stubs");
         if let Ok(entries) = std::fs::read_dir(&stubs_dir) {
             let mut paths: Vec<PathBuf> = entries
@@ -453,6 +460,7 @@ impl Worker {
                             .map(|stem| stem.to_string_lossy().into_owned())
                             .unwrap_or_default();
                         sources.push((stem, text));
+                        self.stub_source_paths.push(Some(path));
                     }
                     Err(error) => {
                         tracing::warn!(
@@ -850,15 +858,66 @@ impl Worker {
             ide::HoverDefinition::Stub {
                 namespace,
                 overloads,
-            } => Some(if *overloads > 1 {
-                format!(
-                    "From the `{namespace}` package (+{} overloads).",
-                    overloads - 1
-                )
-            } else {
-                format!("From the `{namespace}` package.")
-            }),
+                declaration,
+            } => {
+                let mut summary = if *overloads > 1 {
+                    format!(
+                        "From the `{namespace}` package (+{} overloads).",
+                        overloads - 1
+                    )
+                } else {
+                    format!("From the `{namespace}` package.")
+                };
+                if let Some(location) =
+                    declaration.and_then(|target| self.render_stub_source_location(target))
+                {
+                    summary.push_str(&format!(" Declared at `{location}`."));
+                }
+                Some(summary)
+            }
         }
+    }
+
+    /// `utils.Rtypes:12:1`-style location of a stub declaration — the file
+    /// name is enough for a human; goto-definition does the jumping.
+    fn render_stub_source_location(&self, target: ide::StubTarget) -> Option<String> {
+        let path = self.stub_source_paths.get(target.source_index)?.as_ref()?;
+        let sources = semantics::stubs::StubSources::try_get(&self.db)?;
+        let (_, text) = sources.sources(&self.db).get(target.source_index)?;
+        let index = LineIndex::new(text);
+        let position = index.line_column(target.range.start());
+        Some(format!(
+            "{}:{}:{}",
+            path.file_name()?.to_string_lossy(),
+            position.line + 1,
+            position.column + 1
+        ))
+    }
+
+    /// A goto response's `Location` for either target kind.
+    fn definition_location(&self, target: ide::DefinitionTarget) -> Option<lsp_types::Location> {
+        match target {
+            ide::DefinitionTarget::Project(target) => {
+                let path = self.path_of(target.file)?;
+                Some(lsp_types::Location {
+                    uri: self.document_uri(path),
+                    range: self.to_range_in(target.file, target.range),
+                })
+            }
+            ide::DefinitionTarget::Stub(target) => self.stub_location(target),
+        }
+    }
+
+    /// The on-disk `Location` of a stub declaration: the materialized cache
+    /// copy for shipped sources, the real file for project overrides.
+    fn stub_location(&self, target: ide::StubTarget) -> Option<lsp_types::Location> {
+        let path = self.stub_source_paths.get(target.source_index)?.as_ref()?;
+        let sources = semantics::stubs::StubSources::try_get(&self.db)?;
+        let (_, text) = sources.sources(&self.db).get(target.source_index)?;
+        Some(lsp_types::Location {
+            uri: lsp_types::Url::from_file_path(path).ok()?,
+            range: self.to_range(text, target.range),
+        })
     }
 
     /// `R/main.R:2:1`-style location: workspace-relative path, 1-based line
@@ -1678,12 +1737,8 @@ impl LanguageServer for ServerState {
                 .cancellable(|worker| ide::definition(&worker.db, files, file, offset))
                 .unwrap_or_default();
             Ok(target.and_then(|target| {
-                let path = worker.path_of(target.file)?;
                 Some(lsp_types::GotoDefinitionResponse::Scalar(
-                    lsp_types::Location {
-                        uri: worker.document_uri(path),
-                        range: worker.to_range_in(target.file, target.range),
-                    },
+                    worker.definition_location(target)?,
                 ))
             }))
         })
@@ -1710,12 +1765,8 @@ impl LanguageServer for ServerState {
                 .cancellable(|worker| ide::type_definition(&worker.db, files, file, offset))
                 .unwrap_or_default();
             Ok(target.and_then(|target| {
-                let path = worker.path_of(target.file)?;
                 Some(lsp_types::GotoDefinitionResponse::Scalar(
-                    lsp_types::Location {
-                        uri: worker.document_uri(path),
-                        range: worker.to_range_in(target.file, target.range),
-                    },
+                    worker.definition_location(target)?,
                 ))
             }))
         })
@@ -2673,6 +2724,42 @@ fn delta_encode_tokens(
 }
 
 /// Goto for a type name inside a `.Rtypes` buffer: the `@type NAME`
+/// Writes the embedded shipped stubs to a per-version cache directory so
+/// hover locations and goto-definition have real files to land in (the
+/// sources are compiled into the binary — rust-analyzer materializes sysroot
+/// sources the same way). Any failure degrades that source to "no location";
+/// analysis itself never depends on these files.
+fn materialize_shipped_stubs(shipped: &[(String, String)]) -> Vec<Option<PathBuf>> {
+    let Some(cache) = dirs::cache_dir() else {
+        return vec![None; shipped.len()];
+    };
+    let directory = cache
+        .join("roughly")
+        .join("stubs")
+        .join(env!("CARGO_PKG_VERSION"));
+    if let Err(error) = std::fs::create_dir_all(&directory) {
+        tracing::warn!(
+            "stub locations unavailable: cannot create {}: {error}",
+            directory.display()
+        );
+        return vec![None; shipped.len()];
+    }
+    shipped
+        .iter()
+        .map(|(namespace, text)| {
+            let path = directory.join(format!("{namespace}.Rtypes"));
+            let current = std::fs::read_to_string(&path).ok();
+            if current.as_deref() != Some(text.as_str())
+                && let Err(error) = std::fs::write(&path, text)
+            {
+                tracing::warn!("stub location unavailable: {}: {error}", path.display());
+                return None;
+            }
+            Some(path)
+        })
+        .collect()
+}
+
 /// declaration line in the same file (stub files are self-contained).
 fn stub_type_definition(text: &str, offset: TextSize) -> Option<TextRange> {
     let is_name_char =
