@@ -235,16 +235,23 @@ pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
         // frame settled, so any slot in the document resolves it, including
         // the enclosing statement's own target (self-recursion).
         for (expression, name) in &naming.non_locals {
-            if check.masked_reads.contains(expression)
-                || crate::package_scheme_exists(db, name)
-                || super_globals(db, file).contains(name)
-                || declared_global_variable(db, name)
-                || crate::metadata::imported_bare(db, name)
-            {
+            // Guards ordered cheapest first: the file-local resolutions
+            // (masked reads, the document's own frame slots) before the
+            // project- and corpus-wide ones — in a script-heavy workspace
+            // most non-local reads are cross-statement reads that the frame
+            // slots resolve.
+            if check.masked_reads.contains(expression) {
                 continue;
             }
             if let Some(&earliest) = frame_slot_positions(db, file).get(name)
                 && (earliest < item_index || naming.deferred_non_locals.contains(expression))
+            {
+                continue;
+            }
+            if crate::package_scheme_exists(db, name)
+                || super_globals(db, file).contains(name)
+                || declared_global_variable(db, name)
+                || crate::metadata::imported_bare(db, name)
             {
                 continue;
             }
@@ -834,14 +841,26 @@ fn file_global_variable_declarations(
     declared
 }
 
+/// Every name any project file declares via `globalVariables`, unioned once
+/// per project revision. The per-read guard is a single set lookup — a
+/// per-file scan here multiplies by every non-local read in the project and
+/// dominated whole-workspace diagnostics at real scale.
+#[salsa::tracked(returns(ref))]
+fn project_global_variable_declarations(
+    db: &dyn Db,
+    files: crate::ProjectFiles,
+) -> std::collections::BTreeSet<String> {
+    let mut declared = std::collections::BTreeSet::new();
+    for &file in files.files(db).iter() {
+        declared.extend(file_global_variable_declarations(db, file).iter().cloned());
+    }
+    declared
+}
+
 /// Whether any package file declares `name` via `globalVariables`.
 fn declared_global_variable(db: &dyn Db, name: &str) -> bool {
-    crate::ProjectFiles::try_get(db).is_some_and(|files| {
-        files
-            .files(db)
-            .iter()
-            .any(|&file| file_global_variable_declarations(db, file).contains(name))
-    })
+    crate::ProjectFiles::try_get(db)
+        .is_some_and(|files| project_global_variable_declarations(db, files).contains(name))
 }
 
 /// A name as R source spells it: non-syntactic names need backticks (a

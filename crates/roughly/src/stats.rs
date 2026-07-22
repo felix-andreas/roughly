@@ -190,13 +190,30 @@ pub fn analysis_stats(target: Option<&Path>) -> Result<(), CommandError> {
         typecheck_total += record.typecheck;
     }
     let rss_after_typecheck = resident_set_bytes();
-    let mut render_total = Duration::ZERO;
+    // The diagnostics phase split by marginal cost: the semantic render
+    // (unresolved/unused/type findings and their messages), then the lints,
+    // then the final assembly document_diagnostics adds on top (config
+    // gating, severity escalation, sorting) riding the memos just warmed.
+    let mut semantic_render_total = Duration::ZERO;
+    for record in &records {
+        let start = Instant::now();
+        let _ = semantics::diagnostics::file_diagnostics(&db, record.file);
+        semantic_render_total += start.elapsed();
+    }
+    let mut lint_total = Duration::ZERO;
+    for record in &records {
+        let start = Instant::now();
+        let _ = semantics::lints::lint_file(&db, record.file, &config.lint);
+        lint_total += start.elapsed();
+    }
+    let mut assemble_total = Duration::ZERO;
     let mut diagnostic_count = 0usize;
     for record in &records {
         let start = Instant::now();
         diagnostic_count += document_diagnostics(&db, record.file, &config).len();
-        render_total += start.elapsed();
+        assemble_total += start.elapsed();
     }
+    let render_total = semantic_render_total + lint_total + assemble_total;
     let rss_after_render = resident_set_bytes();
     let cold_total = load_total + parse_total + lower_total + typecheck_total + render_total;
 
@@ -248,6 +265,9 @@ pub fn analysis_stats(target: Option<&Path>) -> Result<(), CommandError> {
         render_total,
         delta(rss_after_typecheck, rss_after_render),
     );
+    phase("  semantic render", semantic_render_total, None);
+    phase("  lints", lint_total, None);
+    phase("  assembly (gate + sort)", assemble_total, None);
     let total_memory = match delta(rss_baseline, rss_after_render) {
         Some((before, after)) => {
             format!("  {:>+9.1} MiB", (after as f64 - before as f64) / MEBIBYTE)
