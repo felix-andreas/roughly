@@ -755,10 +755,24 @@ pub fn parse_experimental_flags(flags: &[impl AsRef<str>]) -> ExperimentalFeatur
     let mut features = ExperimentalFeatures::default();
     for flag in flags.iter().flat_map(|flag| flag.as_ref().split(' ')) {
         match flag {
-            "all" | "range_formatting" => features.range_formatting = true,
             "" => {}
-            unknown => {
-                warn(&format!("unknown experimental feature: '{unknown}'"));
+            "all" => {
+                for feature in ExperimentalFeatures::KNOWN {
+                    let enabled = features.enable(feature.name);
+                    debug_assert!(enabled, "KNOWN feature must enable");
+                }
+            }
+            name => {
+                if !features.enable(name) {
+                    let known = ExperimentalFeatures::KNOWN
+                        .iter()
+                        .map(|feature| feature.name)
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    warn(&format!(
+                        "unknown experimental feature: '{name}' (known: {known}, or \"all\")"
+                    ));
+                }
             }
         }
     }

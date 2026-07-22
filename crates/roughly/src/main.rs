@@ -103,9 +103,18 @@ struct Cli {
     /// Ignored ... here only to please VS Code
     #[clap(long, default_value_t = true)]
     stdio: bool,
-    /// Enable experimental features (e.g. "all" or "feature-1 feature-2")
-    #[clap(long, global = true)]
+    /// Enable experimental features (space-separated, or "all")
+    #[clap(long, global = true, long_help = experimental_features_help())]
     experimental_features: Option<Vec<String>>,
+}
+
+fn experimental_features_help() -> String {
+    let features = roughly::config::ExperimentalFeatures::KNOWN
+        .iter()
+        .map(|feature| format!("  {} — {}", feature.name, feature.description))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("Enable experimental features (space-separated, or \"all\" for every one):\n{features}")
 }
 
 #[derive(Debug, Subcommand)]
