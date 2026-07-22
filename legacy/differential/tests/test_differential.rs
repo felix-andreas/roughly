@@ -33,6 +33,10 @@ struct Suite {
 /// stack is correct, with the reason each divergence is accepted.
 const ACCEPTED_DIVERGENCES: &[(&str, &str)] = &[
     (
+        "s4__set_generic_defines_the_name",
+        "setGeneric(\"name\", ...) now defines the generic as a top-level item; the oracle never modeled S4 registration and reports the generic unresolved",
+    ),
+    (
         "stubs__debugging_family_resolves",
         "the shipped stub corpus grew the interactive-debugging family (debug, menu, askYesNo); the frozen oracle's corpus predates it and reports unresolved",
     ),

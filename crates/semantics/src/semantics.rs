@@ -1297,6 +1297,9 @@ impl<'db> check::GlobalEnv<'db> for SccGlobals<'db, '_> {
 /// `<-`, `=`, `<<-`, `:=` bind on the left, `->`, `->>` on the right.
 fn classify_top_level(node: &syntax::SyntaxNode) -> (ItemKind, Option<String>) {
     use syntax::SyntaxKind;
+    if let Some(name) = set_generic_target(node) {
+        return (ItemKind::Function, Some(name));
+    }
     if node.kind() != SyntaxKind::BINARY_EXPR {
         return (ItemKind::Statement, None);
     }
@@ -1340,6 +1343,68 @@ fn classify_top_level(node: &syntax::SyntaxNode) -> (ItemKind, Option<String>) {
         _ => ItemKind::Value,
     };
     (kind, name)
+}
+
+/// The name a top-level `setGeneric("name", ...)` call binds — the one S4
+/// registration call that creates a bare-name binding in the global
+/// environment (`setClass`/`setMethod` register class metadata under
+/// internal names, referenced through strings, so they bind nothing).
+fn set_generic_target(node: &syntax::SyntaxNode) -> Option<String> {
+    use syntax::SyntaxKind;
+    if node.kind() != SyntaxKind::CALL_EXPR {
+        return None;
+    }
+    let callee = node.children().next()?;
+    let callee_name = match callee.kind() {
+        SyntaxKind::NAME => callee.text().to_string(),
+        SyntaxKind::NAMESPACE_EXPR => callee
+            .children()
+            .filter(|child| child.kind() == SyntaxKind::NAME)
+            .last()?
+            .text()
+            .to_string(),
+        _ => return None,
+    };
+    if callee_name != "setGeneric" {
+        return None;
+    }
+    let arguments = node
+        .children()
+        .find(|child| child.kind() == SyntaxKind::ARGUMENT_LIST)?;
+    let is_named_argument = |argument: &syntax::SyntaxNode| {
+        argument.children_with_tokens().any(|element| {
+            element
+                .as_token()
+                .is_some_and(|t| t.kind() == SyntaxKind::EQ)
+        })
+    };
+    // The generic's name: the `name =` argument, else the first positional.
+    let argument = arguments
+        .children()
+        .filter(|child| child.kind() == SyntaxKind::ARGUMENT)
+        .find(|argument| {
+            is_named_argument(argument)
+                && argument
+                    .children()
+                    .find(|child| child.kind() == SyntaxKind::NAME)
+                    .is_some_and(|name| name.text() == "name")
+        })
+        .or_else(|| {
+            arguments
+                .children()
+                .filter(|child| child.kind() == SyntaxKind::ARGUMENT)
+                .find(|argument| !is_named_argument(argument))
+        })?;
+    let string = argument
+        .descendants_with_tokens()
+        .filter_map(|element| element.into_token())
+        .find(|token| token.kind() == SyntaxKind::STRING)?;
+    let text = string.text();
+    if text.len() < 2 || !(text.starts_with('"') || text.starts_with('\'')) {
+        return None;
+    }
+    let name = text[1..text.len() - 1].to_owned();
+    (!name.is_empty()).then_some(name)
 }
 
 #[cfg(test)]

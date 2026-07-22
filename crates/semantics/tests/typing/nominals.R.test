@@ -188,3 +188,12 @@ g <- f(x = 1L, x = 2L)
 f: <T> fn(x: T) -> T
 g: Unknown
 24..41 error[type-mismatch] this call names the argument `x` more than once — R matches each named parameter at most once
+
+#==== s4
+#---- set_generic_defines_the_name
+setClass("Account", representation(balance = "numeric"))
+setGeneric("deposit", function(account, amount) standardGeneric("deposit"))
+setMethod("deposit", "Account", function(account, amount) account)
+use <- function(account) deposit(account, 50)
+#++++
+use: <T> fn(account: T) -> Unknown

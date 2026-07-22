@@ -38,6 +38,8 @@ const ORACLE_DEFICIT_CASES: &[&str] = &[
     // it resolves nothing in these cases (no schemes, no inlay hints).
     "typing::stubs__debugging_family_resolves",
     "typing::stubs__error_handler_stubs_resolve",
+    // The oracle never modeled setGeneric as a definer.
+    "typing::s4__set_generic_defines_the_name",
     "typing::scoping__super_assignment_survives_the_closure",
     "typing::scoping__super_assignment_joins_as_a_union",
     "typing::scoping__forward_capture_resolves_after_repass",

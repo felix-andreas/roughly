@@ -1188,6 +1188,27 @@ pub fn document_symbols(db: &dyn Db, file: SourceFile) -> Vec<DocumentSymbol> {
                 let Some(name) = item.name(db).clone() else {
                     continue;
                 };
+                // A registration-call item (`setGeneric("name", ...)` is a
+                // named Function item without an assignment) presents as its
+                // S4 construct, selecting the string name like the bare
+                // statement form always did.
+                if node.kind() == syntax::SyntaxKind::CALL_EXPR {
+                    let Some(construct) = classify_symbol_call(&node) else {
+                        continue;
+                    };
+                    let Some((name, selection)) = construct.name else {
+                        continue;
+                    };
+                    symbols.push(DocumentSymbol {
+                        name,
+                        kind: construct.kind,
+                        detail: construct.detail,
+                        range,
+                        selection,
+                        children: construct.children,
+                    });
+                    continue;
+                }
                 let selection = definition_name_range(&node).unwrap_or(range);
                 // An assigned S4/R6 construction (the call is the assigned
                 // value, a direct child of the assignment) keeps the assigned
