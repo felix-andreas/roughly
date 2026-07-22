@@ -96,25 +96,30 @@ fn exit_code(result: Result<Outcome, CommandError>) -> ExitCode {
 }
 
 #[derive(Parser)]
-#[command(version)]
+#[command(version, after_help = experimental_features_help())]
 struct Cli {
     #[command(subcommand)]
     command: Command,
     /// Ignored ... here only to please VS Code
     #[clap(long, default_value_t = true)]
     stdio: bool,
-    /// Enable experimental features (space-separated, or "all")
-    #[clap(long, global = true, long_help = experimental_features_help())]
+    // Accepted anywhere but documented only in the root help's trailing
+    // section (a clap global cannot be hidden from subcommand help
+    // selectively, and repeating it under every subcommand is noise).
+    #[clap(long, global = true, hide = true)]
     experimental_features: Option<Vec<String>>,
 }
 
 fn experimental_features_help() -> String {
     let features = roughly::config::ExperimentalFeatures::KNOWN
         .iter()
-        .map(|feature| format!("  {} — {}", feature.name, feature.description))
+        .map(|feature| format!("            {} — {}", feature.name, feature.description))
         .collect::<Vec<_>>()
         .join("\n");
-    format!("Enable experimental features (space-separated, or \"all\" for every one):\n{features}")
+    format!(
+        "Global options:\n      --experimental-features <FEATURES>\n          \
+         Enable experimental features (space-separated, or \"all\" for every one):\n{features}"
+    )
 }
 
 #[derive(Debug, Subcommand)]
