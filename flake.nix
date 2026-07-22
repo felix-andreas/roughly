@@ -1,7 +1,7 @@
 {
   inputs = {
     systems.url = "github:nix-systems/default";
-    nixpkgs.url = "nixpkgs"; # local registry
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     devshell.url = "github:numtide/devshell";
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
