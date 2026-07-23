@@ -15,9 +15,21 @@ developer machine. Two harness facts a rewrite must keep: the pty driver
 must *answer* reedline's cursor-position query (`ESC[6n` → `ESC[1;1R`) or
 the editor blocks before its first prompt, and interactive sessions must
 run serialized (in-session `SESSION_LOCK`) — concurrent R sessions on a
-loaded machine are flaky while serial runs are stable. Not yet:
-analysis-backed completions and pre-eval diagnostics (the next rung),
-graphics devices.
+loaded machine are flaky while serial runs are stable. **Analysis-backed
+Tab completion SHIPPED** (the first analysis rung): the repl crate exposes
+a `SessionCompleter` seam (accept + complete; the console feeds accepted
+lines back, an `Arc<Mutex>` shares the object between reedline's menu and
+the accept path) so the crate stays syntax-only, and the host implements
+`AnalysisCompleter` (`crates/roughly/src/repl_completer.rs`) —
+`ide::completion` over the session-as-script (one salsa `SourceFile`
+updated per request; stubs + export manifests installed), so the menu
+shows typed signatures for stdlib names, session bindings, `pkg::`
+exports, and manifest names; Tab is bound in both emacs and vi-insert
+modes. E2e caveat: menu interactions over a pty are stateful — the e2e
+pins one menu render + accept; the completer's behavior is pinned by its
+unit tests. Not yet: live-session facts (the R environment listing
+unioned in), pre-eval diagnostics, hover on the input line, graphics
+devices.
 
 User-initiated: integrate a first-class REPL into roughly — the successor to the
 `rofy` experiment — **without any build-time link dependency on R**. This

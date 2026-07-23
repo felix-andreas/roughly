@@ -7,6 +7,7 @@ pub mod config;
 pub mod diagnostics;
 pub mod namespace;
 pub mod position;
+pub mod repl_completer;
 pub mod server;
 pub mod stats;
 

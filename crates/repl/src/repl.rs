@@ -11,16 +11,20 @@
 //!   R through the console buffer for R to parse, evaluate, and autoprint.
 //! - Interrupts flow through `R_interrupts_pending`: Ctrl-C during
 //!   evaluation is a SIGINT our handler translates into R's cooperative
-//!   flag; Ctrl-C at the prompt just clears the line (reedline).
+//!   flag; Ctrl-C at the prompt just clears the line (reedline). Windows
+//!   routes the same pair of flags through the console control handler.
 //! - Nothing here requires R at build time; a missing R at RUN time is a
 //!   clear, actionable error.
-//!
-//! Unix only for now: the Windows embedding surface (`R_SetParams`,
-//! `Rstart`, the DLL sibling set) is documented in the design record and
-//! deliberately deferred.
+//! - Tab completion is host-injected ([`SessionCompleter`]): the analysis
+//!   stack lives in the host crate, so this crate's dependency set stays
+//!   syntax-only.
 
 pub mod console;
 pub mod libr;
+
+// Hosts implement `SessionCompleter` against reedline's `Suggestion` type;
+// re-exporting the crate guarantees they build against the same version.
+pub use reedline;
 
 use std::fmt;
 
@@ -46,9 +50,21 @@ pub enum Keybindings {
     Vi,
 }
 
+/// A host-supplied completion source for the interactive editor. The console
+/// feeds every accepted input line back through [`SessionCompleter::accept`],
+/// so completions can see the session's own definitions; the analysis-backed
+/// implementation lives in the host crate, keeping this crate's dependency
+/// set syntax-only.
+pub trait SessionCompleter: Send {
+    /// One accepted input line — extends the completion context.
+    fn accept(&mut self, line: &str);
+    /// Completions for `line` with the cursor at byte `position`.
+    fn complete(&mut self, line: &str, position: usize) -> Vec<reedline::Suggestion>;
+}
+
 /// How a session starts: interactively, with a script pre-loaded before the
 /// first prompt, or as a batch run that ends at the script's end.
-#[derive(Debug, Clone, Default)]
+#[derive(Default)]
 pub struct RunOptions {
     pub keybindings: Keybindings,
     /// A script fed to R before any prompt.
@@ -57,6 +73,8 @@ pub struct RunOptions {
     /// (`roughly run`): a top-level error quits with a failing status, so the
     /// process exit code reflects the script's outcome.
     pub batch: bool,
+    /// Tab-completion source for the interactive editor.
+    pub completer: Option<Box<dyn SessionCompleter>>,
 }
 
 /// Starts the session on the CALLING thread and only returns when R ends

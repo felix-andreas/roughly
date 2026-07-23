@@ -35,11 +35,13 @@ fn main() -> ExitCode {
             keybindings: (*keybindings).into(),
             file: file.clone(),
             batch: false,
+            completer: Some(Box::new(roughly::repl_completer::AnalysisCompleter::new())),
         }),
         Command::Run { file } => Some(repl::RunOptions {
             keybindings: repl::Keybindings::Emacs,
             file: Some(file.clone()),
             batch: true,
+            completer: None,
         }),
         _ => None,
     };

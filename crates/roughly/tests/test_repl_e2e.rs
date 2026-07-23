@@ -243,6 +243,30 @@ fn errors_come_back_on_the_error_stream() {
 }
 
 #[test]
+fn tab_completes_with_analysis_signatures() {
+    if !r_available() {
+        return;
+    }
+    let mut session = ReplSession::start();
+    session.expect("Roughly R console");
+    session.send("seq_l\t");
+    // The completion menu renders the analysis-backed signature next to the
+    // candidate — the stub corpus reaching the console. (Session-binding
+    // completion is pinned by the completer's own unit tests; driving the
+    // menu through several interactions over a pty is too stateful to
+    // assert reliably.)
+    session.expect("seq_len");
+    session.expect("fn(length.out: Any) -> integer[]");
+    // Enter accepts the highlighted candidate and closes the menu; Ctrl-C
+    // then clears the line for a clean quit.
+    session.send("\r");
+    session.settle(Duration::from_millis(300));
+    session.send("\u{3}");
+    session.settle(Duration::from_millis(300));
+    session.quit();
+}
+
+#[test]
 fn ctrl_c_interrupts_evaluation() {
     if !r_available() {
         return;

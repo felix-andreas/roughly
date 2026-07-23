@@ -20,9 +20,9 @@ use crate::ReplError;
 use crate::libr::{self, RApi};
 use nu_ansi_term::{Color, Style};
 use reedline::{
-    DefaultHinter, Emacs, FileBackedHistory, Highlighter, Prompt, PromptEditMode,
-    PromptHistorySearch, PromptHistorySearchStatus, Reedline, Signal, StyledText, ValidationResult,
-    Validator,
+    ColumnarMenu, DefaultHinter, Emacs, FileBackedHistory, Highlighter, KeyCode, KeyModifiers,
+    MenuBuilder, Prompt, PromptEditMode, PromptHistorySearch, PromptHistorySearchStatus, Reedline,
+    ReedlineEvent, ReedlineMenu, Signal, StyledText, ValidationResult, Validator,
 };
 use std::borrow::Cow;
 use std::cell::RefCell;
@@ -32,7 +32,7 @@ use std::io::Write;
 use syntax::SyntaxKind;
 
 pub fn run(api: RApi, options: crate::RunOptions) -> Result<(), ReplError> {
-    let mut console = Console::new(options.keybindings, options.batch);
+    let mut console = Console::new(options.keybindings, options.batch, options.completer);
     if let Some(path) = &options.file {
         let script = std::fs::read_to_string(path)
             .map_err(|error| ReplError(format!("cannot read {}: {error}", path.display())))?;
@@ -70,6 +70,21 @@ thread_local! {
     static CONSOLE: RefCell<Option<Console>> = const { RefCell::new(None) };
 }
 
+type SharedSessionCompleter = std::sync::Arc<std::sync::Mutex<Box<dyn crate::SessionCompleter>>>;
+
+/// The editor owns its completer, but the console must also feed accepted
+/// lines back into the same object — hence the shared handle on both sides.
+struct EditorCompleter(SharedSessionCompleter);
+
+impl reedline::Completer for EditorCompleter {
+    fn complete(&mut self, line: &str, position: usize) -> Vec<reedline::Suggestion> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .complete(line, position)
+    }
+}
+
 struct Console {
     editor: Reedline,
     /// Bytes of accepted input R has not consumed yet: the read hook hands
@@ -78,13 +93,33 @@ struct Console {
     /// Batch mode: once `pending` is exhausted the session ends (EOF)
     /// instead of prompting — `roughly run`'s driver.
     batch: bool,
+    completer: Option<SharedSessionCompleter>,
 }
 
 impl Console {
-    fn new(keybindings: crate::Keybindings, batch: bool) -> Console {
+    fn new(
+        keybindings: crate::Keybindings,
+        batch: bool,
+        completer: Option<Box<dyn crate::SessionCompleter>>,
+    ) -> Console {
+        let completion_menu_binding = ReedlineEvent::UntilFound(vec![
+            ReedlineEvent::Menu("completion_menu".to_owned()),
+            ReedlineEvent::MenuNext,
+        ]);
         let edit_mode: Box<dyn reedline::EditMode> = match keybindings {
-            crate::Keybindings::Emacs => Box::new(Emacs::default()),
-            crate::Keybindings::Vi => Box::new(reedline::Vi::default()),
+            crate::Keybindings::Emacs => {
+                let mut bindings = reedline::default_emacs_keybindings();
+                bindings.add_binding(KeyModifiers::NONE, KeyCode::Tab, completion_menu_binding);
+                Box::new(Emacs::new(bindings))
+            }
+            crate::Keybindings::Vi => {
+                let mut insert = reedline::default_vi_insert_keybindings();
+                insert.add_binding(KeyModifiers::NONE, KeyCode::Tab, completion_menu_binding);
+                Box::new(reedline::Vi::new(
+                    insert,
+                    reedline::default_vi_normal_keybindings(),
+                ))
+            }
         };
         let mut editor = Reedline::create()
             .with_highlighter(Box::new(LexerHighlighter))
@@ -93,6 +128,16 @@ impl Console {
             ))
             .with_validator(Box::new(LexerValidator))
             .with_edit_mode(edit_mode);
+        let completer = completer.map(|completer| {
+            std::sync::Arc::new(std::sync::Mutex::new(completer)) as SharedSessionCompleter
+        });
+        if let Some(shared) = &completer {
+            editor = editor
+                .with_completer(Box::new(EditorCompleter(shared.clone())))
+                .with_menu(ReedlineMenu::EngineCompleter(Box::new(
+                    ColumnarMenu::default().with_name("completion_menu"),
+                )));
+        }
         if let Some(history) = history_file()
             && let Ok(history) = FileBackedHistory::with_file(1000, history)
         {
@@ -102,6 +147,7 @@ impl Console {
             editor,
             pending: VecDeque::new(),
             batch,
+            completer,
         }
     }
 }
@@ -146,6 +192,12 @@ fn read_console_inner(prompt: *const c_char, buffer: *mut c_uchar, length: c_int
             let prompt_text = unsafe { libr::prompt_text(prompt) };
             match console.editor.read_line(&RPrompt { text: prompt_text }) {
                 Ok(Signal::Success(line)) => {
+                    if let Some(completer) = &console.completer {
+                        completer
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .accept(&line);
+                    }
                     console.pending.extend(line.into_bytes());
                     console.pending.push_back(b'\n');
                 }
