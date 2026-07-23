@@ -270,12 +270,19 @@ pub fn check(
         // front half of the cold pass on a single thread. With the memos
         // warm the walk is a cheap graph assembly. Files are dealt to
         // workers largest-first so one big file cannot skew a chunk.
+        // Worker threads need the analysis stack: cross-file interface
+        // resolution recurses per dependency edge, so a long definition
+        // chain overflows a default-sized thread long before the dedicated
+        // command thread would.
         std::thread::scope(|scope| {
             {
                 let db = db.clone();
-                scope.spawn(move || {
-                    let _ = semantics::stubs::stubs(&db);
-                });
+                std::thread::Builder::new()
+                    .stack_size(crate::ANALYSIS_STACK_SIZE)
+                    .spawn_scoped(scope, move || {
+                        let _ = semantics::stubs::stubs(&db);
+                    })
+                    .expect("check worker thread should spawn");
             }
             let mut by_size: Vec<usize> = (0..checked.len()).collect();
             by_size.sort_by_key(|&index| std::cmp::Reverse(checked[index].1.len()));
@@ -288,16 +295,19 @@ pub fn check(
                     .skip(worker)
                     .step_by(workers)
                     .collect();
-                scope.spawn(move || {
-                    for index in deal {
-                        let Some(file) = files[index] else {
-                            continue;
-                        };
-                        for item in semantics::item_tree(&db, file) {
-                            let _ = semantics::item_naming(&db, item);
+                std::thread::Builder::new()
+                    .stack_size(crate::ANALYSIS_STACK_SIZE)
+                    .spawn_scoped(scope, move || {
+                        for index in deal {
+                            let Some(file) = files[index] else {
+                                continue;
+                            };
+                            for item in semantics::item_tree(&db, file) {
+                                let _ = semantics::item_naming(&db, item);
+                            }
                         }
-                    }
-                });
+                    })
+                    .expect("check worker thread should spawn");
             }
         });
         type FileFindings = Vec<(Diagnostic, Vec<RelatedNote>)>;
@@ -317,34 +327,39 @@ pub fn check(
                 let files = &files;
                 let path_by_file = &path_by_file;
                 let config = &config;
-                scope.spawn(move || {
-                    for (index, slot) in chunk {
-                        let (_, source) = &checked[index];
-                        let file = files[index].expect("every checked file was fed to the project");
-                        let rendered = document_diagnostics(&db, file, config);
-                        let rendered = apply_suppressions(rendered, source);
-                        for diagnostic in rendered {
-                            // Related ranges live in other documents; they
-                            // render from their own document's text.
-                            let related: Vec<RelatedNote> = diagnostic
-                                .related
-                                .iter()
-                                .filter_map(|related| {
-                                    let related_path = path_by_file.get(&related.file)?;
-                                    let related_index = LineIndex::new(related.file.text(&db));
-                                    let start = related_index.line_column(related.range.start());
-                                    Some(RelatedNote {
-                                        path: (*related_path).clone(),
-                                        line: start.line,
-                                        column: start.column,
-                                        message: related.message,
+                let worker = std::thread::Builder::new()
+                    .stack_size(crate::ANALYSIS_STACK_SIZE)
+                    .spawn_scoped(scope, move || {
+                        for (index, slot) in chunk {
+                            let (_, source) = &checked[index];
+                            let file =
+                                files[index].expect("every checked file was fed to the project");
+                            let rendered = document_diagnostics(&db, file, config);
+                            let rendered = apply_suppressions(rendered, source);
+                            for diagnostic in rendered {
+                                // Related ranges live in other documents; they
+                                // render from their own document's text.
+                                let related: Vec<RelatedNote> = diagnostic
+                                    .related
+                                    .iter()
+                                    .filter_map(|related| {
+                                        let related_path = path_by_file.get(&related.file)?;
+                                        let related_index = LineIndex::new(related.file.text(&db));
+                                        let start =
+                                            related_index.line_column(related.range.start());
+                                        Some(RelatedNote {
+                                            path: (*related_path).clone(),
+                                            line: start.line,
+                                            column: start.column,
+                                            message: related.message,
+                                        })
                                     })
-                                })
-                                .collect();
-                            slot.push((diagnostic, related));
+                                    .collect();
+                                slot.push((diagnostic, related));
+                            }
                         }
-                    }
-                });
+                    });
+                worker.expect("check worker thread should spawn");
             }
         });
         for (index, (path, source)) in checked.iter().enumerate() {
