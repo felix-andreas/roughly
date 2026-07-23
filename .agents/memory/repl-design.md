@@ -113,6 +113,40 @@ symbol by name, with per-symbol optionality:
   WriteConsoleEx hook for R-level output, plus fd-level dup/pipe capture for
   C `printf` output that bypasses R's console.
 
+## Windows implementation plan (decided, from the field's production embedding)
+
+Windows R embedding does NOT use the Unix `ptr_R_ReadConsole` globals — it
+wires callbacks through the `Rstart` struct. The working recipe, verified
+against a production Rust console's source:
+
+- **Load**: `{R_HOME}\bin\x64\R.dll` (plain `bin\` on ARM64) via
+  `LoadLibrary`, after preloading the sibling DLLs (`Rblas`, `Rlapack`,
+  `Riconv`, `Rgraphapp`) so compiled-package imports resolve; Windows'
+  per-module symbol lookup means no `RTLD_GLOBAL` equivalent is needed.
+- **Discovery**: `R_HOME` env, else `R.exe RHOME` from `PATH` (registry
+  lookup can come later).
+- **Init order (load-bearing)**: `cmdlineoptions(0, [])` →
+  `R_DefParamsEx(&rstart, RSTART_VERSION)` (the version handshake makes R
+  validate the struct layout — this replaces per-R-version struct
+  mirroring) → `R_common_command_line` → fill the callbacks
+  (`ReadConsole`, `WriteConsoleEx` with plain `WriteConsole` NULLed,
+  `ShowMessage`, `YesNoCancel`, `CallBack`, `Busy`, `Suicide`),
+  `R_Interactive = 1`, no init/site files, `rhome`/`home` paths →
+  `CharacterMode = RGui` so `R_SetParams` wires the callback set — then
+  switch to `LinkDLL` BEFORE `setup_Rmainloop`: keeps the RGui callback
+  wiring while avoiding `do_system`'s `SetStdHandle` invalidation (which
+  hangs `system()` calls) → `GA_initapp(0, NULL)` when the symbol exists →
+  `readconsolecfg()` → `setup_Rmainloop()` → `run_Rmainloop()`.
+- **Interrupt**: a `SetConsoleCtrlHandler` handler sets BOTH `UserBreak`
+  (the front-end break flag) and `R_interrupts_pending` (the deferred
+  flag); clear both when handling.
+- **Editor**: reedline runs on Windows terminals; the field carries a
+  crossterm patch for VT input handling — expect that caveat at the editor
+  layer.
+- **Verification loop**: no container here has Windows or R —
+  compile-check with `cargo check --target x86_64-pc-windows-gnu` per
+  change, and the real smoke test runs on a user machine.
+
 ## Console UX backlog (surveyed against the field)
 
 Parity items observed in production Rust R consoles, all compatible with our
