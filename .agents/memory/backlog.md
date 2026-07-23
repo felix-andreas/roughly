@@ -33,8 +33,6 @@
 
 ## Open — website & docs
 
-- **Right-sidebar ToC is cropped on long pages (user report):** the table of contents is not scrollable, so long ToCs (the typing guide, and any page with many headings) get cut off. Fix in the docs site's ToC styling: cap the height at the viewport (sticky) and make the list itself scroll (`overflow-y: auto`).
-- **Move the typing pages to nested URLs (user ask):** `typing` → `typing/guide` and `typing-reference` → `typing/reference`. Needs: the content files relocated/re-slugged, every internal link updated (other docs pages AND any links emitted from code — grep the crates for `/typing-reference` anchors, e.g. in diagnostics or hover text), sidebar config, and redirects from the old URLs so existing links keep working.
 - (The landing-page hero animation is user-owned — do not touch.)
 
 ## Open — REPL (v1 shipped; the analysis wiring is the open rung)

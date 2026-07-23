@@ -2,7 +2,7 @@
 
 Roughly is a language tool for R, built as a language server plus CLI. It aims to be world class at three things: code analysis on the level of rust-analyzer — with a static type checker at its core — plus code formatting and linting.
 
-The type checker is central: no static type checker exists for R, so Roughly defines its own typing semantics (the contract lives in the typing reference at `docs/src/content/docs/typing-reference.md`). Because R itself has no type-annotation syntax, annotations are written in `#:` comments using a JSDoc-like notation, which keeps annotated code fully compatible with ordinary R tooling.
+The type checker is central: no static type checker exists for R, so Roughly defines its own typing semantics (the contract lives in the typing reference at `docs/src/content/docs/typing/reference.md`). Because R itself has no type-annotation syntax, annotations are written in `#:` comments using a JSDoc-like notation, which keeps annotated code fully compatible with ordinary R tooling.
 
 Crates:
 
@@ -51,7 +51,7 @@ There are two written homes. Keep both current; spend the minimum that keeps the
   `MEMORY.md` also names every other knowledge document. Keep a *separate* document only for genuinely larger-scope material — currently `backlog.md` (the prioritized work punch-list), `decisions.md` (the settled architecture decision log), and `typing-design.md` (open, not-yet-decided type-system design questions) — and reference it from `MEMORY.md`; never spawn a new knowledge file for something small (inline it into the right horizon instead). Keeping this current — **adding** what is durable **and pruning** what is resolved, stale, or duplicated, and **promoting/demoting** items across horizons as their status changes — is part of repository hygiene, not optional; do it in the same session as the work.
   - **In-repo on purpose.** Memory lives in git so it is portable and shared: it travels with a `git clone` to any machine or cloud session, and every agent — including a fresh restart — reads the same source of truth, so nothing is lost when an agent or session is replaced. **Never** keep project knowledge in a private/local agent memory store (e.g. a per-tool `~/.claude/…` folder): other agents cannot read it and it does not travel. Because a reader may have zero project history, every entry must be **context-free and timeless** — no internal milestone/phase/gate names, no commit hashes, no "this session" (the same rule as code comments); state durable facts and point at the code or docs.
 - **`docs/` (the docs site)** — the authoritative, user- and contributor-facing specs. They are contracts; keeping them accurate is mandatory.
-  - Type checking: a guide (tutorial) and the typing reference/specification (`typing-reference.md`, the semantics contract).
+  - Type checking: a guide (tutorial) and the typing reference/specification (`typing/reference.md`, the semantics contract).
   - Contributing: `architecture.md`, `structure.md` (the `analysis` crate file layout), and `testing.md` (the fixture contract).
   - Treat docs as a first-class deliverable: when behavior, design, or the fixture contract changes, update the relevant page in the same session and keep it in genuinely good shape — clear, accurate, no stale status. Do not rewrite a spec to paper over a temporary implementation gap; note the gap instead.
 
