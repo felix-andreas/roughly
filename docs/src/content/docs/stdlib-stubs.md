@@ -4,18 +4,20 @@ description: The standard-library stub format (.Rtypes declaration files) that t
 ---
 
 :::note[Status]
-The standard-library stub format ships. The corpus is ~530 declarations across six declaration-only
-`.Rtypes` stub files in the repositorys top-level `types/` directory (`base.Rtypes`, `stats.Rtypes`, `utils.Rtypes`,
-`methods.Rtypes`, `graphics.Rtypes`, `grDevices.Rtypes`), all loaded and bound into the checker as a
-**set-once input** that never invalidates a package edit (see
-[Incremental hygiene](#incremental-hygiene)). Project [overrides](#override-precedence),
-[overload sets](#overloads-and-generics), and `pkg::name` qualified access (with unknown-namespace
-and not-exported warnings) are supported. Still **proposed / not yet built**: the CRAN tier
-(per-project introspection, §7), R-version keying of the embedded corpus (§8), the stubtest CI
-validator, and structural (non-opaque) `@type` declarations in `.Rtypes`. Sections below mark which
-is which. The authoritative typing contract remains the
-[Typing Reference](/typing/reference); this note describes how the standard library feeds that
-contract.
+The standard-library stub format ships. The corpus is ~560 typed declarations across nine
+declaration-only `.Rtypes` stub files in the repository's top-level `types/` directory (`base`,
+`stats`, `utils`, `methods`, `graphics`, `grDevices`, `datasets`, plus the conditional
+`data.table` and `dplyr`), alongside generated `.exports` [manifests](#export-manifests) covering
+every namespace R ships (the attached ones, the `::`-only ones such as `tools` and `parallel`,
+and the conditional packages), all loaded and bound into the checker as a **set-once input** that
+never invalidates a package edit (see [Incremental hygiene](#incremental-hygiene)). Project
+[overrides](#override-precedence), [overload sets](#overloads-and-generics), and `pkg::name`
+qualified access (with unknown-namespace and not-exported warnings) are supported. Still
+**proposed / not yet built**: the CRAN tier (per-project introspection, §7), R-version keying of
+the embedded corpus (§8), the stubtest CI validator, and structural (non-opaque) `@type`
+declarations in `.Rtypes`. Sections below mark which is which. The authoritative typing contract
+remains the [Typing Reference](/typing/reference); this note describes how the standard library
+feeds that contract.
 :::
 
 ## Problem
@@ -172,6 +174,49 @@ Skipped never means silent. `roughly check` reports every dropped override decla
 on its stub line (a line that fails to parse, or a declaration naming an unresolvable type) and
 treats an unreadable override file as an I/O failure, and the editor shows the same problems as
 diagnostics while a `.Rtypes` file is open.
+
+## Export manifests
+
+Base alone exports ~1,400 names; the typed corpus deliberately curates a high-value subset. Without
+more, every real export outside that subset would warn as unresolved — the checker could not tell
+`recover` (a real `utils` export) from a typo. The **export manifests** close that gap: each shipped
+namespace's `.Rtypes` file is paired with a `types/<namespace>.exports` file listing every name the
+namespace really exports, one per line, generated from a live R session by
+`scripts/export-manifests.R` (the header records the R version; rerun the script against a newer R
+to refresh all eight).
+
+Manifest names are known globals with the weakest possible claim:
+
+- a bare or `pkg::`-qualified read of a manifest name **always resolves** — no unresolved or
+  not-exported warning — typing as the `.Rtypes` declaration when one exists and `Unknown`
+  otherwise, so precision is the typed corpus's job and *silence about real names* is the
+  manifest's
+- completion offers manifest-only names (undecorated — there is no scheme to show; non-syntactic
+  names are skipped bare and backtick-quoted after `pkg::`, since inserting them raw would change
+  the syntax), and typo suggestions draw on them
+- the unit suite pins the pairing both ways: every value declaration in a shipped `.Rtypes` file
+  must appear in its namespace's manifest (a stubbed non-export is a hard failure — it catches
+  declarations added to the wrong file, and names R moves between namespaces, e.g. `traceback`
+  and `standardGeneric` live in `base`, not `utils`/`methods`), while a conditional namespace may
+  additionally override a base name (data.table's class-preserving `merge`)
+
+The manifests mirror how R exposes each namespace, in three tiers:
+
+- **default-attached** (`base`, `stats`, `utils`, `graphics`, `grDevices`, `methods`,
+  `datasets`): bare-visible everywhere, so their names resolve unconditionally (`datasets` is
+  manifest-driven via the search-path listing — its objects are lazy data, not namespace
+  exports — with the famous data frames typed in `datasets.Rtypes`, so `iris` is a
+  `data.frame`, not `Unknown`)
+- **R-shipped but unattached** (`tools`, `parallel`, `compiler`, `grid`, `splines`, `stats4`,
+  `tcltk`): `pkg::` reads validate in every project — `tools::file_ext(path)` needs no
+  `library(tools)`, exactly as in R — while bare reads resolve only once the project attaches
+  or declares the package
+- **conditional** (`data.table`, `dplyr`): manifest and stubs activate together
+  ([Conditional namespaces](#conditional-namespaces)); inactive packages' names warn, bare and
+  qualified alike
+
+The manifests vendor R's export lists so analysis never needs an R installation; they are data, not
+types — adding a manifest name costs nothing at check time until code actually reads it.
 
 ## 2. Base-environment model
 
@@ -432,20 +477,11 @@ machinery. This closes the `T`/`F`/`pi` gap with only the two integration edits 
   (`nchar`) remain scalar-claim.
 - **The operator/`c` kernel cannot migrate.** One-source-of-truth is necessarily partial.
 - **Corpus size.** Base alone is ~1400 exports. Curate a high-value subset; treat stubs as living
-  docs with real drift risk. The full validation tool is a **stubtest-equivalent** that introspects real
-  R signatures via `formals()` / `getNamespaceExports()` and diffs them against the `#:` annotations
-  (R-dependent, future — §7-9). A **name-level** slice of it already ships and runs in the ordinary unit
-  suite (no R): `tests/test_stdlib_exports.rs` diffs the names each corpus file declares against a
-  checked-in snapshot of that namespace's real exports (`tests/stdlib_exports/<namespace>.txt`). The
-  snapshots are best-effort full export lists written from R knowledge (hundreds of names per package,
-  including operators and names no stub will cover) — a static stand-in until real-R generation — so
-  the printed per-package coverage percentage is an honest gauge, not a self-referential one. Policy —
-  the corpus must be a **subset** of the snapshot (every stubbed name must be a real export; a stubbed
-  non-export is a hard failure); unstubbed real exports are allowed and only gauge-counted, and no
-  percentage is ever asserted. The suite additionally asserts that every shipped stub source parses
-  and harvests **cleanly** (the loader drops malformed lines rather than aborting, and dropped
-  *override* declarations are reported by `roughly check` and the editor) and that the loader-visible
-  names match the corpus files exactly.
+  docs with real drift risk. The [export manifests](#export-manifests) carry the name-level truth
+  (generated from real R, so unstubbed exports resolve instead of warning), and the unit suite
+  asserts every value declaration is a real export of its namespace. The full validation tool is
+  still a **stubtest-equivalent** that introspects real R *signatures* via `formals()` and diffs
+  them against the declarations (R-dependent, future — §7-9).
 - **`Any` over-permissiveness** silences real errors — hence the two-tier marker in §4.
 - **Incremental isolation** is automatic — a set-once input; see §3.
 

@@ -894,6 +894,34 @@ pub fn completion(
                         takes_arguments: scheme_takes_arguments(db, scheme),
                     });
                 }
+                // Manifest-only exports complete too — untyped, so no
+                // detail, and without a scheme the value/function
+                // distinction is unknowable statically. Non-syntactic
+                // names (replacement functions, operators) are skipped: a
+                // bare reference to them needs backticks, so inserting the
+                // raw name would produce different syntax entirely.
+                for name in &library.known_exports {
+                    if library.schemes.contains_key(name)
+                        || !syntax::is_syntactic_name(name)
+                        || search_match(name, &query).is_none()
+                    {
+                        continue;
+                    }
+                    let namespace = library
+                        .exports_by_namespace
+                        .iter()
+                        .find(|(_, names)| names.contains(name))
+                        .map(|(namespace, _)| namespace.clone());
+                    items.push(CompletionItem {
+                        label: name.clone(),
+                        kind: CompletionKind::Variable,
+                        source: CompletionSource::Stdlib,
+                        detail: None,
+                        documentation: namespace
+                            .map(|namespace| format!("From the `{namespace}` package.")),
+                        takes_arguments: None,
+                    });
+                }
             }
             items
         }
@@ -2394,8 +2422,16 @@ fn namespace_completions(
                         ),
                         None => (CompletionKind::Variable, None, None),
                     };
+                // A non-syntactic export (a replacement function, an
+                // operator) is only referable after `::` in its
+                // backtick-quoted spelling.
+                let label = if syntax::is_syntactic_name(name) {
+                    name.clone()
+                } else {
+                    format!("`{name}`")
+                };
                 CompletionItem {
-                    label: name.clone(),
+                    label,
                     kind,
                     source: CompletionSource::Stdlib,
                     detail,

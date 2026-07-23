@@ -356,7 +356,9 @@ pub fn package_scheme_exists(db: &dyn Db, name: &str) -> bool {
         return true;
     }
     stubs::stubs(db).is_some_and(|library| {
-        library.schemes.contains_key(name) || library.nominals.contains(name)
+        library.schemes.contains_key(name)
+            || library.nominals.contains(name)
+            || library.known_exports.contains(name)
     })
 }
 

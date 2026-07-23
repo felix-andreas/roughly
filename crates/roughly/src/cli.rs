@@ -130,7 +130,11 @@ pub fn check(
         }
 
         let mut db = RootDatabase::default();
-        semantics::stubs::StubSources::new(&db, stub_sources);
+        semantics::stubs::StubSources::new(
+            &db,
+            stub_sources,
+            semantics::stubs::shipped_export_manifests(),
+        );
 
         // A broken override stub silently changes what every file below
         // checks against, so what the loader drops is reported as findings

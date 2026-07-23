@@ -104,7 +104,11 @@ pub fn analysis_stats(target: Option<&Path>) -> Result<(), CommandError> {
     // inputs, exactly as the server loads a workspace from disk.
     let rss_baseline = resident_set_bytes();
     let mut db = RootDatabase::default();
-    semantics::stubs::StubSources::new(&db, stub_sources);
+    semantics::stubs::StubSources::new(
+        &db,
+        stub_sources,
+        semantics::stubs::shipped_export_manifests(),
+    );
     let metadata = semantics::metadata::PackageMetadata::new(
         &db,
         semantics::metadata::normalized_imports(&namespace_imports),

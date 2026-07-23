@@ -471,7 +471,11 @@ impl Worker {
                 }
             }
         }
-        semantics::stubs::StubSources::new(&self.db, sources);
+        semantics::stubs::StubSources::new(
+            &self.db,
+            sources,
+            semantics::stubs::shipped_export_manifests(),
+        );
     }
 
     /// The current NAMESPACE/DESCRIPTION facts: the open NAMESPACE buffer

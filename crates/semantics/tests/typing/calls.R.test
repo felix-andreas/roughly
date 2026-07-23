@@ -22,6 +22,23 @@ handler <- function() traceback()
 #++++
 handler: fn() -> Any
 
+#---- manifest_only_exports_resolve
+f <- function(x, y) bitwAnd(x, y)
+g <- function(path) utils::aspell(path)
+#++++
+f: <T, U> fn(x: T, y: U) -> Unknown
+g: <T> fn(path: T) -> Unknown
+
+#---- qualified_only_namespace_resolves
+extension <- function(path) tools::file_ext(path)
+#++++
+extension: <T> fn(path: T) -> Unknown
+
+#---- datasets_type_through_stubs
+measurements <- function() iris
+#++++
+measurements: fn() -> data.frame
+
 #---- overload_picks_specific
 f <- function() cumsum(1L)
 #++++

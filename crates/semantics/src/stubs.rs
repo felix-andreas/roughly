@@ -15,11 +15,17 @@ use crate::types::TypeScheme;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// The raw stub sources: `(namespace, text)` pairs in precedence order (later
-/// sources replace earlier declarations of the same name wholesale).
+/// sources replace earlier declarations of the same name wholesale), plus the
+/// export manifests: `(namespace, text)` pairs listing every name the
+/// namespace exports, one per line (`#` starts a comment). Manifest names
+/// resolve even without a typed declaration — a real export the typed corpus
+/// does not describe reads as `Unknown` instead of warning.
 #[salsa::input(singleton, debug)]
 pub struct StubSources {
     #[returns(ref)]
     pub sources: Vec<(String, String)>,
+    #[returns(ref)]
+    pub manifests: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, salsa::SalsaValue)]
@@ -41,6 +47,10 @@ pub struct StubLibrary<'db> {
     /// The winning declaration site per name — hover and goto-definition jump
     /// here. For an overload set this is the first candidate's line.
     pub declarations: FxHashMap<String, StubDeclaration>,
+    /// Every manifest-listed export of the active namespaces, typed or not.
+    /// A read of one of these names always resolves; without a typed
+    /// declaration its type is simply `Unknown`.
+    pub known_exports: FxHashSet<String>,
 }
 
 /// Where a stub name is declared: which installed source (an index into the
@@ -104,6 +114,7 @@ pub fn shipped_stub_sources() -> Vec<(String, String)> {
         ("methods", include_str!("../../../types/methods.Rtypes")),
         ("graphics", include_str!("../../../types/graphics.Rtypes")),
         ("grDevices", include_str!("../../../types/grDevices.Rtypes")),
+        ("datasets", include_str!("../../../types/datasets.Rtypes")),
         (
             "data.table",
             include_str!("../../../types/data.table.Rtypes"),
@@ -115,11 +126,52 @@ pub fn shipped_stub_sources() -> Vec<(String, String)> {
     .collect()
 }
 
+/// The vendored export manifests paired with the shipped corpus: every name
+/// each namespace exports, generated from a real R session by
+/// `scripts/export-manifests.R`. Real exports the typed corpus does not
+/// describe still resolve (as `Unknown`) instead of warning.
+pub fn shipped_export_manifests() -> Vec<(String, String)> {
+    [
+        ("base", include_str!("../../../types/base.exports")),
+        ("stats", include_str!("../../../types/stats.exports")),
+        ("utils", include_str!("../../../types/utils.exports")),
+        ("methods", include_str!("../../../types/methods.exports")),
+        ("graphics", include_str!("../../../types/graphics.exports")),
+        (
+            "grDevices",
+            include_str!("../../../types/grDevices.exports"),
+        ),
+        ("datasets", include_str!("../../../types/datasets.exports")),
+        ("tools", include_str!("../../../types/tools.exports")),
+        ("parallel", include_str!("../../../types/parallel.exports")),
+        ("compiler", include_str!("../../../types/compiler.exports")),
+        ("grid", include_str!("../../../types/grid.exports")),
+        ("splines", include_str!("../../../types/splines.exports")),
+        ("stats4", include_str!("../../../types/stats4.exports")),
+        ("tcltk", include_str!("../../../types/tcltk.exports")),
+        (
+            "data.table",
+            include_str!("../../../types/data.table.exports"),
+        ),
+        ("dplyr", include_str!("../../../types/dplyr.exports")),
+    ]
+    .into_iter()
+    .map(|(namespace, text)| (namespace.to_owned(), text.to_owned()))
+    .collect()
+}
+
 /// Shipped namespaces R does not attach by default: their declarations join
 /// the library only when the project declares or attaches the package
 /// (`metadata::namespace_active`), so `fread` and `mutate` never resolve —
 /// and never steal a typo warning — in a project that does not use them.
 pub const CONDITIONAL_NAMESPACES: &[&str] = &["data.table", "dplyr"];
+
+/// Namespaces R ships but does not put on the default search path: `pkg::`
+/// reads work in every R session (their manifests always validate qualified
+/// access), while bare reads need the package attached or declared first.
+pub const QUALIFIED_ONLY_NAMESPACES: &[&str] = &[
+    "compiler", "grid", "parallel", "splines", "stats4", "tcltk", "tools",
+];
 
 /// Parse and lower every stub source into the interned library.
 #[salsa::tracked(returns(ref))]
@@ -218,6 +270,32 @@ pub fn stub_library<'db>(db: &'db dyn Db, sources: StubSources) -> StubLibrary<'
                 }
             } else if let Some(candidates) = library.schemes.get_mut(name) {
                 candidates.push(scheme);
+            }
+        }
+    }
+    for (namespace, text) in sources.manifests(db) {
+        let active = project_overridden.contains(namespace.as_str())
+            || crate::metadata::namespace_active(db, namespace);
+        if CONDITIONAL_NAMESPACES.contains(&namespace.as_str()) && !active {
+            continue;
+        }
+        // R-shipped but unattached namespaces are reachable through `::` in
+        // every session, so their manifests always validate qualified reads —
+        // but their names become bare-visible (`known_exports`) only once the
+        // project attaches or declares the package, exactly as in R.
+        let bare_visible = !QUALIFIED_ONLY_NAMESPACES.contains(&namespace.as_str()) || active;
+        let namespace_exports = library
+            .exports_by_namespace
+            .entry(namespace.clone())
+            .or_default();
+        for line in text.lines() {
+            let name = strip_comment(line).trim();
+            if name.is_empty() {
+                continue;
+            }
+            namespace_exports.insert(name.to_owned());
+            if bare_visible {
+                library.known_exports.insert(name.to_owned());
             }
         }
     }
@@ -469,7 +547,7 @@ fn is_stub_name(name: &str) -> bool {
 
 /// Convenience for hosts and tests: feed the shipped corpus into the database.
 pub fn install_shipped_stubs(db: &dyn Db) -> StubSources {
-    StubSources::new(db, shipped_stub_sources())
+    StubSources::new(db, shipped_stub_sources(), shipped_export_manifests())
 }
 
 #[cfg(test)]
@@ -495,6 +573,142 @@ mod tests {
             "sum keeps its ordered overload candidates"
         );
         assert_eq!(library.schemes["length"].len(), 1);
+    }
+
+    #[test]
+    fn every_declaration_is_a_real_export() {
+        // Each shipped `.Rtypes` value declaration must be an actual export
+        // of its namespace per the vendored manifest (`@type` nominals name
+        // classes, which are not exported bindings). Conditional namespaces
+        // may additionally override base names (data.table's
+        // class-preserving `merge`). Catches declarations added to the wrong
+        // file and names R has moved between namespaces.
+        let db = RootDatabase::default();
+        crate::metadata::PackageMetadata::new(
+            &db,
+            Vec::new(),
+            CONDITIONAL_NAMESPACES
+                .iter()
+                .map(|namespace| (*namespace).to_owned())
+                .collect(),
+            Default::default(),
+        );
+        let sources = StubSources::new(&db, shipped_stub_sources(), Vec::new());
+        let library = stub_library(&db, sources);
+        let manifests: FxHashMap<String, FxHashSet<String>> = shipped_export_manifests()
+            .into_iter()
+            .map(|(namespace, text)| {
+                (
+                    namespace,
+                    text.lines()
+                        .map(|line| strip_comment(line).trim().to_owned())
+                        .filter(|name| !name.is_empty())
+                        .collect(),
+                )
+            })
+            .collect();
+        let empty = FxHashSet::default();
+        let base_manifest = manifests.get("base").unwrap_or(&empty);
+        let mut misplaced = Vec::new();
+        for (namespace, declared) in &library.exports_by_namespace {
+            let Some(manifest) = manifests.get(namespace) else {
+                continue;
+            };
+            for name in declared {
+                if library.nominals.contains(name) || manifest.contains(name.as_str()) {
+                    continue;
+                }
+                if CONDITIONAL_NAMESPACES.contains(&namespace.as_str())
+                    && base_manifest.contains(name.as_str())
+                {
+                    continue;
+                }
+                misplaced.push(format!("{namespace}::{name}"));
+            }
+        }
+        misplaced.sort();
+        assert!(
+            misplaced.is_empty(),
+            "stub declarations that are not exports of their namespace: {misplaced:?}"
+        );
+    }
+
+    #[test]
+    fn manifest_exports_resolve_without_a_typed_declaration() {
+        let db = RootDatabase::default();
+        install_shipped_stubs(&db);
+        // `bitwAnd` (base) and `aggregate` (stats) are manifest-only names.
+        assert!(crate::package_scheme_exists(&db, "bitwAnd"));
+        assert!(crate::package_scheme_exists(&db, "aggregate"));
+        let file = SourceFile::new(
+            &db,
+            "f <- function(x, y) bitwAnd(x, y)\n".to_owned(),
+            DocumentKind::Package,
+        );
+        ProjectFiles::new(&db, vec![file]);
+        let diagnostics = file_diagnostics(&db, file);
+        assert!(
+            diagnostics.is_empty(),
+            "manifest exports must resolve cleanly: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn qualified_only_namespaces_gate_bare_reads() {
+        let db = RootDatabase::default();
+        install_shipped_stubs(&db);
+        // `tools::file_ext` works in every R session without library(tools)…
+        assert!(namespace_exports(&db, "tools", "file_ext"));
+        let file = SourceFile::new(
+            &db,
+            "f <- function(p) tools::file_ext(p)\n".to_owned(),
+            DocumentKind::Package,
+        );
+        ProjectFiles::new(&db, vec![file]);
+        assert!(file_diagnostics(&db, file).is_empty());
+        // …but the bare name needs the package attached or declared.
+        assert!(!crate::package_scheme_exists(&db, "mclapply"));
+        let active = RootDatabase::default();
+        install_shipped_stubs(&active);
+        crate::metadata::PackageMetadata::new(
+            &active,
+            Vec::new(),
+            Default::default(),
+            ["parallel".to_owned()].into(),
+        );
+        assert!(crate::package_scheme_exists(&active, "mclapply"));
+    }
+
+    #[test]
+    fn datasets_objects_are_bare_visible() {
+        let db = RootDatabase::default();
+        install_shipped_stubs(&db);
+        assert!(crate::package_scheme_exists(&db, "iris"));
+        assert!(crate::package_scheme_exists(&db, "state.x77"));
+        let file = SourceFile::new(
+            &db,
+            "widths <- function() iris\n".to_owned(),
+            DocumentKind::Package,
+        );
+        ProjectFiles::new(&db, vec![file]);
+        assert!(file_diagnostics(&db, file).is_empty());
+    }
+
+    #[test]
+    fn conditional_manifest_names_stay_dark_without_activation() {
+        let db = RootDatabase::default();
+        install_shipped_stubs(&db);
+        // `setkey` is a data.table manifest name with no typed declaration.
+        assert!(!crate::package_scheme_exists(&db, "setkey"));
+        let active = RootDatabase::default();
+        install_shipped_stubs(&active);
+        crate::metadata::PackageMetadata::new(
+            &active,
+            Vec::new(),
+            ["data.table".to_owned()].into(),
+            Default::default(),
+        );
+        assert!(crate::package_scheme_exists(&active, "setkey"));
     }
 
     #[test]
@@ -673,6 +887,7 @@ mod tests {
                 "test".to_owned(),
                 "f : fn(x: integer) -> integer\nf : fn(x: integer[]) -> integer[]\n".to_owned(),
             )],
+            Vec::new(),
         );
         // No candidate takes a double, but `1` is a whole number: the
         // courtesy round admits it and exact declaration order still decides.
@@ -693,6 +908,7 @@ mod tests {
                 "test".to_owned(),
                 "f : fn(x: integer) -> integer\nf : fn(x: double) -> double\n".to_owned(),
             )],
+            Vec::new(),
         );
         let check = first_item_check(&db, "g <- function() f(\"a\")\n");
         assert!(
@@ -739,6 +955,7 @@ mod tests {
                 "test".to_owned(),
                 "g : fn(n: integer) -> integer[]\n".to_owned(),
             )],
+            Vec::new(),
         );
         let ok = first_item_check(&db, "f <- function() g(3)\n");
         assert!(ok.errors.is_empty(), "{:?}", ok.errors);
@@ -749,6 +966,7 @@ mod tests {
                 "test".to_owned(),
                 "g : fn(n: integer) -> integer[]\n".to_owned(),
             )],
+            Vec::new(),
         );
         let bad = first_item_check(&db2, "f <- function() g(2.5)\n");
         assert!(
@@ -787,6 +1005,7 @@ mod tests {
                     "f : fn(x: double) -> double\n".to_owned(),
                 ),
             ],
+            Vec::new(),
         );
         let library = stub_library(&db, sources);
         let candidates = &library.schemes["f"];

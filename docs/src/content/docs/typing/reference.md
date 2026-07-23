@@ -197,6 +197,33 @@ with neither file) behaves as if both were empty.
   dependency (`Depends`, `Imports`, `Suggests`, or `Enhances`) or the source namespace of any
   `NAMESPACE` import. Declared-but-undescribed namespaces stay quiet and their reads type
   `Unknown`.
+
+### Standard-library exports
+
+The shipped stub corpus pairs each namespace with a **vendored export manifest** — the complete
+list of names the namespace really exports, generated from a live R session (see the
+[stdlib stubs page](/stdlib-stubs#export-manifests)). Every manifest name is a known global:
+
+- a bare read of a manifest name always resolves — never an unresolved-name warning — typing as
+  the stub corpus's declaration when one exists and `Unknown` otherwise
+- a qualified `pkg::name` read of a manifest name validates the same way (no not-exported
+  warning) and carries the same type
+- typo suggestions on genuinely unresolved names draw on the manifest names as well as the
+  typed declarations
+
+Manifests follow how R itself exposes each namespace:
+
+- the **default-attached** packages (`base`, `stats`, `utils`, `graphics`, `grDevices`,
+  `methods`, `datasets`) are bare-visible in every session, so their manifest names resolve
+  bare and qualified unconditionally
+- the **R-shipped but unattached** packages (`tools`, `parallel`, `compiler`, `grid`,
+  `splines`, `stats4`, `tcltk`) are reachable through `::` in every session, so their
+  manifests always validate qualified reads — but a bare read resolves only once the project
+  attaches the package (a `library()`-family call) or declares it a dependency, exactly as
+  in R
+- a conditional namespace's manifest activates together with its stubs (see
+  [Conditional stub namespaces](#conditional-stub-namespaces-datatable-and-dplyr)); while the
+  namespace is inactive its manifest names stay unknown, bare and qualified alike
 - A read satisfied only by an import still counts as a use for liveness, and strict mode
   attributes its `Unknown` exactly like any other undetermined reference.
 
@@ -1267,9 +1294,10 @@ lexical scoping.
   project stub file — `stubs/dplyr.Rtypes` declares the namespace `dplyr`
   (see [Standard library stubs](/stdlib-stubs))
 - when the stubs declare `name` in `pkg`, the qualified read has the stub's type, exactly like the
-  bare name
-- an unknown namespace warns (`unknown package namespace `foobar``); a known namespace that does
-  not declare the name warns (``bazqux` is not exported by `stats``)
+  bare name; a name only the namespace's [export manifest](#standard-library-exports) lists
+  validates the same way and types `Unknown`
+- an unknown namespace warns (`unknown package namespace `foobar``); a known namespace that
+  neither declares nor manifest-lists the name warns (``bazqux` is not exported by `stats``)
 - exports are declaration-level: a project stub overriding a shipped name's *type* does not remove
   the name from its shipped namespace, so `stats::sd` stays valid under an `sd` override
 - an unvalidated qualified read types as `Unknown`, and that reference is a strict origin

@@ -1,0 +1,31 @@
+# The datasets package: R attaches it by default, so its data objects are
+# bare-visible in every session. Only the widely-used objects with stable
+# classes are typed; everything else resolves through the export manifest.
+
+iris : data.frame
+mtcars : data.frame
+airquality : data.frame
+faithful : data.frame
+ToothGrowth : data.frame
+PlantGrowth : data.frame
+swiss : data.frame
+attitude : data.frame
+cars : data.frame
+pressure : data.frame
+trees : data.frame
+women : data.frame
+warpbreaks : data.frame
+quakes : data.frame
+rock : data.frame
+USArrests : data.frame
+esoph : data.frame
+InsectSprays : data.frame
+OrchardSprays : data.frame
+chickwts : data.frame
+sleep : data.frame
+anscombe : data.frame
+
+euro : double[named]
+state.name : character[]
+state.abb : character[]
+state.region : factor

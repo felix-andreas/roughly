@@ -581,3 +581,6 @@ undebug : fn(fun: Any, [signature]: Any) -> NULL
 isdebugged : fn(fun: Any, [signature]: Any) -> logical
 trace : fn(what: Any, [tracer]: Any, [exit]: Any, [at]: Any, [print]: logical, [signature]: Any, [where]: Any, [edit]: Any) -> character
 untrace : fn(what: Any, [signature]: Any, [where]: Any) -> Any
+traceback : fn([x]: Any, [max.lines]: Any) -> Any
+# The S4 dispatch primitive lives in base, not methods.
+standardGeneric : fn(f: character, [fdef]: Any) -> Any

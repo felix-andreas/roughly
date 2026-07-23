@@ -18,7 +18,7 @@ action: Add inferred type annotation for `wrapper`
 action: Add inferred type annotations for the whole file
   edit 29..29 -> "  #: fn() -> T\n"
   edit 0..0 -> "#: <T> fn(value: T) -> T\n"
-completion (9): value, validObject, eval, evalq, setValidity, vapply, available.packages, isVirtualClass
+completion (48): value, validEnc, validObject, validSlotNames, validUTF8, .valid.factor, .valueClassTest, eval
 hint @7: <T> fn(value: T) -> T
 hint @36: fn() -> T
 
@@ -38,7 +38,7 @@ action: Add inferred type annotation for `wrapper`
 action: Add inferred type annotations for the whole file
   edit 29..29 -> "  #: fn(value: T) -> T\n"
   edit 0..0 -> "#: <T> fn(value: T) -> T\n"
-completion (9): value, validObject, eval, evalq, setValidity, vapply, available.packages, isVirtualClass
+completion (48): value, validEnc, validObject, validSlotNames, validUTF8, .valid.factor, .valueClassTest, eval
 hint @7: <T> fn(value: T) -> T
 hint @36: fn(value: T) -> T
 
@@ -63,7 +63,7 @@ action: Add inferred type annotations for the whole file
   edit 24..24 -> "  #: integer\n"
   edit 38..38 -> "  #: fn() -> integer\n"
   edit 0..0 -> "#: fn() -> integer\n"
-completion (9): value, validObject, eval, evalq, setValidity, vapply, available.packages, isVirtualClass
+completion (48): value, validEnc, validObject, validSlotNames, validUTF8, .valid.factor, .valueClassTest, eval
 hint @7: fn() -> integer
 hint @31: integer
 hint @45: fn() -> integer
@@ -112,4 +112,4 @@ definition 0..6
 references: 0..6*, 32..38, 44..50
 rename: 3 edit(s)
 signature: none
-completion (17): config, conditionCall, conditionMessage, confint, contour, iconv, textConnection, flush.console
+completion (128+): config, conditionCall, conditionCall.condition, conditionMessage, conditionMessage.condition, confint, confint.default, confint.lm

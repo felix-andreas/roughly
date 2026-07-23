@@ -31,7 +31,7 @@ action: Add inferred type annotation for `f`
 action: Add inferred type annotations for the whole file
   edit 18..18 -> "  #: double\n"
   edit 0..0 -> "#: fn() -> double\n"
-completion (9): value, validObject, eval, evalq, setValidity, vapply, available.packages, isVirtualClass
+completion (48): value, validEnc, validObject, validSlotNames, validUTF8, .valid.factor, .valueClassTest, eval
 hint @1: fn() -> double
 hint @25: double
 
@@ -50,7 +50,7 @@ action: Add inferred type annotation for `f`
   edit 0..0 -> "#: <T: numeric> fn(count: T) -> double\n"
 action: Add inferred type annotations for the whole file
   edit 0..0 -> "#: <T: numeric> fn(count: T) -> double\n"
-completion (5): count, capture.output, colours, colSums, contour
+completion (45): count, count.fields, c.noquote, capture.output, chol.default, chooseOpsMethod.default, colours, colSums
 hint @1: <T: numeric> fn(count: T) -> double
 
 #---- function_name
@@ -69,7 +69,7 @@ action: Add inferred type annotation for `g`
 action: Add inferred type annotations for the whole file
   edit 0..0 -> "#: <T: numeric> fn(x: T) -> T\n"
   edit 28..28 -> "#: fn() -> double\n"
-completion (3): double, as.double, is.double
+completion (21): double, stdout, as.double, as.double.difftime, as.double.POSIXlt, is.double, .__C__double, DF2formula
 hint @6: <T: numeric> fn(x: T) -> T
 hint @29: fn() -> double
 
@@ -91,7 +91,7 @@ action: Add inferred type annotation for `f`
 action: Add inferred type annotations for the whole file
   edit 18..18 -> "  #: double\n"
   edit 0..0 -> "#: fn() -> double\n"
-completion (8): total, textConnection, toString, stopifnot, getOption, getSlots, matplot, capture.output
+completion (128+): total, prototype, NLSstAsymptotic, NLSstLfAsymptote, NLSstRtAsymptote, defaultPrototype, makePrototypeFromClassDef, .__C__classPrototypeDef
 hint @1: fn() -> double
 hint @25: double
 
@@ -111,7 +111,7 @@ action: Add inferred type annotation for `caller`
 action: Add inferred type annotations for the whole file
   edit 0..0 -> "#: <T> fn(x: T) -> T\n"
   edit 24..24 -> "#: fn() -> double\n"
-completion (3): helper, help, heat.colors
+completion (27): helper, help, help.request, help.search, help.start, contr.helmert, HairEyeColor, heat.colors
 hint @6: <T> fn(x: T) -> T
 hint @30: fn() -> double
 
@@ -137,7 +137,7 @@ action: Add inferred type annotations for the whole file
   edit 18..18 -> "  #: double\n"
   edit 27..27 -> "  #: double\n"
   edit 0..0 -> "#: fn() -> double\n"
-completion (26): n, NA, NA_character_, NA_complex_, NA_integer_, NA_real_, NaN, next
+completion (74): n, NA, NA_character_, NA_complex_, NA_integer_, NA_real_, NaN, next
 hint @1: fn() -> double
 hint @21: double
 hint @30: double
@@ -157,7 +157,7 @@ action: Add inferred type annotation for `f`
   edit 0..0 -> "#: <T: numeric> fn(count: T) -> double\n"
 action: Add inferred type annotations for the whole file
   edit 0..0 -> "#: <T: numeric> fn(count: T) -> double\n"
-completion (5): count, capture.output, colours, colSums, contour
+completion (45): count, count.fields, c.noquote, capture.output, chol.default, chooseOpsMethod.default, colours, colSums
 hint @1: <T: numeric> fn(count: T) -> double
 
 #---- global_cross_item
@@ -178,7 +178,7 @@ action: Add inferred type annotations for the whole file
   edit 0..0 -> "#: <T> fn(x: T) -> T\n"
   edit 24..24 -> "#: fn() -> double\n"
   edit 55..55 -> "#: fn() -> double\n"
-completion (1): helper
+completion (2): helper, help.search
 hint @6: <T> fn(x: T) -> T
 hint @30: fn() -> double
 hint @59: fn() -> double
@@ -198,7 +198,7 @@ action: Add inferred type annotation for `helper`
 action: Add inferred type annotations for the whole file
   edit 0..0 -> "#: <T> fn(x: T) -> T\n"
   edit 24..24 -> "#: fn() -> double\n"
-completion (3): helper, help, heat.colors
+completion (27): helper, help, help.request, help.search, help.start, contr.helmert, HairEyeColor, heat.colors
 hint @6: <T> fn(x: T) -> T
 hint @30: fn() -> double
 
@@ -216,7 +216,7 @@ action: Add inferred type annotation for `f`
   edit 0..0 -> "#: fn() -> double\n"
 action: Add inferred type annotations for the whole file
   edit 0..0 -> "#: fn() -> double\n"
-completion (9): print, sprintf, is.primitive, dev.print, packageVersion, postscript, predict, representation
+completion (128+): princomp, print, print.AsIs, print.by, print.condition, print.connection, print.data.frame, print.Date
 hint @1: fn() -> double
 
 #---- shadowed_local_not_global
@@ -238,7 +238,7 @@ action: Add inferred type annotations for the whole file
   edit 0..0 -> "#: <T> fn(x: T) -> T\n"
   edit 42..42 -> "  #: double\n"
   edit 24..24 -> "#: fn() -> double\n"
-completion (3): helper, help, heat.colors
+completion (27): helper, help, help.request, help.search, help.start, contr.helmert, HairEyeColor, heat.colors
 hint @6: <T> fn(x: T) -> T
 hint @25: fn() -> double
 hint @50: double
@@ -261,7 +261,7 @@ action: Add inferred type annotation for `f`
 action: Add inferred type annotations for the whole file
   edit 18..18 -> "  #: double\n"
   edit 0..0 -> "#: fn() -> double\n"
-completion (9): value, validObject, eval, evalq, setValidity, vapply, available.packages, isVirtualClass
+completion (48): value, validEnc, validObject, validSlotNames, validUTF8, .valid.factor, .valueClassTest, eval
 hint @1: fn() -> double
 hint @25: double
 
@@ -279,7 +279,7 @@ action: Add inferred type annotation for `f`
   edit 0..0 -> "#: fn() -> NULL\n"
 action: Add inferred type annotations for the whole file
   edit 0..0 -> "#: fn() -> NULL\n"
-completion (48): if, in, Inf, item, iconv, identical, identity, ifelse
+completion (128+): I, if, in, Inf, item, iconv, iconvlist, icuGetCollate
 hint @1: fn() -> NULL
 
 #==== signature
@@ -441,7 +441,7 @@ definition: none
 references: none
 rename: none
 signature: none
-completion (8): total_count, textConnection, toString, stopifnot, getOption, getSlots, matplot, capture.output
+completion (128+): total_count, prototype, NLSstAsymptotic, NLSstLfAsymptote, NLSstRtAsymptote, defaultPrototype, makePrototypeFromClassDef, .__C__classPrototypeDef
 
 #---- globals_shadow_stubs
 print <- function(x) x
@@ -454,7 +454,7 @@ rename: none
 signature: none
 action: Add inferred type annotations for the whole file
   edit 0..0 -> "#: <T> fn(x: T) -> T\n"
-completion (9): print, sprintf, is.primitive, dev.print, packageVersion, postscript, predict, representation
+completion (128+): print, princomp, print.AsIs, print.by, print.condition, print.connection, print.data.frame, print.Date
 hint @5: <T> fn(x: T) -> T
 
 #---- dollar_typed_fields
@@ -479,7 +479,7 @@ definition: none
 references: none
 rename: none
 signature: none
-completion (1): median
+completion (11): median, median.default, medpolish, runmed, makepredictcall, model.frame.default, model.matrix.default, embed
 
 #---- keyword_prefix
 g <- function() fun$0
@@ -489,7 +489,7 @@ definition: none
 references: none
 rename: none
 signature: none
-completion (6): function, as.function, is.function, sys.function, match.fun, flush.console
+completion (52): function, functionBody, findFunction, .Defunct, as.function, as.function.default, getFunction, is.function
 
 #==== annotation_types
 #---- goto_type_definition
@@ -657,7 +657,7 @@ action: Add inferred type annotation for `touch`
   edit 52..52 -> "#: fn() -> UserId\n"
 action: Add inferred type annotations for the whole file
   edit 52..52 -> "#: fn() -> UserId\n"
-completion (16): uid, unclass, undebug, union, unique, uniroot, unlink, unlist
+completion (54): uid, UCBAdmissions, UKDriverDeaths, UKgas, unCfillPOSIXlt, unclass, undebug, undebugcall
 hint @57: fn() -> UserId
 
 #==== actions
@@ -697,7 +697,7 @@ action: Add inferred type annotation for `f`
 action: Add inferred type annotations for the whole file
   edit 18..18 -> "  #: double\n"
   edit 0..0 -> "#: fn() -> double\n"
-completion (1): dead
+completion (13): dead, defaultDumpName, delayedAssign, .Deprecated, model.frame.default, model.matrix.default, conditionMessage.condition, finalDefaultMethod
 hint @1: fn() -> double
 hint @24: double
 
@@ -714,7 +714,7 @@ action: Add inferred type annotation for `count`
   edit 0..0 -> "#: integer\n"
 action: Add inferred type annotations for the whole file
   edit 0..0 -> "#: integer\n"
-completion (5): count, capture.output, colours, colSums, contour
+completion (45): count, count.fields, c.noquote, capture.output, chol.default, chooseOpsMethod.default, colours, colSums
 hint @5: integer
 
 #---- string_subscript_fields

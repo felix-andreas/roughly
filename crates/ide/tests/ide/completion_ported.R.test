@@ -11,7 +11,7 @@ definition: none
 references: none
 rename: none
 signature: none
-completion (12): parameter, partner, packageVersion, pairs, palette, par, parent.env, parent.frame
+completion (38): parameter, partner, pacf, package.skeleton, package_version, packageDate, packageDescription, packageEvent
 
 #---- shadowed_parameter_single_entry
 wrapper <- function(value) {
@@ -25,7 +25,7 @@ definition: none
 references: none
 rename: none
 signature: none
-completion (4): value, validObject, vapply, var
+completion (11): value, VADeaths, validEnc, validObject, validSlotNames, validUTF8, vapply, var
 
 #---- outer_local_visible_in_nested_function
 wrapper <- function() {
@@ -65,7 +65,7 @@ signature: none
 action: Add inferred type annotations for the whole file
   edit 46..46 -> "    #: integer\n"
   edit 98..98 -> "    #: integer\n"
-completion (4): var_b, validObject, vapply, var
+completion (11): var_b, VADeaths, validEnc, validObject, validSlotNames, validUTF8, vapply, var
 hint @55: integer
 hint @107: integer
 
@@ -77,7 +77,7 @@ definition: none
 references: none
 rename: none
 signature: none
-completion (4): NA_character_, NA_complex_, NA_integer_, NA_real_
+completion (10): NA_character_, NA_complex_, NA_integer_, NA_real_, anyNA.numeric_version, is.na.numeric_version, .standard_regexps, .row_names_info
 
 #---- block_body_local
 wrapper <- function(x) {
@@ -134,7 +134,7 @@ action: Add inferred type annotation for `wrapper`
   edit 0..0 -> "#: <T> fn(values: T) -> NULL\n"
 action: Add inferred type annotations for the whole file
   edit 0..0 -> "#: <T> fn(values: T) -> NULL\n"
-completion (36): item, is.finite, is.infinite, write.csv, write.csv2, write.table, writeLines, install.packages
+completion (128+): item, inheritedSlotNames, is.finite, is.finite.POSIXlt, is.infinite, is.infinite.POSIXlt, cite, citeNatbib
 hint @7: <T> fn(values: T) -> NULL
 
 #---- local_shadows_global
@@ -152,7 +152,7 @@ signature: none
 action: Add inferred type annotations for the whole file
   edit 0..0 -> "#: fn() -> NULL\n"
   edit 49..49 -> "  #: integer\n"
-completion (4): value, validObject, vapply, var
+completion (11): value, VADeaths, validEnc, validObject, validSlotNames, validUTF8, vapply, var
 hint @5: fn() -> NULL
 hint @56: integer
 
@@ -190,7 +190,7 @@ definition: none
 references: none
 rename: none
 signature: none
-completion (2): all, all.equal
+completion (21): alarm, alias, alist, all, all.equal, all.equal.character, all.equal.default, all.equal.environment
 
 #---- case_insensitive_prefix
 MyValue <- 1L
@@ -219,7 +219,7 @@ rename: none
 signature: none
 action: Add inferred type annotations for the whole file
   edit 0..0 -> "#: integer\n"
-completion (8): for, fortune, forwarded, force, formals, format, formatC, formula
+completion (32): for, fortune, forwarded, force, forceAndCall, formalArgs, Formaldehyde, formals
 hint @9: integer
 
 #---- no_matching_prefix

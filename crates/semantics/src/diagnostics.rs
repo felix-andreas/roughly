@@ -887,7 +887,15 @@ fn unresolved_suggestion(db: &dyn Db, name: &str) -> Option<String> {
 #[salsa::tracked(returns(clone))]
 fn typo_suggestion<'db>(db: &'db dyn Db, name: crate::types::Name<'db>) -> Option<String> {
     let library = crate::stubs::stubs(db)?;
-    nearest_name(name.text(db), library.schemes.keys().map(String::as_str)).map(str::to_owned)
+    nearest_name(
+        name.text(db),
+        library
+            .schemes
+            .keys()
+            .chain(library.known_exports.iter())
+            .map(String::as_str),
+    )
+    .map(str::to_owned)
 }
 
 /// The closest candidate within an edit-distance budget scaled to the name's

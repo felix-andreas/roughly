@@ -16,7 +16,7 @@ action: Add inferred type annotations for the whole file
   edit 0..0 -> "#: <T> fn(argument: T) -> T\n"
   edit 38..38 -> "#: integer\n"
   edit 50..50 -> "#: integer\n"
-completion (30): result, residuals, representation, suppressMessages, suppressPackageStartupMessages, suppressWarnings, txtProgressBar, setTxtProgressBar
+completion (128+): result, resetClass, resetGeneric, reshape, resid, residuals, residuals.glm, residuals.lm
 hint @6: <T> fn(argument: T) -> T
 hint @43: integer
 hint @56: integer
@@ -39,7 +39,7 @@ action: Add inferred type annotations for the whole file
   edit 0..0 -> "#: <T> fn(argument: T) -> T\n"
   edit 38..38 -> "#: integer\n"
   edit 50..50 -> "#: integer\n"
-completion (9): value, validObject, eval, evalq, setValidity, vapply, available.packages, isVirtualClass
+completion (48): value, validEnc, validObject, validSlotNames, validUTF8, .valid.factor, .valueClassTest, eval
 hint @6: <T> fn(argument: T) -> T
 hint @43: integer
 hint @56: integer
@@ -185,7 +185,7 @@ action: Add inferred type annotation for `chooser`
 action: Add inferred type annotations for the whole file
   edit 0..0 -> "#: integer\n"
   edit 12..12 -> "#: integer\n"
-completion (47): if, in, Inf, iconv, identical, identity, ifelse, image
+completion (128+): I, if, in, Inf, iconv, iconvlist, icuGetCollate, icuSetCollate
 hint @5: integer
 hint @19: integer
 
@@ -203,7 +203,7 @@ action: Add inferred type annotation for `result`
 action: Add inferred type annotations for the whole file
   edit 0..0 -> "#: integer\n"
   edit 12..12 -> "#: NULL\n"
-completion (25): F, FALSE, for, function, factor, factorial, file, file.copy
+completion (102): F, FALSE, for, function, factanal, factor, factor.scope, factorial
 hint @5: integer
 hint @18: NULL
 
@@ -239,7 +239,7 @@ action: Add inferred type annotation for `again`
 action: Add inferred type annotations for the whole file
   edit 0..0 -> "#: integer\n"
   edit 12..12 -> "#: NULL\n"
-completion (16): rep, repeat, rep_len, replace, representation, grep, grepl, strrep
+completion (91): rep, repeat, rep.Date, rep.difftime, rep.factor, rep.int, rep.numeric_version, rep.POSIXct
 hint @5: integer
 hint @17: NULL
 
@@ -255,7 +255,7 @@ action: Add inferred type annotation for `value`
   edit 0..0 -> "#: <T> fn(parameter: T) -> T\n"
 action: Add inferred type annotations for the whole file
   edit 0..0 -> "#: <T> fn(parameter: T) -> T\n"
-completion (6): function, as.function, is.function, sys.function, match.fun, flush.console
+completion (52): function, functionBody, findFunction, .Defunct, as.function, as.function.default, getFunction, is.function
 hint @5: <T> fn(parameter: T) -> T
 
 #==== hover_literals
@@ -334,7 +334,7 @@ action: Add inferred type annotation for `value`
   edit 0..0 -> "#: integer\n"
 action: Add inferred type annotations for the whole file
   edit 0..0 -> "#: integer\n"
-completion (1): LETTERS
+completion (8): La.svd, La_library, La_version, LakeHuron, LETTERS, LifeCycleSavings, Loblolly, Logic
 hint @5: integer
 
 #==== hover_annotated
@@ -348,7 +348,7 @@ definition 11..18
 references: 11..18*
 rename: 1 edit(s)
 signature: none
-completion (9): checked, regmatches, character, chisq.test, choose, .Machine, as.character, is.character
+completion (87): checked, check.options, checkAtAssignment, checkCRAN, checkSlotAssignment, cacheGenericsMetaData, cacheMetaData, cacheMethod
 
 #---- if_unknown_annotation
 #: @if-unknown integer
@@ -360,7 +360,7 @@ definition 23..28
 references: 23..28*
 rename: 1 edit(s)
 signature: none
-completion (3): maybe, mapply, summary
+completion (46): maybe, makePrototypeFromClassDef, mapply, mauchly.test, .mapply, simplify2array, Summary, summary
 hint @28: integer
 
 #---- trust_annotation
@@ -373,7 +373,7 @@ definition 18..25
 references: 18..25*
 rename: 1 edit(s)
 signature: none
-completion (8): TRUE, trusted, trunc, structure, isTRUE, attributes, capture.output, suppressPackageStartupMessages
+completion (68): TRUE, trusted, trunc, trunc.Date, trunc.POSIXt, truncate, truncate.connection, StructTS
 
 #---- new_annotation_binding
 #: @type Person {list{name: character}}
@@ -387,7 +387,7 @@ definition 56..62
 references: 56..62*
 rename: 1 edit(s)
 signature: none
-completion (8): person, toupper, packageVersion, parent.frame, suppressPackageStartupMessages, suppressWarnings, txtProgressBar, setTxtProgressBar
+completion (119): person, personList, persp, phyper, aperm, aperm.default, aperm.table, spec.taper
 
 #---- new_annotation_unknown_value_use
 #: @type Person {list{name: character}}
@@ -407,7 +407,7 @@ action: Add inferred type annotation for `touch`
   edit 80..80 -> "#: fn() -> Person\n"
 action: Add inferred type annotations for the whole file
   edit 80..80 -> "#: fn() -> Person\n"
-completion (8): person, toupper, packageVersion, parent.frame, suppressPackageStartupMessages, suppressWarnings, txtProgressBar, setTxtProgressBar
+completion (119): person, personList, persp, phyper, aperm, aperm.default, aperm.table, spec.taper
 hint @85: fn() -> Person
 
 #---- alias_declaration_tag
@@ -473,7 +473,7 @@ action: Add inferred type annotation for `wrapper`
   edit 0..0 -> "#: fn(flag: logical) -> integer\n"
 action: Add inferred type annotations for the whole file
   edit 0..0 -> "#: fn(flag: logical) -> integer\n"
-completion (9): value, validObject, eval, evalq, setValidity, vapply, available.packages, isVirtualClass
+completion (48): value, validEnc, validObject, validSlotNames, validUTF8, .valid.factor, .valueClassTest, eval
 hint @7: fn(flag: logical) -> integer
 hint @45: integer
 
@@ -498,7 +498,7 @@ action: Add inferred type annotations for the whole file
   edit 22..22 -> "  #: integer\n"
   edit 46..46 -> "    #: integer\n"
   edit 0..0 -> "#: fn(flag: logical) -> integer\n"
-completion (2): x, xor
+completion (29): x, X11, x11, X11.options, X11Font, X11Fonts, xedit, xemacs
 hint @1: fn(flag: logical) -> integer
 hint @25: integer
 hint @51: integer
@@ -524,7 +524,7 @@ action: Add inferred type annotations for the whole file
   edit 22..22 -> "  #: integer\n"
   edit 46..46 -> "    #: character\n"
   edit 0..0 -> "#: fn(flag: logical) -> integer | character\n"
-completion (2): x, xor
+completion (29): x, X11, x11, X11.options, X11Font, X11Fonts, xedit, xemacs
 hint @1: fn(flag: logical) -> integer | character
 hint @25: integer
 hint @51: character
@@ -550,7 +550,7 @@ action: Add inferred type annotations for the whole file
   edit 18..18 -> "  #: integer\n"
   edit 51..51 -> "    #: integer\n"
   edit 0..0 -> "#: fn() -> integer\n"
-completion (8): total, textConnection, toString, stopifnot, getOption, getSlots, matplot, capture.output
+completion (128+): total, prototype, NLSstAsymptotic, NLSstLfAsymptote, NLSstRtAsymptote, defaultPrototype, makePrototypeFromClassDef, .__C__classPrototypeDef
 hint @1: fn() -> integer
 hint @25: integer
 hint @60: integer
@@ -568,7 +568,7 @@ action: Add inferred type annotation for `value`
   edit 0..0 -> "#: integer | character\n"
 action: Add inferred type annotations for the whole file
   edit 0..0 -> "#: integer | character\n"
-completion (9): value, validObject, eval, evalq, setValidity, vapply, available.packages, isVirtualClass
+completion (48): value, validEnc, validObject, validSlotNames, validUTF8, .valid.factor, .valueClassTest, eval
 hint @5: integer | character
 
 #---- for_element_union
@@ -595,7 +595,7 @@ rename: 2 edit(s)
 signature: none
 action: Add inferred type annotations for the whole file
   edit 0..0 -> "#: <T> fn(x: T) -> T\n"
-completion (2): mirror, tempdir
+completion (58): mirror, mirror2html, psmirnov, qsmirnov, rsmirnov, getCRANmirrors, findCRANmirror, chooseBioCmirror
 hint @6: <T> fn(x: T) -> T
 
 #---- two_type_variables
@@ -610,7 +610,7 @@ rename: 2 edit(s)
 signature: none
 action: Add inferred type annotations for the whole file
   edit 0..0 -> "#: <T, U> fn(x: T, y: U) -> T\n"
-completion (11): pair, packageVersion, pairs, palette, par, parent.env, parent.frame, parse
+completion (37): pair, pacf, package.skeleton, package_version, packageDate, packageDescription, packageEvent, packageHasNamespace
 hint @4: <T, U> fn(x: T, y: U) -> T
 
 #---- numeric_constraint_displayed
@@ -625,7 +625,7 @@ rename: 2 edit(s)
 signature: none
 action: Add inferred type annotations for the whole file
   edit 0..0 -> "#: <T: numeric> fn(x: T) -> T\n"
-completion (5): add_one, anyDuplicated, read.delim, readRDS, standardGeneric
+completion (65): add_one, add.scope, add1, addmargins, addNA, addNextMethod, addTaskCallback, lazyLoadDBexec
 hint @7: <T: numeric> fn(x: T) -> T
 
 #---- partially_inferred_function
@@ -640,7 +640,7 @@ rename: 2 edit(s)
 signature: none
 action: Add inferred type annotations for the whole file
   edit 0..0 -> "#: <T> fn(x: T) -> list{T, integer}\n"
-completion (13): make, mad, make.names, make.unique, Map, mapply, match, match.arg
+completion (48): make, mad, mahalanobis, maintainer, make.link, make.names, make.packages.html, make.rgb
 hint @4: <T> fn(x: T) -> list{T, integer}
 
 #---- parameter_never_raw_variable
@@ -656,7 +656,7 @@ action: Add inferred type annotation for `wrap`
   edit 0..0 -> "#: <T, U> fn(first: T, second: U) -> U\n"
 action: Add inferred type annotations for the whole file
   edit 0..0 -> "#: <T, U> fn(first: T, second: U) -> U\n"
-completion (14): second, intersect, selectMethod, setClass, setGeneric, setRefClass, standardGeneric, suppressPackageStartupMessages
+completion (128+): second, ts.intersect, InsectSprays, chooseCRANmirror, intersect, .leap.seconds, se.contrast, sealClass
 hint @4: <T, U> fn(first: T, second: U) -> U
 
 #==== hover_unknown
@@ -670,7 +670,7 @@ definition 0..5
 references: 0..5*, 24..29
 rename: 2 edit(s)
 signature: none
-completion (9): value, validObject, eval, evalq, setValidity, vapply, available.packages, isVirtualClass
+completion (48): value, validEnc, validObject, validSlotNames, validUTF8, .valid.factor, .valueClassTest, eval
 
 #---- uninferable_call
 unde$0fined_fn(1L)
@@ -680,7 +680,7 @@ definition: none
 references: none
 rename: none
 signature: none
-completion (2): undebug, URLencode
+completion (19): undebug, undebugcall, packageNotFoundError, unique.data.frame, unique.default, units.difftime, unloadNamespace, unRematchDefinition
 
 #==== hover_stubs
 #---- overloaded_stub_name
@@ -701,5 +701,5 @@ action: Add inferred type annotation for `total`
   edit 0..0 -> "#: integer\n"
 action: Add inferred type annotations for the whole file
   edit 0..0 -> "#: integer\n"
-completion (79): sample, sample.int, sapply, save, save.image, saveRDS, scale, scan
+completion (128+): S3Class, S3Part, sample, sample.int, sapply, save, save.image, savehistory
 hint @5: integer
