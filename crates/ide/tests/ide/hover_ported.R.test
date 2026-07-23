@@ -381,7 +381,7 @@ completion (8): TRUE, trusted, trunc, structure, isTRUE, attributes, capture.out
 #: @new Person
 per$0son <- make_person()
 #++++
-hover 56..62: person: Unknown
+hover 56..62: person: Person
 hover-definition: global 56..62
 definition 56..62
 references: 56..62*

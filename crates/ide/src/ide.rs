@@ -133,10 +133,21 @@ pub fn hover(
 
     let mut renderer = TypeRenderer::default();
     let (line, definition) = match &hir.expression(expression).kind {
-        ExpressionKind::NameRef(name) => (
-            format!("{name}: {}", renderer.render(db, ty)),
-            hover_definition(db, files, position.item, expression, name),
-        ),
+        ExpressionKind::NameRef(name) => {
+            // The item's own top-level name renders the EXPORTED scheme —
+            // the single exported truth — not the initializer's checked
+            // type: a `#: @new` declaration brands the scheme even when the
+            // initializer's own type is Unknown.
+            let exported = item_naming(db, position.item).and_then(|naming| {
+                let binding = naming.resolutions.get(&expression)?;
+                (naming.bindings.get(binding)?.kind == BindingKind::TopLevel).then_some(())?;
+                check.scheme.as_ref().map(|scheme| scheme.body)
+            });
+            (
+                format!("{name}: {}", renderer.render(db, exported.unwrap_or(ty))),
+                hover_definition(db, files, position.item, expression, name),
+            )
+        }
         _ => (renderer.render(db, ty), None),
     };
 
