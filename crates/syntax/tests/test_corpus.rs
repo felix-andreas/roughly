@@ -1,6 +1,6 @@
 //! Corpus tests over real R sources.
 //!
-//! `scripts/fetch-corpus.sh` populates a gitignored `corpus/` directory with the
+//! `scripts/fetch-corpus.rs` populates a gitignored `corpus/` directory with the
 //! R base library and a set of CRAN packages. These tests run the hand-written
 //! parser over every `.R` file there:
 //!
@@ -23,7 +23,7 @@ fn corpus_round_trip() {
     let Some(root) = corpus_dir() else {
         eprintln!(
             "corpus_round_trip: no corpus found (set ROUGHLY_CORPUS_DIR or run \
-             scripts/fetch-corpus.sh); skipping"
+             scripts/fetch-corpus.rs); skipping"
         );
         return;
     };

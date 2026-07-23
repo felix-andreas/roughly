@@ -26,7 +26,7 @@ fn stats_new_stack() {
     use semantics::{DocumentKind, ProjectFiles, RootDatabase, SourceFile};
 
     let packages = corpus_packages();
-    assert!(!packages.is_empty(), "run scripts/fetch-corpus.sh first");
+    assert!(!packages.is_empty(), "run scripts/fetch-corpus.rs first");
 
     let mut total_lines = 0usize;
     let mut total_bytes = 0usize;
@@ -133,7 +133,7 @@ fn stats_witness() {
     use semantics::{DocumentKind, ProjectFiles, RootDatabase, SourceFile};
 
     let packages = corpus_packages();
-    assert!(!packages.is_empty(), "run scripts/fetch-corpus.sh first");
+    assert!(!packages.is_empty(), "run scripts/fetch-corpus.rs first");
 
     let mut total_lines = 0usize;
     let start = Instant::now();
@@ -184,7 +184,7 @@ fn stats_legacy_stack() {
     use analysis::{Analysis, CheckConfig, LintConfig};
 
     let packages = corpus_packages();
-    assert!(!packages.is_empty(), "run scripts/fetch-corpus.sh first");
+    assert!(!packages.is_empty(), "run scripts/fetch-corpus.rs first");
 
     let mut total_lines = 0usize;
     let mut total_bytes = 0usize;
@@ -343,7 +343,7 @@ fn stats_keystrokes() {
     use semantics::{DocumentKind, ProjectFiles, RootDatabase, SourceFile};
 
     let packages = corpus_packages();
-    assert!(!packages.is_empty(), "run scripts/fetch-corpus.sh first");
+    assert!(!packages.is_empty(), "run scripts/fetch-corpus.rs first");
     let sources = packages
         .iter()
         .max_by_key(|sources| sources.iter().map(String::len).sum::<usize>())
@@ -422,7 +422,7 @@ fn stats_new_stack_parallel() {
     use semantics::{DocumentKind, ProjectFiles, RootDatabase, SourceFile};
 
     let packages = corpus_packages();
-    assert!(!packages.is_empty(), "run scripts/fetch-corpus.sh first");
+    assert!(!packages.is_empty(), "run scripts/fetch-corpus.rs first");
     let workers = std::env::var("STATS_WORKERS")
         .ok()
         .and_then(|value| value.parse().ok())

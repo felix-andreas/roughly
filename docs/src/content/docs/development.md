@@ -79,8 +79,8 @@ environment variables matter day to day:
 - `FIXTURE_FILTER=group__case` runs a single fixture case.
 
 The real-world corpus some suites and all measurement instruments use is fetched with
-`scripts/fetch-corpus.sh` (into the gitignored `corpus/`; the resolved inventory is committed as
-`scripts/corpus-manifest.txt`). The performance and memory instruments live in
+`scripts/fetch-corpus.rs` (a `cargo +nightly -Zscript` single-file script) into the gitignored
+`corpus/`; the resolved inventory is committed as `scripts/corpus-manifest.txt`. The performance and memory instruments live in
 `legacy/differential/tests/test_stats.rs` and are documented on the [Testing](/testing) page.
 
 ## Debug mode

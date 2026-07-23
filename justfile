@@ -51,7 +51,8 @@ fuzz-deep:
     cargo test -p semantics --test test_fuzz fuzz_deep -- --ignored --nocapture
 
 # Coverage-guided libFuzzer targets (parse | format | semantics) — nightly
-# toolchain; seed the corpus first with scripts/seed-fuzz-corpus.sh.
+# toolchain; seed the corpus first with
+# `cargo +nightly -Zscript scripts/seed-fuzz-corpus.rs`.
 fuzz-run target="semantics" *args:
     cargo +nightly fuzz run {{ target }} {{ args }}
 

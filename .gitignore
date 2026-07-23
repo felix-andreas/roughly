@@ -20,6 +20,6 @@ roughly.toml
 # Claude Code local harness state (config, worktrees)
 .claude/
 
-# Fetched parser corpus (populate with scripts/fetch-corpus.sh; pinned inventory
+# Fetched parser corpus (populate with scripts/fetch-corpus.rs; pinned inventory
 # lives in scripts/corpus-manifest.txt).
 /corpus/

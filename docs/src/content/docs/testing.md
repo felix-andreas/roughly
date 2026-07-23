@@ -106,13 +106,13 @@ cache). It
 needs nightly: `cargo install cargo-fuzz`, then from `fuzz/`:
 
 ```sh
-./../scripts/seed-fuzz-corpus.sh          # seed corpus from all fixture case sources
+cargo +nightly -Zscript ../scripts/seed-fuzz-corpus.rs   # seed corpus from all fixture case sources
 cargo +nightly fuzz run format -- -max_total_time=600 -print_final_stats=1
 cargo +nightly fuzz run parse  -- -max_total_time=600
 ```
 
 The seeder extracts every fixture case's source across the repository into
-`fuzz/corpus/{parse,format}/` (content-addressed, so re-running only adds). Corpus and
+`fuzz/corpus/{parse,format,semantics}/` (content-addressed, so re-running only adds). Corpus and
 artifacts are gitignored — durable regressions belong in the `REGRESSIONS` battery or a
 fixture case, not in the corpus. On a find: `cargo +nightly fuzz tmin format <artifact>`
 minimizes it; fix the bug, replay the artifact, add the minimized input to `REGRESSIONS`

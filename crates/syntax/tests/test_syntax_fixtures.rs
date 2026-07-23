@@ -11,7 +11,7 @@ fn syntax_fixtures() {
 }
 
 /// tree-sitter-r's own parser test corpus, converted into the fixture format
-/// (scripts/convert-tsr-corpus.py) with OUR golden trees as expectations; the
+/// (scripts/convert-tsr-corpus.rs) with OUR golden trees as expectations; the
 /// original sexps are kept beside the fetched corpus for adjudication.
 #[test]
 fn tree_sitter_r_corpus_fixtures() {
