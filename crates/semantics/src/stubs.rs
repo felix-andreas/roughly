@@ -90,18 +90,25 @@ pub fn namespace_exports(db: &dyn Db, package: &str, name: &str) -> bool {
 }
 
 /// The shipped stdlib corpus (base + default-attached packages, plus the
-/// conditional namespaces), embedded from this crate's own `stubs/`
-/// directory.
+/// conditional namespaces), embedded from the repository's top-level
+/// `types/` directory — top-level so the R type declarations are the first
+/// thing a repository visitor finds (the typeshed precedent). NOT `stubs/`:
+/// that name is the project-override convention, and a workspace-root
+/// `stubs/` in this repo would be loaded as overrides when roughly analyzes
+/// its own sources.
 pub fn shipped_stub_sources() -> Vec<(String, String)> {
     [
-        ("base", include_str!("../stubs/base.Rtypes")),
-        ("stats", include_str!("../stubs/stats.Rtypes")),
-        ("utils", include_str!("../stubs/utils.Rtypes")),
-        ("methods", include_str!("../stubs/methods.Rtypes")),
-        ("graphics", include_str!("../stubs/graphics.Rtypes")),
-        ("grDevices", include_str!("../stubs/grDevices.Rtypes")),
-        ("data.table", include_str!("../stubs/data.table.Rtypes")),
-        ("dplyr", include_str!("../stubs/dplyr.Rtypes")),
+        ("base", include_str!("../../../types/base.Rtypes")),
+        ("stats", include_str!("../../../types/stats.Rtypes")),
+        ("utils", include_str!("../../../types/utils.Rtypes")),
+        ("methods", include_str!("../../../types/methods.Rtypes")),
+        ("graphics", include_str!("../../../types/graphics.Rtypes")),
+        ("grDevices", include_str!("../../../types/grDevices.Rtypes")),
+        (
+            "data.table",
+            include_str!("../../../types/data.table.Rtypes"),
+        ),
+        ("dplyr", include_str!("../../../types/dplyr.Rtypes")),
     ]
     .into_iter()
     .map(|(namespace, text)| (namespace.to_owned(), text.to_owned()))
