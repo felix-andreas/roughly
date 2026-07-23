@@ -290,7 +290,14 @@ pub fn stub_library<'db>(db: &'db dyn Db, sources: StubSources) -> StubLibrary<'
             .or_default();
         for line in text.lines() {
             let name = strip_comment(line).trim();
-            if name.is_empty() {
+            // R's control keywords are namespace exports (they are
+            // primitives) but can never be referenced as names, so keeping
+            // them would only pollute typo suggestions (`break` for
+            // `fread`).
+            const CONTROL_KEYWORDS: &[&str] = &[
+                "if", "else", "repeat", "while", "function", "for", "next", "break", "in",
+            ];
+            if name.is_empty() || CONTROL_KEYWORDS.contains(&name) {
                 continue;
             }
             namespace_exports.insert(name.to_owned());

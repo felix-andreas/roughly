@@ -201,8 +201,6 @@ helper <- function(r) {
 #++++
 user: <T> fn(w: T) -> Unknown
 helper: fn(r: Unknown) -> Unknown
-66..75 warning[unresolved] I could not resolve `isRestart` in this package, its imports, or builtins.
-85..96 warning[unresolved] I could not resolve `findRestart` in this package, its imports, or builtins.
 
 #---- walrus_outside_masked_brackets_is_an_operator_call
 f <- function(a, b) quo(a := b)

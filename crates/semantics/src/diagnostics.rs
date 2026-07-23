@@ -586,11 +586,58 @@ fn top_level_name_sites(db: &dyn Db, file: SourceFile) -> Vec<(String, TextRange
     sites
 }
 
+/// The named top-level definition names of one package file, in item order —
+/// a range-free projection of [`top_level_name_sites`], so the project-wide
+/// duplicate map depends only on which names exist, never on where: a body
+/// edit that shifts ranges leaves this value equal and the map validates
+/// without re-executing.
+#[salsa::tracked(returns(ref))]
+fn top_level_binding_names(db: &dyn Db, file: SourceFile) -> Vec<String> {
+    let mut names = Vec::new();
+    for item in item_tree(db, file) {
+        if !matches!(
+            *item.kind(db),
+            crate::ItemKind::Function | crate::ItemKind::Value
+        ) {
+            continue;
+        }
+        if let Some(name) = item.name(db).clone() {
+            names.push(name);
+        }
+    }
+    names
+}
+
+/// Package names defined at top level more than once, each mapped to its
+/// definition sites' files in project order (a file repeats per site).
+/// Healthy projects keep this near-empty, so the value-equality firewall
+/// holds: per-file diagnostics re-validate cheaply after edits elsewhere.
+#[salsa::tracked(returns(ref))]
+fn duplicate_binding_map(
+    db: &dyn Db,
+    files: crate::ProjectFiles,
+) -> rustc_hash::FxHashMap<String, Vec<SourceFile>> {
+    let mut sites: rustc_hash::FxHashMap<String, Vec<SourceFile>> =
+        rustc_hash::FxHashMap::default();
+    for &project_file in files.files(db) {
+        if *project_file.kind(db) != DocumentKind::Package {
+            continue;
+        }
+        for name in top_level_binding_names(db, project_file) {
+            sites.entry(name.clone()).or_default().push(project_file);
+        }
+    }
+    sites.retain(|_, files| files.len() >= 2);
+    sites
+}
+
 /// Warnings for a package name defined at top level more than once: per-site
 /// winner semantics make every earlier binding dead, so each site warns, with
 /// a note pointing at its nearest neighbouring definition. Occurrence order
 /// is project order — `ProjectFiles` lists package documents first in
-/// workspace path order — then item order within a file.
+/// workspace path order — then item order within a file. Ranges are fetched
+/// only for the files actually involved in a duplication, so the common
+/// duplicate-free file never reads another file's positions.
 fn duplicate_binding_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
     if *file.kind(db) != DocumentKind::Package {
         return Vec::new();
@@ -598,23 +645,30 @@ fn duplicate_binding_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnosti
     let Some(files) = crate::ProjectFiles::try_get(db) else {
         return Vec::new();
     };
-    let mut occurrences: std::collections::BTreeMap<&str, Vec<(SourceFile, TextRange)>> =
-        std::collections::BTreeMap::new();
-    for &project_file in files.files(db) {
-        if *project_file.kind(db) != DocumentKind::Package {
-            continue;
-        }
-        for (name, range) in top_level_name_sites(db, project_file) {
-            occurrences
-                .entry(name.as_str())
-                .or_default()
-                .push((project_file, *range));
+    let map = duplicate_binding_map(db, files);
+    if map.is_empty() {
+        return Vec::new();
+    }
+    let mut own_duplicated: Vec<&str> = Vec::new();
+    for name in top_level_binding_names(db, file) {
+        if map.contains_key(name) && !own_duplicated.contains(&name.as_str()) {
+            own_duplicated.push(name);
         }
     }
     let mut diagnostics = Vec::new();
-    for (name, sites) in occurrences {
-        if sites.len() < 2 {
-            continue;
+    for name in own_duplicated {
+        let mut sites: Vec<(SourceFile, TextRange)> = Vec::new();
+        let mut seen_files: Vec<SourceFile> = Vec::new();
+        for &site_file in &map[name] {
+            if seen_files.contains(&site_file) {
+                continue;
+            }
+            seen_files.push(site_file);
+            for (site_name, range) in top_level_name_sites(db, site_file) {
+                if site_name == name {
+                    sites.push((site_file, *range));
+                }
+            }
         }
         for (index, &(site_file, range)) in sites.iter().enumerate() {
             if site_file != file {
@@ -681,6 +735,38 @@ fn type_declaration_sites(db: &dyn Db, file: SourceFile) -> Vec<(String, TextRan
     sites
 }
 
+/// The declared type names of one package file, in declaration order — the
+/// range-free projection of [`type_declaration_sites`], for the same
+/// value-equality firewall as [`top_level_binding_names`].
+#[salsa::tracked(returns(ref))]
+fn type_declaration_names(db: &dyn Db, file: SourceFile) -> Vec<String> {
+    type_declaration_sites(db, file)
+        .iter()
+        .map(|(name, _)| name.clone())
+        .collect()
+}
+
+/// Project-global type names declared more than once, mapped to their
+/// declaring files in project order (a file repeats per declaration).
+#[salsa::tracked(returns(ref))]
+fn duplicate_type_map(
+    db: &dyn Db,
+    files: crate::ProjectFiles,
+) -> rustc_hash::FxHashMap<String, Vec<SourceFile>> {
+    let mut sites: rustc_hash::FxHashMap<String, Vec<SourceFile>> =
+        rustc_hash::FxHashMap::default();
+    for &project_file in files.files(db) {
+        if *project_file.kind(db) != DocumentKind::Package {
+            continue;
+        }
+        for name in type_declaration_names(db, project_file) {
+            sites.entry(name.clone()).or_default().push(project_file);
+        }
+    }
+    sites.retain(|_, files| files.len() >= 2);
+    sites
+}
+
 /// Errors for a project-global type name declared more than once: `@type` and
 /// `@alias` share one project-global namespace and every declaration
 /// participating in a duplicate-name conflict is erroneous (see the typing
@@ -695,23 +781,30 @@ fn duplicate_type_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> 
     let Some(files) = crate::ProjectFiles::try_get(db) else {
         return Vec::new();
     };
-    let mut occurrences: std::collections::BTreeMap<&str, Vec<(SourceFile, TextRange)>> =
-        std::collections::BTreeMap::new();
-    for &project_file in files.files(db) {
-        if *project_file.kind(db) != DocumentKind::Package {
-            continue;
-        }
-        for (name, range) in type_declaration_sites(db, project_file) {
-            occurrences
-                .entry(name.as_str())
-                .or_default()
-                .push((project_file, *range));
+    let map = duplicate_type_map(db, files);
+    if map.is_empty() {
+        return Vec::new();
+    }
+    let mut own_duplicated: Vec<&str> = Vec::new();
+    for name in type_declaration_names(db, file) {
+        if map.contains_key(name) && !own_duplicated.contains(&name.as_str()) {
+            own_duplicated.push(name);
         }
     }
     let mut diagnostics = Vec::new();
-    for (name, sites) in occurrences {
-        if sites.len() < 2 {
-            continue;
+    for name in own_duplicated {
+        let mut sites: Vec<(SourceFile, TextRange)> = Vec::new();
+        let mut seen_files: Vec<SourceFile> = Vec::new();
+        for &site_file in &map[name] {
+            if seen_files.contains(&site_file) {
+                continue;
+            }
+            seen_files.push(site_file);
+            for (site_name, range) in type_declaration_sites(db, site_file) {
+                if site_name == name {
+                    sites.push((site_file, *range));
+                }
+            }
         }
         for (index, &(site_file, range)) in sites.iter().enumerate() {
             if site_file != file {

@@ -9,7 +9,7 @@ f: <T> fn(x: T) -> data.table
 f <- function(x) setDT(x)
 #++++
 f: <T> fn(x: T) -> Unknown
-17..22 warning[unresolved] I could not resolve `setDT` in this package, its imports, or builtins.
+17..22 warning[unresolved] I could not resolve `setDT` in this package, its imports, or builtins. Did you mean `setAs`?
 
 #---- import_from_covers_operator_spellings
 #namespace importFrom(rlang, "%||%")
