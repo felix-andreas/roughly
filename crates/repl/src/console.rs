@@ -201,9 +201,37 @@ fn install_sigint_handler() {
     }
 }
 
-/// No R session can start on non-Unix platforms (`libr::load` refuses), so
+/// Ctrl-C on Windows arrives through the console control handler; it raises
+/// both of R's interrupt flags (`UserBreak` + the deferred
+/// `R_interrupts_pending`), honored at R's next interrupt check.
+#[cfg(windows)]
+fn install_sigint_handler() {
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn SetConsoleCtrlHandler(
+            handler: Option<unsafe extern "system" fn(u32) -> i32>,
+            add: i32,
+        ) -> i32;
+    }
+    unsafe {
+        SetConsoleCtrlHandler(Some(ctrl_c_to_r_flags), 1);
+    }
+}
+
+#[cfg(windows)]
+unsafe extern "system" fn ctrl_c_to_r_flags(ctrl_type: u32) -> i32 {
+    const CTRL_C_EVENT: u32 = 0;
+    if ctrl_type == CTRL_C_EVENT {
+        libr::interrupt_r();
+        1
+    } else {
+        0
+    }
+}
+
+/// No R session can start on other platforms (`libr::load` refuses), so
 /// there is no evaluation phase whose Ctrl-C would need translating.
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 fn install_sigint_handler() {}
 
 struct RPrompt {

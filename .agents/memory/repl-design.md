@@ -113,7 +113,7 @@ symbol by name, with per-symbol optionality:
   WriteConsoleEx hook for R-level output, plus fd-level dup/pipe capture for
   C `printf` output that bypasses R's console.
 
-## Windows implementation plan (decided, from the field's production embedding)
+## Windows implementation (IMPLEMENTED per the plan below — compile- and clippy-verified against x86_64-pc-windows-gnu; NEVER run on real Windows+R, so the first Windows machine must smoke test `roughly repl` and `roughly run`)
 
 Windows R embedding does NOT use the Unix `ptr_R_ReadConsole` globals — it
 wires callbacks through the `Rstart` struct. The working recipe, verified
