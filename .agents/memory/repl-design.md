@@ -5,9 +5,10 @@ subcommand packaging, reedline + nu-ansi-term kept, rofy frozen under
 `legacy/`, e2e local-only). Implemented: discovery, the typed runtime-binding
 layer, the ReadConsole-hosted reedline console with lexer highlighting and
 conservative completeness, SIGINT interrupt routing, pty e2e tests
-(skip-if-no-R) in the roughly crate. Not yet: analysis-backed completions and
-pre-eval diagnostics (the next rung), the headless runner (section below),
-Windows, graphics devices.
+(skip-if-no-R) in the roughly crate, the headless runner (`roughly run` /
+`repl --file`), vi keybindings, and the Windows embedding (compile-verified
+only — see its section). Not yet: analysis-backed completions and pre-eval
+diagnostics (the next rung), graphics devices.
 
 User-initiated: integrate a first-class REPL into roughly — the successor to the
 `rofy` experiment — **without any build-time link dependency on R**. This
