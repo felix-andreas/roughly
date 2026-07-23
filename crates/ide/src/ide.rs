@@ -781,9 +781,19 @@ pub fn completion(
             }
             if let Some(position) = position_in_item(db, file, offset)
                 && let Some(naming) = item_naming(db, position.item)
+                && let Some(item_node) = item_node(db, position.item)
             {
+                let item_offset = item_node.text_range().start();
                 for info in naming.bindings.values() {
                     if info.kind == BindingKind::TopLevel {
+                        continue;
+                    }
+                    // R scoping is function-granular: a local is visible at
+                    // the cursor only when its owning function (the innermost
+                    // FUNCTION_DEF enclosing its definition site) encloses
+                    // the cursor too — enclosing frames stay visible inside
+                    // closures, sibling closures' locals do not leak.
+                    if !binding_visible_at(&item_node, info.range.start() + item_offset, offset) {
                         continue;
                     }
                     if search_match(&info.name, &query).is_some() {
@@ -2146,6 +2156,35 @@ enum CompletionContext {
 /// The completion context and query: the identifier chars immediately before
 /// the cursor, and the operator (if any) they follow. Works on raw text so
 /// completion still fires mid-edit inside broken code.
+/// Whether a binding defined at `binding_start` is in scope at `cursor`,
+/// by R's function-granular scoping: the binding's innermost enclosing
+/// `FUNCTION_DEF` must contain the cursor (a binding outside any function is
+/// item-visible).
+fn binding_visible_at(
+    item_node: &syntax::SyntaxNode,
+    binding_start: TextSize,
+    cursor: TextSize,
+) -> bool {
+    if !item_node
+        .text_range()
+        .contains_range(TextRange::empty(binding_start))
+    {
+        return true;
+    }
+    let covering = item_node.covering_element(TextRange::empty(binding_start));
+    let covering_node = match covering {
+        syntax::SyntaxElement::Node(node) => node,
+        syntax::SyntaxElement::Token(token) => token.parent().unwrap_or_else(|| item_node.clone()),
+    };
+    let owning_function = covering_node
+        .ancestors()
+        .find(|ancestor| ancestor.kind() == syntax::SyntaxKind::FUNCTION_DEF);
+    match owning_function {
+        Some(function) => function.text_range().contains(cursor),
+        None => true,
+    }
+}
+
 fn completion_context(text: &str, offset: TextSize) -> Option<(CompletionContext, String)> {
     let at = usize::from(offset).min(text.len());
     let line_start = text[..at].rfind('\n').map_or(0, |index| index + 1);

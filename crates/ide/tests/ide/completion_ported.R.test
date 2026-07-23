@@ -45,6 +45,30 @@ action: Add inferred type annotations for the whole file
 completion (1): outer_value
 hint @37: integer
 
+#---- sibling_scopes_stay_separate
+wrapper <- function() {
+  function(param_a) {
+    var_a <- 1L
+    var_a
+  }
+  function(param_b) {
+    var_b <- 2L
+    va$0
+  }
+}
+#++++
+hover 118..120: va: Unknown
+definition: none
+references: none
+rename: none
+signature: none
+action: Add inferred type annotations for the whole file
+  edit 46..46 -> "    #: integer\n"
+  edit 98..98 -> "    #: integer\n"
+completion (4): var_b, validObject, vapply, var
+hint @55: integer
+hint @107: integer
+
 #---- na_keyword_prefix
 na_$0
 #++++
