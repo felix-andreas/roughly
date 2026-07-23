@@ -27,16 +27,28 @@ fn r_available() -> bool {
     available
 }
 
+/// One interactive session at a time: concurrent full R sessions on a
+/// loaded machine make the pty timing flaky, while serial runs are stable —
+/// the lock rides in the session so its scope is exactly the session's.
+static SESSION_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 struct ReplSession {
+    _lock: std::sync::MutexGuard<'static, ()>,
     _pair: portable_pty::PtyPair,
     child: Box<dyn portable_pty::Child + Send + Sync>,
-    reader: Box<dyn Read + Send>,
+    chunks: std::sync::mpsc::Receiver<Vec<u8>>,
     writer: Box<dyn Write + Send>,
     seen: String,
+    /// Raw tail kept across chunks so a terminal query split over a read
+    /// boundary is still recognized.
+    raw_carry: Vec<u8>,
 }
 
 impl ReplSession {
     fn start() -> ReplSession {
+        let lock = SESSION_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let pair = native_pty_system()
             .openpty(PtySize {
                 rows: 32,
@@ -48,14 +60,33 @@ impl ReplSession {
         let mut command = CommandBuilder::new(env!("CARGO_BIN_EXE_roughly"));
         command.arg("repl");
         let child = pair.slave.spawn_command(command).expect("spawn repl");
-        let reader = pair.master.try_clone_reader().expect("pty reader");
+        let mut reader = pair.master.try_clone_reader().expect("pty reader");
         let writer = pair.master.take_writer().expect("pty writer");
+        // The pty read is blocking with no timeout, so it lives on its own
+        // thread; `expect` then waits on the channel with a deadline — a
+        // session that goes silent fails loudly instead of hanging the test.
+        let (sender, chunks) = std::sync::mpsc::channel::<Vec<u8>>();
+        std::thread::spawn(move || {
+            let mut buffer = [0u8; 4096];
+            loop {
+                match reader.read(&mut buffer) {
+                    Ok(0) | Err(_) => break,
+                    Ok(read) => {
+                        if sender.send(buffer[..read].to_vec()).is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+        });
         ReplSession {
+            _lock: lock,
             _pair: pair,
             child,
-            reader,
+            chunks,
             writer,
             seen: String::new(),
+            raw_carry: Vec::new(),
         }
     }
 
@@ -64,26 +95,54 @@ impl ReplSession {
         self.writer.flush().expect("pty flush");
     }
 
+    /// Waits up to `wait` for one output chunk, answering the terminal
+    /// queries a real terminal would answer (the editor asks for the cursor
+    /// position before drawing its prompt and blocks until the reply comes).
+    fn drain(&mut self, wait: Duration) {
+        let Ok(chunk) = self.chunks.recv_timeout(wait) else {
+            return;
+        };
+        self.raw_carry.extend_from_slice(&chunk);
+        const CURSOR_QUERY: &[u8] = b"\x1b[6n";
+        let queries = self
+            .raw_carry
+            .windows(CURSOR_QUERY.len())
+            .filter(|window| *window == CURSOR_QUERY)
+            .count();
+        for _ in 0..queries {
+            self.writer.write_all(b"\x1b[1;1R").expect("query reply");
+        }
+        if queries > 0 {
+            self.writer.flush().expect("query flush");
+        }
+        let keep = self.raw_carry.len().saturating_sub(CURSOR_QUERY.len() - 1);
+        self.raw_carry.drain(..keep);
+        self.seen
+            .push_str(&strip_ansi(&String::from_utf8_lossy(&chunk)));
+    }
+
+    /// Keeps servicing the session for a fixed duration — used where a test
+    /// must let evaluation *start* (a bare sleep would leave the editor's
+    /// terminal handshake unanswered, so the input would still be queued).
+    fn settle(&mut self, duration: Duration) {
+        let deadline = Instant::now() + duration;
+        while Instant::now() < deadline {
+            self.drain(Duration::from_millis(50));
+        }
+    }
+
     /// Reads until the accumulated (ANSI-stripped) output contains `needle`.
     /// Panics with everything seen so far on timeout, so a failure names
     /// what the session actually did.
     fn expect(&mut self, needle: &str) {
         let deadline = Instant::now() + Duration::from_secs(30);
-        let mut buffer = [0u8; 4096];
         while !self.seen.contains(needle) {
             assert!(
                 Instant::now() < deadline,
                 "timed out waiting for {needle:?}; output so far:\n{}",
                 self.seen
             );
-            match self.reader.read(&mut buffer) {
-                Ok(0) => std::thread::sleep(Duration::from_millis(20)),
-                Ok(read) => {
-                    let chunk = String::from_utf8_lossy(&buffer[..read]);
-                    self.seen.push_str(&strip_ansi(&chunk));
-                }
-                Err(_) => std::thread::sleep(Duration::from_millis(20)),
-            }
+            self.drain(Duration::from_millis(100));
         }
     }
 
@@ -94,7 +153,7 @@ impl ReplSession {
             if self.child.try_wait().expect("child wait").is_some() {
                 return;
             }
-            std::thread::sleep(Duration::from_millis(50));
+            self.drain(Duration::from_millis(50));
         }
         self.child.kill().ok();
         panic!("the session did not exit after q(); output:\n{}", self.seen);
@@ -191,7 +250,11 @@ fn ctrl_c_interrupts_evaluation() {
     let mut session = ReplSession::start();
     session.expect("Roughly R console");
     session.send("Sys.sleep(60)\r");
-    std::thread::sleep(Duration::from_millis(1500));
+    // The editor echoes the line once it has consumed it; give evaluation a
+    // moment to actually start (terminal back in cooked mode) so Ctrl-C
+    // arrives as SIGINT, not as an editor keystroke.
+    session.expect("Sys.sleep(60)");
+    session.settle(Duration::from_millis(1500));
     session.send("\u{3}");
     // The session must come back alive well before the sleep could finish.
     session.send("40 + 2\r");
