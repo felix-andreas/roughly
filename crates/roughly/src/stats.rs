@@ -27,6 +27,7 @@ pub fn analysis_stats(target: Option<&Path>) -> Result<(), CommandError> {
         crate::cli::error(&format!("{error}"));
         CommandError
     })?;
+    crate::cli::warn_unknown_config_keys(&config);
     let target = std::fs::canonicalize(target).map_err(|error| {
         crate::cli::error(&format!("failed to resolve {}: {error}", target.display()));
         CommandError

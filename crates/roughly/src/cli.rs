@@ -92,6 +92,7 @@ pub fn check(
                     return Err(CommandError);
                 }
             };
+            warn_unknown_config_keys(&config);
             let target = std::fs::canonicalize(file).map_err(|err| {
                 error(&format!("failed to resolve: {}", file.display()));
                 eprintln!("{err}");
@@ -413,6 +414,17 @@ pub fn check(
     })
 }
 
+/// Unknown config keys warn but never block: the rest of the file is
+/// honored (forward compatibility for configs written against newer
+/// versions). Wrong types on known keys remain hard errors.
+pub(crate) fn warn_unknown_config_keys(config: &config::Config) {
+    for key in &config.unknown_keys {
+        warn(&format!(
+            "ignoring unknown config key `{key}` — check the spelling, or update roughly"
+        ));
+    }
+}
+
 /// The `[check] exclude` matcher: gitignore-style patterns anchored at the
 /// config file's directory (the walk target's directory when no config file
 /// exists). The anchor is canonicalized so matching agrees with the
@@ -716,6 +728,7 @@ pub fn fmt(
                 error(&err.to_string());
                 CommandError
             })?;
+            warn_unknown_config_keys(&config);
             // `[check] exclude` scopes analysis, not formatting: fmt walks
             // everything, matching the key's name and the formatter's speed.
             let paths = collect_r_files(file, None)?;

@@ -19,12 +19,18 @@ pub struct Config {
     /// relative patterns like `[check] exclude`. `None` for the built-in
     /// default configuration.
     pub source_directory: Option<PathBuf>,
+    /// Keys the loaded file set that this version does not know, in file
+    /// order (e.g. `check.excluded`). The config still loads — forward
+    /// compatibility for files written against newer versions — and hosts
+    /// surface these as visible warnings. Wrong TYPES on known keys remain
+    /// hard errors.
+    pub unknown_keys: Vec<String>,
 }
 
 /// Which diagnostic classes are published. Every class is computed on demand
 /// for IDE features regardless; these gate only what is reported.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+#[serde(default, rename_all = "kebab-case")]
 pub struct CheckConfig {
     /// Surface unused-local-binding warnings (on by default; `unused = false`
     /// under `[check]` opts out).
@@ -91,8 +97,16 @@ impl Config {
     }
 
     pub fn from_toml_str(text: &str) -> Result<Config, ConfigError> {
-        match toml::from_str::<ConfigToml>(text) {
-            Ok(config) => Ok(config.to_config()),
+        let deserializer = toml::de::Deserializer::new(text);
+        let mut unknown_keys = Vec::new();
+        match serde_ignored::deserialize::<_, _, ConfigToml>(deserializer, |path| {
+            unknown_keys.push(path.to_string())
+        }) {
+            Ok(config) => {
+                let mut config = config.to_config();
+                config.unknown_keys = unknown_keys;
+                Ok(config)
+            }
             Err(error) => Err(ConfigError::Invalid(ConfigParseError::new(&error, text))),
         }
     }
@@ -231,7 +245,7 @@ fn line_and_column(text: &str, offset: usize) -> (usize, usize) {
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct ConfigToml {
     pub case: Option<NameStyle>, // kept for backwards compatibility
     pub spaces: Option<usize>,   // kept for backwards compatibility
@@ -253,6 +267,7 @@ impl ConfigToml {
             lint: self.lint,
             check: self.check,
             source_directory: None,
+            unknown_keys: Vec::new(),
         }
     }
 }
@@ -375,29 +390,28 @@ mod tests {
     }
 
     #[test]
-    fn unknown_top_level_key_is_rejected_with_location() {
-        let message = parse_error("strict = true\n");
-        assert!(message.contains("unknown field `strict`"), "{message}");
-        assert!(message.contains("at line 1, column 1"), "{message}");
+    fn unknown_keys_warn_but_load() {
+        let config = parse("strict = true\n[check]\ntyping = true\nstric = true\n");
+        assert_eq!(config.unknown_keys, ["strict", "check.stric"]);
+        assert!(
+            config.check.typing,
+            "the known keys around an unknown one still apply"
+        );
     }
 
     #[test]
-    fn unknown_key_in_each_section_is_rejected() {
-        let format = parse_error("[format]\nindent = 4\n");
-        assert!(
-            format.contains("unknown field `indent`") && format.contains("line 2"),
-            "{format}"
+    fn unknown_keys_in_each_section_are_recorded() {
+        let config = parse("[format]\nindent = 4\n[lint]\nstyle = \"x\"\n[check]\nstric = true\n");
+        assert_eq!(
+            config.unknown_keys,
+            ["format.indent", "lint.style", "check.stric"]
         );
-        let lint = parse_error("[lint]\nstyle = \"snake_case\"\n");
-        assert!(
-            lint.contains("unknown field `style`") && lint.contains("line 2"),
-            "{lint}"
-        );
-        let check = parse_error("[check]\ntyping = true\nstric = true\n");
-        assert!(
-            check.contains("unknown field `stric`") && check.contains("line 3"),
-            "{check}"
-        );
+    }
+
+    #[test]
+    fn wrong_type_on_known_key_stays_a_hard_error() {
+        let message = parse_error("[check]\ntyping = \"yes\"\n");
+        assert!(message.contains("expected a boolean"), "{message}");
     }
 
     #[test]
@@ -426,12 +440,12 @@ mod tests {
     fn from_path_names_the_file_in_errors() {
         let directory = tempfile::tempdir().expect("temp dir");
         let config_path = directory.path().join(CONFIG_FILE_NAME);
-        std::fs::write(&config_path, "debug = 1\n").expect("write config");
+        std::fs::write(&config_path, "[check]\ntyping = 1\n").expect("write config");
         let message = Config::from_path(&config_path)
             .expect_err("expected the config to be rejected")
             .to_string();
         assert!(message.contains("roughly.toml"), "{message}");
-        assert!(message.contains("at line 1"), "{message}");
+        assert!(message.contains("at line 2"), "{message}");
     }
 
     #[test]

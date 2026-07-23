@@ -83,10 +83,10 @@ Type *inference* always runs — it powers editor features such as hover types, 
 
 ## Invalid Configuration
 
-`roughly.toml` is validated strictly: an unknown key, a misspelled key (for example `naming_style` instead of `naming-style`), or a value of the wrong type is an error. The message names the file and points at the offending line and column, for example:
+Unknown keys — a misspelled key, or a key from a newer roughly version — are **not** errors: the tool warns visibly (a CLI warning; an editor notification), ignores the key, and honors the rest of the file, so a config written against a newer version still starts an older tool. A value of the wrong **type** on a known key remains a hard error. The error message names the file and points at the offending line and column, for example:
 
 ```
-invalid config in /path/to/roughly.toml at line 2, column 1: unknown field `naming_style`, expected `naming-style`
+invalid config in /path/to/roughly.toml at line 2, column 10: expected a boolean for `typing`
 ```
 
 Where the error surfaces:

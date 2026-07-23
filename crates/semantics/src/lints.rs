@@ -34,7 +34,7 @@ pub enum NameStyle {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize)]
-#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+#[serde(default, rename_all = "kebab-case")]
 pub struct LintConfig {
     /// `naming-style` is configured by its style value (`None` disables it).
     pub naming_style: Option<NameStyle>,

@@ -764,7 +764,7 @@ async fn workspace_root_comes_from_the_client_not_the_process_cwd() {
 
 #[tokio::test]
 async fn malformed_config_falls_back_to_defaults_and_reports() {
-    let mut context = setup_test(&[("roughly.toml", "debug = 1\n")]).await;
+    let mut context = setup_test(&[("roughly.toml", "[check]\ntyping = 1\n")]).await;
     let message = tokio::time::timeout(TIMEOUT, context.messages_receiver.recv())
         .await
         .expect("timed out waiting for the config error message")
@@ -2236,8 +2236,11 @@ async fn config_reload_failure_keeps_previous_config_and_reports() {
         .await;
     drain_diagnostics(&mut context.diagnostics_receiver).await;
 
-    std::fs::write(context.workspace_dir.join("roughly.toml"), "debug = 1\n")
-        .expect("write broken config");
+    std::fs::write(
+        context.workspace_dir.join("roughly.toml"),
+        "[check]\ntyping = 1\n",
+    )
+    .expect("write broken config");
     context.notify_watched_file_changed("roughly.toml", FileChangeType::CHANGED);
 
     let message = tokio::time::timeout(TIMEOUT, context.messages_receiver.recv())
@@ -2276,7 +2279,7 @@ async fn config_reload_failure_keeps_previous_config_and_reports() {
 
 #[tokio::test]
 async fn malformed_config_publishes_a_diagnostic_on_the_config_file() {
-    let mut context = setup_test(&[("roughly.toml", "debug = 1\n")]).await;
+    let mut context = setup_test(&[("roughly.toml", "[check]\ntyping = 1\n")]).await;
     let config_uri = context.workspace_uri("roughly.toml");
     let published =
         recv_first_diagnostics(&mut context.diagnostics_receiver, &config_uri, TIMEOUT).await;

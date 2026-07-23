@@ -1181,6 +1181,7 @@ impl Worker {
                     Ok(config) => {
                         config_changed |= config != self.config;
                         self.config = config;
+                        self.report_unknown_config_keys();
                         self.publish_config_diagnostics(None);
                     }
                     Err(error) => {
@@ -1237,6 +1238,7 @@ impl Worker {
                 .and_then(|path| Config::from_path(path).err());
             self.publish_config_diagnostics(location.as_ref());
         }
+        self.report_unknown_config_keys();
         self.register_file_watchers();
     }
 
@@ -1500,6 +1502,35 @@ impl Worker {
         let _ = client.show_message(lsp_types::ShowMessageParams {
             typ: lsp_types::MessageType::ERROR,
             message: message.to_owned(),
+        });
+    }
+
+    /// Unknown config keys warn visibly but never block startup or a reload:
+    /// the rest of the file is honored (forward compatibility for configs
+    /// written against newer versions).
+    fn report_unknown_config_keys(&self) {
+        if self.config.unknown_keys.is_empty() {
+            return;
+        }
+        let keys = self
+            .config
+            .unknown_keys
+            .iter()
+            .map(|key| format!("`{key}`"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut client = self.client.clone();
+        let _ = client.show_message(lsp_types::ShowMessageParams {
+            typ: lsp_types::MessageType::WARNING,
+            message: format!(
+                "roughly.toml sets {keys}, which this version of roughly does not know — \
+                 ignoring {}. Check the spelling, or update roughly.",
+                if self.config.unknown_keys.len() == 1 {
+                    "it"
+                } else {
+                    "them"
+                }
+            ),
         });
     }
 }

@@ -336,8 +336,31 @@ fn check_min_severity_error_ignores_warnings() {
 }
 
 #[test]
+fn check_unknown_config_key_warns_but_starts() {
+    let directory = project(&[
+        ("clean.R", "x <- 1\nprint(x)\n"),
+        ("roughly.toml", "[check]\nstric = true\n"),
+    ]);
+    let output = roughly(directory.path(), &["check", "clean.R"]);
+    assert_eq!(
+        exit_code(&output),
+        0,
+        "an unknown key must not block the run: {}",
+        stderr(&output)
+    );
+    assert!(
+        stderr(&output).contains("ignoring unknown config key `check.stric`"),
+        "the unknown key warns visibly: {}",
+        stderr(&output)
+    );
+}
+
+#[test]
 fn check_invalid_config_exits_two() {
-    let directory = project(&[("clean.R", "x <- 1\n"), ("roughly.toml", "debug = 1\n")]);
+    let directory = project(&[
+        ("clean.R", "x <- 1\n"),
+        ("roughly.toml", "[check]\ntyping = 1\n"),
+    ]);
 
     let check = roughly(directory.path(), &["check", "clean.R"]);
     assert_eq!(exit_code(&check), 2, "stderr: {}", stderr(&check));

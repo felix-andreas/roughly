@@ -14,7 +14,7 @@
 use syntax::{SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken, TextRange};
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize)]
-#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+#[serde(default, rename_all = "kebab-case")]
 pub struct Config {
     pub indent_width: usize,
     pub line_ending: LineEnding,

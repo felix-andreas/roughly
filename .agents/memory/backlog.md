@@ -24,11 +24,8 @@
 
 ## Open — editor & polish
 
-- **CLI error rendering (user ask):** the `roughly` error messages are serviceable but not at the diagnostics bar. Evaluate `miette` (or similar) for the human rendering — adopt only if the dependency weight is small; otherwise improve the handrolled renderer. Agent's call; record the decision.
-- **`--experimental-features` visibility (user ask):** the flag is clap-global, so it renders in every subcommand's help. Keep it accepted everywhere but shown only once (root help), however clap allows that cleanly.
 - **`scripts/` to inline cargo scripts (user ask):** convert the shell/python helpers to single-file cargo scripts where they survive; delete the ones no longer needed (e.g. create-large-codebase, get-node-types.py).
 
-- **Unknown config keys must not kill startup (user ask):** an unrecognized configuration key/value should surface as a visible warning (editor notification; CLI note) while the tool starts with the rest of the config honored — forward compatibility for configs written against newer versions. Genuine type errors on known keys keep their current diagnostics.
 - Hover type fences (user-confirmed: no highlighting in current editor builds): the server tags the fences `roughly-type` and the VS Code extension in-repo ships a grammar for that id — needs a released extension update to reach users. Zed renders the fence plain until its extension registers an equivalent fence language (tree-sitter grammar required); consider falling back to tagging fences `r` for Zed if that proves distant.
 
 ## Open — structure & performance
