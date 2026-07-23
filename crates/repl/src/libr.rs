@@ -57,10 +57,14 @@ pub struct RApi {
     def_params_ex: unsafe extern "C" fn(*mut Rstart, c_int) -> c_int,
     #[cfg(windows)]
     set_params: unsafe extern "C" fn(*mut Rstart),
+    /// Lives in `Rgraphapp.dll`, not `R.dll`; required — `readconsolecfg`
+    /// dereferences graphapp state and crashes when it never ran.
     #[cfg(windows)]
-    ga_initapp: Option<unsafe extern "C" fn(c_int, *mut c_void) -> c_int>,
+    ga_initapp: unsafe extern "C" fn(c_int, *mut c_void) -> c_int,
     #[cfg(windows)]
     readconsolecfg: unsafe extern "C" fn(),
+    #[cfg(windows)]
+    get_r_user: unsafe extern "C" fn() -> *const c_char,
     #[cfg(windows)]
     character_mode: *mut c_int,
     #[cfg(windows)]
@@ -201,7 +205,7 @@ pub fn load() -> Result<RApi, ReplError> {
     if let Ok(joined) = std::env::join_paths(entries) {
         unsafe { std::env::set_var("PATH", joined) };
     }
-    for sibling in ["Rblas.dll", "Rlapack.dll", "Riconv.dll", "Rgraphapp.dll"] {
+    for sibling in ["Rblas.dll", "Rlapack.dll", "Riconv.dll"] {
         let candidate = library_directory.join(sibling);
         if candidate.exists()
             && let Ok(loaded) = unsafe { libloading::Library::new(&candidate) }
@@ -209,6 +213,17 @@ pub fn load() -> Result<RApi, ReplError> {
             Box::leak(Box::new(loaded));
         }
     }
+    // Unlike the best-effort preloads above, graphapp is a hard requirement:
+    // `GA_initapp` is exported here (NOT by R.dll) and console setup crashes
+    // when it never ran.
+    let graphapp_path = library_directory.join("Rgraphapp.dll");
+    let graphapp = unsafe { libloading::Library::new(&graphapp_path) }.map_err(|error| {
+        ReplError(format!(
+            "failed to load the R graphapp library at {}: {error}",
+            graphapp_path.display()
+        ))
+    })?;
+    let graphapp: &'static libloading::Library = Box::leak(Box::new(graphapp));
     let library = unsafe { libloading::Library::new(&library_path) }.map_err(|error| {
         ReplError(format!(
             "failed to load the R library at {}: {error}",
@@ -224,8 +239,9 @@ pub fn load() -> Result<RApi, ReplError> {
         cmdlineoptions: symbol(library, &library_path, "cmdlineoptions")?,
         def_params_ex: symbol(library, &library_path, "R_DefParamsEx")?,
         set_params: symbol(library, &library_path, "R_SetParams")?,
-        ga_initapp: symbol(library, &library_path, "GA_initapp").ok(),
+        ga_initapp: symbol(graphapp, &graphapp_path, "GA_initapp")?,
         readconsolecfg: symbol(library, &library_path, "readconsolecfg")?,
+        get_r_user: symbol(library, &library_path, "getRUser")?,
         character_mode: symbol(library, &library_path, "CharacterMode")?,
         user_break: symbol(library, &library_path, "UserBreak")?,
         _library: library,
@@ -279,6 +295,7 @@ impl RApi {
         // R re-derives R_HOME through its own lookup; export what we found
         // so both agree.
         unsafe { std::env::set_var("R_HOME", &self.r_home) };
+        export_wrapper_path_vars(&self.r_home);
 
         let arguments = ["repl", "--interactive", "--no-save", "--no-restore-data"];
         let owned: Vec<CString> = arguments
@@ -312,11 +329,10 @@ impl RApi {
 
     /// Windows initialization goes through the `Rstart` struct: defaults
     /// from `R_DefParamsEx` (its version argument makes R validate the
-    /// layout), our console callbacks on top, `R_SetParams`, then the
-    /// `CharacterMode` global flips from `RGui` to `LinkDLL` BEFORE
-    /// `setup_Rmainloop` — that keeps the RGui callback wiring while
-    /// avoiding `do_system`'s `SetStdHandle` invalidation, which would hang
-    /// `system()` calls.
+    /// layout), our console callbacks on top, `R_SetParams`, graphapp +
+    /// console configuration, then the `CharacterMode` global flips from
+    /// `RGui` to `LinkDLL` before `setup_Rmainloop` (see the comment at the
+    /// flip).
     #[cfg(windows)]
     pub fn initialize(
         &self,
@@ -329,9 +345,19 @@ impl RApi {
 
         let rhome = CString::new(self.r_home.to_string_lossy().into_owned())
             .map_err(|_| ReplError("R_HOME contains a NUL byte".to_owned()))?;
-        let home = std::env::var("USERPROFILE").unwrap_or_else(|_| ".".to_owned());
-        let home = CString::new(home)
-            .map_err(|_| ReplError("USERPROFILE contains a NUL byte".to_owned()))?;
+        // R's `~` is NOT the Win32 profile directory: `getRUser` follows R's
+        // own search order (R_USER, HOME, the Documents folder, then
+        // HOMEDRIVE+HOMEPATH), so `~` and the `R_LIBS_USER` default resolve
+        // exactly as in stock R. The bytes pass through in the native
+        // encoding R hands out and expects back.
+        let r_user = unsafe { (self.get_r_user)() };
+        let home = if r_user.is_null() {
+            CString::new(std::env::var("USERPROFILE").unwrap_or_else(|_| ".".to_owned()))
+                .map_err(|_| ReplError("USERPROFILE contains a NUL byte".to_owned()))?
+        } else {
+            CString::new(unsafe { CStr::from_ptr(r_user) }.to_bytes())
+                .expect("a C string has no interior NUL")
+        };
         // R keeps the pointers; the strings live for the process.
         let rhome: &'static CString = Box::leak(Box::new(rhome));
         let home: &'static CString = Box::leak(Box::new(home));
@@ -341,7 +367,8 @@ impl RApi {
             let mut start = std::mem::zeroed::<Rstart>();
             if (self.def_params_ex)(&mut start, RSTART_VERSION) != 0 {
                 return Err(ReplError(
-                    "this R does not accept the Rstart layout this build speaks                      (R >= 4.2 is required on Windows)"
+                    "this R does not accept the Rstart layout this build speaks \
+                     (R >= 4.2 is required on Windows)"
                         .to_owned(),
                 ));
             }
@@ -360,11 +387,14 @@ impl RApi {
             start.busy = Some(no_op_busy);
             start.character_mode = UI_MODE_R_GUI;
             (self.set_params)(&mut start);
-            *self.character_mode = UI_MODE_LINK_DLL;
-            if let Some(ga_initapp) = self.ga_initapp {
-                ga_initapp(0, std::ptr::null_mut());
-            }
+            (self.ga_initapp)(0, std::ptr::null_mut());
             (self.readconsolecfg)();
+            // `do_system` checks this mode: under `RGui` it invalidates the
+            // standard handles (`SetStdHandle`) before spawning, which hangs
+            // `system()`. Flipping to `LinkDLL` once the console is
+            // configured keeps the RGui callback wiring and spares the
+            // handles.
+            *self.character_mode = UI_MODE_LINK_DLL;
             INTERRUPTS_PENDING.store(self.interrupts_pending, std::sync::atomic::Ordering::SeqCst);
             USER_BREAK.store(self.user_break, std::sync::atomic::Ordering::SeqCst);
             (self.setup_mainloop)();
@@ -445,6 +475,47 @@ fn discover_r_home() -> Result<PathBuf, ReplError> {
     Ok(path)
 }
 
+/// Launching `R` normally goes through its shell wrapper (`{R_HOME}/bin/R`),
+/// which exports `R_SHARE_DIR`/`R_INCLUDE_DIR`/`R_DOC_DIR`; embedding
+/// bypasses the wrapper. On distributions that relocate those directories
+/// (Fedora, RHEL), `R.home("share")` and friends would then fall back to
+/// nonexistent `{R_HOME}/<dir>` paths — so recover the values from the
+/// wrapper's plain `VAR=value` lines (substituted literally when R was
+/// installed). Best-effort by design: without the wrapper, R's own fallback
+/// is correct on standard layouts. Asking R itself (`R --vanilla -s`) would
+/// cost a few hundred milliseconds of startup; reading the script does not.
+#[cfg(unix)]
+fn export_wrapper_path_vars(r_home: &Path) {
+    let Ok(wrapper) = std::fs::read_to_string(r_home.join("bin").join("R")) else {
+        return;
+    };
+    for name in ["R_SHARE_DIR", "R_INCLUDE_DIR", "R_DOC_DIR"] {
+        if std::env::var_os(name).is_some() {
+            continue;
+        }
+        if let Some(value) = wrapper_path_var(&wrapper, name) {
+            unsafe { std::env::set_var(name, value) };
+        }
+    }
+}
+
+/// The value of a plain `NAME=value` line in the wrapper script, quotes
+/// stripped. A value still containing `$` is an unsubstituted shell
+/// expression this parser cannot evaluate — skipped rather than exported
+/// verbatim.
+#[cfg(unix)]
+fn wrapper_path_var(script: &str, name: &str) -> Option<String> {
+    let value = script.lines().find_map(|line| {
+        let (key, value) = line.trim().split_once('=')?;
+        (key == name).then_some(value)
+    })?;
+    let value = value.trim_matches('\'').trim_matches('"');
+    if value.is_empty() || value.contains('$') {
+        return None;
+    }
+    Some(value.to_owned())
+}
+
 /// Unix: `{R_HOME}/lib/libR.{so,dylib}`. Absence almost always means an R
 /// built without `--enable-R-shlib`; say so.
 #[cfg(unix)]
@@ -511,6 +582,26 @@ mod tests {
             Some(value) => unsafe { std::env::set_var("R_HOME", value) },
             None => unsafe { std::env::remove_var("R_HOME") },
         }
+    }
+
+    #[test]
+    fn wrapper_path_vars_parse_plain_assignments_only() {
+        let script = "#!/bin/sh\n\
+             R_SHARE_DIR=/usr/share/R/share\n\
+             export R_SHARE_DIR\n\
+             R_INCLUDE_DIR=\"/usr/share/R/include\"\n\
+             R_DOC_DIR=${R_DOC_DIR-'/usr/share/R/doc'}\n";
+        assert_eq!(
+            wrapper_path_var(script, "R_SHARE_DIR").as_deref(),
+            Some("/usr/share/R/share")
+        );
+        assert_eq!(
+            wrapper_path_var(script, "R_INCLUDE_DIR").as_deref(),
+            Some("/usr/share/R/include")
+        );
+        // An unsubstituted shell expression must not be exported verbatim.
+        assert_eq!(wrapper_path_var(script, "R_DOC_DIR"), None);
+        assert_eq!(wrapper_path_var(script, "R_LIBS_USER"), None);
     }
 
     #[test]

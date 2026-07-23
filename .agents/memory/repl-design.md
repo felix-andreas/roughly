@@ -7,11 +7,11 @@ typed runtime-binding layer, the ReadConsole-hosted reedline console with
 lexer highlighting and conservative completeness, SIGINT interrupt routing,
 pty e2e tests (skip-if-no-R) in the roughly crate, the headless runner
 (`roughly run` / `repl --file`), vi keybindings, and the Windows embedding
-(compile-verified only — see its section). The full pty suite runs green
-against a real R (interactive evaluation, multiline, error stream, Ctrl-C
-interruption, both batch directions) — R installs in agent containers via
-apt + the CRAN repository, so the suite is runnable anywhere, not just on a
-developer machine. Two harness facts a rewrite must keep: the pty driver
+(verified on real Windows + R — see its section). The full pty suite runs
+green against a real R on Unix ptys AND Windows ConPTY (interactive
+evaluation, multiline, error stream, Ctrl-C interruption, both batch
+directions) — R installs in agent containers via apt + the CRAN repository,
+so the suite is runnable anywhere, not just on a developer machine. Two harness facts a rewrite must keep: the pty driver
 must *answer* reedline's cursor-position query (`ESC[6n` → `ESC[1;1R`) or
 the editor blocks before its first prompt, and interactive sessions must
 run serialized (in-session `SESSION_LOCK`) — concurrent R sessions on a
@@ -94,8 +94,14 @@ symbol by name, with per-symbol optionality:
    R_HOME already points into `Resources/`), `{R_HOME}/bin/x64/R.dll` on
    Windows. Fail with an actionable message naming `--enable-R-shlib` when the
    shared library is absent.
-4. Secondary vars (`R_SHARE_DIR`, `R_INCLUDE_DIR`, `R_DOC_DIR`) recovered by
-   one `R --vanilla -s` subprocess call at startup.
+4. Secondary vars (`R_SHARE_DIR`, `R_INCLUDE_DIR`, `R_DOC_DIR`) are exported
+   by R's shell wrapper (`{R_HOME}/bin/R`), which embedding bypasses; on
+   layouts that relocate those directories (Fedora, RHEL) `R.home("share")`
+   would otherwise resolve to nonexistent `{R_HOME}/<dir>` paths. Recovered
+   by parsing the wrapper's plain `VAR=value` lines (values are substituted
+   literally at R's install time; a subprocess asking R directly would cost
+   a few hundred milliseconds of startup). Unix-only — Windows R derives
+   them from `R_HOME` internally.
 
 ## Process shape and the console loop
 
@@ -135,39 +141,75 @@ symbol by name, with per-symbol optionality:
   WriteConsoleEx hook for R-level output, plus fd-level dup/pipe capture for
   C `printf` output that bypasses R's console.
 
-## Windows implementation (IMPLEMENTED per the plan below — compile- and clippy-verified against x86_64-pc-windows-gnu; NEVER run on real Windows+R, so the first Windows machine must smoke test `roughly repl` and `roughly run`)
+## Windows implementation (VERIFIED on real Windows + R 4.5.2: the full pty
+e2e suite runs green over ConPTY, plus `roughly run` exit codes, `system()`,
+`~` expansion, and `.Platform$GUI`)
 
 Windows R embedding does NOT use the Unix `ptr_R_ReadConsole` globals — it
-wires callbacks through the `Rstart` struct. The working recipe, verified
-against a production Rust console's source:
+wires callbacks through the `Rstart` struct. The working recipe (now
+machine-verified end to end):
 
 - **Load**: `{R_HOME}\bin\x64\R.dll` (plain `bin\` on ARM64) via
   `LoadLibrary`, after preloading the sibling DLLs (`Rblas`, `Rlapack`,
-  `Riconv`, `Rgraphapp`) so compiled-package imports resolve; Windows'
+  `Riconv` best-effort) so compiled-package imports resolve; Windows'
   per-module symbol lookup means no `RTLD_GLOBAL` equivalent is needed.
+  **`Rgraphapp.dll` is a hard requirement, not a best-effort preload: it —
+  not `R.dll` — exports `GA_initapp`, and skipping the call leaves graphapp
+  uninitialized, which crashes `readconsolecfg()` with an access violation**
+  (this exact miss was the original Windows-crash root cause: resolving
+  `GA_initapp` against `R.dll`, finding nothing, and treating it as
+  optional).
 - **Discovery**: `R_HOME` env, else `R.exe RHOME` from `PATH` (registry
   lookup can come later).
-- **Init order (load-bearing)**: `cmdlineoptions(0, [])` →
+- **Init order (load-bearing)**: `cmdlineoptions(1, [name])` →
   `R_DefParamsEx(&rstart, RSTART_VERSION)` (the version handshake makes R
   validate the struct layout — this replaces per-R-version struct
-  mirroring) → `R_common_command_line` → fill the callbacks
-  (`ReadConsole`, `WriteConsoleEx` with plain `WriteConsole` NULLed,
-  `ShowMessage`, `YesNoCancel`, `CallBack`, `Busy`, `Suicide`),
-  `R_Interactive = 1`, no init/site files, `rhome`/`home` paths →
-  `CharacterMode = RGui` so `R_SetParams` wires the callback set — then
-  switch to `LinkDLL` BEFORE `setup_Rmainloop`: keeps the RGui callback
-  wiring while avoiding `do_system`'s `SetStdHandle` invalidation (which
-  hangs `system()` calls) → `GA_initapp(0, NULL)` when the symbol exists →
-  `readconsolecfg()` → `setup_Rmainloop()` → `run_Rmainloop()`.
+  mirroring) → fill the callbacks (`ReadConsole`, `WriteConsoleEx` with
+  plain `WriteConsole` NULLed, `ShowMessage`, `YesNoCancel`, `CallBack`,
+  `Busy`, `Suicide`), `R_Interactive = 1`, `rhome` from discovery and
+  `home` from R's own `getRUser()` (NOT `USERPROFILE`: R's `~` is the
+  Documents folder, and the `R_LIBS_USER` default hangs off it — the wrong
+  `home` silently loses the user's installed packages) →
+  `CharacterMode = RGui` so `R_SetParams` wires the callback set →
+  `GA_initapp(0, NULL)` (from `Rgraphapp.dll`, required) →
+  `readconsolecfg()` → only then switch `CharacterMode` to `LinkDLL`,
+  BEFORE `setup_Rmainloop`: keeps the RGui callback wiring while avoiding
+  `do_system`'s `SetStdHandle` invalidation (which hangs `system()` calls;
+  verified un-hung) → `setup_Rmainloop()` → `run_Rmainloop()`.
+- **`.Platform$GUI`**: RGui-mode init stamps it `"Rgui"`, and the LinkDLL
+  flip does not retroactively update it — packages take `"Rgui"` as license
+  to call Rgui-only GUI functions (menus, dialogs) that fail here. The
+  console feeds a first hidden line that rebinds it to `"roughly"` in
+  `baseenv()` (unlock/relock `.Platform`) before any user input. Known gap:
+  R sources the startup profiles before the first console read, so profile
+  code still sees `"Rgui"`; fixing that would mean suppressing native
+  profile loading and sourcing them manually after init — deliberately not
+  taken on.
+- **Encoding**: `roughly.exe` embeds a Windows application manifest
+  declaring UTF-8 as the active code page (`crates/roughly/build.rs`, MSVC
+  linker `/MANIFESTINPUT` — no build dependency). Embedded R (4.2+, UCRT)
+  takes its native encoding from the host process's code page and `R.exe`
+  declares UTF-8 the same way; without the manifest R runs in the system
+  ANSI code page on any machine that has not enabled UTF-8 system-wide, and
+  text handling silently diverges from stock R. Machines WITH the
+  system-wide UTF-8 option mask the gap — verify encoding claims on a
+  default-locale machine (`l10n_info()` must report codepage 65001).
+- **Line endings**: every path into the console feed normalizes CRLF (and
+  lone CR) to `\n` — R's parser reports a raw `\r` as "unexpected invalid
+  token". Two real carriers: script files on Windows, and the editor's
+  multiline buffer, which joins continuation lines with `\r\n` there
+  (single-line interactive input never carries one).
 - **Interrupt**: a `SetConsoleCtrlHandler` handler sets BOTH `UserBreak`
   (the front-end break flag) and `R_interrupts_pending` (the deferred
-  flag); clear both when handling.
+  flag); clear both when handling. Ctrl-C over ConPTY reaches the handler
+  only while R evaluates (raw editor mode disables `ENABLE_PROCESSED_INPUT`),
+  exactly as intended; the e2e interrupt test passes.
 - **Editor**: reedline runs on Windows terminals; the field carries a
   crossterm patch for VT input handling — expect that caveat at the editor
   layer.
-- **Verification loop**: no container here has Windows or R —
-  compile-check with `cargo check --target x86_64-pc-windows-gnu` per
-  change, and the real smoke test runs on a user machine.
+- **E2e**: the pty suite drives the same harness through ConPTY
+  (`portable-pty`'s native pty), so REPL-touching changes are verifiable on
+  Windows machines with R exactly like on Unix.
 
 ## Console UX backlog (surveyed against the field)
 

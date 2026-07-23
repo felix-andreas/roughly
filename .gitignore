@@ -14,7 +14,10 @@ node_modules
 .local
 .rlib
 r-examples
-R*/
+# Local R installations at the repo root only. Unanchored `R*/` would match
+# ANY directory starting with `r` on case-insensitive filesystems (Windows,
+# macOS) — including `crates/roughly/`, silently dropping new files there.
+/R*/
 roughly.toml
 
 # Claude Code local harness state (config, worktrees)

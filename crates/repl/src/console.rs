@@ -33,9 +33,24 @@ use syntax::SyntaxKind;
 
 pub fn run(api: RApi, options: crate::RunOptions) -> Result<(), ReplError> {
     let mut console = Console::new(options.keybindings, options.batch, options.completer);
+    // Windows console setup runs in RGui mode (the callback wiring requires
+    // it), which stamps `.Platform$GUI` as "Rgui" — packages take that as
+    // license to call Rgui-only GUI functions (menus, dialogs) that fail
+    // here. Rebind the honest front-end name before any user input runs.
+    // R sources the startup profiles before the first console read, so
+    // profile code still sees "Rgui" — an accepted gap.
+    #[cfg(windows)]
+    console.pending.extend(
+        b"invisible(local({ e <- baseenv(); locked <- bindingIsLocked(\".Platform\", e); \
+          if (locked) unlockBinding(\".Platform\", e); \
+          p <- get(\".Platform\", envir = e); p$GUI <- \"roughly\"; \
+          assign(\".Platform\", p, envir = e); \
+          if (locked) lockBinding(\".Platform\", e) }))\n",
+    );
     if let Some(path) = &options.file {
         let script = std::fs::read_to_string(path)
             .map_err(|error| ReplError(format!("cannot read {}: {error}", path.display())))?;
+        let script = normalize_line_endings(&script);
         if options.batch {
             // Rscript-like halt semantics without any new C surface: a
             // top-level error quits the session with a failing status, which
@@ -152,6 +167,15 @@ impl Console {
     }
 }
 
+/// The console feed must carry only `\n`: a real terminal never sends `\r`,
+/// and R's parser reports a raw one as an invalid token. Script files carry
+/// CRLF on Windows, and so does the editor's multiline buffer there —
+/// normalize every path into the feed, treating CRLF (and classic lone CR)
+/// as line endings exactly like R's own text-mode connections do.
+fn normalize_line_endings(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
 fn history_file() -> Option<std::path::PathBuf> {
     // Per-platform data directory (XDG on Linux, Application Support on
     // macOS, roaming AppData on Windows). Persistence is best-effort: on
@@ -192,6 +216,7 @@ fn read_console_inner(prompt: *const c_char, buffer: *mut c_uchar, length: c_int
             let prompt_text = unsafe { libr::prompt_text(prompt) };
             match console.editor.read_line(&RPrompt { text: prompt_text }) {
                 Ok(Signal::Success(line)) => {
+                    let line = normalize_line_endings(&line);
                     if let Some(completer) = &console.completer {
                         completer
                             .lock()

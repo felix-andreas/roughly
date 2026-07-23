@@ -72,6 +72,7 @@
               # `commonCargoSources` filters out and must be added explicitly.
               ./types
               ./crates/format/tests/format
+              ./crates/roughly/roughly.exe.manifest
             ];
           };
 
@@ -127,9 +128,32 @@
                 pkgs.zig
               ];
 
-              preBuild = ''
-                export XDG_CACHE_HOME="$TMPDIR/.cache"
-              '';
+              preBuild =
+                ''
+                  export XDG_CACHE_HOME="$TMPDIR/.cache"
+                ''
+                # The winapi crate (pulled in through reedline → crossterm)
+                # links the Windows "synchronization" API-set import library
+                # (the WaitOnAddress family). cargo-zigbuild disables winapi's
+                # bundled import libraries (they are incompatible with zig's
+                # lld), and zig's bundled mingw-w64 ships no synchronization
+                # import library either — so synthesize one and put it on the
+                # library search path.
+                + pkgs.lib.optionalString (target == "x86_64-pc-windows-gnu") ''
+                  synchronization_lib_dir="$TMPDIR/synchronization-lib"
+                  mkdir -p "$synchronization_lib_dir"
+                  cat > "$synchronization_lib_dir/synchronization.def" <<'EOF'
+                  LIBRARY "api-ms-win-core-synch-l1-2-0.dll"
+                  EXPORTS
+                  WaitOnAddress
+                  WakeByAddressAll
+                  WakeByAddressSingle
+                  EOF
+                  zig dlltool -m i386:x86-64 \
+                    -d "$synchronization_lib_dir/synchronization.def" \
+                    -l "$synchronization_lib_dir/libsynchronization.a"
+                  export RUSTFLAGS="-L native=$synchronization_lib_dir''${RUSTFLAGS:+ $RUSTFLAGS}"
+                '';
 
               doCheck = false;
             };

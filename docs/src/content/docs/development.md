@@ -30,11 +30,11 @@ may be duplicated freely instead.
 **`crates/repl`** backs `roughly repl`, an interactive R console that embeds the system R
 **without any build-time link dependency**: the R shared library is located (`R_HOME`, or
 `R RHOME` from `PATH`) and loaded at runtime, so the whole workspace builds and its unit tests run
-on machines with no R at all. Only *running* the console needs R, and running is Unix-only for
-now: the crate compiles on every platform, but on Windows `roughly repl` reports that the port
-(a different embedding API) is still pending. Its end-to-end tests
-(`cargo test -p roughly --test test_repl_e2e`) drive the real binary through a pseudo-terminal and
-skip cleanly where no R exists — run them locally before touching the REPL. The predecessor
+on machines with no R at all. Only *running* the console needs R; it runs on Unix (through the
+`ptr_R_ReadConsole` hook globals) and on Windows (through the `Rstart` callback struct). Its
+end-to-end tests (`cargo test -p roughly --test test_repl_e2e`) drive the real binary through a
+pseudo-terminal (a Unix pty or Windows ConPTY) and skip cleanly where no R exists — run them
+locally before touching the REPL. The predecessor
 experiment (`legacy/rofy`, which linked R at build time through `extendr`) stays frozen until the
 new console reaches feature parity.
 
