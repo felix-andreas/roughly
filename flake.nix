@@ -109,6 +109,12 @@
             commonArgsLinux
             // {
               cargoArtifacts = cargoArtifactsLinux;
+              # The LSP tests exercise stub materialization, which writes to
+              # the user cache directory — the sandbox's HOME is not
+              # writable, so give it a real one.
+              preCheck = ''
+                export XDG_CACHE_HOME="$TMPDIR/.cache"
+              '';
             }
           );
 
