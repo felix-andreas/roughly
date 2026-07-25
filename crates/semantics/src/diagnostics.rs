@@ -137,7 +137,12 @@ fn dangling_annotation_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnos
                 "A `#:` typing comment cannot be separated from its expression by an empty line."
             }
             crate::AnnotationTarget::Dangling => {
-                "A `#:` typing comment must be followed immediately by an expression."
+                // Overwhelmingly this is a `#:` block placed above a roxygen2
+                // block instead of below it, so the message names the fix
+                // rather than only the rule: every documented function in a
+                // package has roxygen above it, and the order is the one thing
+                // a reader cannot guess.
+                "A `#:` typing comment must be followed immediately by an expression — put it directly above the definition, below any roxygen2 block."
             }
         };
         diagnostics.push(Diagnostic {

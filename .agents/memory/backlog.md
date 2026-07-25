@@ -49,8 +49,7 @@ below, ranked by how often a real user hits it.
   closure re-entry is unmodelled, so the `if (!is.null(cache)) return(cache); cache <<- v` memo idiom
   yields `T | NULL`; a generic parameter cannot have a non-`NULL` default; the `unused` write-then-`break`
   false positive is NOT reproducible (verified across `for`/`while`/`repeat` and both used and genuinely
-  dead writes) — drop it unless a concrete shape resurfaces; `#:` cannot coexist with a
-  roxygen2 block; `unused-parameter` fires on signatures R mandates; `export(name)` in `NAMESPACE`
+  dead writes) — drop it unless a concrete shape resurfaces; `export(name)` in `NAMESPACE`
   is not validated; hover renders a polymorphic scheme without its `<...>` binder while inlay hints
   include it; config type errors name the line and column but not the key; no `--fix`, no stdin, and
   no CLI way to ask "what type is this?" (which makes debugging an inference surprise guesswork for a

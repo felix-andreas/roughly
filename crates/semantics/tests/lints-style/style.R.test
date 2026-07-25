@@ -50,6 +50,17 @@ f <- function(...) 1
 #++++
 clean
 
+#---- s3_method_formals_are_mandated_not_reported
+format.myclass <- function(x, ...) "myclass"
+as.character.myclass <- function(x, ...) "myclass"
+#++++
+clean
+
+#---- an_ordinary_dotted_name_is_still_reported
+my.helper <- function(count) 1
+#++++
+22..27 warning[unused-parameter] parameter `count` is never used.
+
 #---- closure_read_counts
 f <- function(count) {
   g <- function() count

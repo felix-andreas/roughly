@@ -259,6 +259,28 @@ render <- function(render_count, count, label = "n") {
 Both styles produce the same signature; pick per function. The formatter keeps both
 styles tidy.
 
+### Alongside roxygen2
+
+A `#:` block attaches to the statement that follows it *immediately*, so in a documented
+package the annotation goes **last** — directly above the definition, below the roxygen2
+block:
+
+```r
+#' Add one to a count.
+#'
+#' @param count An integer.
+#' @return The incremented count.
+#' @export
+#: fn(count: integer) -> integer
+add_one <- function(count) count + 1L
+```
+
+The other order does not work, and says so: a roxygen line between the annotation and the
+definition breaks the attachment, and the `#:` block reports that it is dangling. The two
+notations are complementary rather than redundant — roxygen documents for humans and
+generates `.Rd`, `#:` states the types — so their `@param` entries are written separately
+and neither validates the other.
+
 ## Naming shapes: aliases and nominal types
 
 Structural types describe shape, but repeating `list{name: character, age: double}`

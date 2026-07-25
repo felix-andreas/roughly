@@ -60,7 +60,9 @@ shadows-namespace = "warn" # default off: same for names from other stub namespa
 
 `unused-parameter` is **off by default** — R signatures legitimately carry ignored formals (an S3
 method must match its generic's signature; callbacks receive arguments they ignore) — so it only
-speaks when a project opts in. Parameters named with a leading `.` or `_` are never reported.
+speaks when a project opts in. Parameters named with a leading `.` or `_` are never reported, and
+neither are the formals of an S3 method (`format.myclass`, `as.character.myclass`): R mandates that
+signature, so the author has no choice to make.
 
 `unused-import` is also **off by default**. When enabled, it flags an `importFrom(pkg, name)` in the
 package's `NAMESPACE` whose `name` appears in no checked source. Usage is a conservative token scan

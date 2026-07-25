@@ -54,7 +54,10 @@ Semantics checks enforce coding conventions and best practices that won't necess
 - **`boolean-shorthand`**: Use `TRUE` and `FALSE` over `T` and `F`
 - **`unused-parameter`** *(off by default)*: Flags function parameters no read ever uses. Off
   unless enabled in `roughly.toml` (`[lint] unused-parameter = "warn"`), because R signatures
-  legitimately carry ignored formals; `.`/`_`-prefixed names are never reported
+  legitimately carry ignored formals; `.`/`_`-prefixed names are never reported, and an S3
+  method's formals are never reported at all — `format.myclass(x, ...)` that ignores `x` is
+  matching its generic, which R requires. A name counts as an S3 method when the part before its
+  last dot is a name the standard-library corpus declares, so `my.helper` is still checked
 - **`unused-import`** *(off by default)*: Flags an `importFrom(pkg, name)` in the `NAMESPACE` whose
   `name` appears in no checked source. Off unless enabled (`[lint] unused-import = "warn"`); usage is
   a conservative token scan (a name used via `pkg::name` or an operator import like `%>%` counts), so

@@ -252,7 +252,7 @@ value <- 1L
 #: integer
 #++++
 value: integer
-12..22 error[annotation] A `#:` typing comment must be followed immediately by an expression.
+12..22 error[annotation] A `#:` typing comment must be followed immediately by an expression — put it directly above the definition, below any roxygen2 block.
 
 #---- blank_line_breaks_the_annotation
 #: integer
@@ -268,7 +268,7 @@ value: character
 value <- 1L
 #++++
 value: integer
-0..10 error[annotation] A `#:` typing comment must be followed immediately by an expression.
+0..10 error[annotation] A `#:` typing comment must be followed immediately by an expression — put it directly above the definition, below any roxygen2 block.
 
 #---- expanded_annotation_separated_by_blank_line_is_refused
 #: @param count {integer}
