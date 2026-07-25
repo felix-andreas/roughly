@@ -8,7 +8,7 @@
 
 use crate::check::{OperandExpectation, TypeError, TypeErrorKind};
 use crate::types::{Atomic, Constraint, FunctionType, Name, Ty, TyKind, TypeScheme};
-use crate::{Db, DocumentKind, Item, SourceFile, item_check, item_tree, parse};
+use crate::{Db, DocumentKind, SourceFile, item_check, item_tree, parse};
 use syntax::TextRange;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, salsa::SalsaValue)]
@@ -180,10 +180,11 @@ fn frame_slot_positions(db: &dyn Db, file: SourceFile) -> rustc_hash::FxHashMap<
 pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
     let mut diagnostics = parse_stage_diagnostics(db, file);
 
-    for (item_index, item) in item_tree(db, file).into_iter().enumerate() {
-        let Some(offset) = item_offset(db, item) else {
-            continue;
-        };
+    // Walk the spans, not the item tree: they already pair each item with its
+    // absolute range, so the offset needs no per-item lookup.
+    for (item_index, span) in crate::item_spans(db, file).iter().enumerate() {
+        let item = span.item;
+        let offset = span.range.start();
         let Some(check) = item_check(db, item) else {
             continue;
         };
@@ -1097,11 +1098,10 @@ fn script_unused_bindings(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
     // top-level frame slot the item creates (a conditional write inside a
     // top-level `for`/`while`/`if` binds the frame like any assignment).
     let mut reads: Vec<(usize, String, bool)> = Vec::new();
-    for (index, item) in item_tree(db, file).into_iter().enumerate() {
+    for (index, span) in crate::item_spans(db, file).iter().enumerate() {
+        let item = span.item;
+        let offset = span.range.start();
         let Some(naming) = crate::item_naming(db, item) else {
-            continue;
-        };
-        let Some(offset) = item_offset(db, item) else {
             continue;
         };
         let item_name = matches!(
@@ -1231,14 +1231,6 @@ fn script_unused_bindings(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
         .collect()
 }
 
-/// The absolute byte offset of an item's subtree inside its file.
-fn item_offset(db: &dyn Db, item: Item<'_>) -> Option<syntax::TextSize> {
-    crate::item_spans(db, *item.file(db))
-        .iter()
-        .find(|span| span.item == item)
-        .map(|span| span.range.start())
-}
-
 /// Strict-mode diagnostics: reports at `Unknown` origins, assembled
 /// separately so hosts publish them only under `[check] strict` or the
 /// per-file directive. An origin that is an assignment's value is phrased
@@ -1250,10 +1242,9 @@ pub fn strict_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
     use crate::hir::ExpressionKind;
 
     let mut diagnostics = Vec::new();
-    for item in item_tree(db, file) {
-        let Some(offset) = item_offset(db, item) else {
-            continue;
-        };
+    for span in crate::item_spans(db, file) {
+        let item = span.item;
+        let offset = span.range.start();
         let Some(check) = item_check(db, item) else {
             continue;
         };

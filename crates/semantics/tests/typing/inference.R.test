@@ -153,6 +153,29 @@ g: fn() -> logical[]
 h: Unknown
 73..81 error[type-mismatch] expected `integer`, found `character`
 
+#---- logical_operands_promote_to_integer_in_arithmetic
+f <- function() TRUE + TRUE
+g <- function() TRUE + 1L
+h <- function() TRUE + 1.5
+k <- function() c(TRUE, FALSE) * 2L
+#++++
+f: fn() -> integer
+g: fn() -> integer
+h: fn() -> double
+k: fn() -> integer[]
+
+#---- logical_compares_in_the_numeric_family
+f <- function() TRUE > 0
+g <- function() c(TRUE, FALSE) > 0L
+h <- function() TRUE == 1L
+k <- function() TRUE < "a"
+#++++
+f: fn() -> logical
+g: fn() -> logical[]
+h: fn() -> logical
+k: Unknown
+104..114 error[type-mismatch] expected `logical`, found `character`
+
 #---- range_operator_shapes
 f <- function() 1L:10L
 g <- function() 1:10

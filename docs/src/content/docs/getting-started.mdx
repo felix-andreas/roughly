@@ -16,13 +16,20 @@ parse_count <- function(raw) {
 }
 ```
 
-Roughly catches it the moment you type it, with no annotations, no setup beyond
-installing the extension, and no changes to your code:
+Turn the type checker on — one line of configuration, no annotations and no
+changes to your code — and Roughly catches it the moment you type it:
+
+```toml
+# roughly.toml
+[check]
+typing = true
+```
 
 ```text
-error[type-error] expected a numeric value (`integer` or `double`), found `integer | character`
---> 6:3-6:8
-|   count + 1L
+error[type-mismatch]: expected a numeric value (`integer` or `double`), found `integer | character`
+ --> parse.R:6:3
+6 |   count + 1L
+      ^^^^^
 ```
 
 That is the pitch in one example: **Roughly is a static type checker for R** — the
@@ -43,11 +50,12 @@ ratio <- function(numerator, denominator) {
 }
 
 ratio(1.0)
-# error[type-error] This call passes 1 positional argument(s), but the function accepts 2.
+# error[type-mismatch] this call supplies 1 argument, but the function requires 2
+#                      — a required argument is missing
 
 total <- 10L
 total(2L)
-# error[type-error] expected function, found `integer`
+# error[type-mismatch] this has type `integer`, which is not a function — it cannot be called
 ```
 
 And because the checker tracks variables through control flow the way R actually
@@ -67,7 +75,7 @@ render_row <- function(count, label) {
 }
 
 render_row("three", 3L)
-# error[type-error] expected `integer`, found `character`
+# error[type-mismatch] expected `integer`, found `character`
 ```
 
 Adoption is gradual by design: inference-only checking works with zero
@@ -114,13 +122,39 @@ Install the [VS Code extension](https://marketplace.visualstudio.com/items?itemN
 [installation page](/installation) for Zed, RStudio, the standalone CLI, and
 CI setup.
 
-Then, if you want the types:
+Hover, completion and go-to-definition work immediately. Type *errors* are
+opt-in, so add a `roughly.toml` next to your code when you want them:
 
 ```toml
 # roughly.toml
 [check]
 typing = true
 ```
+
+## Where Roughly looks
+
+Roughly analyses `.R` and `.r` files. `.Rmd`, `.qmd` and `.Rnw` are not
+analysed yet, and `source()` calls are not followed.
+
+Files directly under a `R/` directory are **package source files**: they share
+one namespace, so any one of them may call a function or reference a `#: @type`
+name declared in another, and their top-level definitions are treated as
+package-visible rather than unused. Every other `.R` file — a driver script at
+the project root, anything under `scripts/` or `inst/` — is a **script**: it is
+analysed on its own, top to bottom, and its unused top-level bindings are
+reported.
+
+So a project laid out like this gets cross-file resolution for free:
+
+```text
+roughly.toml
+R/load_data.R      # package source files: one shared namespace
+R/summarise.R
+run_analysis.R     # a script: analysed on its own
+```
+
+while the same files in a flat directory are each analysed in isolation, and a
+call to a helper defined in a sibling file reports `unresolved`.
 
 ## Where next
 

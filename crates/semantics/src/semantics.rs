@@ -291,20 +291,43 @@ pub(crate) fn resolve_item_node<'db>(
     db: &'db dyn Db,
     item: Item<'db>,
 ) -> Option<syntax::SyntaxNode> {
-    let file = *item.file(db);
-    let range = item_spans(db, file)
-        .iter()
-        .find(|span| span.item == item)
-        .map(|span| span.range)?;
-    let parse = parse(db, file);
+    let range = item_span_range(db, item)?;
+    let parse = parse(db, *item.file(db));
+    // Descend by range rather than scanning the root's children: every
+    // per-item query lands here, so a linear child walk makes a file of many
+    // top-level statements quadratic.
     parse
         .syntax_node()
-        .children()
-        .find(|node| node.text_range() == range)
+        .child_or_token_at_range(range)
+        .and_then(|element| element.into_node())
+        .filter(|node| node.text_range() == range)
+}
+
+/// One item's current absolute span, as a hash probe. Every per-item query
+/// needs it, so scanning `item_spans` here would make a file of many
+/// top-level statements quadratic.
+pub(crate) fn item_span_range<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<syntax::TextRange> {
+    let file = *item.file(db);
+    let index = *item_span_positions(db, file).get(&item)?;
+    item_spans(db, file).get(index).map(|span| span.range)
+}
+
+/// Each item's index in `item_spans` — a lookup index over that one source of
+/// truth, not a second copy of the spans.
+#[salsa::tracked(returns(ref))]
+fn item_span_positions<'db>(
+    db: &'db dyn Db,
+    file: SourceFile,
+) -> rustc_hash::FxHashMap<Item<'db>, usize> {
+    item_spans(db, file)
+        .iter()
+        .enumerate()
+        .map(|(index, span)| (span.item, index))
+        .collect()
 }
 
 /// A position-independent green subtree; equality is structural.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, salsa::SalsaValue)]
 pub struct ItemSyntax(pub rowan::GreenNode);
 
 impl ItemSyntax {
@@ -449,41 +472,43 @@ pub fn statement_annotations(
 /// for the association rule), as a position-independent green subtree.
 /// Annotations are siblings of the item statement in the file tree, so
 /// attachment happens here, not inside `item_syntax`.
+///
+/// A probe into the file's one association walk: deriving the association per
+/// item instead re-walks every top-level statement and token of the file for
+/// each item, which is quadratic on any file with many top-level statements —
+/// annotated or not. The per-item query survives as the incrementality
+/// firewall: an edit re-runs the file walk once, and every untouched item's
+/// green annotation subtree compares equal, so its dependents cut off.
 #[salsa::tracked(returns(clone))]
 pub fn item_annotation_syntax<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<ItemSyntax> {
-    let parse = parse(db, *item.file(db));
-    let root = parse.syntax_node();
-    let mut counts: rustc_hash::FxHashMap<(ItemKind, Option<String>), u32> =
-        rustc_hash::FxHashMap::default();
-    let target = (
-        *item.kind(db),
-        item.name(db).clone(),
-        *item.disambiguator(db),
-    );
-    let mut item_node: Option<syntax::SyntaxNode> = None;
-    for node in root.children() {
-        if !syntax::ast::is_expression_kind(node.kind()) && node.kind() != syntax::SyntaxKind::ERROR
-        {
-            continue;
-        }
-        let (kind, name) = classify_top_level(&node);
-        let counter = counts.entry((kind, name.clone())).or_insert(0);
-        let disambiguator = *counter;
-        *counter += 1;
-        if (kind, name, disambiguator) == target {
-            item_node = Some(node);
-            break;
-        }
-    }
-    let item_node = item_node?;
-    statement_annotations(&root)
+    file_item_annotations(db, *item.file(db))
+        .get(&item)
+        .cloned()
+}
+
+/// Every item's attached annotation region, from one walk over the file.
+/// Item identity comes from `item_spans` — the association matches an
+/// annotation's attachment target to a span by range, so the top-level
+/// classification rule lives in exactly one place.
+#[salsa::tracked(returns(ref))]
+fn file_item_annotations<'db>(
+    db: &'db dyn Db,
+    file: SourceFile,
+) -> rustc_hash::FxHashMap<Item<'db>, ItemSyntax> {
+    let item_by_range: rustc_hash::FxHashMap<syntax::TextRange, Item<'db>> = item_spans(db, file)
+        .iter()
+        .map(|span| (span.range, span.item))
+        .collect();
+    let parse = parse(db, file);
+    statement_annotations(&parse.syntax_node())
         .into_iter()
-        .find_map(|(annotation, target)| match target {
-            AnnotationTarget::Attached(node) if node == item_node => {
-                Some(ItemSyntax(annotation.green().into()))
-            }
+        .filter_map(|(annotation, target)| match target {
+            AnnotationTarget::Attached(node) => item_by_range
+                .get(&node.text_range())
+                .map(|&item| (item, ItemSyntax(annotation.green().into()))),
             _ => None,
         })
+        .collect()
 }
 
 /// Annotations attached to statements BELOW the item root — block statements

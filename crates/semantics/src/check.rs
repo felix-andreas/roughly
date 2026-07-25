@@ -380,12 +380,14 @@ pub fn check_item_with_annotation<'db>(
         .iter()
         .map(|(&id, &ty)| (id, context.table.resolve(context.db, ty)))
         .collect();
-    // One reported error per item, and a failed item exports `Unknown`: a
-    // type error means the inferred shape is not trustworthy, so downstream
-    // items must not check against it (they would cascade), and everything
-    // after the first failure inside the item is itself suspect. Inference
-    // still runs to completion internally — expression types stay available
-    // for IDE surfaces — only the report and the export are cut.
+    // A failed item exports `Unknown`: a type error means the inferred shape
+    // is not trustworthy, so downstream items must not check against it (they
+    // would cascade). Inference still runs to completion internally —
+    // expression types stay available for IDE surfaces — only the export is
+    // cut. Every error *inside* the item is still reported: a failing
+    // expression records `Unknown`, which is compatible with everything, so
+    // later checks read a poisoned value as an absent fact rather than
+    // cascading off it.
     let mut errors = context.errors;
     let scheme = if errors.is_empty() {
         // Inference variables are table-scoped: a scheme crossing the item
@@ -396,7 +398,10 @@ pub fn check_item_with_annotation<'db>(
         // unconstrained one (no information) erases to `Unknown`.
         scheme.map(|scheme| close_scheme(db, &mut context.table, scheme))
     } else {
-        errors.truncate(1);
+        // Speculative paths (overload probing, guard edges) can record the
+        // same failure twice; the report is one finding per site and kind.
+        errors.sort_by_key(|error| (error.range.start(), error.range.end()));
+        errors.dedup();
         scheme.map(|_| TypeScheme::monomorphic(unknown(db)))
     };
     let mut top_level_bindings = Vec::new();
@@ -794,9 +799,11 @@ enum VectorIndexShape {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ComparisonFamily {
+    /// `logical`, `integer` and `double`: R promotes a logical operand to
+    /// `integer` before comparing, exactly as it does for arithmetic, so all
+    /// three compare freely (`flags > 0`, `flag == TRUE`).
     Numeric,
     Character,
-    Logical,
 }
 
 /// How an operand of an arithmetic operator classifies: a concrete numeric
@@ -925,15 +932,20 @@ impl<'db> FlexibleComparisonOperand<'db> {
     }
 }
 
+/// An arithmetic operand's shape and the atomic it computes in. R promotes a
+/// logical operand to `integer` before arithmetic (`TRUE + TRUE` is `2L`), so
+/// a logical operand reports `integer` and the result rules below need no
+/// logical case of their own.
 fn numeric_operand_parts<'db>(db: &'db dyn Db, ty: Ty<'db>) -> Option<(OperandShape, Atomic)> {
+    let arithmetic_atomic = |atomic: &Atomic| match atomic {
+        Atomic::Logical => Some(Atomic::Integer),
+        Atomic::Integer | Atomic::Double => Some(*atomic),
+        _ => None,
+    };
     match ty.kind(db) {
-        TyKind::Scalar(atomic @ (Atomic::Integer | Atomic::Double)) => {
-            Some((OperandShape::Scalar, *atomic))
-        }
+        TyKind::Scalar(atomic) => Some((OperandShape::Scalar, arithmetic_atomic(atomic)?)),
         TyKind::Vector(element) | TyKind::NamedVector(element) => match element.kind(db) {
-            TyKind::Scalar(atomic @ (Atomic::Integer | Atomic::Double)) => {
-                Some((OperandShape::Vector, *atomic))
-            }
+            TyKind::Scalar(atomic) => Some((OperandShape::Vector, arithmetic_atomic(atomic)?)),
             _ => None,
         },
         _ => None,
@@ -969,9 +981,8 @@ fn comparison_operand_parts<'db>(
         _ => return None,
     };
     let family = match atomic {
-        Atomic::Integer | Atomic::Double => ComparisonFamily::Numeric,
+        Atomic::Logical | Atomic::Integer | Atomic::Double => ComparisonFamily::Numeric,
         Atomic::Character => ComparisonFamily::Character,
-        Atomic::Logical => ComparisonFamily::Logical,
         Atomic::Complex | Atomic::Raw => return None,
     };
     Some((shape, family))
@@ -3330,19 +3341,15 @@ impl<'db> Checker<'db, '_> {
                 if !courtesy {
                     self.overload_probe_depth -= 1;
                 }
-                match outcome {
-                    Ok(()) => {
-                        self.recorded.insert(callee, resolved);
-                        self.selected_overloads
-                            .insert(callee, declared_index(probe_index));
-                        return Some(function.ret);
-                    }
-                    Err(error) => {
-                        self.table.rollback(snapshot);
-                        if first_error.is_none() {
-                            first_error = Some(error);
-                        }
-                    }
+                if outcome.is_empty() {
+                    self.recorded.insert(callee, resolved);
+                    self.selected_overloads
+                        .insert(callee, declared_index(probe_index));
+                    return Some(function.ret);
+                }
+                self.table.rollback(snapshot);
+                if first_error.is_none() {
+                    first_error = outcome.into_iter().next();
                 }
             }
         }
@@ -3434,10 +3441,8 @@ impl<'db> Checker<'db, '_> {
         match resolved.kind(self.db) {
             TyKind::Function(function) => {
                 let function = function.clone();
-                if let Err(error) = self.match_arguments(range, callee_range, &function, arguments)
-                {
-                    self.errors.push(error);
-                }
+                let findings = self.match_arguments(range, callee_range, &function, arguments);
+                self.errors.extend(findings);
                 function.ret
             }
             TyKind::Any | TyKind::Unknown => self.unknown(),
@@ -3497,17 +3502,15 @@ impl<'db> Checker<'db, '_> {
                         continue;
                     };
                     let snapshot = self.table.snapshot();
-                    match self.match_arguments(range, callee_range, &function, arguments) {
-                        Ok(()) => {
-                            let member_return = self.table.resolve(self.db, function.ret);
-                            self.table.rollback(snapshot);
-                            returns.push(crate::types::erase_vars(self.db, member_return));
-                        }
-                        Err(error) => {
-                            self.table.rollback(snapshot);
-                            self.errors.push(error);
-                            return self.unknown();
-                        }
+                    let findings = self.match_arguments(range, callee_range, &function, arguments);
+                    if findings.is_empty() {
+                        let member_return = self.table.resolve(self.db, function.ret);
+                        self.table.rollback(snapshot);
+                        returns.push(crate::types::erase_vars(self.db, member_return));
+                    } else {
+                        self.table.rollback(snapshot);
+                        self.errors.extend(findings);
+                        return self.unknown();
                     }
                 }
                 union_of(self.db, returns)
@@ -3530,15 +3533,22 @@ impl<'db> Checker<'db, '_> {
     /// arguments consume their same-named formal; positionals fill the fixed
     /// positional parameters, then the named formals declared before the rest
     /// parameter (all of them when the function is not variadic), then the
-    /// rest parameter absorbs the overflow. The first failing argument aborts
-    /// the match, so an overload probe can run this inside a snapshot.
+    /// rest parameter absorbs the overflow. Every argument is checked, so a
+    /// call with three wrong arguments reports three findings rather than
+    /// forcing a fix-one-recheck loop; a failed `compatible` leaves the table
+    /// untouched, so each argument's verdict is independent. Returns the
+    /// findings in argument order — empty means the call matches, which is
+    /// what an overload probe tests inside a snapshot. A *structural* failure
+    /// (wrong arity, a name no parameter declares) describes the call as a
+    /// whole and is returned alone: per-argument mismatches under a mis-shaped
+    /// call are misleading.
     fn match_arguments(
         &mut self,
         range: TextRange,
         callee_range: TextRange,
         function: &FunctionType<'db>,
         arguments: &[CallArgument<'db>],
-    ) -> Result<(), TypeError<'db>> {
+    ) -> Vec<TypeError<'db>> {
         let total = function.positional.len() + function.named.len();
         let required = function.positional.len()
             + function
@@ -3605,6 +3615,7 @@ impl<'db> Checker<'db, '_> {
         };
 
         let forwards_dots = arguments.iter().any(|argument| argument.forwards_dots);
+        let mut findings = Vec::new();
         for argument in arguments {
             if argument.forwards_dots {
                 continue;
@@ -3635,7 +3646,7 @@ impl<'db> Checker<'db, '_> {
                                     argument.range,
                                 )
                             {
-                                return Err(error);
+                                findings.push(error);
                             }
                         }
                         None => {
@@ -3651,20 +3662,22 @@ impl<'db> Checker<'db, '_> {
                                 .any(|field| field.name.text(self.db) == name.as_str());
                             match (variadic_element, duplicates_declared) {
                                 (Some(element), false) => {
-                                    if let Some(ty) = argument.ty {
-                                        self.check_argument(
+                                    if let Some(ty) = argument.ty
+                                        && let Err(error) = self.check_argument(
                                             element,
                                             ty,
                                             argument.range,
                                             argument.whole_double,
-                                        )?;
+                                        )
+                                    {
+                                        findings.push(error);
                                     }
                                 }
                                 _ => {
-                                    return Err(TypeError {
+                                    return vec![TypeError {
                                         range,
                                         kind: self.named_argument_mismatch(function, arguments),
-                                    });
+                                    }];
                                 }
                             }
                         }
@@ -3674,13 +3687,15 @@ impl<'db> Checker<'db, '_> {
                     if next_positional < function.positional.len() {
                         let expected = function.positional[next_positional];
                         next_positional += 1;
-                        if let Some(ty) = argument.ty {
-                            self.check_argument(
+                        if let Some(ty) = argument.ty
+                            && let Err(error) = self.check_argument(
                                 expected,
                                 ty,
                                 argument.range,
                                 argument.whole_double,
-                            )?;
+                            )
+                        {
+                            findings.push(error);
                         }
                     } else if pre_rest_remaining > 0 {
                         let field = remaining_named.remove(0);
@@ -3700,25 +3715,27 @@ impl<'db> Checker<'db, '_> {
                                 argument.range,
                             )
                         {
-                            return Err(error);
+                            findings.push(error);
                         }
                     } else if let Some(element) = variadic_element {
-                        if let Some(ty) = argument.ty {
-                            self.check_argument(
+                        if let Some(ty) = argument.ty
+                            && let Err(error) = self.check_argument(
                                 element,
                                 ty,
                                 argument.range,
                                 argument.whole_double,
-                            )?;
+                            )
+                        {
+                            findings.push(error);
                         }
                     } else if !forwards_dots {
-                        return Err(TypeError {
+                        return vec![TypeError {
                             range: callee_range,
                             kind: TypeErrorKind::ArityMismatch {
                                 expected: total,
                                 found: arguments.len(),
                             },
-                        });
+                        }];
                     }
                 }
             }
@@ -3728,15 +3745,15 @@ impl<'db> Checker<'db, '_> {
             && (next_positional != function.positional.len()
                 || remaining_named.iter().any(|field| !field.optional))
         {
-            return Err(TypeError {
+            return vec![TypeError {
                 range: callee_range,
                 kind: TypeErrorKind::ArityMismatch {
                     expected: required,
                     found: arguments.len(),
                 },
-            });
+            }];
         }
-        Ok(())
+        findings
     }
 
     fn named_argument_mismatch(

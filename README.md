@@ -41,7 +41,7 @@ Roughly aims to support the following language server features (some are experim
   - Warning for unused variables *(opt-in: `[check] unused`)*
   - Error for undefined variable *(⚠️ missing)*
   - Argument validation for function calls *(part of type checking)*
-  - Static type checking — HM-style inference with nominal/structural types, function types, nullable unions, and numeric constraints, driven by [`#:` typing comments](https://roughly.felixandreas.me/type-checker). Inferred types power editor features by default; type-error diagnostics are opt-in via `[check] typing`.
+  - Static type checking — HM-style inference with nominal/structural types, function types, nullable unions, and numeric constraints, driven by [`#:` typing comments](https://roughly.felixandreas.me/type-checker). Inferred types power editor features by default; `type-mismatch` diagnostics are opt-in via `[check] typing`.
 
 - **Editing**
   - Autocomplete local and global variables

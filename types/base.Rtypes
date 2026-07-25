@@ -403,8 +403,9 @@ rowMeans : fn(x: Any, [na.rm]: logical, [dims]: Any) -> double[]
 colMeans : fn(x: Any, [na.rm]: logical, [dims]: Any) -> double[]
 
 # Genuinely parametric transforms — the type system's payoff. `lapply` cannot yet accept forwarded
-# `...` arguments for `f` (a rest-aware function-compat rule is needed), and the list parameters
-# should also accept atomic vectors once generic `T[]` parameters land. `Reduce` types the
+# `...` arguments for `f` (a rest-aware function-compat rule is needed). Every sequence parameter
+# accepts `list[T] | T[]`, because R's functional operators iterate an atomic vector exactly as they
+# iterate a list (`Reduce("+", c(1, 2, 3))` is textbook base R). `Reduce` types the
 # accumulator separately (`U`) so `init =` folds check precisely; without an init R seeds the fold
 # from the first element (forcing `U = T`), which one scheme cannot state, and `accumulate = TRUE`
 # returns the list of intermediates rather than `U` — both need overload sets.
@@ -413,10 +414,10 @@ colMeans : fn(x: Any, [na.rm]: logical, [dims]: Any) -> double[]
 # callbacks with more formals.
 apply : fn(X: Any, MARGIN: Any, FUN: fn(Any) -> Any, ...: Any) -> Any
 lapply : <T, U> fn(x: list[T] | T[], f: fn(T) -> U, ...: Any) -> list[U]
-Filter : <T> fn(f: fn(T) -> logical, x: list[T]) -> list[T]
-Find : <T> fn(f: fn(T) -> logical, x: list[T]) -> T | NULL
-Position : <T> fn(f: fn(T) -> logical, x: list[T]) -> integer | NULL
-Reduce : <T, U> fn(f: fn(U, T) -> U, x: list[T], [init]: U, [right]: logical, [accumulate]: logical) -> U
+Filter : <T> fn(f: fn(T) -> logical, x: list[T] | T[]) -> list[T]
+Find : <T> fn(f: fn(T) -> logical, x: list[T] | T[]) -> T | NULL
+Position : <T> fn(f: fn(T) -> logical, x: list[T] | T[]) -> integer | NULL
+Reduce : <T, U> fn(f: fn(U, T) -> U, x: list[T] | T[], [init]: U, [right]: logical, [accumulate]: logical) -> U
 # `identity : <T> fn(x: T) -> T` and `apply : Any` are deliberately NOT declared yet: many existing
 # fixtures bind those names as local helpers, and a stub declaration makes each such binding fire the
 # (by-design) builtin-shadow warning. Rename the fixture helpers first, then declare both.

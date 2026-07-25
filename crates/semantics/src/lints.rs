@@ -156,19 +156,16 @@ fn shadow_lints(
 }
 
 fn syntax_lints(root: &SyntaxNode, config: &LintConfig, diagnostics: &mut Vec<Diagnostic>) {
-    // Inherited state, maintained by enter/leave depth counters: name-style
-    // checks apply only inside function definitions, and `#:` annotation
-    // regions are type syntax, not R identifiers.
-    let mut function_depth = 0usize;
+    // Inherited state, maintained by an enter/leave depth counter: `#:`
+    // annotation regions are type syntax, not R identifiers.
     let mut annotation_depth = 0usize;
     for event in root.preorder_with_tokens() {
         match event {
             rowan::WalkEvent::Enter(element) => match element {
                 rowan::NodeOrToken::Node(node) => match node.kind() {
-                    SyntaxKind::FUNCTION_DEF => function_depth += 1,
                     SyntaxKind::ANNOTATION => annotation_depth += 1,
                     SyntaxKind::BINARY_EXPR => {
-                        binary_lints(&node, config, function_depth > 0, diagnostics);
+                        binary_lints(&node, config, diagnostics);
                     }
                     SyntaxKind::ARGUMENT_LIST => {
                         let call = node
@@ -204,43 +201,37 @@ fn syntax_lints(root: &SyntaxNode, config: &LintConfig, diagnostics: &mut Vec<Di
                 }
             },
             rowan::WalkEvent::Leave(element) => {
-                if let rowan::NodeOrToken::Node(node) = element {
-                    match node.kind() {
-                        SyntaxKind::FUNCTION_DEF => function_depth -= 1,
-                        SyntaxKind::ANNOTATION => annotation_depth -= 1,
-                        _ => {}
-                    }
+                if let rowan::NodeOrToken::Node(node) = element
+                    && node.kind() == SyntaxKind::ANNOTATION
+                {
+                    annotation_depth -= 1;
                 }
             }
         }
     }
 }
 
-fn binary_lints(
-    node: &SyntaxNode,
-    config: &LintConfig,
-    inside_function: bool,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
+fn binary_lints(node: &SyntaxNode, config: &LintConfig, diagnostics: &mut Vec<Diagnostic>) {
     let Some(binary) = syntax::ast::BinaryExpr::cast(node.clone()) else {
         return;
     };
     let Some(operator) = binary.operator() else {
         return;
     };
-    let range = expression_range(node);
     if operator.kind() == SyntaxKind::EQ {
+        // The `=` token alone: the fix is that one character, and several
+        // lints commonly fire on the same statement, so a whole-statement
+        // range would stack three identical squiggles.
         push_lint(
             diagnostics,
             config.assignment_operator,
             Severity::Warning,
             "assignment-operator",
-            range,
+            operator.text_range(),
             "Use <-, not =, for assignment",
         );
     }
-    if inside_function
-        && let Some(style) = config.naming_style
+    if let Some(style) = config.naming_style
         && matches!(operator.kind(), SyntaxKind::LESS_MINUS | SyntaxKind::EQ)
         && let Some(target) = binary
             .lhs()
@@ -249,7 +240,7 @@ fn binary_lints(
         let name = target.text().to_string();
         if let Some(message) = naming_style_message(&name, style, "Variable") {
             diagnostics.push(Diagnostic {
-                range,
+                range: expression_range(&target),
                 severity: Severity::Warning,
                 code: "naming-style",
                 message,
@@ -317,6 +308,17 @@ fn parameter_name_lint(
 /// The naming-style finding for one identifier, shared by the variable and
 /// parameter sites: `None` when the name already matches the configured style.
 fn naming_style_message(actual: &str, style: NameStyle, subject: &str) -> Option<String> {
+    // `SCREAMING_SNAKE_CASE` is R's universal spelling for a constant, at any
+    // scope, so it conforms under every configured style rather than being
+    // rewritten to the style's default casing.
+    if actual.chars().all(|character| {
+        character.is_ascii_uppercase() || character == '_' || character.is_numeric()
+    }) && actual
+        .chars()
+        .any(|character| character.is_ascii_uppercase())
+    {
+        return None;
+    }
     let expected = match style {
         NameStyle::Camel => to_camel_case(actual),
         NameStyle::Snake => to_snake_case(actual),

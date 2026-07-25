@@ -5,10 +5,19 @@ f <- function() {
   myVar
 }
 #++++
-20..30 warning[naming-style] Variable `myVar` should have snake_case name, e.g. my_var
+20..25 warning[naming-style] Variable `myVar` should have snake_case name, e.g. my_var
 
-#---- top_level_assignment_not_style_checked
+#---- top_level_assignment_is_style_checked
 myVar <- 1
+#++++
+0..5 warning[naming-style] Variable `myVar` should have snake_case name, e.g. my_var
+
+#---- screaming_snake_constants_conform_at_any_scope
+MAX_ITER <- 100L
+f <- function() {
+  RETRY_LIMIT <- 3L
+  RETRY_LIMIT
+}
 #++++
 clean
 

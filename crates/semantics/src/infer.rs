@@ -851,12 +851,16 @@ impl<'db> InferenceTable<'db> {
             (TyKind::NamedVector(actual_element), TyKind::Vector(expected_element)) => {
                 self.compatible_probe(db, actual_element, expected_element, depth + 1)
             }
-            // `integer` widens to `double` in compatibility (a directional
-            // check only — unification never widens): R freely promotes
-            // integers in numeric contexts, and without this every numeric
-            // parameter in the stub corpus would have to be `Any`.
+            // The numeric ladder widens in compatibility (a directional check
+            // only — unification never widens): R freely promotes `logical`
+            // and `integer` in numeric contexts (`sum(flags)`,
+            // `mean(x > threshold)`, `(x > 0) * weight`), and without this
+            // every numeric parameter in the stub corpus would have to be
+            // `Any`.
             (TyKind::Scalar(actual_atomic), TyKind::Scalar(expected_atomic)) => {
-                actual_atomic == Atomic::Integer && expected_atomic == Atomic::Double
+                numeric_ladder_rank(actual_atomic)
+                    .zip(numeric_ladder_rank(expected_atomic))
+                    .is_some_and(|(actual_rank, expected_rank)| actual_rank < expected_rank)
             }
             (TyKind::Vector(actual_element), TyKind::Vector(expected_element))
             | (TyKind::NamedVector(actual_element), TyKind::NamedVector(expected_element)) => {
@@ -1214,6 +1218,21 @@ fn record_occurrences<'db>(
             }
         }
         _ => {}
+    }
+}
+
+/// R's numeric promotion ladder — `logical` < `integer` < `double` <
+/// `complex` — as ranks, so a lower rank is accepted where a higher one is
+/// expected. `character` and `raw` are deliberately off the ladder: R reaches
+/// `character` only through an explicit coercion, and accepting it implicitly
+/// would hide the argument-order mistakes this check exists to catch.
+fn numeric_ladder_rank(atomic: Atomic) -> Option<u8> {
+    match atomic {
+        Atomic::Logical => Some(0),
+        Atomic::Integer => Some(1),
+        Atomic::Double => Some(2),
+        Atomic::Complex => Some(3),
+        Atomic::Character | Atomic::Raw => None,
     }
 }
 

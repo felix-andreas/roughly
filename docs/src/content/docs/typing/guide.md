@@ -38,14 +38,14 @@ flooded with messages. Turn them on in `roughly.toml`:
 typing = true
 ```
 
-With that set, `roughly check` and your editor report a `type-error` diagnostic
+With that set, `roughly check` and your editor report a `type-mismatch` diagnostic
 wherever types do not line up — even in completely unannotated code, because inferred
 types flow through bindings, calls, operators, and indexing:
 
 ```r
 add <- function(a, b) a + b   # inferred: <T: numeric> fn(a: T, b: T) -> T
 add(1L, "x")
-# error[type-error] expected a numeric value (`integer` or `double`), found `character`
+# error[type-mismatch] expected a numeric value (`integer` or `double`), found `character`
 ```
 
 Two things are worth noticing in that example, because they are the heart of the
@@ -144,7 +144,7 @@ mutable slots the way R actually treats them:
 x <- 1L
 if (flag) x <- "two"
 x + 1L
-# error[type-error]: `x` is `integer | character` here, and `+` rejects the
+# error[type-mismatch]: `x` is `integer | character` here, and `+` rejects the
 # `character` member
 ```
 
@@ -209,7 +209,7 @@ sizes <- list(1L, 2L)     # ok: the tuple fits the array-like claim
 
 #: integer
 label <- "west"
-# error[type-error] expected `integer`, found `character`
+# error[type-mismatch] expected `integer`, found `character`
 ```
 
 Two escape hatches cover the boundary with untypeable code:

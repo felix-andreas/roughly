@@ -2,7 +2,7 @@
 #---- equals_assignment_warns
 x = 1
 #++++
-0..5 warning[assignment-operator] Use <-, not =, for assignment
+2..3 warning[assignment-operator] Use <-, not =, for assignment
 
 #---- arrow_assignment_clean
 x <- 1
