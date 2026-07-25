@@ -1,3 +1,32 @@
+#==== unknown_only_coercions
+#---- if_unknown_fills_a_genuine_gap
+frame <- data.frame(a = 1)
+
+#: @if-unknown integer
+gap <- frame$a
+#++++
+frame: Unknown
+gap: integer
+
+#---- if_unknown_on_a_known_type_is_an_error
+#: @if-unknown integer
+known <- 1L
+#++++
+known: Unknown
+32..34 error[type-mismatch] `@if-unknown` applies only where the type is unknown, and this is already `integer` — drop the annotation, or use `#:` to check the type or `@trust` to override it
+
+#---- the_coerced_type_is_then_enforced
+frame <- data.frame(a = 1)
+
+#: @if-unknown character
+gap <- frame$a
+label <- gap + 1L
+#++++
+frame: Unknown
+gap: character
+label: Unknown
+77..80 error[type-mismatch] expected a numeric value (`integer` or `double`), found `character`
+
 #==== checked
 #---- declared_scheme_wins
 #: <T> fn(x: T) -> T

@@ -38,6 +38,10 @@ pub struct Annotation<'db> {
     pub strict: Option<bool>,
     /// `@trust TYPE` — the declared type applies unchecked.
     pub trusted: bool,
+    /// `@if-unknown TYPE` — the declared type applies only where the checker
+    /// has nothing better than `Unknown`; using it on a value whose type is
+    /// already known is an error, so a stale annotation cannot hide.
+    pub if_unknown: bool,
     /// Annotation-shape violations: form mixing, directive ordering,
     /// duplicate or unknown type parameters, a non-nominal `@new` payload,
     /// nesting beyond the parse cap. A violating block carries no typing
@@ -233,8 +237,19 @@ pub fn lower_annotation<'db>(db: &'db dyn Db, node: &SyntaxNode) -> Annotation<'
                             ));
                         }
                     }
-                    // `@if-unknown` and unknown directives: no typing payload
-                    // at this layer.
+                    "if-unknown" => {
+                        annotation.if_unknown = true;
+                        if let Some(ty) = child.children().find(|c| is_type_kind(c.kind())) {
+                            lowering.definition_type = true;
+                            let lowered = lowering.lower_type(&ty);
+                            lowering.definition_type = false;
+                            annotation.declared = Some(TypeScheme {
+                                binders: Vec::new(),
+                                body: lowered,
+                            });
+                        }
+                    }
+                    // Unknown directives carry no typing payload at this layer.
                     _ => {}
                 }
             }

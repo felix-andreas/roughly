@@ -351,17 +351,18 @@ signature: none
 completion (87): checked, check.options, checkAtAssignment, checkCRAN, checkSlotAssignment, cacheGenericsMetaData, cacheMetaData, cacheMethod
 
 #---- if_unknown_annotation
+frame <- data.frame(a = 1)
+
 #: @if-unknown integer
-may$0be <- 2L
+may$0be <- frame$a
 #++++
-hover 23..28: maybe: integer
-hover-definition: global 23..28
-definition 23..28
-references: 23..28*
+hover 51..56: maybe: integer
+hover-definition: global 51..56
+definition 51..56
+references: 51..56*
 rename: 1 edit(s)
 signature: none
 completion (46): maybe, makePrototypeFromClassDef, mapply, mauchly.test, .mapply, simplify2array, Summary, summary
-hint @28: integer
 
 #---- trust_annotation
 #: @trust integer

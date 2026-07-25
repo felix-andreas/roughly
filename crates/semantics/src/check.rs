@@ -65,6 +65,10 @@ pub enum TypeErrorKind<'db> {
         suggestion: Option<String>,
         expected_parameters: Vec<String>,
     },
+    /// `#: @if-unknown` on a value whose type the checker already knows.
+    KnownTypeUnderIfUnknown {
+        found: Ty<'db>,
+    },
     /// An annotation declares a parameter the definition has no formal for.
     AnnotationParameterMismatch {
         name: String,
@@ -351,6 +355,24 @@ pub fn check_item_with_annotation<'db>(
                         // `@new` is the only nominal introduction. Unknown and
                         // Any declarations are tolerance floors with nothing
                         // to check.
+                        // An unknown-only coercion applies exactly where the
+                        // checker has nothing and reports where it has
+                        // something: see the expression-level path for why the
+                        // refusal is the point.
+                        Some(declared) if annotation.is_some_and(|a| a.if_unknown) => {
+                            let resolved_value = context.table.resolve(db, value_ty);
+                            if matches!(resolved_value.kind(db), TyKind::Unknown) {
+                                Some(declared)
+                            } else {
+                                context.errors.push(TypeError {
+                                    range: module.expression(*value).range,
+                                    kind: TypeErrorKind::KnownTypeUnderIfUnknown {
+                                        found: resolved_value,
+                                    },
+                                });
+                                Some(context.generalize(value_ty))
+                            }
+                        }
                         Some(declared) => {
                             if annotation.is_some_and(|a| !a.trusted)
                                 && !matches!(declared.body.kind(db), TyKind::Unknown | TyKind::Any)
@@ -1349,6 +1371,25 @@ impl<'db> Checker<'db, '_> {
         };
         if annotation.trusted {
             return declared.body;
+        }
+        // An unknown-only coercion fills an inference gap without overriding
+        // knowledge: it applies exactly where the checker has nothing, and
+        // says so when it has something. That refusal is the whole reason to
+        // reach for it over `@trust` — an annotation that silently stayed in
+        // place as the inferred type changed underneath it would be
+        // indistinguishable from a stale one.
+        if annotation.if_unknown {
+            let resolved_value = self.table.resolve(self.db, value_ty);
+            if matches!(resolved_value.kind(self.db), TyKind::Unknown) {
+                return declared.body;
+            }
+            self.errors.push(TypeError {
+                range: self.blame_range(value),
+                kind: TypeErrorKind::KnownTypeUnderIfUnknown {
+                    found: resolved_value,
+                },
+            });
+            return resolved_value;
         }
         if matches!(declared.body.kind(self.db), TyKind::Unknown | TyKind::Any) {
             return declared.body;
