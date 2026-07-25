@@ -178,6 +178,7 @@ impl ConfigError {
 pub struct ConfigParseError {
     path: Option<PathBuf>,
     location: Option<(usize, usize)>,
+    key: Option<String>,
     message: String,
 }
 
@@ -186,9 +187,42 @@ impl ConfigParseError {
         ConfigParseError {
             path: None,
             location: error.span().map(|span| line_and_column(text, span.start)),
+            key: error
+                .span()
+                .and_then(|span| offending_key(text, span.start)),
             message: error.message().to_owned(),
         }
     }
+}
+
+/// The dotted key whose value sits at `offset` — the `[table]` header above it
+/// joined with the `key =` on its own line. A line/column pair alone makes the
+/// reader open the file to find out which setting they got wrong, and the
+/// dotted name is what the documentation calls it.
+fn offending_key(text: &str, offset: usize) -> Option<String> {
+    let before = text.get(..offset)?;
+    let line_start = before.rfind('\n').map_or(0, |index| index + 1);
+    let key = before
+        .get(line_start..)?
+        .split('=')
+        .next()?
+        .trim()
+        .trim_matches('"');
+    if key.is_empty() {
+        return None;
+    }
+    let table = before[..line_start]
+        .lines()
+        .rev()
+        .find_map(|line| {
+            let line = line.trim();
+            line.strip_prefix('[')?.strip_suffix(']')
+        })
+        .filter(|table| !table.is_empty());
+    Some(match table {
+        Some(table) => format!("{table}.{key}"),
+        None => key.to_owned(),
+    })
 }
 
 impl fmt::Display for ConfigParseError {
@@ -196,6 +230,9 @@ impl fmt::Display for ConfigParseError {
         write!(formatter, "invalid config")?;
         if let Some(path) = &self.path {
             write!(formatter, " in {}", path.display())?;
+        }
+        if let Some(key) = &self.key {
+            write!(formatter, " for `{key}`")?;
         }
         if let Some((line, column)) = self.location {
             write!(formatter, " at line {line}, column {column}")?;

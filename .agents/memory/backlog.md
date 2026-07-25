@@ -43,16 +43,14 @@ below, ranked by how often a real user hits it.
   boundaries. Operator dispatch now gives the mechanism to fix this: a nominal that declares
   `Arith.Meters` gets exactly the pairings it names. Decide whether declaring *any* operator method
   should make the nominal opaque to the numeric fallback.
-- **Smaller, each with a one-line repro in the reports:** a bad `return()` value is blamed on the
-  trailing expression; messages leak unbound type variables (`list[T] | T[]`) and expand an alias on
+- **Smaller, each with a one-line repro in the reports:** messages leak unbound type variables (`list[T] | T[]`) and expand an alias on
   only one side of an expected/found pair; `unused` false-positives on a write followed by `break`;
   closure re-entry is unmodelled, so the `if (!is.null(cache)) return(cache); cache <<- v` memo idiom
   yields `T | NULL`; a generic parameter cannot have a non-`NULL` default; the `unused` write-then-`break`
   false positive is NOT reproducible (verified across `for`/`while`/`repeat` and both used and genuinely
   dead writes) — drop it unless a concrete shape resurfaces; `export(name)` in `NAMESPACE`
   is not validated; hover renders a polymorphic scheme without its `<...>` binder while inlay hints
-  include it; config type errors name the line and column but not the key; no `--fix`, no stdin, and
-  no CLI way to ask "what type is this?" (which makes debugging an inference surprise guesswork for a
+  include it; no `--fix`, no stdin, and no CLI way to ask "what type is this?" (which makes debugging an inference surprise guesswork for a
   CLI-only user). `sum(1, 2, 3,)` formatting to `sum(1, 2, 3, )` is NOT a defect and stays: the
   trailing comma introduces a missing argument, so it parses identically to the `alist(, )` idiom the
   space serves, and the `trailing-comma` lint reports the mistake.

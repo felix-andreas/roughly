@@ -798,7 +798,10 @@ struct Checker<'db, 'a> {
     overload_probe_depth: u32,
     /// Early-`return` value types per enclosing function frame; a function's
     /// return type is their union with the body's trailing value.
-    return_frames: Vec<Vec<Ty<'db>>>,
+    /// Per enclosing function: each early `return` value with the range to
+    /// blame for it, so a declared-return mismatch reports at the `return`
+    /// that is wrong rather than at whichever expression happens to be last.
+    return_frames: Vec<Vec<(Ty<'db>, TextRange)>>,
     /// Super-assignment (`<<-`) writes to enclosing slots: re-applied after
     /// each enclosing body's environment rollback so the join survives at the
     /// definition site.
@@ -1321,7 +1324,7 @@ impl<'db> Checker<'db, '_> {
                     .return_frames
                     .pop()
                     .expect("return frames stay balanced around body inference");
-                let return_ty = self.join_early_returns(early_returns, trailing_ty);
+                let return_ty = self.join_early_returns(&early_returns, trailing_ty);
                 self.environment.rollback(mark);
                 self.reapply_enclosing_writes(pending_mark);
                 self.table.level -= 1;
@@ -2142,7 +2145,7 @@ impl<'db> Checker<'db, '_> {
     /// itself yields no observable value where it stands. A top-level
     /// `return` (an R runtime error) still checks its value but joins no
     /// frame.
-    fn infer_return(&mut self, arguments: &[Argument]) -> Ty<'db> {
+    fn infer_return(&mut self, range: TextRange, arguments: &[Argument]) -> Ty<'db> {
         let value_ty = match arguments.first().and_then(|argument| argument.value) {
             Some(value) => self.infer(value),
             None => crate::types::null(self.db),
@@ -2153,8 +2156,13 @@ impl<'db> Checker<'db, '_> {
             }
         }
         let resolved = self.table.resolve(self.db, value_ty);
+        let blamed = match arguments.first().and_then(|argument| argument.value) {
+            Some(value) => self.blame_range(value),
+            // A bare `return()` has no value expression; blame the call.
+            None => range,
+        };
         if let Some(frame) = self.return_frames.last_mut() {
-            frame.push(resolved);
+            frame.push((resolved, blamed));
         }
         crate::types::null(self.db)
     }
@@ -3197,13 +3205,31 @@ impl<'db> Checker<'db, '_> {
             .return_frames
             .pop()
             .expect("return frames stay balanced around body inference");
-        let body_ty = self.join_early_returns(early_returns, trailing_ty);
         // The body's value only needs to be *compatible* with the declared
         // return (covariant, like an argument against a parameter), so a body
         // returning `integer` satisfies a declared `integer | NULL` — and an
         // alias-typed declaration checks through its expansion. An Unknown
         // declared return (elided `->`) constrains nothing.
         if !matches!(declared.ret.kind(self.db), TyKind::Unknown) {
+            // Each `return` is checked at its OWN site: reporting the union of
+            // every return against the declaration would blame whichever
+            // expression came last and leave the reader to work out which
+            // return is actually wrong.
+            let mut early_return_failed = false;
+            for &(returned, return_range) in &early_returns {
+                if !matches!(returned.kind(self.db), TyKind::Unknown)
+                    && !self.table.compatible(self.db, returned, declared.ret)
+                {
+                    early_return_failed = true;
+                    self.errors.push(TypeError {
+                        range: return_range,
+                        kind: TypeErrorKind::Mismatch {
+                            expected: declared.ret,
+                            found: returned,
+                        },
+                    });
+                }
+            }
             // Blame the expression that produces the value — a block's tail
             // expression — not the whole body; the block range stays only
             // when there is no tail (an empty or semicolon-terminated body).
@@ -3215,8 +3241,12 @@ impl<'db> Checker<'db, '_> {
                 _ => *body,
             };
             let body_range = self.blame_range(blamed);
-            let resolved_body = self.table.resolve(self.db, body_ty);
-            if !matches!(resolved_body.kind(self.db), TyKind::Unknown)
+            // The trailing value alone: the early returns already reported
+            // themselves, so including them here would double-report and
+            // widen the found type past what this expression produces.
+            let resolved_body = self.table.resolve(self.db, trailing_ty);
+            if !early_return_failed
+                && !matches!(resolved_body.kind(self.db), TyKind::Unknown)
                 && !self.table.compatible(self.db, resolved_body, declared.ret)
             {
                 self.errors.push(TypeError {
@@ -3266,12 +3296,17 @@ impl<'db> Checker<'db, '_> {
 
     /// A function's return type is the union of every early `return` value
     /// with the body's trailing value.
-    fn join_early_returns(&self, mut early_returns: Vec<Ty<'db>>, trailing: Ty<'db>) -> Ty<'db> {
+    fn join_early_returns(
+        &self,
+        early_returns: &[(Ty<'db>, TextRange)],
+        trailing: Ty<'db>,
+    ) -> Ty<'db> {
         if early_returns.is_empty() {
             return trailing;
         }
-        early_returns.push(self.table.resolve(self.db, trailing));
-        union_of(self.db, early_returns)
+        let mut members: Vec<Ty<'db>> = early_returns.iter().map(|(ty, _)| *ty).collect();
+        members.push(self.table.resolve(self.db, trailing));
+        union_of(self.db, members)
     }
 
     /// The call entry point: shape-constructing builtins (`c`, `list`,
@@ -3290,7 +3325,7 @@ impl<'db> Checker<'db, '_> {
                 "c" => Some(self.infer_combine(id, arguments)),
                 "list" => Some(self.infer_list(arguments)),
                 "switch" => Some(self.infer_switch(range, arguments)),
-                "return" => Some(self.infer_return(arguments)),
+                "return" => Some(self.infer_return(range, arguments)),
                 _ => None,
             };
             if let Some(ty) = builtin {

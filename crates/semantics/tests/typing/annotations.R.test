@@ -1,3 +1,44 @@
+#==== declared_returns
+#---- a_bad_early_return_is_blamed_at_that_return
+#: fn(flag: logical) -> integer
+pick <- function(flag) {
+  if (flag) {
+    return("wrong type")
+  }
+  42L
+}
+#++++
+pick: fn(flag: logical) -> integer
+82..94 error[type-mismatch] expected `integer`, found `character`
+
+#---- a_bad_trailing_value_is_blamed_at_the_tail
+#: fn(flag: logical) -> integer
+pick <- function(flag) {
+  if (flag) {
+    return(1L)
+  }
+  "wrong tail"
+}
+#++++
+pick: fn(flag: logical) -> integer
+92..104 error[type-mismatch] expected `integer`, found `character`
+
+#---- each_bad_return_reports_its_own_site
+#: fn(n: integer) -> integer
+grade <- function(n) {
+  if (n > 10L) {
+    return("high")
+  }
+  if (n < 0L) {
+    return(NULL)
+  }
+  n
+}
+#++++
+grade: fn(n: integer) -> integer
+80..86 error[type-mismatch] expected `integer`, found `character`
+119..123 error[type-mismatch] expected `integer`, found `NULL`
+
 #==== nested_definitions
 #---- a_nested_annotation_pushes_parameter_types_into_the_body
 outer <- function() {
