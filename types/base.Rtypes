@@ -50,7 +50,44 @@
 @type connection
 @type Date
 @type POSIXct
+@type difftime
 @type environment
+
+# Operator methods. R gives a class arithmetic and comparison through S3 group
+# generics (`Ops.Date`), and a declaration named the way R names the method is
+# how a stub says so: the checker dispatches `d + 30L` to `+.Date` exactly as R
+# does, trying the operator-specific method, then the group (`Arith`/`Compare`),
+# then `Ops`. Without these, every date expression in ordinary code — days
+# between visits, a window offset, a date filter — is a type error with no way
+# to opt out. Repeating a name declares an ordered overload set, so one method
+# per operand pairing keeps the RESULT precise: differencing two dates is a
+# `difftime`, offsetting a date by a count is a `Date`.
+#
+# `Date + Date` is deliberately absent: R rejects it too ("binary + is not
+# defined for Date objects"), and a class that declares an operator but fits no
+# candidate reports a mismatch rather than falling back to the numeric rules.
++.Date : fn(e1: Date, e2: double) -> Date
++.Date : fn(e1: double, e2: Date) -> Date
+-.Date : fn(e1: Date, e2: Date) -> difftime
+-.Date : fn(e1: Date, e2: double) -> Date
+Compare.Date : fn(e1: Date, e2: Date) -> logical
+Compare.Date : fn(e1: Date, e2: character) -> logical
+Compare.Date : fn(e1: character, e2: Date) -> logical
+
++.POSIXct : fn(e1: POSIXct, e2: double) -> POSIXct
++.POSIXct : fn(e1: double, e2: POSIXct) -> POSIXct
+-.POSIXct : fn(e1: POSIXct, e2: POSIXct) -> difftime
+-.POSIXct : fn(e1: POSIXct, e2: double) -> POSIXct
+Compare.POSIXct : fn(e1: POSIXct, e2: POSIXct) -> logical
+
+# A `difftime` keeps its class through scaling and combination, and compares
+# with itself or a bare number (`elapsed > 30`).
+Arith.difftime : fn(e1: difftime, e2: difftime) -> difftime
+Arith.difftime : fn(e1: difftime, e2: double) -> difftime
+Arith.difftime : fn(e1: double, e2: difftime) -> difftime
+Compare.difftime : fn(e1: difftime, e2: difftime) -> logical
+Compare.difftime : fn(e1: difftime, e2: double) -> logical
+Compare.difftime : fn(e1: double, e2: difftime) -> logical
 
 # Reserved value constants and built-in constant vectors.
 T : logical
@@ -427,7 +464,14 @@ force : <T> fn(x: T) -> T
 # results (value-dependent); `apply` and friends also forward named arguments to the callee. `Negate`
 # needs a variadic-generic signature. All stay `Any`.
 sapply : Any
-vapply : Any
+# `vapply`'s whole reason to exist is that `FUN.VALUE` DECLARES the result type,
+# so the declaration ties the callback's return to it: a callback returning
+# `character` under a `numeric(1)` template is the error R raises at runtime
+# ("values must be type 'double'"), caught statically here. The template accepts
+# `V[] | V` because the idiomatic spelling is a length-1 vector (`numeric(1)`)
+# while the callback returns a scalar. A multi-element template makes R return a
+# matrix; the result claim stays `V[]` (scalar-claim, as elsewhere in this file).
+vapply : <T, V> fn(X: list[T] | T[], FUN: fn(T) -> V, FUN.VALUE: V[] | V, ...: Any, [USE.NAMES]: logical) -> V[]
 mapply : Any
 Map : Any
 tapply : Any
@@ -550,6 +594,17 @@ gzfile : fn(description: character, [open]: character, [encoding]: character, [c
 textConnection : fn(object: Any, [open]: character, [local]: logical, [name]: character, [encoding]: character) -> connection
 close : fn(con: Any, [type]: character) -> Any
 readline : fn([prompt]: character) -> character
+
+# Date and time construction. `difftime` and `as.difftime` produce the class the
+# `Arith.difftime` / `Compare.difftime` methods above give arithmetic to;
+# `format`/`strftime` render a date back to text.
+difftime : fn(time1: Any, time2: Any, [tz]: character, [units]: character) -> difftime
+as.difftime : fn(tim: Any, [format]: character, [units]: character) -> difftime
+strftime : fn(x: Any, [format]: character, [tz]: character, [usetz]: logical, ...: Any) -> character
+strptime : fn(x: Any, format: character, [tz]: character) -> POSIXct
+weekdays : fn(x: Any, [abbreviate]: logical) -> character
+months : fn(x: Any, [abbreviate]: logical) -> character
+julian : Any
 
 # System and session.
 Sys.time : fn() -> POSIXct

@@ -539,18 +539,40 @@ fn top_level_colon(content: &str) -> Option<usize> {
     None
 }
 
-/// An R identifier: letters, digits, `.`, `_`, not starting with a digit.
+/// A declarable name: an R identifier (letters, digits, `.`, `_`, not starting
+/// with a digit), an infix operator (`%in%`, a user `%||%`), or an S3 operator
+/// method (`+.Date`) — the spelling R itself uses to give a class arithmetic
+/// or comparison, and the only way a stub can say a nominal supports `+`.
 fn is_stub_name(name: &str) -> bool {
-    let mut characters = name.chars();
-    let Some(first) = characters.next() else {
-        return false;
+    let identifier = |name: &str| {
+        let mut characters = name.chars();
+        characters
+            .next()
+            .is_some_and(|first| !first.is_ascii_digit())
+            && name
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '.' || c == '_')
     };
-    if first.is_ascii_digit() {
-        return false;
+    if identifier(name) {
+        return true;
     }
-    name.chars()
-        .all(|c| c.is_alphanumeric() || c == '.' || c == '_')
+    if let Some(body) = name
+        .strip_prefix('%')
+        .and_then(|rest| rest.strip_suffix('%'))
+    {
+        return !body.is_empty() && !body.contains('%');
+    }
+    OPERATOR_METHOD_PREFIXES
+        .iter()
+        .filter_map(|operator| name.strip_prefix(operator))
+        .any(|suffix| suffix.strip_prefix('.').is_some_and(identifier))
 }
+
+/// The operator spellings an S3 method name may carry, longest first so
+/// `%/%.difftime` is not read as `%%` followed by a stray `/`.
+const OPERATOR_METHOD_PREFIXES: [&str; 13] = [
+    "%/%", "%%", "<=", ">=", "==", "!=", "+", "-", "*", "/", "^", "<", ">",
+];
 
 /// Convenience for hosts and tests: feed the shipped corpus into the database.
 pub fn install_shipped_stubs(db: &dyn Db) -> StubSources {
@@ -580,6 +602,20 @@ mod tests {
             "sum keeps its ordered overload candidates"
         );
         assert_eq!(library.schemes["length"].len(), 1);
+    }
+
+    /// Whether a name is an S3 operator method (`+.Date`) or an operator group
+    /// generic (`Arith.difftime`, `Compare.Date`) — a dispatch target for the
+    /// checker's operator lookup rather than a name a namespace exports.
+    fn is_operator_method_name(name: &str) -> bool {
+        const GROUP_GENERICS: [&str; 3] = ["Arith.", "Compare.", "Ops."];
+        GROUP_GENERICS
+            .iter()
+            .any(|group| name.starts_with(group) && name.len() > group.len())
+            || OPERATOR_METHOD_PREFIXES
+                .iter()
+                .filter_map(|operator| name.strip_prefix(operator))
+                .any(|suffix| suffix.starts_with('.') && suffix.len() > 1)
     }
 
     #[test]
@@ -623,6 +659,12 @@ mod tests {
             };
             for name in declared {
                 if library.nominals.contains(name) || manifest.contains(name.as_str()) {
+                    continue;
+                }
+                // An operator method is a dispatch target, not a name user code
+                // reads: R registers `Compare.Date` in base's namespace without
+                // exporting it, so the manifest cannot vouch for it.
+                if is_operator_method_name(name) {
                     continue;
                 }
                 if CONDITIONAL_NAMESPACES.contains(&namespace.as_str())

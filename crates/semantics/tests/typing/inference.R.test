@@ -176,6 +176,27 @@ h: fn() -> logical
 k: Unknown
 104..114 error[type-mismatch] expected `logical`, found `character`
 
+#---- date_arithmetic_dispatches_to_the_declared_operator_method
+#: fn(from: Date, until: Date) -> difftime
+elapsed <- function(from, until) until - from
+#: fn(day: Date) -> Date
+shifted <- function(day) day + 30L
+#: fn(from: Date, until: Date) -> logical
+ordered <- function(from, until) from < until
+#: fn(gap: difftime) -> logical
+long <- function(gap) gap > 30
+#++++
+elapsed: fn(from: Date, until: Date) -> difftime
+shifted: fn(day: Date) -> Date
+ordered: fn(from: Date, until: Date) -> logical
+long: fn(gap: difftime) -> logical
+
+#---- an_operand_pair_the_class_does_not_accept_reports_the_class
+f <- function() as.Date("2024-01-15") + as.Date("2024-03-01")
+#++++
+f: Unknown
+16..61 error[type-mismatch] `+` is not defined between `Date` and `Date`
+
 #---- range_operator_shapes
 f <- function() 1L:10L
 g <- function() 1:10

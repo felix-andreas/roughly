@@ -47,6 +47,13 @@ the way TypeScript `.d.ts` and Python `.pyi` are declaration-only by constructio
 Blank lines and `#` comments (whole-line or trailing) are ignored. The loader harvests each type
 expression directly into a `TypeScheme`.
 
+A declared `name` is an R identifier, an infix operator (`%in%`, a project's own `%||%`), or an S3
+**operator method** — `+.Date`, `-.POSIXct`, `Arith.difftime`, `Compare.Date`, `Ops.gg`. The operator
+spellings are how a stub gives a class arithmetic or comparison: see
+[operator methods on a class](/typing/reference#arithmetic-operators) for the dispatch order. The
+suffix is the nominal's own name, so `+.ggplot : fn(e1: ggplot, e2: Any) -> ggplot` in a project stub
+is all a `+`-based DSL needs.
+
 ```
 # base.Rtypes — a fragment
 

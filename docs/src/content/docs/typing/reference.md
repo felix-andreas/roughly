@@ -659,11 +659,22 @@ A map-like list `list[named: T]` represents a name-keyed collection whose values
 
 #### Mixed named and unnamed lists
 
-All elements in `list(...)` must be either all named or all unnamed.
+A partially named `list(...)` is ordinary R — `do.call(f, list(x, n = 1))` is the standard spelling —
+but neither the tuple-like nor the record-like shape can express it. The element names are therefore
+dropped and the value types join into an array-like list: less precise than either fixed shape, and
+never a false rejection of legal code.
 
 Example:
 
-- `list(1L, bar = "foo")` is a type error
+- `list(1L, bar = "foo")` infers as `list[integer | character]`
+
+#### The empty list
+
+`list()` infers as the empty tuple-like shape `list{}`, and is compatible with **any** element-typed
+list shape — `list[T]` and `list[named: T]` alike — because it has no element whose type or name
+could conflict. That is what makes `function(options = list())` a usable default for a
+`list[named: T]` parameter. A record-like expectation with required fields still rejects it: those
+fields are genuinely missing.
 
 ### `NULL`
 
@@ -1552,6 +1563,28 @@ Examples:
 
 ### Arithmetic operators
 
+**Operator methods on a class.** Before the numeric rules below apply, an operator whose operand is
+a nominal dispatches to that class's declared operator method, the way R dispatches `d + 30L` on
+`Date` through `+.Date`. Lookup mirrors R's own order — the operator-specific method (`+.Date`),
+then the operator's S3 group generic (`Arith.Date` for arithmetic, `Compare.Date` for comparison),
+then `Ops.Date` — and either operand's class may supply the method, left first, so `30L + d` behaves
+like `d + 30L`. A declaration is an ordinary stub or annotation declaration named the way R names
+the method, so the result stays precise per operand pairing: differencing two `Date`s is a
+`difftime`, offsetting one by a count is a `Date`.
+
+A class that declares an operator but accepts no candidate for the operands at hand reports
+``error[type-mismatch] `+` is not defined between `Date` and `Date` `` rather than falling back to
+the numeric rules — R rejects that expression too. A class that declares nothing falls through to
+the rules below unchanged, so an opaque nominal is still a type error under arithmetic.
+
+The method name's suffix is the **nominal's** name, not R's full class vector: Roughly's nominals
+carry one name, so a class declared `@type ggplot` takes `+.ggplot` even though R registers the
+method as `+.gg`.
+
+The shipped corpus uses this for `Date`, `POSIXct` and `difftime`. It is also how a project types a
+`+`-based DSL: a `stubs/*.Rtypes` declaring `+.ggplot : fn(e1: ggplot, e2: Any) -> ggplot` gives that
+class its operator.
+
 For now, arithmetic operators are defined only for numeric operands:
 
 - `integer`
@@ -1713,7 +1746,11 @@ Examples:
   member must be an atomic vector type and joins the coercion like a separate argument; an
   accumulator seeded with `NULL` therefore combines cleanly — with `acc` of type
   `double[] | NULL`, `c(acc, 1.0)` is `double[]`
-- every non-`NULL` argument must be an atomic vector type; lists are not supported
+- if **any** argument is list-shaped, `c` concatenates into a list rather than an atomic vector —
+  `c(list_a, list_b)` is the standard way to append to a list in R. The result is array-like
+  `list[T]` whose element type is the join of every argument's elements, taking an atomic argument's
+  own type as its contribution (`c(list(1L), "a")` is `list[integer | character]`). The atomic
+  coercion rules below apply only when no argument is a list
 - a non-concrete argument whose element type is not statically known — `Any`, `Unknown`, or an
   unresolved inference variable (an unannotated parameter, `function(x) c(x, 1L)`) — is tolerated
   rather than rejected: the combined element atomic is indeterminate, so the whole result is
@@ -1735,6 +1772,7 @@ Examples:
 - `c(1L, NA)` returns `integer[]`
 - `c(1L, "a")` returns `character[]`
 - `c(foo = 1L, bar = 2L)` returns `integer[named]`
+- `c(list(1L), list(2L))` returns `list[integer]`
 - `function(x) c(x, 1L)` infers as `fn(x: T) -> Unknown` (the unannotated `x` leaves the element
   atomic indeterminate)
 

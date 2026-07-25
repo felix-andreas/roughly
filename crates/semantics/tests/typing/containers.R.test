@@ -1,3 +1,26 @@
+#==== list_shapes
+#---- c_over_lists_appends
+a <- list(1L, 2L)
+b <- list(3L)
+joined <- c(a, b)
+appended <- c(a, list("x"))
+#++++
+a: list{integer, integer}
+b: list{integer}
+joined: list[integer]
+appended: list[integer | character]
+
+#---- a_partially_named_list_keeps_its_element_types
+options <- list(1L, retries = 2L)
+#++++
+options: list[integer]
+
+#---- an_empty_list_default_satisfies_a_named_list_parameter
+#: fn([options]: list[named: integer]) -> integer
+count <- function(options = list()) length(options)
+#++++
+count: fn([options]: list[named: integer]) -> integer
+
 #==== construction
 #---- combine_promotes
 ints <- c(1L, 2L)
@@ -23,11 +46,10 @@ tuple: list{integer, character}
 record: list{a: integer, b: character}
 empty: list{}
 
-#---- mixed_list_is_refused
+#---- a_partially_named_list_joins_its_element_types
 f <- function() list(1L, b = 2L)
 #++++
-f: Unknown
-16..32 error[type-mismatch] the elements of a `list(...)` must be either all named or all unnamed
+f: fn() -> list[integer]
 
 #==== extraction
 #---- tuple_literal_position

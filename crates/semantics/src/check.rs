@@ -110,12 +110,17 @@ pub enum TypeErrorKind<'db> {
     DollarOnAtomicVector {
         found: Ty<'db>,
     },
-    /// `list(...)` mixing named and unnamed elements has no modeled shape.
-    MixedListElements,
     /// An operator operand outside the operator's accepted family.
     InvalidOperand {
         expected: OperandExpectation,
         found: Ty<'db>,
+    },
+    /// An operator applied to a class that declares that operator, but to no
+    /// combination of operand types the class accepts (`Date + Date`).
+    UnsupportedOperandPair {
+        operator: &'static str,
+        left: Ty<'db>,
+        right: Ty<'db>,
     },
     /// A `for` sequence that is neither a vector nor a list shape.
     NotIterable {
@@ -936,6 +941,38 @@ impl<'db> FlexibleComparisonOperand<'db> {
 /// logical operand to `integer` before arithmetic (`TRUE + TRUE` is `2L`), so
 /// a logical operand reports `integer` and the result rules below need no
 /// logical case of their own.
+/// An operator's R spelling, used to build its S3 method name (`+.Date`).
+fn operator_spelling(operator: BinaryOperator) -> Option<&'static str> {
+    use BinaryOperator::*;
+    Some(match operator {
+        Add => "+",
+        Subtract => "-",
+        Multiply => "*",
+        Divide => "/",
+        Power => "^",
+        Modulo => "%%",
+        IntegerDivide => "%/%",
+        Less => "<",
+        Greater => ">",
+        LessEq => "<=",
+        GreaterEq => ">=",
+        Equal => "==",
+        NotEqual => "!=",
+        _ => return None,
+    })
+}
+
+/// R's S3 operator group for an operator: a class may declare one method for
+/// the whole group instead of one per operator.
+fn operator_group(operator: BinaryOperator) -> Option<&'static str> {
+    use BinaryOperator::*;
+    Some(match operator {
+        Add | Subtract | Multiply | Divide | Power | Modulo | IntegerDivide => "Arith",
+        Less | Greater | LessEq | GreaterEq | Equal | NotEqual => "Compare",
+        _ => return None,
+    })
+}
+
 fn numeric_operand_parts<'db>(db: &'db dyn Db, ty: Ty<'db>) -> Option<(OperandShape, Atomic)> {
     let arithmetic_atomic = |atomic: &Atomic| match atomic {
         Atomic::Logical => Some(Atomic::Integer),
@@ -2269,15 +2306,17 @@ impl<'db> Checker<'db, '_> {
     ) -> Ty<'db> {
         use BinaryOperator::*;
         match operator {
-            Add | Subtract | Multiply | Modulo | IntegerDivide => {
-                self.infer_binary_numeric(range, lhs, rhs, false)
-            }
+            Add | Subtract | Multiply | Modulo | IntegerDivide => self
+                .operator_method_result(range, operator, lhs, rhs)
+                .unwrap_or_else(|| self.infer_binary_numeric(range, lhs, rhs, false)),
             // `/` and `^` always produce doubles.
-            Divide | Power => self.infer_binary_numeric(range, lhs, rhs, true),
+            Divide | Power => self
+                .operator_method_result(range, operator, lhs, rhs)
+                .unwrap_or_else(|| self.infer_binary_numeric(range, lhs, rhs, true)),
             Sequence => self.infer_colon(lhs, rhs),
-            Less | Greater | LessEq | GreaterEq | Equal | NotEqual => {
-                self.infer_compare(range, lhs, rhs)
-            }
+            Less | Greater | LessEq | GreaterEq | Equal | NotEqual => self
+                .operator_method_result(range, operator, lhs, rhs)
+                .unwrap_or_else(|| self.infer_compare(range, lhs, rhs)),
             And2 | Or2 => {
                 self.expect_scalar_logical(lhs);
                 self.expect_scalar_logical(rhs);
@@ -2299,6 +2338,107 @@ impl<'db> Checker<'db, '_> {
                 self.unknown()
             }
         }
+    }
+
+    /// An operator applied to a nominal operand dispatches to that class's
+    /// declared operator method, the way R dispatches `d + 30L` on `Date`
+    /// through `+.Date`. Without this every class that defines arithmetic —
+    /// `Date`, `POSIXct`, `difftime`, and every `+`-based DSL — is a type
+    /// error on its most ordinary use, and there is no way to say otherwise.
+    ///
+    /// Lookup mirrors R's own order: the operator-specific method
+    /// (`+.Date`), then the group generic for the operator's group
+    /// (`Arith.Date` / `Compare.Date`), then `Ops.Date`. Either operand's
+    /// class can supply the method, left first, so `30L + d` works like
+    /// `d + 30L`. `None` means no nominal operand declared anything and the
+    /// ordinary numeric/comparison rules apply unchanged.
+    fn operator_method_result(
+        &mut self,
+        range: TextRange,
+        operator: BinaryOperator,
+        lhs: ExprId,
+        rhs: ExprId,
+    ) -> Option<Ty<'db>> {
+        let globals = self.globals?;
+        let spelling = operator_spelling(operator)?;
+        let group = operator_group(operator)?;
+        // Both operands infer exactly once, here, before any candidate probe:
+        // inference writes environment and recorded-type state that a probe
+        // snapshot does not reverse.
+        let left = self.infer(lhs);
+        let right = self.infer(rhs);
+        let arguments = [
+            CallArgument {
+                name: None,
+                ty: Some(left),
+                range: self.blame_range(lhs),
+                whole_double: self.is_whole_double(lhs),
+                forwards_dots: false,
+            },
+            CallArgument {
+                name: None,
+                ty: Some(right),
+                range: self.blame_range(rhs),
+                whole_double: self.is_whole_double(rhs),
+                forwards_dots: false,
+            },
+        ];
+        let class_of = |ty: Ty<'db>| match self.table.shallow_resolve(self.db, ty).kind(self.db) {
+            TyKind::Named(name, _) => Some(name.text(self.db).to_owned()),
+            _ => None,
+        };
+        let classes: Vec<String> = [class_of(left), class_of(right)]
+            .into_iter()
+            .flatten()
+            .collect();
+        let mut declared_any = false;
+        for class in &classes {
+            for method in [
+                format!("{spelling}.{class}"),
+                format!("{group}.{class}"),
+                format!("Ops.{class}"),
+            ] {
+                let Some(candidates) = globals
+                    .overloads(&method, false)
+                    .or_else(|| globals.scheme(&method, false).map(|scheme| vec![scheme]))
+                    .filter(|candidates| !candidates.is_empty())
+                else {
+                    continue;
+                };
+                declared_any = true;
+                for scheme in candidates {
+                    let snapshot = self.table.snapshot();
+                    let instantiated = self.instantiate(&scheme);
+                    let resolved = self.table.shallow_resolve(self.db, instantiated);
+                    let TyKind::Function(function) = resolved.kind(self.db).clone() else {
+                        self.table.rollback(snapshot);
+                        continue;
+                    };
+                    if self
+                        .match_arguments(range, range, &function, &arguments)
+                        .is_empty()
+                    {
+                        return Some(function.ret);
+                    }
+                    self.table.rollback(snapshot);
+                }
+            }
+        }
+        // A class that declares the operator but fits no candidate is a real
+        // mismatch of that operator's contract (`Date + Date` is an error in R
+        // too), reported against the class rather than against "not numeric".
+        if declared_any {
+            self.errors.push(TypeError {
+                range,
+                kind: TypeErrorKind::UnsupportedOperandPair {
+                    operator: spelling,
+                    left,
+                    right,
+                },
+            });
+            return Some(self.unknown());
+        }
+        None
     }
 
     /// The condition of `if`/`while` and the operands of `&&`/`||` must be
@@ -3014,7 +3154,7 @@ impl<'db> Checker<'db, '_> {
         if let ExpressionKind::NameRef(name) = &self.module.expression(callee).kind {
             let builtin = match name.as_str() {
                 "c" => Some(self.infer_combine(id, arguments)),
-                "list" => Some(self.infer_list(range, arguments)),
+                "list" => Some(self.infer_list(arguments)),
                 "switch" => Some(self.infer_switch(range, arguments)),
                 "return" => Some(self.infer_return(arguments)),
                 _ => None,
@@ -3054,6 +3194,28 @@ impl<'db> Checker<'db, '_> {
     fn infer_combine(&mut self, id: ExprId, arguments: &[Argument]) -> Ty<'db> {
         if arguments.is_empty() {
             return crate::types::null(self.db);
+        }
+        // `c()` over any list-shaped argument concatenates into a LIST, not an
+        // atomic vector — `c(list_a, list_b)` is the standard way to append to
+        // a list in R. The atomic coercion below cannot describe that, so the
+        // list case takes its own path.
+        let values: Vec<ExprId> = arguments.iter().filter_map(|a| a.value).collect();
+        let inferred: Vec<Ty<'db>> = values
+            .iter()
+            .map(|&value| {
+                let ty = self.infer(value);
+                self.structural(ty)
+            })
+            .collect();
+        if inferred
+            .iter()
+            .any(|&ty| self.list_element_type(ty).is_some())
+        {
+            let elements: Vec<Ty<'db>> = inferred
+                .iter()
+                .map(|&ty| self.list_element_type(ty).unwrap_or(ty))
+                .collect();
+            return Ty::new(self.db, TyKind::List(union_of(self.db, elements)));
         }
         let mut item_atomic: Option<Atomic> = None;
         let mut all_arguments_are_named = true;
@@ -3151,25 +3313,40 @@ impl<'db> Checker<'db, '_> {
         )
     }
 
+    /// The element type of a list-shaped type: the declared element for
+    /// `list[T]`/`list[named: T]`, the join of the items or fields for a
+    /// tuple or record shape. `None` for anything that is not a list.
+    fn list_element_type(&self, ty: Ty<'db>) -> Option<Ty<'db>> {
+        match ty.kind(self.db) {
+            TyKind::List(element) | TyKind::NamedList(element) => Some(*element),
+            TyKind::Tuple(items) => Some(union_of(self.db, items.clone())),
+            TyKind::Record(fields) => Some(union_of(self.db, fields.iter().map(|field| field.ty))),
+            _ => None,
+        }
+    }
+
     /// `list(...)` builds the fixed shapes: all-unnamed → tuple-like,
-    /// all-named → record-like, mixed → no modeled shape.
-    fn infer_list(&mut self, range: TextRange, arguments: &[Argument]) -> Ty<'db> {
+    /// all-named → record-like, partially named → an array-like list.
+    fn infer_list(&mut self, arguments: &[Argument]) -> Ty<'db> {
         if arguments.is_empty() {
             return Ty::new(self.db, TyKind::Tuple(Vec::new()));
         }
         let all_named = arguments.iter().all(|argument| argument.name.is_some());
         let all_unnamed = arguments.iter().all(|argument| argument.name.is_none());
         if !(all_named || all_unnamed) {
+            // A partially named list is ordinary R — `do.call(f, list(x, n = 1))`
+            // is the standard spelling. Neither the tuple nor the record shape
+            // can express it, so the names are dropped and the value types join
+            // into an array-like list: less precise than either shape, never a
+            // false rejection of legal code.
+            let mut items = Vec::with_capacity(arguments.len());
             for argument in arguments {
                 if let Some(value) = argument.value {
-                    self.infer(value);
+                    let inferred = self.infer(value);
+                    items.push(self.table.resolve(self.db, inferred));
                 }
             }
-            self.errors.push(TypeError {
-                range,
-                kind: TypeErrorKind::MixedListElements,
-            });
-            return self.unknown();
+            return Ty::new(self.db, TyKind::List(union_of(self.db, items)));
         }
         if all_named {
             let mut fields = Vec::with_capacity(arguments.len());

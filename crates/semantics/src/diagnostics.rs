@@ -1518,9 +1518,6 @@ fn render_type_error_message(db: &dyn Db, error: &TypeError<'_>) -> String {
             "R's `$` operator is invalid on atomic vectors; this value is `{}` — extract an element with `[[` instead.",
             renderer.render(db, *found)
         ),
-        TypeErrorKind::MixedListElements => {
-            "the elements of a `list(...)` must be either all named or all unnamed".to_owned()
-        }
         TypeErrorKind::InvalidOperand { expected, found } => {
             let expected_description = match expected {
                 OperandExpectation::Numeric => "a numeric value (`integer` or `double`)",
@@ -1537,6 +1534,15 @@ fn render_type_error_message(db: &dyn Db, error: &TypeError<'_>) -> String {
                 renderer.render(db, *found)
             )
         }
+        TypeErrorKind::UnsupportedOperandPair {
+            operator,
+            left,
+            right,
+        } => format!(
+            "`{operator}` is not defined between `{}` and `{}`",
+            renderer.render(db, *left),
+            renderer.render(db, *right)
+        ),
         TypeErrorKind::NoMatchingOverload {
             name,
             candidates,

@@ -154,6 +154,16 @@ first: fn(x: integer | character) -> logical
 second: fn(x: logical | character) -> logical
 both: fn(v: logical | character) -> logical
 
+#---- vapply_checks_the_callback_against_its_template
+xs <- c(1, 2, 3)
+labels <- vapply(xs, function(v) as.character(v), character(1))
+wrong <- vapply(xs, function(v) as.character(v), numeric(1))
+#++++
+xs: double[]
+labels: character[]
+wrong: Unknown
+130..140 error[type-mismatch] expected `character[] | character`, found `double[]`
+
 #==== higher_order
 #---- callback_pairs_positionally
 apply1 <- function() {

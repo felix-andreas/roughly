@@ -890,6 +890,11 @@ impl<'db> InferenceTable<'db> {
             (TyKind::Tuple(items), TyKind::List(element)) => items
                 .iter()
                 .all(|&item| self.compatible_probe(db, item, element, depth + 1)),
+            // `list()` is both the empty unnamed and the empty map-like list in
+            // R — it has no element whose name could be missing — so it
+            // satisfies a `list[named: T]` parameter. That is what makes
+            // `= list()` a usable default for one.
+            (TyKind::Tuple(items), TyKind::NamedList(_)) if items.is_empty() => true,
             (TyKind::Record(fields), TyKind::List(element))
             | (TyKind::Record(fields), TyKind::NamedList(element)) => fields
                 .iter()
