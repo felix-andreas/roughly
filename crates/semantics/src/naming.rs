@@ -88,6 +88,12 @@ pub struct ItemNaming {
     pub quiet_reads: BTreeMap<ExprId, String>,
     /// The subset of `quiet_reads` read from inside a nested function.
     pub deferred_quiet_reads: BTreeSet<ExprId>,
+    /// Names read as `%…%` operators (`a %||% b`). R calls a function of that
+    /// name, so the read keeps the project's own operator definition alive.
+    /// Held by name rather than by expression id, because the operator is a
+    /// token and not a `NameRef` node; quiet like the other opaque-construct
+    /// reads, so an undeclared operator is never reported unresolved.
+    pub quiet_operator_reads: BTreeSet<String>,
     /// Dead stores (surfaced only when the unused check is enabled).
     pub unused_assignments: Vec<UnusedAssignment>,
     /// Parameters no read resolves to (`...` excluded), for the default-off
@@ -316,8 +322,21 @@ impl Context<'_> {
                     self.resolve(*operand);
                 }
             }
-            ExpressionKind::Binary { operator, lhs, rhs } => {
+            ExpressionKind::Binary {
+                operator,
+                special_name,
+                lhs,
+                rhs,
+            } => {
                 use crate::hir::BinaryOperator;
+                // `a %op% b` calls a function named `%op%`, so the operator
+                // name is a read like any other — that is what keeps a
+                // project's own `%||%` from being reported unused. It is a
+                // QUIET read: the construct is opaque to the checker, so an
+                // undeclared operator is not a reportable unresolved name.
+                if let Some(name) = special_name {
+                    self.naming.quiet_operator_reads.insert(name.clone());
+                }
                 match operator {
                     // A formula quotes its operands: names inside are model
                     // syntax, exactly like the unary form.

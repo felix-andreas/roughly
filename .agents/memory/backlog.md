@@ -26,9 +26,12 @@ below, ranked by how often a real user hits it.
   `self$` offers every record field in the workspace.
 - **Matrix algebra is untypeable *and* invisible:** `%*%` yields `Unknown`;
   `matrix`/`t`/`solve`/`dim`/`apply`/`outer`/`crossprod`/`diag` are `Any`, so even strict mode says
-  nothing about a transposed dimension. `%in%` and user `%op%` are likewise untyped — the
-  `.Rtypes` grammar now *accepts* `%op%` declaration names, so the remaining work is the checker's
-  `Special` operator path, which currently refuses wholesale.
+  nothing about a transposed dimension. `%in%` and user `%op%` are still *untyped* (the result is `Unknown`), though a use of one now
+  counts as a read of its name. The `.Rtypes` grammar accepts `%op%` declaration names, and the HIR
+  now carries the operator's spelling, so the remaining work is the checker's `Special` path:
+  look the name up and check the call. Weigh it against lowering `%op%` to the call it is (the
+  documented `|>` precedent) — that route also gives goto/references on the operator, at the risk of
+  `unresolved` on an undeclared operator such as a bare-script `%>%`.
 - **`lapply` drops names**, so "named list in, named list out" is inexpressible. A list of
   *functions* is also still rejected — `lapply(list(mean = mean, sd = sd), function(f) f(1:3))` now
   joins the element to a union of two function types, and the callback check cannot yet satisfy a
@@ -51,8 +54,7 @@ below, ranked by how often a real user hits it.
   closure re-entry is unmodelled, so the `if (!is.null(cache)) return(cache); cache <<- v` memo idiom
   yields `T | NULL`; a generic parameter cannot have a non-`NULL` default; the `unused` write-then-`break`
   false positive is NOT reproducible (verified across `for`/`while`/`repeat` and both used and genuinely
-  dead writes) — drop it unless a concrete shape resurfaces; hover renders a polymorphic scheme without its `<...>` binder while inlay hints
-  include it; no `--fix`, no stdin, and no CLI way to ask "what type is this?" (which makes debugging an inference surprise guesswork for a
+  dead writes) — drop it unless a concrete shape resurfaces; no `--fix`, no stdin, and no CLI way to ask "what type is this?" (which makes debugging an inference surprise guesswork for a
   CLI-only user). `sum(1, 2, 3,)` formatting to `sum(1, 2, 3, )` is NOT a defect and stays: the
   trailing comma introduces a missing argument, so it parses identically to the `alist(, )` idiom the
   space serves, and the `trailing-comma` lint reports the mistake.

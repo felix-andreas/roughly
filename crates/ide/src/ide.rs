@@ -141,10 +141,18 @@ pub fn hover(
             let exported = item_naming(db, position.item).and_then(|naming| {
                 let binding = naming.resolutions.get(&expression)?;
                 (naming.bindings.get(binding)?.kind == BindingKind::TopLevel).then_some(())?;
-                check.scheme.as_ref().map(|scheme| scheme.body)
+                check.scheme.as_ref()
             });
+            // The whole scheme, binders included: rendering only the body
+            // drops the `<T>` prefix, so a polymorphic function hovered as
+            // `fn(x: T) -> T` left `T` unexplained — and disagreed with the
+            // inlay hint for the same binding, which renders the scheme.
+            let rendered = match exported {
+                Some(scheme) => renderer.render_scheme(db, scheme),
+                None => renderer.render(db, ty),
+            };
             (
-                format!("{name}: {}", renderer.render(db, exported.unwrap_or(ty))),
+                format!("{name}: {rendered}"),
                 hover_definition(db, files, position.item, expression, name),
             )
         }

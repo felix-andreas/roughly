@@ -187,7 +187,7 @@ hint @59: fn() -> double
 hel$0per <- function(x) x
 caller <- function() helper(1)
 #++++
-hover 0..6: helper: fn(x: T) -> T
+hover 0..6: helper: <T> fn(x: T) -> T
 hover-definition: global 0..6
 definition 0..6
 references: 0..6*, 45..51

@@ -1289,6 +1289,13 @@ fn script_unused_bindings(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
             let deferred = naming.deferred_quiet_reads.contains(expression);
             reads.push((index, name.clone(), deferred));
         }
+        // An operator use keeps every definition of that operator alive: R
+        // resolves `%op%` when the expression runs, and a helper operator is
+        // typically defined in one file and used across the project, so the
+        // read is treated as deferred (order-independent).
+        for name in &naming.quiet_operator_reads {
+            reads.push((index, name.clone(), true));
+        }
         // A maybe-undefined read of the item's own top-level slot (a loop
         // reading its carried variable) reaches the enclosing frame on the
         // unwritten path — its first iteration reads the earlier binding, so

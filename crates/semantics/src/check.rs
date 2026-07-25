@@ -1197,7 +1197,9 @@ impl<'db> Checker<'db, '_> {
                 let (operator, operand) = (*operator, *operand);
                 self.infer_unary(id, operator, operand)
             }
-            ExpressionKind::Binary { operator, lhs, rhs } => {
+            ExpressionKind::Binary {
+                operator, lhs, rhs, ..
+            } => {
                 let (operator, lhs, rhs) = (*operator, *lhs, *rhs);
                 self.infer_binary(id, range, operator, lhs, rhs)
             }

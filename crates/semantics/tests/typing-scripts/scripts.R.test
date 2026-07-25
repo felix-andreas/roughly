@@ -165,6 +165,21 @@ print(y)
 x: integer
 y: integer
 
+#---- operator_use_is_a_use
+`%||%` <- function(a, b) if (is.null(a)) b else a
+fallback <- NULL %||% 3L
+print(fallback)
+#++++
+%||%: <T> fn(a: T | NULL, b: T) -> T
+fallback: Unknown
+
+#---- an_operator_nothing_uses_still_warns
+`%unused%` <- function(a, b) a
+print(1L)
+#++++
+%unused%: <T, U> fn(a: T, b: U) -> T
+0..10 warning[unused] `%unused%` is assigned but never used.
+
 #---- masked_read_is_a_use
 x <- 1L
 out <- with(list(y = 2L), x + y)

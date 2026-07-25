@@ -150,6 +150,11 @@ pub enum ExpressionKind {
     },
     Binary {
         operator: BinaryOperator,
+        /// A `%…%` operator's spelling, carried for [`BinaryOperator::Special`]
+        /// only. R evaluates `a %op% b` as a call to a function of that name,
+        /// so naming needs the name to keep a user-defined operator's
+        /// definition alive; the checker still treats the construct as opaque.
+        special_name: Option<String>,
         lhs: ExprId,
         rhs: ExprId,
     },
@@ -605,7 +610,17 @@ impl Lowering {
                 };
                 let lhs = self.lower_optional(lhs, range);
                 let rhs = self.lower_optional(rhs, range);
-                self.allocate(ExpressionKind::Binary { operator, lhs, rhs }, range)
+                let special_name =
+                    (operator == BinaryOperator::Special).then(|| operator_token.text().to_owned());
+                self.allocate(
+                    ExpressionKind::Binary {
+                        operator,
+                        special_name,
+                        lhs,
+                        rhs,
+                    },
+                    range,
+                )
             }
         }
     }
