@@ -133,8 +133,14 @@ typing = true
 
 ## Where Roughly looks
 
-Roughly analyses `.R` and `.r` files. `.Rmd`, `.qmd` and `.Rnw` are not
-analysed yet, and `source()` calls are not followed.
+Roughly analyses `.R` and `.r` files. `roughly check` also reads **literate
+documents** — `.Rmd`, `.qmd`, `.Rnw` — as the R program their chunks contain:
+prose is ignored, a fence naming another language is skipped, and the whole
+document is one script, so a chunk sees what earlier chunks defined. Every
+reported line and column points at the original file. The formatter deliberately
+leaves them alone (most of an `.Rmd` is prose it has no business rewriting), and
+the editor integration does not cover them yet — `check` and CI do. `source()`
+calls are not followed.
 
 Files directly under a `R/` directory are **package source files**: they share
 one namespace, so any one of them may call a function or reference a `#: @type`

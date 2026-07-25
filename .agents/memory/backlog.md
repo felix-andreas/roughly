@@ -62,8 +62,13 @@ below, ranked by how often a real user hits it.
   CLI-only user). `sum(1, 2, 3,)` formatting to `sum(1, 2, 3, )` is NOT a defect and stays: the
   trailing comma introduces a missing argument, so it parses identically to the `alist(, )` idiom the
   space serves, and the `trailing-comma` lint reports the mistake.
-- **`.Rmd` / `.qmd` chunks are not analysed** — reported honestly in `check`'s summary rather than
-  silently skipped, but half of an analysis user's deliverables are still uncovered.
+- **Literate documents are analysed by `check` but not by the editor.** `.Rmd` / `.qmd` / `.Rnw`
+  chunks are converted to an R program by blanking every non-R character (`syntax::literate`), so
+  ranges need no translation and `check` reports at the original line and column. The LSP path still
+  ignores them: `did_change` hands the engine incremental edits against the document the editor
+  holds, and the converted text is a different buffer, so wiring it needs the original text kept
+  alongside the analysed one (or the conversion applied per-edit). The formatter deliberately stays
+  out — most of an `.Rmd` is prose.
 - **An unannotated helper that wraps an operator over a class fails, and the tie is why.**
   `add_layer <- function(plot, layer) plot + layer` infers `<T: numeric> fn(plot: T, layer: T)` — the
   two flexible operands are tied to ONE variable — so `add_layer(base, geom_point())` reports

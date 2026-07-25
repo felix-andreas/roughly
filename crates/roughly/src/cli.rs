@@ -113,9 +113,6 @@ pub fn check(
     let mut n_files = 0;
     let mut n_diagnostics = 0;
     let mut n_failures = 0;
-    // Extensions found under the requested paths that Roughly cannot analyse,
-    // named in the summary so `check` on an `.Rmd` tree cannot look clean.
-    let mut unanalysable: BTreeSet<String> = BTreeSet::new();
     for (root, config, requested) in groups {
         let exclude = exclude_matcher(&config, &root)?;
         let mut paths = collect_r_files(&root, exclude.as_ref())?;
@@ -124,7 +121,6 @@ pub fn check(
         // named *directory* is a walk like any other, so `exclude` still
         // applies inside it.
         for target in &requested {
-            unanalysable.extend(unanalysable_extensions(target));
             if !target.is_dir() && !paths.contains(target) {
                 paths.push(target.clone());
             }
@@ -218,7 +214,7 @@ pub fn check(
         let mut reported: Vec<bool> = Vec::with_capacity(paths.len());
         for path in paths {
             let source = match std::fs::read_to_string(&path) {
-                Ok(source) => source,
+                Ok(source) => analysable_source(&path, source),
                 Err(err) => {
                     n_failures += 1;
                     error(&format!("failed to read: {}", path.display()));
@@ -471,7 +467,7 @@ pub fn check(
     // look alike: silence would otherwise read as success on a tree of `.Rmd`
     // files, of which none is analysed.
     if output == OutputFormat::Human {
-        report_check_summary(&unanalysable, n_files, n_diagnostics);
+        report_check_summary(n_files, n_diagnostics);
     }
     Ok(if n_diagnostics == 0 {
         Outcome::Clean
@@ -482,23 +478,11 @@ pub fn check(
 
 /// `check`'s closing line. An empty tree is not a usage error — a monorepo
 /// stage with no R in it yet must not fail a pipeline — so it reports what it
-/// found (nothing) and exits clean, naming the extensions it had to skip.
-fn report_check_summary(unanalysable: &BTreeSet<String>, n_files: usize, n_diagnostics: usize) {
-    let skipped = if unanalysable.is_empty() {
-        String::new()
-    } else {
-        let extensions: Vec<String> = unanalysable
-            .iter()
-            .map(|extension| format!("`.{extension}`"))
-            .collect();
-        format!(
-            "; skipped {} (Roughly analyses `.R` and `.r`)",
-            extensions.join(", ")
-        )
-    };
+/// found (nothing) and exits clean.
+fn report_check_summary(n_files: usize, n_diagnostics: usize) {
     let files = if n_files == 1 { "file" } else { "files" };
     if n_diagnostics == 0 {
-        println!("{n_files} {files} checked, no problems{skipped}");
+        println!("{n_files} {files} checked, no problems");
         return;
     }
     let problems = if n_diagnostics == 1 {
@@ -506,7 +490,22 @@ fn report_check_summary(unanalysable: &BTreeSet<String>, n_files: usize, n_diagn
     } else {
         "problems"
     };
-    println!("{n_diagnostics} {problems} in {n_files} {files}{skipped}");
+    println!("{n_diagnostics} {problems} in {n_files} {files}");
+}
+
+/// The R program a file contributes to analysis: its own text, or — for a
+/// literate document — the R its chunks contain, with prose blanked so every
+/// reported range still points at the original file.
+pub(crate) fn analysable_source(path: &Path, text: String) -> String {
+    let literate = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(syntax::literate::is_literate_extension);
+    if literate {
+        syntax::literate::r_source_of_literate(&text)
+    } else {
+        text
+    }
 }
 
 /// Unknown config keys warn but never block: the rest of the file is
@@ -561,23 +560,6 @@ pub(crate) fn exclude_matcher(
 /// Walks `target` for R sources. Excluded directories are pruned without
 /// descending; a `target` that is itself a file bypasses exclusion — a file
 /// named explicitly is always checked.
-/// Extensions under a requested path that Roughly does not analyse but a user
-/// could reasonably expect it to. Reported in `check`'s summary rather than
-/// silently skipped, because a tree of `.Rmd` files would otherwise produce a
-/// clean run over nothing.
-fn unanalysable_extensions(target: &Path) -> BTreeSet<String> {
-    const UNANALYSABLE: [&str; 5] = ["Rmd", "rmd", "qmd", "Rnw", "rnw"];
-    let mut found = BTreeSet::new();
-    for entry in ignore::WalkBuilder::new(target).build().flatten() {
-        if let Some(extension) = entry.path().extension().and_then(|ext| ext.to_str())
-            && UNANALYSABLE.contains(&extension)
-        {
-            found.insert(extension.to_owned());
-        }
-    }
-    found
-}
-
 /// Directories that hold vendored dependency infrastructure rather than
 /// project code. `renv/activate.R` alone is a thousand generated lines every
 /// `renv`-using project would otherwise see reported. A path named explicitly
@@ -622,7 +604,12 @@ pub(crate) fn collect_r_files(
             Ok(entry) => {
                 let path = entry.into_path();
                 path.extension()
-                    .is_some_and(|ext| ext == "R" || ext == "r")
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| {
+                        extension == "R"
+                            || extension == "r"
+                            || syntax::literate::is_literate_extension(extension)
+                    })
                     .then_some(Ok(path))
             }
             Err(err) => {
@@ -891,7 +878,18 @@ pub fn fmt(
             warn_unknown_config_keys(&config);
             // `[check] exclude` scopes analysis, not formatting: fmt walks
             // everything, matching the key's name and the formatter's speed.
-            let paths = collect_r_files(file, None)?;
+            // Literate documents are analysed but never formatted — the
+            // formatter rewrites whole-file layout, and most of an `.Rmd` is
+            // prose it has no business touching.
+            let paths: Vec<PathBuf> = collect_r_files(file, None)?
+                .into_iter()
+                .filter(|path| {
+                    !path
+                        .extension()
+                        .and_then(|extension| extension.to_str())
+                        .is_some_and(syntax::literate::is_literate_extension)
+                })
+                .collect();
             Ok((paths, config))
         })
         .collect::<Result<Vec<_>, _>>()?;

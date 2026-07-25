@@ -10,6 +10,7 @@
 
 pub mod ast;
 pub mod kind;
+pub mod literate;
 pub mod testing;
 
 mod lexer;

@@ -660,14 +660,27 @@ fn check_reports_only_the_paths_it_was_given() {
 }
 
 #[test]
-fn check_summary_names_extensions_it_cannot_analyse() {
-    let directory = project(&[("report.Rmd", "```{r}\nx <- 1\n```\n")]);
-    let output = roughly(directory.path(), &["check"]);
-    assert_eq!(exit_code(&output), 0, "stderr: {}", stderr(&output));
+fn check_analyses_r_chunks_in_a_literate_document() {
+    let directory = project(&[
+        ("roughly.toml", "[check]\ntyping = true\n"),
+        (
+            "report.Rmd",
+            "# Title\n\nProse about it.\n\n```{r}\ncount <- 10L\n```\n\n```{r}\nprint(count + \"text\")\n```\n\n```{python}\nx = 1\n```\n",
+        ),
+    ]);
+    let output = roughly(directory.path(), &["check", "."]);
+    let rendered = stderr(&output);
+    assert_eq!(exit_code(&output), 1, "stderr: {rendered}");
     assert!(
-        stdout(&output).contains("skipped `.Rmd`"),
-        "a tree of unanalysable files must not look clean: {}",
-        stdout(&output)
+        rendered.contains("report.Rmd:10:") && rendered.contains("found `character`"),
+        "the chunk error is located in the original document: {rendered}"
+    );
+    // The formatter must leave a literate document alone.
+    let formatted = roughly(directory.path(), &["fmt", "--check", "."]);
+    assert!(
+        !stdout(&formatted).contains("1 file"),
+        "fmt must not pick up literate documents: {}",
+        stdout(&formatted)
     );
 }
 
