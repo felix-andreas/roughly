@@ -64,9 +64,18 @@ below, ranked by how often a real user hits it.
   space serves, and the `trailing-comma` lint reports the mistake.
 - **`.Rmd` / `.qmd` chunks are not analysed** — reported honestly in `check`'s summary rather than
   silently skipped, but half of an analysis user's deliverables are still uncovered.
-- **Stub coverage is the cheapest lever on false positives.** `library(pkg)` for an unstubbed
-  package tolerates every bare read except a near-miss of the project's own names; shipping
-  `testthat` and `ggplot2` stubs would buy full typo detection back where it matters most.
+- **`ggplot2` stubs are the remaining cheap lever on false positives.** `testthat` now ships (see the
+  ledger), so a package's `tests/` tree resolves properly instead of relying on the blanket tolerance.
+  `ggplot2` is the other high-traffic namespace: it needs the `@type ggplot` nominal, `+.ggplot`, and
+  the `aes(...)` data mask. **R is installable in an agent container** (recipe in MEMORY.md; note
+  `fs` needs `apt-get install libuv1-dev` first), so generate the manifest with
+  `Rscript scripts/export-manifests.R` rather than writing one from memory — an incomplete manifest
+  turns a real export into a false `unresolved`.
+- **A type error inside `expect_error(...)` is still reported.** `expect_error(f("bad type"))` is how
+  you test a type-related failure, and the call really is type-incorrect, so the finding is defensible
+  — but it needs a suppression to write that test. Decide whether an expectation that asserts a
+  condition should suppress type findings in its payload, or whether `# roughly: allow(...)` is the
+  answer and the guide should say so.
 
 ## Open
 

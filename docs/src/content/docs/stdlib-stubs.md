@@ -7,7 +7,7 @@ description: The standard-library stub format (.Rtypes declaration files) that t
 The standard-library stub format ships. The corpus is ~560 typed declarations across nine
 declaration-only `.Rtypes` stub files in the repository's top-level `types/` directory (`base`,
 `stats`, `utils`, `methods`, `graphics`, `grDevices`, `datasets`, plus the conditional
-`data.table` and `dplyr`), alongside generated `.exports` [manifests](#export-manifests) covering
+`data.table`, `dplyr` and `testthat`), alongside generated `.exports` [manifests](#export-manifests) covering
 every namespace R ships (the attached ones, the `::`-only ones such as `tools` and `parallel`,
 and the conditional packages), all loaded and bound into the checker as a **set-once input** that
 never invalidates a package edit (see [Incremental hygiene](#incremental-hygiene)). Project
@@ -306,10 +306,10 @@ override winning a name's type never un-exports it from its declaring namespace.
 
 ### Conditional namespaces
 
-Some shipped stubs describe packages R does **not** attach by default — today `data.table` and
-`dplyr`. Folding them in unconditionally would let `fread` or `mutate` resolve (and steal a typo
-warning) in projects that never use them, so a conditional namespace joins the assembly only when
-the project uses the package:
+Some shipped stubs describe packages R does **not** attach by default — today `data.table`, `dplyr`
+and `testthat`. Folding them in unconditionally would let `fread`, `mutate` or `expect_equal` resolve
+(and steal a typo warning) in projects that never use them, so a conditional namespace joins the
+assembly only when the project uses the package:
 
 - a `DESCRIPTION` dependency field (`Depends`/`Imports`/`Suggests`/`Enhances`) names it, or any
   `NAMESPACE` `import`/`importFrom` uses it as a source, or
@@ -319,6 +319,14 @@ the project uses the package:
 - the project ships its own `stubs/<pkg>.Rtypes` override for the namespace — writing one is
   itself the clearest declaration that the project uses the package, and the override then folds
   over the shipped declarations as usual.
+
+`testthat` earns its place for a different reason than the data packages: a package's `tests/`
+directory is a third of its source and every line of it calls these names, so without the corpus the
+only way to quiet them was the blanket tolerance an unknowable export set earns — which also silenced
+typos in the package's *own* functions. With the stubs, `expect_eqaul` is reported with a suggestion.
+Expectation `object` parameters are `Any` (an expectation compares whatever the code under test
+produced), and each `expect_*` returns its `object`, which is the value testthat passes through
+invisibly.
 
 While inactive the namespace is simply absent: its names warn as unresolved, `pkg::` reads behave
 like any stub-less package, and its `@type` nominals are unknown type names. The hosts keep the

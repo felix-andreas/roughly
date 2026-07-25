@@ -1,0 +1,97 @@
+# testthat — a CONDITIONAL namespace (like data.table and dplyr): these
+# declarations join resolution only when the project declares testthat
+# (DESCRIPTION `Suggests`/`Imports`, or a NAMESPACE import) or a file attaches it
+# with a `library()`-family call. A package's `tests/` directory is a third of
+# its source and every line of it calls these names, so without the corpus the
+# only way to quiet them was the blanket tolerance an unknowable export set
+# earns — which also silenced real typos in the package's own functions.
+#
+# `object` and `expected` are Any-param throughout: an expectation compares
+# whatever the code under test produced, so a declared type would reject correct
+# tests. What the declarations DO buy is arity and named-argument checking
+# (`expect_error(x, clss = "e")` is caught) and the return type, which is the
+# value invisibly passed through — `expect_*` returns its `object`, which is
+# what makes the chained form `expect_equal(f(x), 1) |> expect_type(...)` type.
+
+# The test-organising blocks. `code` is a braced expression evaluated in a fresh
+# environment; the declared `Any` accepts it without inspecting its result.
+test_that : fn(desc: character, code: Any) -> logical
+describe : fn(description: character, code: Any) -> Any
+it : fn(description: character, code: Any) -> Any
+test_check : fn(package: character, [reporter]: Any, ...: Any) -> Any
+test_local : fn([path]: character, [reporter]: Any, ...: Any) -> Any
+test_dir : fn(path: character, ...: Any) -> Any
+test_file : fn(path: character, [reporter]: Any, ...: Any) -> Any
+test_path : fn(...: Any) -> character
+local_edition : fn(x: Any, [.env]: Any) -> Any
+local_reproducible_output : Any
+
+# Comparison expectations. Each returns its `object` invisibly.
+expect_equal : <T> fn(object: T, expected: Any, ...: Any, [tolerance]: Any, [info]: Any, [label]: Any, [expected.label]: Any) -> T
+expect_identical : <T> fn(object: T, expected: Any, [info]: Any, [label]: Any, [expected.label]: Any, ...: Any) -> T
+expect_setequal : <T> fn(object: T, expected: Any) -> T
+expect_mapequal : <T> fn(object: T, expected: Any) -> T
+expect_contains : <T> fn(object: T, expected: Any) -> T
+expect_in : <T> fn(object: T, expected: Any) -> T
+expect_reference : <T> fn(object: T, expected: Any, [info]: Any, [label]: Any, [expected.label]: Any) -> T
+expect_equivalent : <T> fn(object: T, expected: Any, ...: Any, [info]: Any, [label]: Any, [expected.label]: Any) -> T
+
+# Truth and value expectations.
+expect_true : <T> fn(object: T, [info]: Any, [label]: Any) -> T
+expect_false : <T> fn(object: T, [info]: Any, [label]: Any) -> T
+expect_null : <T> fn(object: T, [info]: Any, [label]: Any) -> T
+expect_length : <T> fn(object: T, n: Any) -> T
+expect_named : <T> fn(object: T, [expected]: Any, ...: Any, [ignore.order]: logical, [ignore.case]: logical, [info]: Any, [label]: Any) -> T
+expect_type : <T> fn(object: T, type: character) -> T
+expect_s3_class : <T> fn(object: T, class: Any, [exact]: logical) -> T
+expect_s4_class : <T> fn(object: T, class: Any) -> T
+expect_is : <T> fn(object: T, class: Any, [info]: Any, [label]: Any) -> T
+expect_vector : <T> fn(object: T, [ptype]: Any, [size]: Any) -> T
+expect_visible : <T> fn(object: T, [label]: Any) -> T
+expect_invisible : <T> fn(call: T, [label]: Any) -> T
+
+# Numeric and string expectations.
+expect_lt : <T> fn(object: T, expected: Any, [label]: Any, [expected.label]: Any) -> T
+expect_lte : <T> fn(object: T, expected: Any, [label]: Any, [expected.label]: Any) -> T
+expect_gt : <T> fn(object: T, expected: Any, [label]: Any, [expected.label]: Any) -> T
+expect_gte : <T> fn(object: T, expected: Any, [label]: Any, [expected.label]: Any) -> T
+expect_match : <T> fn(object: T, regexp: Any, [perl]: logical, [fixed]: logical, ...: Any, [all]: logical, [info]: Any, [label]: Any) -> T
+expect_no_match : <T> fn(object: T, regexp: Any, [perl]: logical, [fixed]: logical, ...: Any, [all]: logical, [info]: Any, [label]: Any) -> T
+expect_output : <T> fn(object: T, [regexp]: Any, ...: Any, [info]: Any, [label]: Any) -> T
+
+# Condition expectations. `regexp` and `class` select which condition matches.
+expect_error : <T> fn(object: T, [regexp]: Any, [class]: Any, ...: Any, [inherit]: logical, [info]: Any, [label]: Any) -> T
+expect_warning : <T> fn(object: T, [regexp]: Any, [class]: Any, ...: Any, [inherit]: logical, [all]: logical, [info]: Any, [label]: Any) -> T
+expect_message : <T> fn(object: T, [regexp]: Any, [class]: Any, ...: Any, [inherit]: logical, [all]: logical, [info]: Any, [label]: Any) -> T
+expect_condition : <T> fn(object: T, [regexp]: Any, [class]: Any, ...: Any, [inherit]: logical, [info]: Any, [label]: Any) -> T
+expect_no_error : <T> fn(object: T, ...: Any, [message]: Any, [class]: Any) -> T
+expect_no_warning : <T> fn(object: T, ...: Any, [message]: Any, [class]: Any) -> T
+expect_no_message : <T> fn(object: T, ...: Any, [message]: Any, [class]: Any) -> T
+expect_no_condition : <T> fn(object: T, ...: Any, [message]: Any, [class]: Any) -> T
+expect_silent : <T> fn(object: T) -> T
+
+# Snapshot expectations: value-dependent, so the payload stays Any.
+expect_snapshot : Any
+expect_snapshot_value : Any
+expect_snapshot_output : Any
+expect_snapshot_error : Any
+expect_snapshot_warning : Any
+expect_snapshot_file : Any
+
+# Skips and failures. `skip` and `fail` never return; `Any` stands in for the
+# missing `Never` type, as `stop`'s does in base.
+skip : Any
+skip_if : fn(condition: Any, [message]: character) -> Any
+skip_if_not : fn(condition: Any, [message]: character) -> Any
+skip_on_cran : fn() -> Any
+skip_on_ci : fn() -> Any
+skip_on_os : fn(os: character, [arch]: character) -> Any
+skip_if_not_installed : fn(pkg: character, [minimum_version]: Any) -> Any
+skip_if_offline : Any
+fail : Any
+succeed : Any
+
+# Mocking and fixtures.
+local_mocked_bindings : Any
+with_mocked_bindings : Any
+teardown_env : fn() -> environment

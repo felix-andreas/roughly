@@ -120,6 +120,7 @@ pub fn shipped_stub_sources() -> Vec<(String, String)> {
             include_str!("../../../types/data.table.Rtypes"),
         ),
         ("dplyr", include_str!("../../../types/dplyr.Rtypes")),
+        ("testthat", include_str!("../../../types/testthat.Rtypes")),
     ]
     .into_iter()
     .map(|(namespace, text)| (namespace.to_owned(), text.to_owned()))
@@ -154,6 +155,7 @@ pub fn shipped_export_manifests() -> Vec<(String, String)> {
             include_str!("../../../types/data.table.exports"),
         ),
         ("dplyr", include_str!("../../../types/dplyr.exports")),
+        ("testthat", include_str!("../../../types/testthat.exports")),
     ]
     .into_iter()
     .map(|(namespace, text)| (namespace.to_owned(), text.to_owned()))
@@ -164,7 +166,7 @@ pub fn shipped_export_manifests() -> Vec<(String, String)> {
 /// the library only when the project declares or attaches the package
 /// (`metadata::namespace_active`), so `fread` and `mutate` never resolve —
 /// and never steal a typo warning — in a project that does not use them.
-pub const CONDITIONAL_NAMESPACES: &[&str] = &["data.table", "dplyr"];
+pub const CONDITIONAL_NAMESPACES: &[&str] = &["data.table", "dplyr", "testthat"];
 
 /// Namespaces R ships but does not put on the default search path: `pkg::`
 /// reads work in every R session (their manifests always validate qualified

@@ -56,7 +56,7 @@ use_library_name <- function(x) expect_equal(x, x)
 #++++
 validate_url: <T> fn(url: T) -> logical
 check_one: <T> fn(url: T) -> Unknown
-use_library_name: <T> fn(x: T) -> Unknown
+use_library_name: <T> fn(x: T) -> T
 91..102 warning[unresolved] I could not resolve `validte_url` in this package, its imports, or builtins. Did you mean `validate_url`?
 
 #---- a_transposition_is_suggested_but_a_distant_name_is_not
@@ -67,6 +67,30 @@ f: <T> fn(x: T) -> Unknown
 g: <T> fn(d: T) -> Unknown
 17..23 warning[unresolved] I could not resolve `lenght` in this package, its imports, or builtins. Did you mean `length`?
 44..50 warning[unresolved] I could not resolve `ggplot` in this package, its imports, or builtins.
+
+#==== testthat
+#---- declared_dependency_activates_the_testthat_stub
+#description Suggests: testthat
+check_it <- function(value) {
+  test_that("adds", {
+    expect_equal(value, 2L)
+  })
+}
+#++++
+check_it: <T> fn(value: T) -> logical
+
+#---- a_misspelled_expectation_is_caught_not_tolerated
+#description Suggests: testthat
+check_it <- function(value) expect_eqaul(value, 2L)
+#++++
+check_it: <T> fn(value: T) -> Unknown
+60..72 warning[unresolved] I could not resolve `expect_eqaul` in this package, its imports, or builtins. Did you mean `expect_equal`?
+
+#---- an_expectation_returns_its_object
+#description Suggests: testthat
+passthrough <- function() expect_equal(2L, 2L)
+#++++
+passthrough: fn() -> integer
 
 #==== namespace_reads
 #---- declared_dependency_quiets_an_unknown_namespace

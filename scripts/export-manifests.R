@@ -1,12 +1,13 @@
 #!/usr/bin/env Rscript
 # Regenerates types/<namespace>.exports — the vendored export manifests the
 # stub loader uses to resolve names the typed corpus does not declare.
-# Requires an R installation with data.table and dplyr available; run from
-# the repository root: Rscript scripts/export-manifests.R
+# Requires an R installation with the conditional packages available
+# (data.table, dplyr, testthat); run from the repository root:
+# Rscript scripts/export-manifests.R
 namespaces <- c(
   "base", "stats", "utils", "graphics", "grDevices", "methods", "datasets",
   "tools", "parallel", "compiler", "grid", "splines", "stats4", "tcltk",
-  "data.table", "dplyr"
+  "data.table", "dplyr", "testthat"
 )
 for (namespace in namespaces) {
   # datasets exports nothing through its namespace — its objects are lazy
