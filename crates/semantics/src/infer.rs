@@ -887,6 +887,26 @@ impl<'db> InferenceTable<'db> {
                         })
                 })
             }
+            // A fixed-shape list flowing into `list[T]`: when `T` is still
+            // open, it takes the JOIN of the items rather than unifying with
+            // each in turn — otherwise the first item pins `T` and every later
+            // one is a mismatch, so `lapply(list(1L, "a"), f)` failed while
+            // `for` over the same list is documented to bind
+            // `integer | character`. A concrete `T` keeps the all-must-fit
+            // rule.
+            (TyKind::Tuple(items), TyKind::List(element))
+                if matches!(self.resolve(db, element).kind(db), TyKind::Var(_)) =>
+            {
+                let joined = union_of(db, items);
+                self.unify(db, element, joined).is_ok()
+            }
+            (TyKind::Record(fields), TyKind::List(element))
+            | (TyKind::Record(fields), TyKind::NamedList(element))
+                if matches!(self.resolve(db, element).kind(db), TyKind::Var(_)) =>
+            {
+                let joined = union_of(db, fields.iter().map(|field| field.ty));
+                self.unify(db, element, joined).is_ok()
+            }
             (TyKind::Tuple(items), TyKind::List(element)) => items
                 .iter()
                 .all(|&item| self.compatible_probe(db, item, element, depth + 1)),

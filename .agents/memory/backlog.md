@@ -47,9 +47,11 @@ below, ranked by how often a real user hits it.
   that produced the `Unknown`, and the wording differs from the documented text.
 - **`match.arg` + `switch` yields `fn | NULL`, which is then uncallable** — it made a reviewer add
   provably dead guard code.
-- **`lapply` drops names**, so "named list in, named list out" is inexpressible, and
-  `lapply(list(1L, "a"), f)` errors although `for` over the same list is documented to bind
-  `integer | character`.
+- **`lapply` drops names**, so "named list in, named list out" is inexpressible. A list of
+  *functions* is also still rejected — `lapply(list(mean = mean, sd = sd), function(f) f(1:3))` now
+  joins the element to a union of two function types, and the callback check cannot yet satisfy a
+  union in a contravariant parameter position. (The plain heterogeneous case is fixed: an open
+  `list[T]` element takes the join.)
 - **Everything from a `data.frame` is `Unknown`, and `Unknown` satisfies every annotation** — so on
   data-frame-heavy code annotations look protective and are not. This is the design consequence that
   decides the tool's value for analysis users; it needs at minimum a way to *see* that a check was

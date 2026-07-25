@@ -653,6 +653,8 @@ Examples:
 
 An array-like list `list[T]` represents a list whose elements all share a common element type `T`. Array-like lists do not have fixed positional semantics and do not require element names to be statically known. They are normally introduced via annotations or by coercion from tuple-like, record-like, or map-like shapes when all values are compatible with `T`.
 
+When a fixed-shape list flows into `list[T]` and `T` is still an open inference variable — the shape of every `lapply(x, f)` call — `T` takes the **join** of the elements rather than unifying with each in turn. Otherwise the first element would pin `T` and every later one would be a mismatch, so `lapply(list(1L, "a"), f)` would fail while `for` over the same list is specified to bind `integer | character`. A `T` that is already concrete keeps the all-must-fit rule.
+
 #### Map-like lists
 
 A map-like list `list[named: T]` represents a name-keyed collection whose values all share a common value type `T`. Map-like lists do not require the set of names to be statically known and are typically produced by annotations or by coercion from structural list shapes whose element names are not statically available.

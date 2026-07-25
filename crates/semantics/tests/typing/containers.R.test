@@ -10,6 +10,13 @@ b: list{integer}
 joined: list[integer]
 appended: list[integer | character]
 
+#---- a_fixed_shape_list_joins_into_an_open_element
+mixed <- lapply(list(1L, "a"), function(x) x)
+named <- lapply(list(a = 1L, b = "x"), function(x) x)
+#++++
+mixed: list[integer | character]
+named: list[integer | character]
+
 #---- a_partially_named_list_keeps_its_element_types
 options <- list(1L, retries = 2L)
 #++++
