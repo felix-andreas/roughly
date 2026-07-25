@@ -1407,10 +1407,16 @@ call site:
   (`sum(1L, 2L)` is `integer`, `sum(1.5, 2.5)` is `double`)
 - each failed candidate is probed in isolation: nothing it bound leaks into the next candidate or
   into the committed result
-- selection needs concrete argument types. When any argument's type is still an undetermined
-  inference variable (an unannotated parameter of an enclosing function, for example), selection is
-  skipped and the **last** declaration — by corpus convention the most general — is used, so a
-  wrapper like `function(x) sum(x)` keeps its parameter unconstrained
+- when an argument's type is still an undetermined inference variable (an unannotated parameter of an
+  enclosing function, for example), a candidate may fit only *because* unification narrowed that
+  variable — a guess, not a fact. Every candidate is still tried, and one that fits while leaving the
+  caller's undetermined types exactly as they were beats one that does not: the first such candidate
+  wins. When every fitting candidate would cost the caller something, nothing discriminates and the
+  **last** fitting declaration — by corpus convention the most general — is used, so a wrapper like
+  `function(x) sum(x)` keeps its parameter unconstrained. A single fitting candidate is never a guess:
+  it is the only signature that accepts the call, so it is selected and its narrowing stands
+  (`f(function(v) v, 1L)` selects the candidate whose second parameter is `integer`, even though the
+  lambda's parameter type was open)
 - the [whole-number literal rule](#function-calls) does not steer selection: candidates are first
   tried against the arguments' true types (`sum(1, 2)` selects the `double` candidate, matching what
   R computes), and only if no candidate accepts them is the set retried with the literal-as-integer
@@ -1418,8 +1424,8 @@ call site:
 - when no candidate accepts the arguments, the call is a type error naming the overloaded callee and
   how many signatures were tried, with the first candidate's failure as the concrete hint
 - every non-call use of an overloaded name (passing it as a value, hover) sees the **last**
-  declaration — by corpus convention the most general one, the same candidate undetermined
-  arguments fall back to, so a value-use never carries a narrower contract than the calls it
+  declaration — by corpus convention the most general one, the same candidate a call with nothing to
+  discriminate on falls back to, so a value-use never carries a narrower contract than the calls it
   might make
 
 Only a plain or namespace-qualified stub name can be overloaded. A local or package binding that

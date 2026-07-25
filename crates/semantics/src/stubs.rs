@@ -1000,6 +1000,82 @@ mod tests {
     }
 
     #[test]
+    fn a_discriminating_argument_selects_despite_a_flexible_one() {
+        let db = RootDatabase::default();
+        StubSources::new(
+            &db,
+            vec![(
+                "test".to_owned(),
+                "f : fn(callback: fn(integer) -> integer, x: integer) -> integer\n\
+                 f : fn(callback: fn(character) -> character, x: character) -> character\n"
+                    .to_owned(),
+            )],
+            Vec::new(),
+        );
+        // The lambda's parameter is a free variable, but `1L` fits only the
+        // first candidate: selection follows the argument that discriminates
+        // instead of forcing the last declaration.
+        let check = first_item_check(&db, "g <- function() f(function(v) v, 1L)\n");
+        assert!(check.errors.is_empty(), "{:?}", check.errors);
+        assert!(matches!(
+            scheme_return(&db, &check).kind(&db),
+            crate::types::TyKind::Scalar(crate::types::Atomic::Integer)
+        ));
+    }
+
+    #[test]
+    fn arity_selects_the_only_candidate_a_flexible_call_can_fit() {
+        let db = RootDatabase::default();
+        StubSources::new(
+            &db,
+            vec![(
+                "test".to_owned(),
+                "f : fn(x: integer) -> integer\n\
+                 f : fn(x: integer, y: integer) -> double\n\
+                 f : fn(x: character) -> character\n"
+                    .to_owned(),
+            )],
+            Vec::new(),
+        );
+        // Only the two-parameter candidate can accept two arguments at all, so
+        // the flexible `n` does not make the choice a guess.
+        let check = first_item_check(&db, "g <- function(n) f(n, 2L)\n");
+        assert!(check.errors.is_empty(), "{:?}", check.errors);
+        assert!(matches!(
+            scheme_return(&db, &check).kind(&db),
+            crate::types::TyKind::Scalar(crate::types::Atomic::Double)
+        ));
+    }
+
+    #[test]
+    fn a_candidate_that_costs_the_caller_nothing_wins() {
+        let db = RootDatabase::default();
+        StubSources::new(
+            &db,
+            vec![(
+                "test".to_owned(),
+                "f : fn(x: Any) -> character\nf : fn(x: integer) -> integer\n".to_owned(),
+            )],
+            Vec::new(),
+        );
+        // Both candidates fit, but the second only by pinning the caller's
+        // parameter to `integer`. The one that costs nothing wins and the
+        // parameter stays generic.
+        let check = first_item_check(&db, "g <- function(n) f(n)\n");
+        assert!(check.errors.is_empty(), "{:?}", check.errors);
+        let scheme = check.scheme.clone().expect("scheme");
+        assert_eq!(
+            scheme.binders.len(),
+            1,
+            "the parameter must stay generic: {scheme:?}"
+        );
+        assert!(matches!(
+            scheme_return(&db, &check).kind(&db),
+            crate::types::TyKind::Scalar(crate::types::Atomic::Character)
+        ));
+    }
+
+    #[test]
     fn courtesy_applies_outside_overload_sets_too() {
         let db = RootDatabase::default();
         StubSources::new(

@@ -15,11 +15,14 @@ numerical-computing user; docs + `--help` only, no source access) simulated real
 converged on the same walls. What they found and is now fixed is in the ledger; what remains is
 below, ranked by how often a real user hits it.
 
-- **Overload selection is skipped whenever an argument's type contains an inference variable** —
-  true of every lambda and every unannotated function — so the *last* candidate is forced. Proven
-  with a two-candidate project stub: an annotated callback selects correctly, a lambda does not.
-  This is what blocks widening the apply-family stubs into overload sets, and it now also limits
-  operator-method dispatch on a generic operand.
+- **Overload selection with a flexible argument FIXED** (fact-versus-guess probing — see
+  `decisions.md`): a candidate that fits without narrowing the caller's open types beats one that
+  does not, and a single fitting candidate is selected outright. The apply family is now unblocked
+  but still untyped where its result shape is *value*-dependent: `sapply`/`mapply`/`Map`/`tapply`
+  stay `Any` because `simplify = FALSE` and a vector-returning callback change the result shape
+  without changing any argument type, so no overload set can discriminate them — typing only their
+  *parameters* (leaving the return `Any`) is the reachable win, at the cost of rejecting R's
+  function-name-as-string form (`sapply(x, "length")`, already rejected for `lapply`).
 - **S4 is untyped:** a slot typo against a class declared two lines above is silent
   (`setClass("A", representation(x = "numeric")); new("A", y = 1)`). R6 method *bodies* now resolve
   `self`/`private`/`super`, but their field and method types are still `Unknown`, so completion after

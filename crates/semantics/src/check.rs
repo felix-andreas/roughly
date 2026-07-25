@@ -21,10 +21,10 @@ use crate::hir::{
 use crate::infer::{Entry, InferenceTable, UnifyError};
 use crate::naming::{BindingId, ItemNaming};
 use crate::types::{
-    Atomic, Constraint, FunctionType, Name, RecordField, RestParameter, Ty, TyKind, TypeScheme,
-    any, scalar, union_of, unknown,
+    Atomic, Constraint, FunctionType, InferenceVar, Name, RecordField, RestParameter, Ty, TyKind,
+    TypeScheme, any, scalar, union_of, unknown,
 };
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use syntax::TextRange;
 
 /// A structured type finding; rendering to wording happens at the diagnostic
@@ -3700,33 +3700,26 @@ impl<'db> Checker<'db, '_> {
         // probe would leak bindings that reference rolled-back variable ids.
         let call_arguments = self.infer_call_arguments(range, arguments);
 
-        // Selection needs concrete argument types. Probing against an
-        // argument whose type still contains a free inference variable would
-        // let the first candidate bind it — committing a wrapper function's
-        // parameter (`function(x) sum(x)`) to the first candidate's parameter
-        // type and rejecting calls R accepts. Such a call skips selection and
-        // uses the final declaration, by corpus convention the most general.
-        let has_unresolved_argument = call_arguments.iter().any(|argument| {
-            argument
-                .ty
-                .is_some_and(|ty| self.table.contains_unbound_var(self.db, ty))
-        });
-        let declared_count = schemes.len();
-        let probed: Vec<TypeScheme<'db>> = if has_unresolved_argument {
-            vec![schemes.last().cloned()?]
-        } else {
-            schemes
-        };
-        // Maps a probe index back into the declared set: the unresolved-
-        // argument fallback probes only the final declaration, so its one
-        // candidate is the set's last index.
-        let declared_index = |probe_index: usize| {
-            if has_unresolved_argument {
-                declared_count - 1
-            } else {
-                probe_index
+        // A fit is a FACT when the concrete arguments alone chose the
+        // candidate, and a GUESS when the candidate only fits because
+        // unification narrowed one of the caller's own flexible types —
+        // binding a wrapper's parameter (`function(x) sum(x)`) to whichever
+        // candidate was probed first would reject calls R accepts. So the
+        // caller's open variables are recorded up front, every candidate is
+        // probed, and a fit that left them all untouched beats one that did
+        // not. When every fit is a guess nothing discriminates, and the most
+        // general declaration — last, by corpus convention — wins.
+        let mut caller_variables = FxHashSet::default();
+        for argument in &call_arguments {
+            if let Some(ty) = argument.ty {
+                self.table
+                    .collect_unbound_vars(self.db, ty, &mut caller_variables);
             }
-        };
+        }
+        let caller_entries: Vec<(InferenceVar, Entry<'db>)> = caller_variables
+            .into_iter()
+            .map(|var| (var, self.table.entry(var).clone()))
+            .collect();
 
         // Selection runs strict first, then (only if nothing matched and a
         // whole-number double literal is present) once more with the
@@ -3742,57 +3735,103 @@ impl<'db> Checker<'db, '_> {
         };
 
         let mut first_error: Option<TypeError<'db>> = None;
+        let mut fits: Vec<(usize, bool)> = Vec::new();
+        let mut fitting_courtesy = false;
         for &courtesy in rounds {
-            for (probe_index, scheme) in probed.iter().enumerate() {
+            for (index, scheme) in schemes.iter().enumerate() {
                 let snapshot = self.table.snapshot();
-                let instantiated = self.instantiate(scheme);
-                let resolved = self.table.shallow_resolve(self.db, instantiated);
-                let TyKind::Function(function) = resolved.kind(self.db).clone() else {
-                    self.table.rollback(snapshot);
-                    continue;
-                };
-                if !courtesy {
-                    self.overload_probe_depth += 1;
+                match self.probe_overload_candidate(callee, scheme, &call_arguments, courtesy) {
+                    Ok((resolved, function)) => {
+                        // Nothing flexible to protect: the first fit is the
+                        // answer and the bindings it made stand.
+                        if caller_entries.is_empty() {
+                            self.recorded.insert(callee, resolved);
+                            self.selected_overloads.insert(callee, index);
+                            return Some(function.ret);
+                        }
+                        let free = caller_entries.iter().all(|(var, entry)| {
+                            self.table.find(*var) == *var && self.table.entry(*var) == entry
+                        });
+                        self.table.rollback(snapshot);
+                        fits.push((index, free));
+                        fitting_courtesy = courtesy;
+                    }
+                    Err(outcome) => {
+                        self.table.rollback(snapshot);
+                        if first_error.is_none() {
+                            first_error = outcome.into_iter().next();
+                        }
+                    }
                 }
-                let callee_range = self.blame_range(callee);
-                let outcome = self.match_arguments(callee_range, &function, &call_arguments);
-                if !courtesy {
-                    self.overload_probe_depth -= 1;
-                }
-                if outcome.is_empty() {
-                    self.recorded.insert(callee, resolved);
-                    self.selected_overloads
-                        .insert(callee, declared_index(probe_index));
-                    return Some(function.ret);
-                }
-                self.table.rollback(snapshot);
-                if first_error.is_none() {
-                    first_error = outcome.into_iter().next();
-                }
+            }
+            if !fits.is_empty() {
+                break;
             }
         }
 
-        // The unresolved-argument fallback probes a single candidate; failing
-        // it is an ordinary call mismatch, so the underlying error reads
-        // better than a one-candidate overload report.
-        let error = match (probed.len(), first_error) {
-            (1, Some(error)) => error,
-            (candidates, first) => TypeError {
-                range,
-                kind: TypeErrorKind::NoMatchingOverload {
-                    name,
-                    candidates,
-                    first: first.map(Box::new),
-                },
+        // With one fit the two arms agree, so a forced choice is never treated
+        // as a guess. The winner is re-probed because probing rolls back: the
+        // table is in its pre-probe state again and matching is a pure
+        // function of it, so the fit repeats — and this time it commits.
+        if let Some(&(index, _)) = fits.iter().find(|(_, free)| *free).or(fits.last())
+            && let Some(scheme) = schemes.get(index)
+        {
+            let snapshot = self.table.snapshot();
+            match self.probe_overload_candidate(callee, scheme, &call_arguments, fitting_courtesy) {
+                Ok((resolved, function)) => {
+                    self.recorded.insert(callee, resolved);
+                    self.selected_overloads.insert(callee, index);
+                    return Some(function.ret);
+                }
+                Err(_) => self.table.rollback(snapshot),
+            }
+        }
+
+        self.errors.push(TypeError {
+            range,
+            kind: TypeErrorKind::NoMatchingOverload {
+                name,
+                candidates: schemes.len(),
+                first: first_error.map(Box::new),
             },
-        };
-        self.errors.push(error);
+        });
         self.recorded.insert(callee, self.unknown());
         // A capture-discovery re-pass overwrites recorded state in place; a
         // call that committed on the first pass but fails on the re-pass
         // must not keep the stale commitment.
         self.selected_overloads.remove(&callee);
         Some(self.unknown())
+    }
+
+    /// One overload probe. `Ok` means the candidate fits and the bindings it
+    /// made are live in the table — the caller keeps or rolls them back. `Err`
+    /// carries the findings that rejected it, empty when the candidate is not
+    /// a function type at all (nothing about the call is wrong then).
+    fn probe_overload_candidate(
+        &mut self,
+        callee: ExprId,
+        scheme: &TypeScheme<'db>,
+        call_arguments: &[CallArgument<'db>],
+        courtesy: bool,
+    ) -> Result<(Ty<'db>, FunctionType<'db>), Vec<TypeError<'db>>> {
+        let instantiated = self.instantiate(scheme);
+        let resolved = self.table.shallow_resolve(self.db, instantiated);
+        let TyKind::Function(function) = resolved.kind(self.db).clone() else {
+            return Err(Vec::new());
+        };
+        if !courtesy {
+            self.overload_probe_depth += 1;
+        }
+        let callee_range = self.blame_range(callee);
+        let outcome = self.match_arguments(callee_range, &function, call_arguments);
+        if !courtesy {
+            self.overload_probe_depth -= 1;
+        }
+        if outcome.is_empty() {
+            Ok((resolved, function))
+        } else {
+            Err(outcome)
+        }
     }
 
     fn infer_call_arguments(

@@ -17,7 +17,7 @@ use crate::annotations::NamedDefinition;
 use crate::types::{
     Atomic, Constraint, FunctionType, InferenceVar, Name, Ty, TyKind, substitute_rigid, union_of,
 };
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Entry<'db> {
@@ -1044,41 +1044,67 @@ impl<'db> InferenceTable<'db> {
     /// Whether the resolved form of `ty` still contains an unbound inference
     /// variable anywhere in its structure.
     pub fn contains_unbound_var(&self, db: &'db dyn Db, ty: Ty<'db>) -> bool {
+        !self.walk_unbound_vars(db, ty, &mut |_| false)
+    }
+
+    /// Every unbound inference variable reachable from `ty`, canonicalized to
+    /// its representative.
+    pub fn collect_unbound_vars(
+        &self,
+        db: &'db dyn Db,
+        ty: Ty<'db>,
+        found: &mut FxHashSet<InferenceVar>,
+    ) {
+        self.walk_unbound_vars(db, ty, &mut |var| {
+            found.insert(var);
+            true
+        });
+    }
+
+    /// Visits the unbound variables of `ty`'s resolved form, stopping as soon
+    /// as `visit` returns `false`. Returns whether the whole structure was
+    /// visited, so a `visit` that always stops answers "is there one".
+    fn walk_unbound_vars(
+        &self,
+        db: &'db dyn Db,
+        ty: Ty<'db>,
+        visit: &mut impl FnMut(InferenceVar) -> bool,
+    ) -> bool {
         let shallow = self.shallow_resolve(db, ty);
         match shallow.kind(db) {
-            TyKind::Var(_) => true,
+            TyKind::Var(var) => visit(*var),
             TyKind::Vector(inner)
             | TyKind::NamedVector(inner)
             | TyKind::List(inner)
-            | TyKind::NamedList(inner) => self.contains_unbound_var(db, *inner),
+            | TyKind::NamedList(inner) => self.walk_unbound_vars(db, *inner, visit),
             TyKind::Tuple(items) => items
                 .iter()
-                .any(|&item| self.contains_unbound_var(db, item)),
+                .all(|&item| self.walk_unbound_vars(db, item, visit)),
             TyKind::Record(fields) => fields
                 .iter()
-                .any(|field| self.contains_unbound_var(db, field.ty)),
+                .all(|field| self.walk_unbound_vars(db, field.ty, visit)),
             TyKind::Function(function) => {
                 function
                     .positional
                     .iter()
-                    .any(|&ty| self.contains_unbound_var(db, ty))
-                    || function
+                    .all(|&ty| self.walk_unbound_vars(db, ty, visit))
+                    && function
                         .named
                         .iter()
-                        .any(|field| self.contains_unbound_var(db, field.ty))
-                    || function
+                        .all(|field| self.walk_unbound_vars(db, field.ty, visit))
+                    && function
                         .variadic
                         .as_ref()
-                        .is_some_and(|rest| self.contains_unbound_var(db, rest.element))
-                    || self.contains_unbound_var(db, function.ret)
+                        .is_none_or(|rest| self.walk_unbound_vars(db, rest.element, visit))
+                    && self.walk_unbound_vars(db, function.ret, visit)
             }
             TyKind::Union(members) => members
                 .iter()
-                .any(|&member| self.contains_unbound_var(db, member)),
+                .all(|&member| self.walk_unbound_vars(db, member, visit)),
             TyKind::Named(_, arguments) => arguments
                 .iter()
-                .any(|&argument| self.contains_unbound_var(db, argument)),
-            _ => false,
+                .all(|&argument| self.walk_unbound_vars(db, argument, visit)),
+            _ => true,
         }
     }
 }
