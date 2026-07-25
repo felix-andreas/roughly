@@ -30,11 +30,34 @@ f <- function(x) zzz_not_exported(x)
 f: <T> fn(x: T) -> Unknown
 42..58 warning[unresolved] I could not resolve `zzz_not_exported` in this package, its imports, or builtins.
 
+#---- r6_injects_self_and_private_into_method_bodies
+#namespace importFrom(R6, R6Class)
+Counter <- R6Class("Counter", public = list(
+  n = 0L,
+  add = function(k) {
+    self$n <- self$n + k
+    private$note()
+  }
+))
+#++++
+Counter: Unknown
+
 #---- library_of_an_unstubbed_package_tolerates_any_read
 library(ggplot2)
 make <- function(d) ggplot(d)
 #++++
 make: <T> fn(d: T) -> Unknown
+
+#---- a_blanket_tolerance_still_reports_a_typo_of_the_project_s_own_name
+library(testthat)
+validate_url <- function(url) nchar(url) > 0L
+check_one <- function(url) validte_url(url)
+use_library_name <- function(x) expect_equal(x, x)
+#++++
+validate_url: <T> fn(url: T) -> logical
+check_one: <T> fn(url: T) -> Unknown
+use_library_name: <T> fn(x: T) -> Unknown
+91..102 warning[unresolved] I could not resolve `validte_url` in this package, its imports, or builtins. Did you mean `validate_url`?
 
 #---- a_transposition_is_suggested_but_a_distant_name_is_not
 f <- function(x) lenght(x)

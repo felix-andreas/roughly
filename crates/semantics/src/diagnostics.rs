@@ -249,12 +249,23 @@ pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
             {
                 continue;
             }
+            if R6_INJECTED_BINDINGS.contains(&name.as_str()) && *file_defines_r6_class(db, file) {
+                continue;
+            }
             if crate::package_scheme_exists(db, name)
                 || super_globals(db, file).contains(name)
                 || declared_global_variable(db, name)
-                || crate::metadata::imported_bare(db, name)
-                || crate::metadata::attaches_unknown_namespace(db)
+                || crate::metadata::imported_by_name(db, name)
             {
+                continue;
+            }
+            // A near-miss of one of the project's own definitions is reported
+            // even under the blanket tolerance an unknowable export set earns:
+            // `library(testthat)` cannot explain `validte_url` in a project
+            // that defines `validate_url`, and a typo of your own function is
+            // the case where the hint is worth most.
+            let project_typo = project_definition_suggestion(db, name);
+            if project_typo.is_none() && crate::metadata::imports_every_name(db) {
                 continue;
             }
             let expression_range = module.expression(*expression).range;
@@ -263,7 +274,8 @@ pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
                 expression_range.end() + offset,
             );
             let display = display_name(name);
-            let suggestion = unresolved_suggestion(db, name)
+            let suggestion = project_typo
+                .or_else(|| unresolved_suggestion(db, name))
                 .map(|nearest| format!(" Did you mean `{nearest}`?"))
                 .unwrap_or_default();
             diagnostics.push(Diagnostic {
@@ -952,6 +964,35 @@ fn project_global_variable_declarations(
     declared
 }
 
+/// The bindings R6 injects into every method's enclosing environment. They
+/// resolve nowhere lexically — R6 builds them at construction — so a read of
+/// one inside a class that defines methods is not an unresolved name, exactly
+/// as `this` is not one in a JavaScript class.
+const R6_INJECTED_BINDINGS: [&str; 3] = ["self", "private", "super"];
+
+/// Whether a file constructs an R6 class, and so injects `self`/`private`/
+/// `super` into the method bodies it contains. Purely syntactic, like the
+/// other escape hatches here: a local binding shadowing `R6Class` is not
+/// honored.
+#[salsa::tracked]
+fn file_defines_r6_class(db: &dyn Db, file: SourceFile) -> bool {
+    use crate::hir::ExpressionKind;
+    crate::item_spans(db, file).iter().any(|span| {
+        crate::item_hir(db, span.item).is_some_and(|module| {
+            module.expressions.iter().any(|expression| {
+                let ExpressionKind::Call { callee, .. } = &expression.kind else {
+                    return false;
+                };
+                match &module.expression(*callee).kind {
+                    ExpressionKind::NameRef(name) => name == "R6Class",
+                    ExpressionKind::Namespace { name, .. } => name.as_deref() == Some("R6Class"),
+                    _ => false,
+                }
+            })
+        })
+    })
+}
+
 /// Whether any package file declares `name` via `globalVariables`.
 fn declared_global_variable(db: &dyn Db, name: &str) -> bool {
     crate::ProjectFiles::try_get(db)
@@ -970,6 +1011,15 @@ fn display_name(name: &str) -> String {
     } else {
         format!("`{name}`")
     }
+}
+
+/// The nearest of the project's own top-level definitions — checked before
+/// the stub corpus, because a near-miss of a name this project defines is far
+/// more likely the intent than a same-distance name from the standard library.
+fn project_definition_suggestion(db: &dyn Db, name: &str) -> Option<String> {
+    let files = crate::ProjectFiles::try_get(db)?;
+    let definitions = crate::package_definitions(db, files);
+    nearest_name(name, definitions.keys().map(String::as_str)).map(str::to_owned)
 }
 
 /// The nearest stub name for a typo hint on an unresolved reference.

@@ -53,6 +53,13 @@ pub struct PackageMetadata {
 /// resolves the namespace's stub exports, or — when no stubs describe the
 /// namespace — any name at all, since the export set is unknowable.
 pub fn imported_bare(db: &dyn Db, name: &str) -> bool {
+    imported_by_name(db, name) || imports_every_name(db)
+}
+
+/// Whether an import names `name` specifically: an exact `importFrom`, or a
+/// whole-namespace import of a namespace whose stub-described exports include
+/// it. This is knowledge about the name itself, not a blanket tolerance.
+pub fn imported_by_name(db: &dyn Db, name: &str) -> bool {
     let Some(metadata) = PackageMetadata::try_get(db) else {
         return false;
     };
@@ -61,28 +68,30 @@ pub fn imported_bare(db: &dyn Db, name: &str) -> bool {
         .iter()
         .any(|(namespace, imported)| match imported {
             Some(imported) => imported == name,
-            None => match crate::stubs::namespace_known(db, namespace) {
-                Some(true) => crate::stubs::namespace_exports(db, namespace, name),
-                Some(false) | None => true,
-            },
+            None => {
+                crate::stubs::namespace_known(db, namespace) == Some(true)
+                    && crate::stubs::namespace_exports(db, namespace, name)
+            }
         })
 }
 
-/// Whether the project attaches a namespace the stub corpus cannot describe.
-/// `library(pkg)` puts every export of `pkg` on the search path, so with no
-/// stub for `pkg` that export set is unknowable and no bare read can be
-/// called unresolvable — the same rule, and the same zero-false-positives
-/// priority, a whole-namespace `NAMESPACE` import already follows. This is
-/// what makes `library(ggplot2)` behave in a script the way `import(ggplot2)`
-/// behaves in a package.
-pub fn attaches_unknown_namespace(db: &dyn Db) -> bool {
+/// Whether the project pulls in a namespace whose export set is unknowable —
+/// a whole-namespace `import(pkg)` or a `library(pkg)` for a package no stub
+/// describes — and so cannot call *any* bare read unresolvable. A blanket
+/// tolerance, deliberately: zero false positives beats typo detection. It is
+/// not absolute, though — see `project_definition_suggestion`, because an
+/// unknown library cannot explain a near-miss of a name the project itself
+/// defines.
+pub fn imports_every_name(db: &dyn Db) -> bool {
     let Some(metadata) = PackageMetadata::try_get(db) else {
         return false;
     };
+    let unknown = |namespace: &String| crate::stubs::namespace_known(db, namespace) != Some(true);
     metadata
-        .attached(db)
+        .imports(db)
         .iter()
-        .any(|namespace| crate::stubs::namespace_known(db, namespace) != Some(true))
+        .any(|(namespace, imported)| imported.is_none() && unknown(namespace))
+        || metadata.attached(db).iter().any(unknown)
 }
 
 /// Whether `package` is part of the package's declared universe: a

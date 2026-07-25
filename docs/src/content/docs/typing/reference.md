@@ -2335,6 +2335,12 @@ declaration whose only parameter is `...` (`join_by : @masked fn(...: Any) -> An
 argument. A locally defined function of the same name masks nothing, and `@masked` on a
 non-variadic declaration is a stub error.
 
+A file that calls `R6Class` gets `self`, `private` and `super` for free inside it: R6 builds those
+bindings at construction, so they resolve nowhere lexically and a read of one is not an unresolved
+name, exactly as `this` is not one in a JavaScript class. The recognition is syntactic (a local
+binding shadowing `R6Class` is not honored) and file-scoped — a file that defines no R6 class still
+warns about `self`. Their type is `Unknown` for now; R6 field and method types are not yet modelled.
+
 For dynamic bindings outside any recognized mask, the ecosystem-standard escape hatch works: a
 top-level `globalVariables(c("a", "b"))` / `utils::globalVariables(...)` call (literal string
 arguments) declares those names as dynamically bound for the whole package, and could-not-resolve
