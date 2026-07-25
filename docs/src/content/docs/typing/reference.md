@@ -294,8 +294,9 @@ Definite assignment:
 
 Unused (dead-store) analysis follows from the same reaching sets when the `unused` check is
 enabled: an assignment whose written value no read can observe on any path warns
-``warning[unused] `x` is assigned but never used.`` at the assignment site. Package-visible
-top-level assignments, parameters, `for` variables, and `.`/`_`-prefixed names are not reported.
+``warning[unused] `x` is assigned but never used.`` on the assigned name — not on the whole
+assignment, since the value being computed is not what is dead. Package-visible top-level
+assignments, parameters, `for` variables, and `.`/`_`-prefixed names are not reported.
 
 Examples:
 

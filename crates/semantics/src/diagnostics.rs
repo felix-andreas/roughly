@@ -1120,12 +1120,26 @@ fn script_unused_bindings(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
             && let Some(root) = module.root
         {
             let root_range = module.expression(root).range;
-            let range = TextRange::new(root_range.start() + offset, root_range.end() + offset);
-            if !broken(range) {
+            let statement_range =
+                TextRange::new(root_range.start() + offset, root_range.end() + offset);
+            // The finding belongs on the assigned name, not on the whole
+            // statement: the value being computed is fine, the binding is what
+            // is dead. `broken` still consults the whole statement, because a
+            // syntax error anywhere in it suppresses the finding.
+            let name_range = naming
+                .bindings
+                .values()
+                .find(|binding| {
+                    binding.kind == crate::naming::BindingKind::TopLevel && binding.name == name
+                })
+                .map_or(statement_range, |binding| {
+                    TextRange::new(binding.range.start() + offset, binding.range.end() + offset)
+                });
+            if !broken(statement_range) {
                 definers.push(Definer {
                     item_index: index,
                     name,
-                    range,
+                    range: name_range,
                     used: false,
                     conditional: false,
                 });

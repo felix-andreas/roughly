@@ -7,7 +7,7 @@ describe <- function() area + 1
 radius: double
 area: double
 describe: fn() -> double
-45..76 warning[unused] `describe` is assigned but never used.
+45..53 warning[unused] `describe` is assigned but never used.
 
 #---- rebinding_changes_later_uses
 x <- 1L
@@ -19,8 +19,8 @@ x: integer
 first_use: integer
 x: character
 second_use: fn() -> integer
-8..27 warning[unused] `first_use` is assigned but never used.
-40..73 warning[unused] `second_use` is assigned but never used.
+8..17 warning[unused] `first_use` is assigned but never used.
+40..50 warning[unused] `second_use` is assigned but never used.
 
 #---- script_calls_its_own_helpers
 double_it <- function(n) n * 2L
@@ -28,7 +28,7 @@ result <- double_it(21L)
 #++++
 double_it: <T: numeric> fn(n: T) -> T
 result: integer
-32..56 warning[unused] `result` is assigned but never used.
+32..38 warning[unused] `result` is assigned but never used.
 
 #---- script_local_type_declarations
 #: @type Point {list{x: double, y: double}}
@@ -39,7 +39,7 @@ norm <- function() origin$x
 #++++
 origin: Point
 norm: fn() -> double
-88..115 warning[unused] `norm` is assigned but never used.
+88..92 warning[unused] `norm` is assigned but never used.
 
 #---- stub_names_still_resolve
 sizes <- c(3L, 1L, 2L)
@@ -47,7 +47,7 @@ total <- sum(sizes)
 #++++
 sizes: integer[]
 total: integer
-23..42 warning[unused] `total` is assigned but never used.
+23..28 warning[unused] `total` is assigned but never used.
 
 #---- script_definition_shadows_a_stub
 sum <- function(a, b) a + b
@@ -55,7 +55,7 @@ shadowed <- sum(1L, 2L)
 #++++
 sum: <T: numeric> fn(a: T, b: T) -> T
 shadowed: integer
-28..51 warning[unused] `shadowed` is assigned but never used.
+28..36 warning[unused] `shadowed` is assigned but never used.
 
 #---- aliased_function_reference_exports_closed
 f <- function(p) p
@@ -65,8 +65,16 @@ h <- function() g()
 f: <T> fn(p: T) -> T
 g: fn(p: Unknown) -> Unknown
 h: Unknown
-26..45 warning[unused] `h` is assigned but never used.
+26..27 warning[unused] `h` is assigned but never used.
 42..43 error[type-mismatch] this call supplies 0 arguments, but the function requires 1 — a required argument is missing
+
+#---- unused_marks_the_name_not_the_multiline_value
+helper <- function(count) {
+  count + 1L
+}
+#++++
+helper: <T: numeric> fn(count: T) -> T
+0..6 warning[unused] `helper` is assigned but never used.
 
 #==== resolution
 #---- use_before_any_definition_is_unresolved
@@ -161,7 +169,7 @@ p <- p - 1L
 #++++
 p: character
 p: Unknown
-12..23 warning[unused] `p` is assigned but never used.
+12..13 warning[unused] `p` is assigned but never used.
 17..18 error[type-mismatch] expected a numeric value (`integer` or `double`), found `character`
 
 #---- loop_carried_read_starts_from_the_earlier_binding
@@ -181,4 +189,4 @@ n: integer
 n: integer
 n: double
 final: fn() -> double
-33..54 warning[unused] `final` is assigned but never used.
+33..38 warning[unused] `final` is assigned but never used.
