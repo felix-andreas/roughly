@@ -180,9 +180,28 @@ fn frame_slot_positions(db: &dyn Db, file: SourceFile) -> rustc_hash::FxHashMap<
 pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
     let mut diagnostics = parse_stage_diagnostics(db, file);
 
+    // A broken statement contributes nothing beyond the syntax error covering
+    // it: its names, reads and inferred types are all suspect, so judging them
+    // turns one mistake into a report storm. R-grammar errors only —
+    // annotation-grammar errors leave the R statement intact.
+    let broken_ranges: Vec<TextRange> = parse(db, file)
+        .errors()
+        .iter()
+        .filter(|error| !error.in_annotation)
+        .map(|error| error.range)
+        .collect();
+    let is_broken = |range: TextRange| {
+        broken_ranges
+            .iter()
+            .any(|error| error.start() <= range.end() && range.start() <= error.end())
+    };
+
     // Walk the spans, not the item tree: they already pair each item with its
     // absolute range, so the offset needs no per-item lookup.
     for (item_index, span) in crate::item_spans(db, file).iter().enumerate() {
+        if is_broken(span.range) {
+            continue;
+        }
         let item = span.item;
         let offset = span.range.start();
         let Some(check) = item_check(db, item) else {
@@ -1013,6 +1032,17 @@ fn display_name(name: &str) -> String {
     }
 }
 
+/// The nearest name in a small, closed candidate set — a container's fields, a
+/// function's named parameters. Same budget as the corpus-wide hint, but here
+/// the set is the declaration itself, so a near-miss is all but certainly the
+/// intent.
+pub(crate) fn nearest_field_name<'a>(
+    name: &str,
+    candidates: impl Iterator<Item = &'a str>,
+) -> Option<String> {
+    nearest_name(name, candidates).map(str::to_owned)
+}
+
 /// The nearest of the project's own top-level definitions — checked before
 /// the stub corpus, because a near-miss of a name this project defines is far
 /// more likely the intent than a same-distance name from the standard library.
@@ -1435,28 +1465,26 @@ fn render_type_error_message(db: &dyn Db, error: &TypeError<'_>) -> String {
             }
         }
         TypeErrorKind::NamedArgumentMismatch {
+            argument,
+            duplicate,
+            suggestion,
             expected_parameters,
-            actual_arguments,
         } => {
-            let mut seen = std::collections::BTreeSet::new();
-            if let Some(duplicate) = actual_arguments
-                .iter()
-                .find(|name| !seen.insert(name.as_str()))
-            {
+            if *duplicate {
                 return format!(
-                    "this call names the argument `{duplicate}` more than once — R matches each named parameter at most once"
+                    "this call gives `{argument}` more than once — R matches each named parameter at most once"
                 );
             }
-            let arguments = format!(
-                "this call names {} {}",
-                plural(actual_arguments.len(), "an argument", "arguments"),
-                render_names(actual_arguments),
-            );
+            if let Some(nearest) = suggestion {
+                return format!(
+                    "this function has no parameter `{argument}`. Did you mean `{nearest}`?"
+                );
+            }
             if expected_parameters.is_empty() {
-                format!("{arguments}, but the function has no named parameters")
+                format!("this function has no parameter `{argument}` — it has no named parameters")
             } else {
                 format!(
-                    "{arguments}, but the function's named {} {}",
+                    "this function has no parameter `{argument}` — its named {} {}",
                     plural(expected_parameters.len(), "parameter is", "parameters are"),
                     render_names(expected_parameters),
                 )
@@ -1510,10 +1538,20 @@ fn render_type_error_message(db: &dyn Db, error: &TypeError<'_>) -> String {
             "position {position} does not exist in `{}`",
             renderer.render(db, *container)
         ),
-        TypeErrorKind::FieldDoesNotExist { field, container } => format!(
-            "field `{field}` does not exist in `{}`",
-            renderer.render(db, *container)
-        ),
+        TypeErrorKind::FieldDoesNotExist {
+            suggestion,
+            field,
+            container,
+        } => {
+            let hint = suggestion
+                .as_ref()
+                .map(|nearest| format!(". Did you mean `{nearest}`?"))
+                .unwrap_or_default();
+            format!(
+                "field `{field}` does not exist in `{}`{hint}",
+                renderer.render(db, *container)
+            )
+        }
         TypeErrorKind::DollarOnAtomicVector { found } => format!(
             "R's `$` operator is invalid on atomic vectors; this value is `{}` — extract an element with `[[` instead.",
             renderer.render(db, *found)

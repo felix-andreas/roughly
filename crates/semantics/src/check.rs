@@ -56,10 +56,14 @@ pub enum TypeErrorKind<'db> {
         found: usize,
     },
     /// A named argument matching no declared formal (or duplicating one
-    /// already given); carries both sides for the message.
+    /// already given). Blamed on the offending name's own token and carrying
+    /// it, so the reader is never left diffing two comma-separated lists to
+    /// find which one the call got wrong.
     NamedArgumentMismatch {
+        argument: String,
+        duplicate: bool,
+        suggestion: Option<String>,
         expected_parameters: Vec<String>,
-        actual_arguments: Vec<String>,
     },
     /// An annotation declares a parameter the definition has no formal for.
     AnnotationParameterMismatch {
@@ -101,8 +105,10 @@ pub enum TypeErrorKind<'db> {
         position: usize,
         container: Ty<'db>,
     },
-    /// A literal field name absent from a fixed-shape container.
+    /// A literal field name absent from a fixed-shape container. The
+    /// candidate set is small and closed, so a near-miss is a certain hint.
     FieldDoesNotExist {
+        suggestion: Option<String>,
         field: String,
         container: Ty<'db>,
     },
@@ -778,6 +784,9 @@ struct Checker<'db, 'a> {
 /// an overload probe can re-match without re-running expression inference.
 struct CallArgument<'db> {
     name: Option<String>,
+    /// The name token's own range, so a finding about the NAME points at the
+    /// name rather than at the value attached to it.
+    name_range: Option<TextRange>,
     /// `None` is a positional hole (`f(, x)`).
     ty: Option<Ty<'db>>,
     range: TextRange,
@@ -2370,6 +2379,7 @@ impl<'db> Checker<'db, '_> {
         let arguments = [
             CallArgument {
                 name: None,
+                name_range: None,
                 ty: Some(left),
                 range: self.blame_range(lhs),
                 whole_double: self.is_whole_double(lhs),
@@ -2377,6 +2387,7 @@ impl<'db> Checker<'db, '_> {
             },
             CallArgument {
                 name: None,
+                name_range: None,
                 ty: Some(right),
                 range: self.blame_range(rhs),
                 whole_double: self.is_whole_double(rhs),
@@ -2415,7 +2426,7 @@ impl<'db> Checker<'db, '_> {
                         continue;
                     };
                     if self
-                        .match_arguments(range, range, &function, &arguments)
+                        .match_arguments(range, &function, &arguments)
                         .is_empty()
                     {
                         return Some(function.ret);
@@ -3514,7 +3525,7 @@ impl<'db> Checker<'db, '_> {
                     self.overload_probe_depth += 1;
                 }
                 let callee_range = self.blame_range(callee);
-                let outcome = self.match_arguments(range, callee_range, &function, &call_arguments);
+                let outcome = self.match_arguments(callee_range, &function, &call_arguments);
                 if !courtesy {
                     self.overload_probe_depth -= 1;
                 }
@@ -3579,6 +3590,7 @@ impl<'db> Checker<'db, '_> {
                     });
                 CallArgument {
                     name: argument.name.clone(),
+                    name_range: argument.name_range,
                     ty,
                     range: argument_range,
                     whole_double,
@@ -3618,7 +3630,7 @@ impl<'db> Checker<'db, '_> {
         match resolved.kind(self.db) {
             TyKind::Function(function) => {
                 let function = function.clone();
-                let findings = self.match_arguments(range, callee_range, &function, arguments);
+                let findings = self.match_arguments(callee_range, &function, arguments);
                 self.errors.extend(findings);
                 function.ret
             }
@@ -3679,7 +3691,7 @@ impl<'db> Checker<'db, '_> {
                         continue;
                     };
                     let snapshot = self.table.snapshot();
-                    let findings = self.match_arguments(range, callee_range, &function, arguments);
+                    let findings = self.match_arguments(callee_range, &function, arguments);
                     if findings.is_empty() {
                         let member_return = self.table.resolve(self.db, function.ret);
                         self.table.rollback(snapshot);
@@ -3721,7 +3733,6 @@ impl<'db> Checker<'db, '_> {
     /// call are misleading.
     fn match_arguments(
         &mut self,
-        range: TextRange,
         callee_range: TextRange,
         function: &FunctionType<'db>,
         arguments: &[CallArgument<'db>],
@@ -3793,6 +3804,10 @@ impl<'db> Checker<'db, '_> {
 
         let forwards_dots = arguments.iter().any(|argument| argument.forwards_dots);
         let mut findings = Vec::new();
+        // A name no parameter declares throws off the positional accounting
+        // below, so its arity verdict would be noise on top of a finding that
+        // already says what is wrong.
+        let mut unknown_name = false;
         for argument in arguments {
             if argument.forwards_dots {
                 continue;
@@ -3851,10 +3866,11 @@ impl<'db> Checker<'db, '_> {
                                     }
                                 }
                                 _ => {
-                                    return vec![TypeError {
-                                        range,
-                                        kind: self.named_argument_mismatch(function, arguments),
-                                    }];
+                                    findings.push(TypeError {
+                                        range: argument.name_range.unwrap_or(argument.range),
+                                        kind: self.named_argument_mismatch(function, name),
+                                    });
+                                    unknown_name = true;
                                 }
                             }
                         }
@@ -3919,6 +3935,7 @@ impl<'db> Checker<'db, '_> {
         }
 
         if !forwards_dots
+            && !unknown_name
             && (next_positional != function.positional.len()
                 || remaining_named.iter().any(|field| !field.optional))
         {
@@ -3936,18 +3953,21 @@ impl<'db> Checker<'db, '_> {
     fn named_argument_mismatch(
         &self,
         function: &FunctionType<'db>,
-        arguments: &[CallArgument<'db>],
+        argument: &str,
     ) -> TypeErrorKind<'db> {
+        let parameters: Vec<String> = function
+            .named
+            .iter()
+            .map(|field| field.name.text(self.db).to_owned())
+            .collect();
         TypeErrorKind::NamedArgumentMismatch {
-            expected_parameters: function
-                .named
-                .iter()
-                .map(|field| field.name.text(self.db).to_owned())
-                .collect(),
-            actual_arguments: arguments
-                .iter()
-                .filter_map(|argument| argument.name.clone())
-                .collect(),
+            duplicate: parameters.iter().any(|parameter| parameter == argument),
+            suggestion: crate::diagnostics::nearest_field_name(
+                argument,
+                parameters.iter().map(String::as_str),
+            ),
+            argument: argument.to_owned(),
+            expected_parameters: parameters,
         }
     }
 
@@ -4469,13 +4489,20 @@ impl<'db> Checker<'db, '_> {
                     Some(name) => {
                         match fields.iter().find(|field| field.name.text(self.db) == name) {
                             Some(field) => Ok(field.ty),
-                            None => Err(TypeError {
-                                range,
-                                kind: TypeErrorKind::FieldDoesNotExist {
-                                    field: name,
-                                    container: subject,
-                                },
-                            }),
+                            None => {
+                                let suggestion = crate::diagnostics::nearest_field_name(
+                                    &name,
+                                    fields.iter().map(|field| field.name.text(self.db)),
+                                );
+                                Err(TypeError {
+                                    range,
+                                    kind: TypeErrorKind::FieldDoesNotExist {
+                                        suggestion,
+                                        field: name,
+                                        container: subject,
+                                    },
+                                })
+                            }
                         }
                     }
                 }
@@ -4682,6 +4709,10 @@ impl<'db> Checker<'db, '_> {
                     None => Err(TypeError {
                         range,
                         kind: TypeErrorKind::FieldDoesNotExist {
+                            suggestion: crate::diagnostics::nearest_field_name(
+                                name,
+                                fields.iter().map(|field| field.name.text(self.db)),
+                            ),
                             field: name.to_owned(),
                             container: subject,
                         },
@@ -4691,6 +4722,7 @@ impl<'db> Checker<'db, '_> {
             TyKind::Tuple(_) | TyKind::List(_) => Err(TypeError {
                 range,
                 kind: TypeErrorKind::FieldDoesNotExist {
+                    suggestion: None,
                     field: name.to_owned(),
                     container: subject,
                 },
@@ -5201,8 +5233,7 @@ mod tests {
         assert!(
             check.errors.iter().any(|error| matches!(
                 &error.kind,
-                TypeErrorKind::NamedArgumentMismatch { actual_arguments, .. }
-                    if actual_arguments.iter().any(|name| name == "z")
+                TypeErrorKind::NamedArgumentMismatch { argument, .. } if argument == "z"
             )),
             "expected a named-argument mismatch, got {:?}",
             check.errors

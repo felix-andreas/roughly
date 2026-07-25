@@ -81,7 +81,7 @@ f <- function() {
 }
 #++++
 f: Unknown
-41..49 error[type-mismatch] this call names an argument `z`, but the function's named parameter is `x`
+43..44 error[type-mismatch] this function has no parameter `z` — its named parameter is `x`
 
 #---- surplus_positional
 f <- function() {

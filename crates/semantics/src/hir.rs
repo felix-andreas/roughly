@@ -114,6 +114,10 @@ pub enum NaAtom {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Argument {
     pub name: Option<String>,
+    /// The argument NAME's range, when the argument is tagged — a distinct
+    /// source token, so a finding about the name points at the name rather
+    /// than at the value it is attached to (as `Parameter::range` does).
+    pub name_range: Option<TextRange>,
     /// `None` is a positional hole (`f(, x)`) or an empty tagged value.
     pub value: Option<ExprId>,
 }
@@ -382,6 +386,7 @@ impl Lowering {
                         Argument {
                             name: None,
                             value: Some(body),
+                            ..
                         },
                     ] = arguments.as_slice()
                 {
@@ -553,10 +558,12 @@ impl Lowering {
                         arguments: vec![
                             Argument {
                                 name: None,
+                                name_range: None,
                                 value: Some(left),
                             },
                             Argument {
                                 name: None,
+                                name_range: None,
                                 value: Some(right),
                             },
                         ],
@@ -635,6 +642,7 @@ impl Lowering {
                 0,
                 Argument {
                     name: None,
+                    name_range: None,
                     value: Some(piped),
                 },
             );
@@ -667,7 +675,7 @@ impl Lowering {
             .iter()
             .enumerate()
             .map(|(index, argument)| {
-                let name = argument
+                let tag = argument
                     .children()
                     .find(|child| {
                         child.kind() == SyntaxKind::NAME || child.kind() == SyntaxKind::LITERAL
@@ -677,13 +685,15 @@ impl Lowering {
                             .children_with_tokens()
                             .filter_map(|element| element.into_token())
                             .any(|token| token.kind() == SyntaxKind::EQ)
-                    })
-                    .and_then(|tag| field_name_text(&tag));
+                    });
+                let name_range = tag.as_ref().map(|tag| tag.text_range());
+                let name = tag.as_ref().and_then(field_name_text);
                 if let Some((placeholder, piped)) = substitute
                     && placeholder == index
                 {
                     return Argument {
                         name,
+                        name_range,
                         value: Some(piped),
                     };
                 }
@@ -696,7 +706,11 @@ impl Lowering {
                     expressions.next()
                 };
                 let value = value_node.map(|node| self.lower_expression(&node));
-                Argument { name, value }
+                Argument {
+                    name,
+                    name_range,
+                    value,
+                }
             })
             .collect()
     }

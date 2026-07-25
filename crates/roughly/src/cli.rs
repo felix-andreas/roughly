@@ -564,11 +564,29 @@ fn unanalysable_extensions(target: &Path) -> BTreeSet<String> {
     found
 }
 
+/// Directories that hold vendored dependency infrastructure rather than
+/// project code. `renv/activate.R` alone is a thousand generated lines every
+/// `renv`-using project would otherwise see reported. A path named explicitly
+/// on the command line still wins — this only scopes the directory walk.
+const VENDORED_DIRECTORIES: [&str; 5] = ["renv", "packrat", "revdep", ".Rproj.user", ".Rcheck"];
+
 pub(crate) fn collect_r_files(
     target: &Path,
     exclude: Option<&Gitignore>,
 ) -> Result<Vec<PathBuf>, CommandError> {
     let mut builder = ignore::WalkBuilder::new(target);
+    // Honour `.gitignore` whether or not the tree is a git checkout: a
+    // generated or vendored file is not project code either way.
+    builder.require_git(false);
+    builder.filter_entry(|entry| {
+        !entry
+            .file_type()
+            .is_some_and(|file_type| file_type.is_dir())
+            || !entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| VENDORED_DIRECTORIES.contains(&name))
+    });
     if let Some(gitignore) = exclude.filter(|_| target.is_dir()) {
         let gitignore = gitignore.clone();
         builder.filter_entry(move |entry| {

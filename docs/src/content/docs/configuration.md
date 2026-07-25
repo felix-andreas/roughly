@@ -80,6 +80,7 @@ Type *inference* always runs — it powers editor features such as hover types, 
 - `exclude` — paths the directory walk of `roughly check` (and `roughly debug analysis-stats`) skips, as a list of gitignore-style patterns anchored at the directory containing `roughly.toml`. Use it to keep large ad-hoc trees out of analysis — for example `exclude = ["scripts/"]` in a repository where `scripts/` holds thousands of one-off files that would dominate checking time. Default: empty (everything is checked).
   - Patterns follow gitignore rules: `scripts/` excludes that directory's whole subtree, `**/generated` matches at any depth, and a leading `!` re-includes (with git's usual caveat that children of an excluded *directory* cannot be re-included — spell the parent `scripts/*` instead of `scripts/` when you need `!scripts/keep`). Excluded directories are pruned from the walk without being traversed, so exclusion also cuts wall-clock, not just output.
   - A file named explicitly on the command line (`roughly check scripts/one-off.R`) is always checked, and `roughly fmt` ignores `exclude` — the scope applies to analysis, not formatting. Files opened in the editor are likewise always analyzed.
+  - Some directories are skipped without configuration, because they hold vendored dependency infrastructure rather than project code: `renv/`, `packrat/`, `revdep/`, `.Rproj.user/` and `.Rcheck/`. `.gitignore` is also honoured, whether or not the tree is a git checkout. Naming such a path on the command line still checks it.
 
 ## Invalid Configuration
 
