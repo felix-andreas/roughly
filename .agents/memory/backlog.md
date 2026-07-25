@@ -15,16 +15,6 @@ numerical-computing user; docs + `--help` only, no source access) simulated real
 converged on the same walls. What they found and is now fixed is in the ledger; what remains is
 below, ranked by how often a real user hits it.
 
-- **A `#:` annotation on a *nested* function does not push parameter types into its body.** With
-  `#: fn(x: double[]) -> double` on an `inner <- function(x) ...` inside another function, `x[[1L]]`
-  stays `Unknown`; the identical code at top level checks. Every closure-factory body is therefore
-  unchecked, which contradicts the reference's "full checked semantics at any statement depth".
-- **`if`/`else` unifies a literal branch with an unannotated parameter instead of unioning it.**
-  `f <- function(flag, x) if (flag) x else "s"; f(TRUE, 1)` reports
-  `expected character, found double`, and blames the *caller*. The reference specifies the union
-  (`different branch types are not a type error`). The same root cause pins a type-guard branch that
-  reads the guarded parameter: `fmt <- function(x) if (is.character(x)) x else "other"; fmt(1)`
-  errors, contradicting "an unannotated parameter is not pinned by a guard".
 - **A body that fails its own annotation silences every call site of that binding** — the caller's
   mistake goes unreported until the body is fixed, which inverts the usual fix order.
 - **Overload selection is skipped whenever an argument's type contains an inference variable** —

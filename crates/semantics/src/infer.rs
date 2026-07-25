@@ -657,6 +657,21 @@ impl<'db> InferenceTable<'db> {
 
     /// Raise a variable's constraint through the lattice (or verify an
     /// already-bound one admits it).
+    /// The constraint a still-unbound type carries, when it is a bare
+    /// variable. `Unconstrained` means the program has demanded nothing of it
+    /// yet — the state that makes pinning it from elsewhere an invention.
+    pub fn open_constraint(&self, db: &'db dyn Db, ty: Ty<'db>) -> Option<Constraint> {
+        let resolved = self.resolve(db, ty);
+        let TyKind::Var(var) = resolved.kind(db) else {
+            return None;
+        };
+        let representative = self.find(*var);
+        match *self.entry(representative) {
+            Entry::Unbound { constraint, .. } => Some(constraint),
+            _ => None,
+        }
+    }
+
     pub fn constrain(
         &mut self,
         db: &'db dyn Db,

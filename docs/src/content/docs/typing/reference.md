@@ -1178,6 +1178,9 @@ Examples:
   - branches that unify share that type: `if (flag) 1L else 2L` is `integer`, and `if (cond) a else b` over two unconstrained values keeps them unified as one polymorphic type
   - a `NULL` branch joins by union without constraining the other branch: one branch `T` and one branch `NULL` produce `T | NULL`
   - branches with genuinely different types produce their union: `if (flag) 1L else "foo"` is `integer | character` — different branch types are **not** a type error
+  - a branch whose type is still an **unconstrained** inference variable is never pinned by the other branch: `function(flag, x) if (flag) x else "s"` is `<T> fn(flag: logical, x: T) -> T | character`, not `fn(flag: logical, x: character)`. Unifying there would make the *caller* wrong for a line that is not, and it is what the guard rule requires — the whole point of `if (is.character(x)) x else "other"` is that the caller may pass something else
+  - a branch whose variable the body has already **constrained** may unify with the other, because that pin adds nothing the program did not already require: `function(n) if (n <= 1L) 1L else n * fact(n - 1L)` converges to `fn(n: integer) -> integer`
+  - two branches that are **both** still open tie to each other, since neither pins the other: `function(value, fallback) if (is.null(value)) fallback else value` is `<T> fn(value: T | NULL, fallback: T) -> T`
   - an `Unknown` branch makes the whole conditional `Unknown` rather than claiming the other branch's type
 - the join does not merge or coerce branch types beyond unification; it only records the alternatives
 

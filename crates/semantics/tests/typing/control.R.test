@@ -1,3 +1,32 @@
+#==== branch_unions
+#---- a_concrete_branch_does_not_pin_an_unannotated_parameter
+f <- function(flag, x) if (flag) x else "s"
+a <- f(TRUE, 1)
+b <- f(TRUE, "text")
+#++++
+f: <T> fn(flag: logical, x: T) -> T | character
+a: double | character
+b: character
+
+#---- a_guard_branch_reading_the_guarded_parameter_does_not_pin_it
+fmt <- function(x) if (is.character(x)) x else "other"
+a <- fmt(1)
+b <- fmt("text")
+#++++
+fmt: <T> fn(x: T) -> T | character
+a: double | character
+b: character
+
+#---- two_open_branches_still_tie_to_each_other
+coalesce <- function(value, fallback) if (is.null(value)) fallback else value
+#++++
+coalesce: <T> fn(value: T | NULL, fallback: T) -> T
+
+#---- a_constrained_branch_may_unify_so_recursion_converges
+fact <- function(n) if (n <= 1L) 1L else n * fact(n - 1L)
+#++++
+fact: fn(n: integer) -> integer
+
 #==== joins
 #---- if_unifies_or_unions
 same <- function(flag) if (flag) 1L else 2L

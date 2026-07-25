@@ -1140,10 +1140,32 @@ impl<'db> Checker<'db, '_> {
                 value,
             } => {
                 let (spelling, target, value) = (*spelling, *target, *value);
-                let value_ty = self.infer(value);
-                // A statement-level annotation on the assignment applies
-                // before the write so the binding takes the annotated type.
-                let value_ty = self.apply_expression_annotation(id, value, value_ty);
+                let declares_function = self.declared_function_annotation(id).filter(|_| {
+                    matches!(
+                        self.module.expression(value).kind,
+                        ExpressionKind::Function { .. }
+                    )
+                });
+                let value_ty = match declares_function {
+                    // A declared function annotation on a function definition
+                    // checks the body under the declared parameter types,
+                    // exactly as at the item root.
+                    Some(declared) => {
+                        for (name, constraint) in &declared.binders {
+                            self.rigid_constraints.insert(*name, *constraint);
+                        }
+                        if let TyKind::Function(function) = declared.body.kind(self.db).clone() {
+                            self.check_declared_function(value, &function);
+                        }
+                        self.record(value, declared.body)
+                    }
+                    None => {
+                        let value_ty = self.infer(value);
+                        // A statement-level annotation on the assignment applies
+                        // before the write so the binding takes the annotated type.
+                        self.apply_expression_annotation(id, value, value_ty)
+                    }
+                };
                 self.write_target(spelling, target, value_ty);
                 value_ty
             }
@@ -1212,6 +1234,24 @@ impl<'db> Checker<'db, '_> {
             // are inferred but do not pin an unannotated parameter's type —
             // that comes from the parameter's uses.
             ExpressionKind::Function { parameters, body } => {
+                // A statement-level `#:` declaring a function type checks this
+                // definition the way the item root does: parameter types push
+                // INTO the body (rigid, so they refuse to bind) and the result
+                // checks against the declared return. Inferring the body freely
+                // and comparing afterwards would report a shape mismatch —
+                // `expected fn(x: character) -> integer, found fn(x: T) -> T` —
+                // while the real error inside the body went unreported, which
+                // leaves every closure-factory body unchecked.
+                if let Some(declared) = self.declared_function_annotation(id) {
+                    for (name, constraint) in &declared.binders {
+                        self.rigid_constraints.insert(*name, *constraint);
+                    }
+                    let TyKind::Function(function) = declared.body.kind(self.db).clone() else {
+                        return self.unknown();
+                    };
+                    self.check_declared_function(id, &function);
+                    return self.record(id, declared.body);
+                }
                 let parameters = parameters.clone();
                 self.table.level += 1;
                 let pending_mark = self.pending_enclosing_writes.len();
@@ -1346,6 +1386,19 @@ impl<'db> Checker<'db, '_> {
             self.apply_expression_annotation(id, id, ty)
         };
         self.record(id, ty)
+    }
+
+    /// The function type a statement-level annotation declares for this
+    /// expression, when it declares one to check against. `@trust` and
+    /// `@if-unknown` are deliberately excluded: neither checks the value, and
+    /// `@new` mints a nominal instead of declaring a signature.
+    fn declared_function_annotation(&self, annotated: ExprId) -> Option<TypeScheme<'db>> {
+        let annotation = self.expression_annotations.get(&annotated)?;
+        if annotation.trusted || annotation.if_unknown || annotation.new_nominal.is_some() {
+            return None;
+        }
+        let declared = annotation.declared.clone()?;
+        matches!(declared.body.kind(self.db), TyKind::Function(_)).then_some(declared)
     }
 
     /// Applies a statement-level annotation to the annotated expression's
@@ -1841,13 +1894,13 @@ impl<'db> Checker<'db, '_> {
             }
             (false, false) => {
                 self.join_writes(then_writes);
-                self.join_types(then_ty, else_ty)
+                self.join_branch_values(then_ty, else_ty)
             }
             // Nothing falls through; the state after the `if` is unreachable,
             // so keep the pre-`if` state.
             (true, true) => {
                 self.environment.rollback(false_mark);
-                self.join_types(then_ty, else_ty)
+                self.join_branch_values(then_ty, else_ty)
             }
         }
     }
@@ -4785,6 +4838,48 @@ impl<'db> Checker<'db, '_> {
     /// Branch-merge join: unify when possible (keeps the chooser idiom linking
     /// two inference variables), otherwise the union of the branch types; a
     /// NULL branch joins by pure union so it never binds a variable to NULL.
+    /// The value of an `if`/`else` whose branches both fall through. Branches
+    /// with genuinely different types produce their UNION — never a
+    /// unification — whenever either side still carries an unresolved
+    /// inference variable. Unifying there would let the concrete branch pin
+    /// the other: `function(flag, x) if (flag) x else "s"` would silently
+    /// become `fn(flag, x: character)`, so `f(TRUE, 1)` failed and the error
+    /// blamed the *caller* for a line that is not wrong. It is also what the
+    /// guard rule requires — an unannotated parameter is not pinned by the
+    /// guard that tests it, which is the whole point of
+    /// `if (is.character(x)) x else "other"`.
+    ///
+    /// Two branches that are BOTH still open do tie to each other, because
+    /// neither pins the other and the tie is what makes the coalesce idiom
+    /// `if (is.null(value)) fallback else value` infer
+    /// `<T> fn(value: T | NULL, fallback: T) -> T`. Two concrete branches go
+    /// through `join_types`, where identical types collapse instead of forming
+    /// a one-member union.
+    fn join_branch_values(&mut self, left: Ty<'db>, right: Ty<'db>) -> Ty<'db> {
+        let left_resolved = self.table.resolve(self.db, left);
+        let right_resolved = self.table.resolve(self.db, right);
+        let left_open = self.table.contains_unbound_var(self.db, left_resolved);
+        let right_open = self.table.contains_unbound_var(self.db, right_resolved);
+        if left_open != right_open {
+            let open = if left_open {
+                left_resolved
+            } else {
+                right_resolved
+            };
+            // Only an UNCONSTRAINED variable is protected. One the body has
+            // already restricted — `n * fact(n - 1L)` demands numeric — may
+            // unify with the other branch, because that pin adds nothing the
+            // program did not already require and it is what lets recursion
+            // converge to a precise type. An unconstrained variable is a
+            // parameter the body only passes through, so pinning it would
+            // invent a requirement the code never expressed.
+            if self.table.open_constraint(self.db, open) == Some(Constraint::Unconstrained) {
+                return union_of(self.db, [left_resolved, right_resolved]);
+            }
+        }
+        self.join_types(left, right)
+    }
+
     fn join_types(&mut self, left: Ty<'db>, right: Ty<'db>) -> Ty<'db> {
         let left_resolved = self.table.resolve(self.db, left);
         let right_resolved = self.table.resolve(self.db, right);

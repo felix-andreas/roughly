@@ -1,3 +1,34 @@
+#==== nested_definitions
+#---- a_nested_annotation_pushes_parameter_types_into_the_body
+outer <- function() {
+  #: fn(x: character) -> integer
+  inner <- function(x) x + 1L
+  inner("a")
+}
+#++++
+outer: Unknown
+78..79 error[type-mismatch] expected a numeric value (`integer` or `double`), found `character`
+
+#---- a_nested_annotation_checks_its_return
+outer <- function() {
+  #: fn(x: double[]) -> double
+  inner <- function(x) "text"
+  inner(c(1, 2))
+}
+#++++
+outer: Unknown
+76..82 error[type-mismatch] expected `double`, found `character`
+
+#---- a_nested_annotation_checks_its_call_sites
+outer <- function() {
+  #: fn(x: double[]) -> double
+  inner <- function(x) x[[1L]]
+  inner("bad")
+}
+#++++
+outer: Unknown
+92..97 error[type-mismatch] expected `double[]`, found `character`
+
 #==== unknown_only_coercions
 #---- if_unknown_fills_a_genuine_gap
 frame <- data.frame(a = 1)
