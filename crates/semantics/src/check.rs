@@ -1198,10 +1198,14 @@ impl<'db> Checker<'db, '_> {
                 self.infer_unary(id, operator, operand)
             }
             ExpressionKind::Binary {
-                operator, lhs, rhs, ..
+                operator,
+                special_name,
+                lhs,
+                rhs,
             } => {
                 let (operator, lhs, rhs) = (*operator, *lhs, *rhs);
-                self.infer_binary(id, range, operator, lhs, rhs)
+                let special_name = special_name.clone();
+                self.infer_binary(id, range, operator, special_name.as_deref(), lhs, rhs)
             }
             ExpressionKind::Call { callee, arguments } => {
                 let arguments = arguments.clone();
@@ -2443,10 +2447,17 @@ impl<'db> Checker<'db, '_> {
         id: ExprId,
         range: TextRange,
         operator: BinaryOperator,
+        special_name: Option<&str>,
         lhs: ExprId,
         rhs: ExprId,
     ) -> Ty<'db> {
         use BinaryOperator::*;
+        if operator == Special
+            && let Some(name) = special_name
+            && let Some(result) = self.infer_declared_operator(range, name, lhs, rhs)
+        {
+            return self.record(id, result);
+        }
         match operator {
             Add | Subtract | Multiply | Modulo | IntegerDivide => self
                 .operator_method_result(range, operator, lhs, rhs)
@@ -2480,6 +2491,61 @@ impl<'db> Checker<'db, '_> {
                 self.unknown()
             }
         }
+    }
+
+    /// A `%…%` operator the STUB CORPUS declares is the call R makes: `a %in% b`
+    /// is `` `%in%`(a, b) ``, so the declaration checks and the result is typed.
+    /// Deliberately corpus-only — a project's own `%op%` may be a
+    /// non-standard-evaluation wrapper whose right operand is quoted rather than
+    /// evaluated (magrittr's `%>%` is the canonical one), and checking that as an
+    /// ordinary call would reject correct code. Those stay opaque.
+    fn infer_declared_operator(
+        &mut self,
+        range: TextRange,
+        name: &str,
+        lhs: ExprId,
+        rhs: ExprId,
+    ) -> Option<Ty<'db>> {
+        let library = crate::stubs::stubs(self.db)?;
+        if !library.schemes.contains_key(name) {
+            return None;
+        }
+        // A project definition of the same operator wins, as everywhere else.
+        if self
+            .globals
+            .is_some_and(|globals| globals.defined_in_project(name, false))
+        {
+            return None;
+        }
+        let scheme = self.globals?.scheme(name, false)?;
+        let instantiated = self.instantiate(&scheme);
+        let resolved = self.table.shallow_resolve(self.db, instantiated);
+        let TyKind::Function(function) = resolved.kind(self.db).clone() else {
+            return None;
+        };
+        let left = self.infer(lhs);
+        let right = self.infer(rhs);
+        let arguments = [
+            CallArgument {
+                name: None,
+                name_range: None,
+                ty: Some(left),
+                range: self.blame_range(lhs),
+                whole_double: self.is_whole_double(lhs),
+                forwards_dots: false,
+            },
+            CallArgument {
+                name: None,
+                name_range: None,
+                ty: Some(right),
+                range: self.blame_range(rhs),
+                whole_double: self.is_whole_double(rhs),
+                forwards_dots: false,
+            },
+        ];
+        let findings = self.match_arguments(range, &function, &arguments);
+        self.errors.extend(findings);
+        Some(function.ret)
     }
 
     /// An operator applied to a nominal operand dispatches to that class's

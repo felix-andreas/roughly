@@ -206,8 +206,8 @@ hint @30: fn() -> double
 f <- function() pri$0nt(1)
 #++++
 hover 16..21: print: fn(x: double, ...: Any, [digits]: Any, [quote]: logical, [right]: logical, [max]: Any, [width]: Any, [n]: Any, [na.print]: Any, [row.names]: Any) -> double
-hover-definition: package base (1 declaration(s), declared in stub source 0 at 13728..13733)
-definition: stub source 0 13728..13733
+hover-definition: package base (1 declaration(s), declared in stub source 0 at 14304..14309)
+definition: stub source 0 14304..14309
 references: none
 rename: none
 signature: fn(x: double, ...: Any, [digits]: Any, [quote]: logical, [right]: logical, [max]: Any, [width]: Any, [n]: Any, [na.print]: Any, [row.names]: Any) -> double

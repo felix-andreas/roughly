@@ -24,14 +24,18 @@ below, ranked by how often a real user hits it.
   (`setClass("A", representation(x = "numeric")); new("A", y = 1)`). R6 method *bodies* now resolve
   `self`/`private`/`super`, but their field and method types are still `Unknown`, so completion after
   `self$` offers every record field in the workspace.
-- **Matrix algebra is untypeable *and* invisible:** `%*%` yields `Unknown`;
-  `matrix`/`t`/`solve`/`dim`/`apply`/`outer`/`crossprod`/`diag` are `Any`, so even strict mode says
-  nothing about a transposed dimension. `%in%` and user `%op%` are still *untyped* (the result is `Unknown`), though a use of one now
-  counts as a read of its name. The `.Rtypes` grammar accepts `%op%` declaration names, and the HIR
-  now carries the operator's spelling, so the remaining work is the checker's `Special` path:
-  look the name up and check the call. Weigh it against lowering `%op%` to the call it is (the
-  documented `|>` precedent) — that route also gives goto/references on the operator, at the risk of
-  `unresolved` on an undeclared operator such as a bare-script `%>%`.
+- **Matrix SHAPE is still untracked.** `%*%`/`%o%`/`%x%` now return the `matrix` nominal and the class
+  has its arithmetic and comparison methods, so matrix expressions type and compose — but
+  `matrix`/`t`/`solve`/`dim`/`crossprod`/`diag`/`apply` still return `Any`, so a transposed dimension
+  or a non-conformable product is invisible. Declaring them `-> matrix` is easy; the value is in
+  *dimensions*, which needs a shape-carrying matrix type (see the data.frame row-type design). Note
+  the trap this session hit: making a constructor return a real nominal without also declaring the
+  class's operator methods turns every `m + 1` into a false error.
+- **A project's own `%op%` stays untyped by design** (the result is `Unknown`, a strict-mode origin):
+  it may be an NSE wrapper whose right operand is quoted, like magrittr's `%>%`, and checking that as
+  an ordinary call would reject correct code. Lowering `%op%` to the call it is (the documented `|>`
+  precedent) would type it and give goto/references on the operator — weigh that against the NSE risk
+  and the `unresolved` a bare-script `%>%` would gain.
 - **`lapply` drops names**, so "named list in, named list out" is inexpressible. A list of
   *functions* is also still rejected — `lapply(list(mean = mean, sd = sd), function(f) f(1:3))` now
   joins the element to a union of two function types, and the callback check cannot yet satisfy a

@@ -1,24 +1,29 @@
 #==== origins
 #---- unsupported_constructs_are_origins
-special <- function(a, b) a %in% b
+special <- function(a, b) a %undeclared% b
 formula_model <- function() y ~ x
 elementwise <- function(a, b) a & b
 #++++
 special: <T, U> fn(a: T, b: U) -> Unknown
 formula_model: fn() -> Unknown
 elementwise: <T, U> fn(a: T, b: U) -> Unknown
-26..34 error[strict] strict mode: this expression has an undetermined type (`Unknown`)
-63..68 error[strict] strict mode: this expression has an undetermined type (`Unknown`)
-99..104 error[strict] strict mode: this expression has an undetermined type (`Unknown`)
+26..42 error[strict] strict mode: this expression has an undetermined type (`Unknown`)
+71..76 error[strict] strict mode: this expression has an undetermined type (`Unknown`)
+107..112 error[strict] strict mode: this expression has an undetermined type (`Unknown`)
+
+#---- a_corpus_declared_operator_is_typed_and_no_origin
+member <- function(a, b) a %in% b
+#++++
+member: <T, U> fn(a: T, b: U) -> logical
 
 #---- assignment_value_phrasing
 f <- function(x) {
-  result <- x %in% letters
+  result <- x %undeclared% letters
   result
 }
 #++++
 f: <T> fn(x: T) -> Unknown
-31..45 error[strict] strict mode: could not determine the type of `result`; add a type annotation
+31..53 error[strict] strict mode: could not determine the type of `result`; add a type annotation
 
 #---- dollar_on_an_unresolved_variable
 f <- function(node) node$value

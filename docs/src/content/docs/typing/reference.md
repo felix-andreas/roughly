@@ -1578,6 +1578,15 @@ Examples:
 
 ### Arithmetic operators
 
+**`%…%` operators.** `a %op% b` is the call `` `%op%`(a, b) ``, so a `%…%` operator the **standard-library
+corpus declares** is checked and typed as that call: `"a" %in% valid` is `logical`, `m %*% m` is a
+`matrix`. Every other `%…%` — including a project's own — stays an opaque construct whose result is
+`Unknown` (a strict-mode origin), deliberately: a user operator may be a non-standard-evaluation
+wrapper whose right operand is quoted rather than evaluated (magrittr's `%>%` is the canonical one),
+and checking that as an ordinary call would reject correct code. A project definition of a
+corpus-declared operator also wins, as everywhere else, and reverts it to opaque. A use of any
+`%…%` operator counts as a read of its name, so a project's own operator is never reported unused.
+
 **Operator methods on a class.** Before the numeric rules below apply, an operator whose operand is
 a nominal dispatches to that class's declared operator method, the way R dispatches `d + 30L` on
 `Date` through `+.Date`. Lookup mirrors R's own order — the operator-specific method (`+.Date`),
