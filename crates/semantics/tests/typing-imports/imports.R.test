@@ -43,8 +43,8 @@ Counter <- R6Class("Counter", public = list(
 Counter: Unknown
 
 #---- library_of_an_unstubbed_package_tolerates_any_read
-library(ggplot2)
-make <- function(d) ggplot(d)
+library(jsonlite)
+make <- function(d) toJSON(d)
 #++++
 make: <T> fn(d: T) -> Unknown
 
@@ -61,12 +61,39 @@ use_library_name: <T> fn(x: T) -> T
 
 #---- a_transposition_is_suggested_but_a_distant_name_is_not
 f <- function(x) lenght(x)
-g <- function(d) ggplot(d)
+g <- function(d) zzframboz(d)
 #++++
 f: <T> fn(x: T) -> Unknown
 g: <T> fn(d: T) -> Unknown
 17..23 warning[unresolved] I could not resolve `lenght` in this package, its imports, or builtins. Did you mean `length`?
-44..50 warning[unresolved] I could not resolve `ggplot` in this package, its imports, or builtins.
+44..53 warning[unresolved] I could not resolve `zzframboz` in this package, its imports, or builtins.
+
+#==== ggplot2
+#---- a_plot_pipeline_types_end_to_end
+library(ggplot2)
+plot <- ggplot(mtcars, aes(x = mpg, y = wt)) + geom_point() + theme_minimal()
+#++++
+plot: ggplot
+
+#---- masked_aesthetics_are_not_unresolved
+#description Imports: ggplot2
+build <- function(frame) ggplot(frame, aes(x = a_column, y = another_column))
+#++++
+build: <T> fn(frame: T) -> ggplot
+
+#---- a_typo_in_a_geom_is_caught
+#description Imports: ggplot2
+build <- function(frame) ggplot(frame) + geom_poimt()
+#++++
+build: <T> fn(frame: T) -> ggplot
+71..81 warning[unresolved] I could not resolve `geom_poimt` in this package, its imports, or builtins. Did you mean `geom_point`?
+
+#---- a_non_component_is_not_addable_to_a_plot
+#description Imports: ggplot2
+build <- function(frame) ggplot(frame) + 1L
+#++++
+build: Unknown
+55..73 error[type-mismatch] `+` is not defined between `ggplot` and `integer`
 
 #==== testthat
 #---- declared_dependency_activates_the_testthat_stub

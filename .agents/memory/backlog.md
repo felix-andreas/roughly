@@ -64,13 +64,17 @@ below, ranked by how often a real user hits it.
   space serves, and the `trailing-comma` lint reports the mistake.
 - **`.Rmd` / `.qmd` chunks are not analysed** — reported honestly in `check`'s summary rather than
   silently skipped, but half of an analysis user's deliverables are still uncovered.
-- **`ggplot2` stubs are the remaining cheap lever on false positives.** `testthat` now ships (see the
-  ledger), so a package's `tests/` tree resolves properly instead of relying on the blanket tolerance.
-  `ggplot2` is the other high-traffic namespace: it needs the `@type ggplot` nominal, `+.ggplot`, and
-  the `aes(...)` data mask. **R is installable in an agent container** (recipe in MEMORY.md; note
-  `fs` needs `apt-get install libuv1-dev` first), so generate the manifest with
-  `Rscript scripts/export-manifests.R` rather than writing one from memory — an incomplete manifest
-  turns a real export into a false `unresolved`.
+- **An unannotated helper that wraps an operator over a class fails, and the tie is why.**
+  `add_layer <- function(plot, layer) plot + layer` infers `<T: numeric> fn(plot: T, layer: T)` — the
+  two flexible operands are tied to ONE variable — so `add_layer(base, geom_point())` reports
+  `expected ggplot, found gg`. Same shape for dates: `add_days <- function(d, n) d + n`. Annotating
+  the helper fixes it and the message is clear, but the tie is an over-commitment: R's `+` never
+  required its operands to share a type, and a class that declares `+.Class` accepts pairings the tie
+  forbids. **This is the "traits" / third-constraint-kind question in `typing-design.md`, now tripped a
+  third time by shipped features** — the right fix is a "supports this operator" constraint instead of
+  `Numeric`, replacing both the tie and the `declares_arithmetic` relaxation that lets an
+  arithmetic-declaring class satisfy `Numeric` today. Next stub corpus addition that returns a real
+  nominal will trip it again.
 - **A type error inside `expect_error(...)` is still reported.** `expect_error(f("bad type"))` is how
   you test a type-related failure, and the call really is type-incorrect, so the finding is defensible
   — but it needs a suppression to write that test. Decide whether an expectation that asserts a

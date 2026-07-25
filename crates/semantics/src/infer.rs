@@ -1287,6 +1287,21 @@ fn nullable_single_member<'db>(db: &'db dyn Db, members: &[Ty<'db>]) -> Option<T
     Some(members[1 - null_at])
 }
 
+/// Whether a class declares an arithmetic operator method, and so participates
+/// in arithmetic even though it is not a numeric atom. The numeric constraint on
+/// an inference variable comes from a body doing `a + b`, which for such a class
+/// is legal R — so rejecting it would refuse `add_days <- function(d, n) d + n`
+/// every date, matrix or plot in the language. The result may be imprecise
+/// (the variable takes the class), never a false rejection.
+fn declares_arithmetic(db: &dyn Db, class: &str) -> bool {
+    let Some(library) = crate::stubs::stubs(db) else {
+        return false;
+    };
+    ["+.", "-.", "*.", "/.", "Arith.", "Ops."]
+        .iter()
+        .any(|prefix| library.schemes.contains_key(&format!("{prefix}{class}")))
+}
+
 fn constraint_rejects<'db>(
     db: &'db dyn Db,
     constraint: Constraint,
@@ -1303,16 +1318,20 @@ fn constraint_rejects<'db>(
                 element.kind(db),
                 TyKind::Scalar(Atomic::Integer | Atomic::Double)
             ),
+            TyKind::Named(name, _) => declares_arithmetic(db, name.text(db)),
             _ => false,
         },
         Constraint::AtomicElement => matches!(
             ty.kind(db),
             TyKind::Scalar(_) | TyKind::Any | TyKind::Unknown
         ),
-        Constraint::ScalarNumeric => matches!(
-            ty.kind(db),
-            TyKind::Scalar(Atomic::Integer | Atomic::Double) | TyKind::Any | TyKind::Unknown
-        ),
+        Constraint::ScalarNumeric => match ty.kind(db) {
+            TyKind::Scalar(Atomic::Integer | Atomic::Double) | TyKind::Any | TyKind::Unknown => {
+                true
+            }
+            TyKind::Named(name, _) => declares_arithmetic(db, name.text(db)),
+            _ => false,
+        },
     };
     (!admissible).then_some(UnifyError::ConstraintRejected(constraint, ty))
 }

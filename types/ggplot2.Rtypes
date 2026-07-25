@@ -1,0 +1,132 @@
+# ggplot2 — a CONDITIONAL namespace (like data.table, dplyr and testthat): these
+# declarations join resolution only when the project declares ggplot2 or a file
+# attaches it with a `library()`-family call.
+#
+# One line of ggplot code touched four unresolved names before this file existed,
+# and the typo hints on them were actively wrong — the worst first impression the
+# tool could make on a plotting-heavy script. The model is deliberately small,
+# because the export manifest resolves the other ~600 names as `Unknown` and an
+# `Unknown` component still composes: `ggplot(...) + geom_undeclared()` checks,
+# since `Unknown` satisfies the `gg` parameter of `+.ggplot`.
+#
+# Two nominals carry the whole grammar. `ggplot` is the plot; `gg` is a component
+# — a layer, scale, theme, facet, coord or label set. Everything ggplot2 returns
+# for `+` has class `gg` in R, which is what makes one component type enough.
+@type ggplot
+@type gg
+
+# The grammar's operator. `p + geom_point() + theme_minimal()` chains left to
+# right, so the result stays a plot; `%+%` replaces a plot's data.
++.ggplot : fn(e1: ggplot, e2: gg) -> ggplot
+%+% : fn(e1: ggplot, e2: Any) -> ggplot
+
+# `ggplot(data, mapping)` starts a plot. `aes()` and `vars()` are data masks: the
+# names inside them are columns of the data, resolved when the plot is drawn, so
+# they are never "unresolved" — declaring no formals before `...` masks every
+# argument, the same rule `join_by` uses.
+ggplot : fn([data]: Any, [mapping]: Any, ...: Any, [environment]: Any) -> ggplot
+aes : @masked fn(...: Any) -> Any
+vars : @masked fn(...: Any) -> Any
+aes_ : @masked fn(...: Any) -> Any
+aes_string : @masked fn(...: Any) -> Any
+after_stat : @masked fn(...: Any) -> Any
+after_scale : @masked fn(...: Any) -> Any
+stage : @masked fn(...: Any) -> Any
+
+# Layers. Every geom and stat takes the same leading formals and an aesthetic
+# `...`; they return a component, so only the return type is worth declaring.
+geom_point : fn([mapping]: Any, [data]: Any, ...: Any) -> gg
+geom_line : fn([mapping]: Any, [data]: Any, ...: Any) -> gg
+geom_bar : fn([mapping]: Any, [data]: Any, ...: Any) -> gg
+geom_col : fn([mapping]: Any, [data]: Any, ...: Any) -> gg
+geom_histogram : fn([mapping]: Any, [data]: Any, ...: Any) -> gg
+geom_boxplot : fn([mapping]: Any, [data]: Any, ...: Any) -> gg
+geom_smooth : fn([mapping]: Any, [data]: Any, ...: Any) -> gg
+geom_text : fn([mapping]: Any, [data]: Any, ...: Any) -> gg
+geom_label : fn([mapping]: Any, [data]: Any, ...: Any) -> gg
+geom_tile : fn([mapping]: Any, [data]: Any, ...: Any) -> gg
+geom_area : fn([mapping]: Any, [data]: Any, ...: Any) -> gg
+geom_density : fn([mapping]: Any, [data]: Any, ...: Any) -> gg
+geom_errorbar : fn([mapping]: Any, [data]: Any, ...: Any) -> gg
+geom_hline : fn(...: Any) -> gg
+geom_vline : fn(...: Any) -> gg
+geom_abline : fn(...: Any) -> gg
+geom_jitter : fn([mapping]: Any, [data]: Any, ...: Any) -> gg
+geom_violin : fn([mapping]: Any, [data]: Any, ...: Any) -> gg
+geom_ribbon : fn([mapping]: Any, [data]: Any, ...: Any) -> gg
+geom_segment : fn([mapping]: Any, [data]: Any, ...: Any) -> gg
+geom_step : fn([mapping]: Any, [data]: Any, ...: Any) -> gg
+stat_summary : fn([mapping]: Any, [data]: Any, ...: Any) -> gg
+stat_smooth : fn([mapping]: Any, [data]: Any, ...: Any) -> gg
+stat_bin : fn([mapping]: Any, [data]: Any, ...: Any) -> gg
+stat_count : fn([mapping]: Any, [data]: Any, ...: Any) -> gg
+stat_function : fn(...: Any) -> gg
+annotate : fn(geom: Any, ...: Any) -> gg
+
+# Labels, scales, themes, facets and coordinates — all components.
+labs : fn(...: Any) -> gg
+ggtitle : fn(label: Any, [subtitle]: Any) -> gg
+xlab : fn(label: Any) -> gg
+ylab : fn(label: Any) -> gg
+xlim : fn(...: Any) -> gg
+ylim : fn(...: Any) -> gg
+lims : fn(...: Any) -> gg
+expand_limits : fn(...: Any) -> gg
+scale_x_continuous : fn(...: Any) -> gg
+scale_y_continuous : fn(...: Any) -> gg
+scale_x_discrete : fn(...: Any) -> gg
+scale_y_discrete : fn(...: Any) -> gg
+scale_x_log10 : fn(...: Any) -> gg
+scale_y_log10 : fn(...: Any) -> gg
+scale_x_date : fn(...: Any) -> gg
+scale_y_date : fn(...: Any) -> gg
+scale_colour_manual : fn(...: Any) -> gg
+scale_color_manual : fn(...: Any) -> gg
+scale_fill_manual : fn(...: Any) -> gg
+scale_colour_brewer : fn(...: Any) -> gg
+scale_color_brewer : fn(...: Any) -> gg
+scale_fill_brewer : fn(...: Any) -> gg
+scale_colour_gradient : fn(...: Any) -> gg
+scale_color_gradient : fn(...: Any) -> gg
+scale_fill_gradient : fn(...: Any) -> gg
+scale_size : fn(...: Any) -> gg
+scale_alpha : fn(...: Any) -> gg
+scale_shape : fn(...: Any) -> gg
+scale_linetype : fn(...: Any) -> gg
+guides : fn(...: Any) -> gg
+guide_legend : fn(...: Any) -> Any
+guide_colourbar : fn(...: Any) -> Any
+guide_axis : fn(...: Any) -> Any
+theme : fn(...: Any) -> gg
+theme_grey : fn(...: Any) -> gg
+theme_gray : fn(...: Any) -> gg
+theme_bw : fn(...: Any) -> gg
+theme_minimal : fn(...: Any) -> gg
+theme_classic : fn(...: Any) -> gg
+theme_light : fn(...: Any) -> gg
+theme_dark : fn(...: Any) -> gg
+theme_void : fn(...: Any) -> gg
+theme_linedraw : fn(...: Any) -> gg
+theme_set : fn(new: Any) -> Any
+theme_update : fn(...: Any) -> Any
+element_text : fn(...: Any) -> Any
+element_line : fn(...: Any) -> Any
+element_rect : fn(...: Any) -> Any
+element_blank : fn() -> Any
+margin : fn(...: Any) -> Any
+unit : fn(x: Any, units: character, ...: Any) -> Any
+rel : fn(x: Any) -> Any
+facet_wrap : fn([facets]: Any, ...: Any) -> gg
+facet_grid : fn([rows]: Any, ...: Any) -> gg
+coord_flip : fn(...: Any) -> gg
+coord_cartesian : fn(...: Any) -> gg
+coord_fixed : fn(...: Any) -> gg
+coord_polar : fn(...: Any) -> gg
+coord_trans : fn(...: Any) -> gg
+
+# Output and helpers.
+ggsave : fn([filename]: Any, [plot]: Any, ...: Any) -> character
+last_plot : fn() -> ggplot
+ggplot_build : fn(plot: Any) -> Any
+ggplotGrob : fn(x: Any) -> Any
+waiver : fn() -> Any
