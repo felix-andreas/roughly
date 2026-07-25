@@ -23,10 +23,20 @@ below, ranked by how often a real user hits it.
   without changing any argument type, so no overload set can discriminate them — typing only their
   *parameters* (leaving the return `Any`) is the reachable win, at the cost of rejecting R's
   function-name-as-string form (`sapply(x, "length")`, already rejected for `lapply`).
-- **S4 is untyped:** a slot typo against a class declared two lines above is silent
-  (`setClass("A", representation(x = "numeric")); new("A", y = 1)`). R6 method *bodies* now resolve
-  `self`/`private`/`super`, but their field and method types are still `Unknown`, so completion after
-  `self$` offers every record field in the workspace.
+- **The three object systems, measured (S3 partial, S4 and R6 recognition-only).** S3 *operator*
+  dispatch is real (`+.Date`, `Arith.X`, `Ops.X` method names are built and dispatched, and the
+  linter knows `generic.class` names), but `UseMethod` is not modelled — a generic call is `Unknown`
+  — and `structure(list(...), class = "dog")` produces a plain record, so the class attribute is
+  data. S4 is untyped end to end: `setClass`/`setGeneric`/`setMethod`/`new` are `Any` stubs, `x@slot`
+  has no type, a slot typo against a class declared two lines above is silent
+  (`setClass("A", representation(x = "numeric")); new("A", y = 1)`), and — the one *active* false
+  positive of the three — `setGeneric("f", ...)` does not define `f`, so every call to a project's
+  own S4 generic reports `unresolved`. R6 has no stub at all (`R6::R6Class` reports `unknown package
+  namespace R6`); method bodies resolve `self`/`private`/`super` as a special case, but the class,
+  its fields and its methods are `Unknown`, so `obj$typo()` is silent and completion after `self$`
+  offers every record field in the workspace. All three are recognized structurally by the IDE
+  outline (`classify_symbol_call`), which is where the type-side work can start. Fix order by pain:
+  the `setGeneric` false positive, then an R6 stub, then S4 slot types, then `UseMethod`.
 - **Matrix SHAPE is still untracked.** `%*%`/`%o%`/`%x%` now return the `matrix` nominal and the class
   has its arithmetic and comparison methods, so matrix expressions type and compose — but
   `matrix`/`t`/`solve`/`dim`/`crossprod`/`diag`/`apply` still return `Any`, so a transposed dimension
