@@ -375,10 +375,13 @@ pub fn check(
                                         let related_index = LineIndex::new(related.file.text(&db));
                                         let start =
                                             related_index.line_column(related.range.start());
+                                        let end = related_index.line_column(related.range.end());
                                         Some(RelatedNote {
                                             path: (*related_path).clone(),
                                             line: start.line,
                                             column: start.column,
+                                            end_line: end.line,
+                                            end_column: end.column,
                                             message: related.message,
                                         })
                                     })
@@ -665,6 +668,11 @@ struct RelatedNote {
     path: PathBuf,
     line: u32,
     column: u32,
+    /// The note's end position, so a machine consumer can annotate the same
+    /// span it annotates for the finding itself. The human renderer only
+    /// needs the start.
+    end_line: u32,
+    end_column: u32,
     message: &'static str,
 }
 
@@ -794,6 +802,8 @@ fn render_json_diagnostic(
                 "path": note.path.display().to_string(),
                 "line": note.line + 1,
                 "column": note.column + 1,
+                "endLine": note.end_line + 1,
+                "endColumn": note.end_column + 1,
                 "message": note.message,
             })
         })
@@ -933,15 +943,28 @@ pub fn fmt(
     } else {
         ("reformatted", "left unchanged")
     };
-    let n_unchanged = n_files - n_unformatted;
+    // A file that could not be read or parsed is neither reformatted nor
+    // "already formatted" — counting it as the latter told the reader their
+    // whole tree was clean when part of it was never looked at.
+    let n_unchanged = n_files - n_unformatted - n_errors;
+    let failed = if n_errors == 0 {
+        String::new()
+    } else {
+        format!(
+            ", {} file{} could not be formatted",
+            n_errors,
+            if n_errors == 1 { "" } else { "s" }
+        )
+    };
     info(&format!(
-        "{} file{} {}, {} file{} {}",
+        "{} file{} {}, {} file{} {}{}",
         n_unformatted,
         if n_unformatted == 1 { "" } else { "s" },
         action_format,
         n_unchanged,
         if n_unchanged == 1 { "" } else { "s" },
-        action_skip
+        action_skip,
+        failed
     ));
 
     if verbose {

@@ -65,6 +65,11 @@ pub enum TypeErrorKind<'db> {
         suggestion: Option<String>,
         expected_parameters: Vec<String>,
     },
+    /// A callee that may be `NULL` — callable on every other path, so the
+    /// finding is the nullability rather than "not a function".
+    MaybeNullCallee {
+        found: Ty<'db>,
+    },
     /// `#: @if-unknown` on a value whose type the checker already knows.
     KnownTypeUnderIfUnknown {
         found: Ty<'db>,
@@ -3797,6 +3802,37 @@ impl<'db> Checker<'db, '_> {
             // call's type is the union of the member returns; returns are
             // variable-erased because the probe bindings that produced them
             // roll back.
+            // A callee that is functions plus `NULL` — what `switch` without a
+            // default produces, since R returns invisible `NULL` when nothing
+            // matches. The value IS callable on every non-`NULL` path, so
+            // "not a function" would be the wrong complaint: the finding is the
+            // nullability, and the arguments and result still check against the
+            // function members so nothing downstream cascades.
+            TyKind::Union(members)
+                if members
+                    .iter()
+                    .any(|&member| matches!(member.kind(self.db), TyKind::Null))
+                    && members.iter().all(|&member| {
+                        matches!(
+                            self.table.shallow_resolve(self.db, member).kind(self.db),
+                            TyKind::Function(_) | TyKind::Null
+                        )
+                    }) =>
+            {
+                self.errors.push(TypeError {
+                    range: callee_range,
+                    kind: TypeErrorKind::MaybeNullCallee {
+                        found: self.table.resolve(self.db, resolved),
+                    },
+                });
+                let callable: Vec<Ty<'db>> = members
+                    .iter()
+                    .copied()
+                    .filter(|member| !matches!(member.kind(self.db), TyKind::Null))
+                    .collect();
+                let without_null = union_of(self.db, callable);
+                self.dispatch_call(range, callee_range, without_null, arguments)
+            }
             TyKind::Union(members)
                 if members.iter().all(|&member| {
                     matches!(

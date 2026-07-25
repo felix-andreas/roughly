@@ -2073,7 +2073,18 @@ fn annotation_space_between(
     use AnnotationTokenKind::*;
     match current {
         Comma | Colon | CloseParen | CloseBracket | CloseBrace | CloseAngle => return false,
-        OpenParen => return false,
+        // `(` hugs only what it APPLIES to — `fn(`, `Box<T>(`. After a `:`,
+        // `|` or `->` it opens a grouped type, and the surrounding-space rule
+        // for that neighbour governs: `x: (integer | character)`, not
+        // `x:(integer | character)`.
+        OpenParen
+            if matches!(
+                previous,
+                Word | Dots | CloseParen | CloseBracket | CloseBrace | CloseAngle
+            ) =>
+        {
+            return false;
+        }
         OpenAngle if previous == Word => return false,
         OpenBracket if matches!(previous, Word | CloseAngle | CloseBracket) => return false,
         OpenBrace if previous == Word && previous_text == "list" => return false,

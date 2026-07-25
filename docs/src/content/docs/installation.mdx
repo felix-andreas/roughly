@@ -130,6 +130,28 @@ diagnostic stands alone). These field names are a contract — safe to build CI 
 
 A warnings-only `check` run exits 1 by default; pass `--min-severity error` to gate on errors only.
 
+### JSON output
+
+`roughly check --output json` writes **JSON Lines** to stdout — one object per diagnostic, nothing
+else, so the stream stays parseable while human-readable progress goes to stderr:
+
+```json
+{"path":"R/config.R","line":20,"column":14,"endLine":20,"endColumn":24,"severity":"error","code":"type-mismatch","message":"expected `integer`, found `character`","related":[]}
+```
+
+| Field | Meaning |
+| ----- | ------- |
+| `path` | Absolute path of the file |
+| `line`, `column` | 1-based start position, in bytes |
+| `endLine`, `endColumn` | 1-based end position, in bytes (exclusive) |
+| `severity` | `"error"` or `"warning"` |
+| `code` | The stable diagnostic code, the same one `# roughly: allow(...)` takes |
+| `message` | The rendered message |
+| `related` | Other locations the finding refers to — the same five position and message fields, one object each. Empty for most findings; a `duplicate` names both sites |
+
+The summary line `check` prints at the end goes to stdout too, but only in human mode — a JSON run
+emits nothing but diagnostics.
+
 ## Next steps
 
 - [Typing guide](/typing/guide) — how inference and `#:` annotations work

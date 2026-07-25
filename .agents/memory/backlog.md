@@ -29,8 +29,6 @@ below, ranked by how often a real user hits it.
   nothing about a transposed dimension. `%in%` and user `%op%` are likewise untyped — the
   `.Rtypes` grammar now *accepts* `%op%` declaration names, so the remaining work is the checker's
   `Special` operator path, which currently refuses wholesale.
-- **`match.arg` + `switch` yields `fn | NULL`, which is then uncallable** — it made a reviewer add
-  provably dead guard code.
 - **`lapply` drops names**, so "named list in, named list out" is inexpressible. A list of
   *functions* is also still rejected — `lapply(list(mean = mean, sd = sd), function(f) f(1:3))` now
   joins the element to a union of two function types, and the callback check cannot yet satisfy a
@@ -49,14 +47,16 @@ below, ranked by how often a real user hits it.
   trailing expression; messages leak unbound type variables (`list[T] | T[]`) and expand an alias on
   only one side of an expected/found pair; `unused` false-positives on a write followed by `break`;
   closure re-entry is unmodelled, so the `if (!is.null(cache)) return(cache); cache <<- v` memo idiom
-  yields `T | NULL`; a generic parameter cannot have a non-`NULL` default; `#:` cannot coexist with a
+  yields `T | NULL`; a generic parameter cannot have a non-`NULL` default; the `unused` write-then-`break`
+  false positive is NOT reproducible (verified across `for`/`while`/`repeat` and both used and genuinely
+  dead writes) — drop it unless a concrete shape resurfaces; `#:` cannot coexist with a
   roxygen2 block; `unused-parameter` fires on signatures R mandates; `export(name)` in `NAMESPACE`
   is not validated; hover renders a polymorphic scheme without its `<...>` binder while inlay hints
-  include it; the formatter drops the required space before a parenthesised type and turns
-  `sum(1, 2, 3,)` into `sum(1, 2, 3, )`; an unparseable file counts as "already formatted"; JSON
-  `related` omits the documented `endLine`/`endColumn`; config type errors do not name the offending
-  key; no `--fix`, no stdin, and no CLI way to ask "what type is this?" (which makes debugging an
-  inference surprise guesswork for a CLI-only user).
+  include it; config type errors name the line and column but not the key; no `--fix`, no stdin, and
+  no CLI way to ask "what type is this?" (which makes debugging an inference surprise guesswork for a
+  CLI-only user). `sum(1, 2, 3,)` formatting to `sum(1, 2, 3, )` is NOT a defect and stays: the
+  trailing comma introduces a missing argument, so it parses identically to the `alist(, )` idiom the
+  space serves, and the `trailing-comma` lint reports the mistake.
 - **`.Rmd` / `.qmd` chunks are not analysed** — reported honestly in `check`'s summary rather than
   silently skipped, but half of an analysis user's deliverables are still uncovered.
 - **Stub coverage is the cheapest lever on false positives.** `library(pkg)` for an unstubbed

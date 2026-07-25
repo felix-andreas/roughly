@@ -1490,6 +1490,10 @@ fn render_type_error_message(db: &dyn Db, error: &TypeError<'_>) -> String {
                 )
             }
         }
+        TypeErrorKind::MaybeNullCallee { found } => format!(
+            "this may be `NULL` here, so calling it is not safe — its type is `{}`. Guard it with `is.null()`, or give the `switch` a default branch",
+            renderer.render(db, *found)
+        ),
         TypeErrorKind::KnownTypeUnderIfUnknown { found } => format!(
             "`@if-unknown` applies only where the type is unknown, and this is already `{}` — drop the annotation, or use `#:` to check the type or `@trust` to override it",
             renderer.render(db, *found)
