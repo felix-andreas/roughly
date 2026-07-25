@@ -34,7 +34,10 @@ expectations and `FIXTURE_FILTER=group__case` runs one case. Suites:
 - `crates/semantics/tests/typing` — the typing suite: each case runs the full semantic
   pipeline on one package file (shipped stubs installed) and renders every named top-level
   definition's exported scheme (`name: <T: numeric> fn(x: T) -> T`) followed by the file's
-  diagnostics (`start..end severity[code] message`, byte offsets)
+  diagnostics (`start..end severity[code] message`, byte offsets). Cases are grouped by feature,
+  except `programs.R.test`, which holds whole small programs written the way a real project is:
+  a case there earns its place by exercising several features at once, and a clean case with an
+  empty diagnostics block is a **zero-false-positive** contract for that style of code
 - `crates/semantics/tests/typing-scripts` — the same pipeline over script documents (one
   sequential top-down scope)
 - `crates/semantics/tests/typing-strict` — the strict stream: the per-file typing mode and
