@@ -253,6 +253,7 @@ pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
                 || super_globals(db, file).contains(name)
                 || declared_global_variable(db, name)
                 || crate::metadata::imported_bare(db, name)
+                || crate::metadata::attaches_unknown_namespace(db)
             {
                 continue;
             }
@@ -993,14 +994,20 @@ fn typo_suggestion<'db>(db: &'db dyn Db, name: crate::types::Name<'db>) -> Optio
 }
 
 /// The closest candidate within an edit-distance budget scaled to the name's
-/// length (nothing for names shorter than 3 characters); distance ties break
-/// to the lexicographically smallest candidate so the hint is deterministic.
+/// length; distance ties break to the lexicographically smallest candidate so
+/// the hint is deterministic.
+///
+/// The budget is deliberately tight — one edit below eight characters, two at
+/// or above. A wrong guess is worse than no guess (`ggplot` is not a typo of
+/// `biplot`, and `aes` is not a typo of `abs`), and on a short name two edits
+/// change a third of it. Transposition counts as one edit, which is what
+/// keeps the real typos inside that budget: `lenght` for `length`.
 fn nearest_name<'a>(name: &str, candidates: impl Iterator<Item = &'a str>) -> Option<&'a str> {
     let name_characters: Vec<char> = name.chars().collect();
-    if name_characters.len() < 3 {
+    if name_characters.len() < 4 {
         return None;
     }
-    let budget = if name_characters.len() >= 5 { 2 } else { 1 };
+    let budget = if name_characters.len() >= 8 { 2 } else { 1 };
     let mut candidate_characters: Vec<char> = Vec::new();
     let mut previous: Vec<usize> = Vec::new();
     let mut current: Vec<usize> = Vec::new();
@@ -1032,10 +1039,13 @@ fn nearest_name<'a>(name: &str, candidates: impl Iterator<Item = &'a str>) -> Op
     best.map(|(_, candidate)| candidate)
 }
 
-/// Levenshtein distance, `None` when it exceeds `budget` (with a length
-/// pre-check and an early bail once a whole DP row exceeds the budget). The
-/// caller lends the two DP rows so a scan over many candidates allocates
-/// nothing per candidate.
+/// Optimal string alignment distance — Levenshtein plus adjacent
+/// transposition as a single edit, because swapping two letters is the most
+/// common real typo and counting it as two edits would push it outside the
+/// budget above. `None` when the distance exceeds `budget` (with a length
+/// pre-check and an early bail once a whole DP row exceeds it). The caller
+/// lends the DP rows so a scan over many candidates allocates nothing per
+/// candidate.
 fn edit_distance_within(
     left: &[char],
     right: &[char],
@@ -1046,6 +1056,9 @@ fn edit_distance_within(
     if left.len().abs_diff(right.len()) > budget {
         return None;
     }
+    // Transposition reads the row two above, so the rows rotate through three
+    // buffers; the third lives here because only this function needs it.
+    let mut before_previous: Vec<usize> = Vec::new();
     previous.clear();
     previous.extend(0..=right.len());
     current.clear();
@@ -1055,15 +1068,30 @@ fn edit_distance_within(
         let mut row_minimum = current[0];
         for (column, right_character) in right.iter().enumerate() {
             let substitution = previous[column] + usize::from(left_character != right_character);
-            current[column + 1] = substitution
+            let mut best = substitution
                 .min(previous[column + 1] + 1)
                 .min(current[column] + 1);
-            row_minimum = row_minimum.min(current[column + 1]);
+            if row > 0
+                && column > 0
+                && Some(left_character) == right.get(column - 1)
+                && left.get(row - 1) == Some(right_character)
+                && let Some(&transposed) = before_previous.get(column - 1)
+            {
+                best = best.min(transposed + 1);
+            }
+            current[column + 1] = best;
+            row_minimum = row_minimum.min(best);
         }
         if row_minimum > budget {
             return None;
         }
+        // Rotate: the row just computed becomes `previous`, the old
+        // `previous` becomes `before_previous`, and the buffer they displace
+        // is recycled as the next `current`.
+        std::mem::swap(&mut before_previous, previous);
         std::mem::swap(previous, current);
+        current.clear();
+        current.resize(right.len() + 1, 0);
     }
     (previous[right.len()] <= budget).then_some(previous[right.len()])
 }

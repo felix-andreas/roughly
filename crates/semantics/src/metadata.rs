@@ -68,6 +68,23 @@ pub fn imported_bare(db: &dyn Db, name: &str) -> bool {
         })
 }
 
+/// Whether the project attaches a namespace the stub corpus cannot describe.
+/// `library(pkg)` puts every export of `pkg` on the search path, so with no
+/// stub for `pkg` that export set is unknowable and no bare read can be
+/// called unresolvable — the same rule, and the same zero-false-positives
+/// priority, a whole-namespace `NAMESPACE` import already follows. This is
+/// what makes `library(ggplot2)` behave in a script the way `import(ggplot2)`
+/// behaves in a package.
+pub fn attaches_unknown_namespace(db: &dyn Db) -> bool {
+    let Some(metadata) = PackageMetadata::try_get(db) else {
+        return false;
+    };
+    metadata
+        .attached(db)
+        .iter()
+        .any(|namespace| crate::stubs::namespace_known(db, namespace) != Some(true))
+}
+
 /// Whether `package` is part of the package's declared universe: a
 /// `DESCRIPTION` dependency or the source of any `NAMESPACE` import.
 pub fn declared_dependency(db: &dyn Db, package: &str) -> bool {

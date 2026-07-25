@@ -9,7 +9,7 @@ f: <T> fn(x: T) -> data.table
 f <- function(x) setDT(x)
 #++++
 f: <T> fn(x: T) -> Unknown
-17..22 warning[unresolved] I could not resolve `setDT` in this package, its imports, or builtins. Did you mean `setAs`?
+17..22 warning[unresolved] I could not resolve `setDT` in this package, its imports, or builtins.
 
 #---- import_from_covers_operator_spellings
 #namespace importFrom(rlang, "%||%")
@@ -29,6 +29,21 @@ f <- function(x) zzz_not_exported(x)
 #++++
 f: <T> fn(x: T) -> Unknown
 42..58 warning[unresolved] I could not resolve `zzz_not_exported` in this package, its imports, or builtins.
+
+#---- library_of_an_unstubbed_package_tolerates_any_read
+library(ggplot2)
+make <- function(d) ggplot(d)
+#++++
+make: <T> fn(d: T) -> Unknown
+
+#---- a_transposition_is_suggested_but_a_distant_name_is_not
+f <- function(x) lenght(x)
+g <- function(d) ggplot(d)
+#++++
+f: <T> fn(x: T) -> Unknown
+g: <T> fn(d: T) -> Unknown
+17..23 warning[unresolved] I could not resolve `lenght` in this package, its imports, or builtins. Did you mean `length`?
+44..50 warning[unresolved] I could not resolve `ggplot` in this package, its imports, or builtins.
 
 #==== namespace_reads
 #---- declared_dependency_quiets_an_unknown_namespace
@@ -60,7 +75,7 @@ load: fn(path: character) -> data.table
 load <- function(path) fread(path)
 #++++
 load: <T> fn(path: T) -> Unknown
-23..28 warning[unresolved] I could not resolve `fread` in this package, its imports, or builtins. Did you mean `head`?
+23..28 warning[unresolved] I could not resolve `fread` in this package, its imports, or builtins.
 
 #---- library_call_activates_the_stub
 library(data.table)

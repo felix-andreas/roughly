@@ -192,6 +192,12 @@ with neither file) behaves as if both were empty.
   otherwise-unresolved bare read in the package is tolerated rather than guessed at (the
   zero-false-positive rule); unresolved-name detection for such packages resumes when stubs
   for `pkg` exist.
+- A `library(pkg)` / `require(pkg)` call anywhere in the project is the script world's equivalent
+  of `import(pkg)`, and follows the same rule: it attaches every export of `pkg` to the search
+  path, so when no stubs describe `pkg` its export set is unknowable and every
+  otherwise-unresolved bare read is tolerated. This is what keeps a script that opens with
+  `library(ggplot2)` from reporting one warning per plotting call. The tolerance is project-wide,
+  because R's search path is, and it lifts as soon as stubs for `pkg` exist.
 - A `pkg::name` read of a namespace the stub corpus does not know warns about an unknown
   namespace **unless** `pkg` is part of the package's declared universe: a `DESCRIPTION`
   dependency (`Depends`, `Imports`, `Suggests`, or `Enhances`) or the source namespace of any

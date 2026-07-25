@@ -8,6 +8,93 @@
 - **Performance:** keystroke-to-diagnostics p50 ≤ 30 ms / p95 ≤ 100 ms at 300k LoC (read against the raw-parse floor the instrument prints — latency numbers swing ~1.4x with machine load); budgets pinned by `stats_witness` (per-line wall/memory/resolve-step ceilings) with the measurement instruments in `legacy/differential/tests/test_stats.rs`.
 - **No server-killing input** (no `unwrap` panics on protocol-legal messages).
 
+## Open — adoption review findings (unfixed items, each with a minimal repro)
+
+Three independent black-box adoption reviews (an analysis-script user, a CRAN package author, a
+numerical-computing user; docs + `--help` only, no source access) agreed on the walls below. What
+they *also* found and is now fixed is in the ledger. Ranked by how often a real user hits it.
+
+- **`Date`/`POSIXct` arithmetic and comparison are type errors, and no escape hatch exists.**
+  `d <- as.Date("2024-01-15"); e - d`, `d + 30L`, `d < e` each report `type-mismatch`. R defines
+  `Ops.Date`, so all three are legal and ubiquitous. The same gap blocks every `+`-based DSL
+  (`ggplot2`'s `+.gg`, `difftime`, `units`), because `.Rtypes` has no syntax for an operator method
+  and rejects `%op%` / `+` as declaration names — the only workaround is returning `Any`, which
+  discards the class the stub existed to introduce. **Two pieces: an operator-method declaration
+  form in `.Rtypes`, and `Ops`-group declarations for the shipped date nominals.** The
+  "revisit if real code makes it noisy" note on this was answered: it is the single most-cited
+  blocker.
+- **A `#:` annotation on a *nested* function does not push parameter types into its body.** With
+  `#: fn(x: double[]) -> double` on an `inner <- function(x) ...` inside another function, `x[[1L]]`
+  stays `Unknown`; the identical code at top level checks. Every closure-factory body is therefore
+  unchecked, which contradicts the reference's "full checked semantics at any statement depth".
+- **`if`/`else` unifies a literal branch with an unannotated parameter instead of unioning it.**
+  `f <- function(flag, x) if (flag) x else "s"; f(TRUE, 1)` reports
+  `expected character, found double`, and blames the *caller*. The reference specifies the union
+  (`different branch types are not a type error`). Same root cause pins a type-guard branch that
+  reads the guarded parameter: `fmt <- function(x) if (is.character(x)) x else "other"; fmt(1)`
+  errors, contradicting "an unannotated parameter is not pinned by a guard".
+- **A body that fails its own annotation silences every call site of that binding** — the caller's
+  mistake goes unreported until the body is fixed, which inverts the usual fix order.
+- **`self` / `private` / `super` in R6 method bodies report `unresolved`** (13 warnings from one
+  110-line class), hover claims `self` is a local variable, and completion after `self$` offers
+  every record field in the workspace. `utils::globalVariables()` is the current workaround. The
+  indexer already understands `R6Class(public = list(...))`, so the association exists.
+- **S4 is untyped:** a slot typo against a class declared two lines above is silent
+  (`setClass("A", representation(x = "numeric")); new("A", y = 1)`).
+- **`vapply`'s `FUN.VALUE` is not checked** — `vapply(xs, as.character, numeric(1))` passes. It is a
+  declared type sitting in the call, and the single highest-value check still missing.
+- **Overload selection is skipped whenever an argument's type contains an inference variable** —
+  true of every lambda and every unannotated function — so the *last* candidate is forced. Proven
+  with a two-candidate project stub: an annotated callback selects correctly, a lambda does not.
+  This is what blocks widening apply-family stubs into overload sets.
+- **Container/`list` gaps that fire on ordinary code:** `c(list_a, list_b)` (the standard list
+  append) is a hard error; `list(1, name = 2)` is rejected, which breaks every `do.call`; `list()`
+  does not satisfy `list[named: T]`, so `= list()` defaults cannot be annotated; `list(...)` types
+  as `list{Unknown}`, a false one-tuple claim; `lapply` drops names, so "named list in, named list
+  out" is inexpressible; `lapply(list(1L, "a"), f)` errors although `for` over the same list is
+  documented to bind `integer | character`.
+- **`match.arg` + `switch` yields `fn | NULL`, which is then uncallable** — it made a reviewer add
+  provably dead guard code.
+- **Matrix algebra is untypeable *and* invisible:** `%*%` yields `Unknown`;
+  `matrix`/`t`/`solve`/`dim`/`apply`/`outer`/`crossprod`/`diag` are `Any`, so even strict mode says
+  nothing about a transposed dimension.
+- **Strict mode reports at every *use*, not at the origin**, contradicting its own documented
+  "origins, not propagation" rule: `df <- data.frame(a = 1); y <- df$a` then three `print(y)` lines
+  produce four diagnostics instead of one. The blame also lands on `df` (whose type is known) rather
+  than on the `$` access that produced the `Unknown`, and the wording differs from the documented
+  text.
+- **`#: @if-unknown` is a no-op** — neither documented rule is implemented: it does not coerce, and
+  using it on an already-known type is accepted where the reference says it is an error.
+- **`@type` nominals do not prevent mixing under operators**, so the guide's `Meters`/`Seconds`
+  "never mix" promise holds only at annotation and parameter boundaries. Either give nominals
+  operator identity or the guide has to keep the narrower claim it now makes.
+- **Everything from a `data.frame` is `Unknown`, and `Unknown` satisfies every annotation** — so on
+  data-frame-heavy code annotations look protective and are not. This is the design consequence that
+  decides the tool's value for analysis users; it needs at minimum a way to *see* that a check was
+  skipped (strict mode, once it reports origins).
+- **Smaller, each with a one-line repro in the reports:** a bad `return()` value is blamed on the
+  trailing expression; the named-argument mismatch message lists both name sets instead of naming
+  the offending one, and points at the callee rather than the argument token; no "did you mean" for
+  a field typo or a named argument (the candidate set there is small and closed) and none for a
+  project's own names; a field-access error prints the structural shape instead of the declared
+  nominal name; messages leak unbound type variables (`list[T] | T[]`) and expand an alias on only
+  one side of an expected/found pair; `unused` false-positives on a write followed by `break`;
+  closure re-entry is unmodelled, so the `if (!is.null(cache)) return(cache); cache <<- v` memo idiom
+  yields `T | NULL`; a generic parameter cannot have a non-`NULL` default; `#:` cannot coexist with a
+  roxygen2 block; `unused-parameter` fires on signatures R mandates; `export(name)` in `NAMESPACE`
+  is not validated; hover renders a polymorphic scheme without its `<...>` binder while inlay hints
+  include it; `%in%` and user `%op%` are untyped; `renv/`/`packrat/` are walked and `.gitignore` is
+  not honoured; a broken statement still emits a second diagnostic; the formatter drops the required
+  space before a parenthesised type and turns `sum(1, 2, 3,)` into `sum(1, 2, 3, )`; an unparseable
+  file counts as "already formatted"; JSON `related` omits the documented `endLine`/`endColumn`;
+  config type errors do not name the offending key; no `--fix`, no stdin, and no CLI way to ask
+  "what type is this?" (which makes debugging an inference surprise guesswork for a CLI-only user).
+- **`.Rmd` / `.qmd` chunks are not analysed** — now reported honestly in `check`'s summary rather
+  than silently skipped, but half of an analysis user's deliverables are still uncovered.
+- **Stub coverage is the cheapest lever on false positives.** `library(pkg)` for an unstubbed
+  package now tolerates every bare read, which trades typo detection for silence; shipping
+  `testthat` and `ggplot2` stubs would buy the detection back where it matters most.
+
 ## Open
 
  — semantics

@@ -82,33 +82,53 @@ pub fn check(
     let root: Vec<PathBuf> = vec![".".into()];
     let files = maybe_files.unwrap_or(&root);
 
-    let targets_with_config = files
-        .iter()
-        .map(|file| {
-            let config = match config::Config::discover(file) {
-                Ok(config) => config,
-                Err(err) => {
-                    error(&err.to_string());
-                    return Err(CommandError);
-                }
-            };
-            warn_unknown_config_keys(&config);
-            let target = std::fs::canonicalize(file).map_err(|err| {
-                error(&format!("failed to resolve: {}", file.display()));
-                eprintln!("{err}");
-                CommandError
-            })?;
-            let exclude = exclude_matcher(&config, &target)?;
-            let paths = collect_r_files(&target, exclude.as_ref())?;
-            Ok((target, paths, config))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    // One project per root, however the user spelled the paths. A name
+    // declared in a sibling file must resolve the same way for `check .`,
+    // `check R/` and `check R/a.R R/b.R`, so analysis always covers the whole
+    // root and only *reporting* is scoped to the paths that were named —
+    // otherwise the verdict depends on the command line, and
+    // `check $(git diff --name-only)` cannot be trusted as a gate.
+    let mut groups: Vec<(PathBuf, config::Config, Vec<PathBuf>)> = Vec::new();
+    for file in files {
+        let config = match config::Config::discover(file) {
+            Ok(config) => config,
+            Err(err) => {
+                error(&err.to_string());
+                return Err(CommandError);
+            }
+        };
+        warn_unknown_config_keys(&config);
+        let target = std::fs::canonicalize(file).map_err(|err| {
+            error(&format!("failed to resolve: {}", file.display()));
+            eprintln!("{err}");
+            CommandError
+        })?;
+        let root = project_root_for_target(&target, &config);
+        match groups.iter_mut().find(|(existing, _, _)| *existing == root) {
+            Some((_, _, requested)) => requested.push(target),
+            None => groups.push((root, config, vec![target])),
+        }
+    }
 
     let mut n_files = 0;
     let mut n_diagnostics = 0;
     let mut n_failures = 0;
-    for (target, paths, config) in targets_with_config {
-        let root = analysis_root_for_target(&target);
+    // Extensions found under the requested paths that Roughly cannot analyse,
+    // named in the summary so `check` on an `.Rmd` tree cannot look clean.
+    let mut unanalysable: BTreeSet<String> = BTreeSet::new();
+    for (root, config, requested) in groups {
+        let exclude = exclude_matcher(&config, &root)?;
+        let mut paths = collect_r_files(&root, exclude.as_ref())?;
+        // Naming a single file always checks it: `exclude` scopes the project
+        // walk, it does not veto a file the command pointed at directly. A
+        // named *directory* is a walk like any other, so `exclude` still
+        // applies inside it.
+        for target in &requested {
+            unanalysable.extend(unanalysable_extensions(target));
+            if !target.is_dir() && !paths.contains(target) {
+                paths.push(target.clone());
+            }
+        }
 
         // Project override stubs fold on top of the shipped corpus (later
         // sources win); an unreadable override is an I/O failure because it
@@ -194,8 +214,9 @@ pub fn check(
         let r_path = root.join("R");
         let mut used_tokens = BTreeSet::new();
         let mut checked: Vec<(PathBuf, String)> = Vec::with_capacity(paths.len());
+        // Which of the project's files the command actually asked about.
+        let mut reported: Vec<bool> = Vec::with_capacity(paths.len());
         for path in paths {
-            n_files += 1;
             let source = match std::fs::read_to_string(&path) {
                 Ok(source) => source,
                 Err(err) => {
@@ -205,6 +226,13 @@ pub fn check(
                     continue;
                 }
             };
+            let asked_about = requested
+                .iter()
+                .any(|target| path == *target || path.starts_with(target));
+            if asked_about {
+                n_files += 1;
+            }
+            reported.push(asked_about);
             namespace::collect_used_tokens(&source, &mut used_tokens);
             checked.push((path, source));
         }
@@ -363,6 +391,9 @@ pub fn check(
             }
         });
         for (index, (path, source)) in checked.iter().enumerate() {
+            if !reported.get(index).copied().unwrap_or(false) {
+                continue;
+            }
             let line_index = LineIndex::new(source);
             for (diagnostic, related) in &per_file[index] {
                 if min_severity == MinSeverity::Error && diagnostic.severity != Severity::Error {
@@ -419,18 +450,49 @@ pub fn check(
         }
     }
 
-    if n_files == 0 {
-        error("no R files found under the given path(s)");
-        return Err(CommandError);
-    }
     if n_failures > 0 {
         return Err(CommandError);
+    }
+    // A summary always, so a clean run and a run that matched nothing never
+    // look alike: silence would otherwise read as success on a tree of `.Rmd`
+    // files, of which none is analysed.
+    if output == OutputFormat::Human {
+        report_check_summary(&unanalysable, n_files, n_diagnostics);
     }
     Ok(if n_diagnostics == 0 {
         Outcome::Clean
     } else {
         Outcome::Findings
     })
+}
+
+/// `check`'s closing line. An empty tree is not a usage error — a monorepo
+/// stage with no R in it yet must not fail a pipeline — so it reports what it
+/// found (nothing) and exits clean, naming the extensions it had to skip.
+fn report_check_summary(unanalysable: &BTreeSet<String>, n_files: usize, n_diagnostics: usize) {
+    let skipped = if unanalysable.is_empty() {
+        String::new()
+    } else {
+        let extensions: Vec<String> = unanalysable
+            .iter()
+            .map(|extension| format!("`.{extension}`"))
+            .collect();
+        format!(
+            "; skipped {} (Roughly analyses `.R` and `.r`)",
+            extensions.join(", ")
+        )
+    };
+    let files = if n_files == 1 { "file" } else { "files" };
+    if n_diagnostics == 0 {
+        println!("{n_files} {files} checked, no problems{skipped}");
+        return;
+    }
+    let problems = if n_diagnostics == 1 {
+        "problem"
+    } else {
+        "problems"
+    };
+    println!("{n_diagnostics} {problems} in {n_files} {files}{skipped}");
 }
 
 /// Unknown config keys warn but never block: the rest of the file is
@@ -485,6 +547,23 @@ pub(crate) fn exclude_matcher(
 /// Walks `target` for R sources. Excluded directories are pruned without
 /// descending; a `target` that is itself a file bypasses exclusion — a file
 /// named explicitly is always checked.
+/// Extensions under a requested path that Roughly does not analyse but a user
+/// could reasonably expect it to. Reported in `check`'s summary rather than
+/// silently skipped, because a tree of `.Rmd` files would otherwise produce a
+/// clean run over nothing.
+fn unanalysable_extensions(target: &Path) -> BTreeSet<String> {
+    const UNANALYSABLE: [&str; 5] = ["Rmd", "rmd", "qmd", "Rnw", "rnw"];
+    let mut found = BTreeSet::new();
+    for entry in ignore::WalkBuilder::new(target).build().flatten() {
+        if let Some(extension) = entry.path().extension().and_then(|ext| ext.to_str())
+            && UNANALYSABLE.contains(&extension)
+        {
+            found.insert(extension.to_owned());
+        }
+    }
+    found
+}
+
 pub(crate) fn collect_r_files(
     target: &Path,
     exclude: Option<&Gitignore>,
@@ -713,6 +792,28 @@ fn render_json_diagnostic(
         "related": related,
     });
     println!("{record}");
+}
+
+/// The project root a target is analysed in: the directory holding the
+/// `roughly.toml` that configures it, else the nearest ancestor carrying a
+/// `DESCRIPTION`, else the target's own directory. This is what makes the
+/// answer independent of how the command names its paths.
+fn project_root_for_target(target: &Path, config: &config::Config) -> PathBuf {
+    if let Some(directory) = &config.source_directory {
+        return directory.clone();
+    }
+    let mut current = if target.is_dir() {
+        Some(target)
+    } else {
+        target.parent()
+    };
+    while let Some(directory) = current {
+        if directory.join("DESCRIPTION").is_file() {
+            return directory.to_path_buf();
+        }
+        current = directory.parent();
+    }
+    analysis_root_for_target(target)
 }
 
 pub(crate) fn analysis_root_for_target(target: &Path) -> PathBuf {

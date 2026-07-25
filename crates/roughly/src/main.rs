@@ -141,7 +141,13 @@ fn experimental_features_help() -> String {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Lint the given files or directories
+    /// Lint and type-check the given files or directories
+    ///
+    /// Analysis covers the whole project the paths belong to — the directory
+    /// holding `roughly.toml` or `DESCRIPTION` — so cross-file names resolve
+    /// the same however the paths are named; only reporting is scoped to what
+    /// was named. Exit status: 0 clean, 1 findings, 2 usage or I/O failure.
+    /// Type errors are opt-in via `[check] typing` in `roughly.toml`.
     Check {
         /// R files to check
         files: Option<Vec<PathBuf>>,

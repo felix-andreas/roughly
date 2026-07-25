@@ -329,8 +329,13 @@ fn check_min_severity_error_ignores_warnings() {
     );
     assert_eq!(exit_code(&filtered), 0, "stderr: {}", stderr(&filtered));
     assert!(
-        stdout(&filtered).trim().is_empty(),
+        !stderr(&filtered).contains("assignment-operator"),
         "warnings must not render under --min-severity error: {}",
+        stderr(&filtered)
+    );
+    assert!(
+        stdout(&filtered).contains("no problems"),
+        "the summary counts only what passed the severity floor: {}",
         stdout(&filtered)
     );
 }
@@ -550,14 +555,76 @@ fn analysis_stats_reports_phases_and_probe() {
 }
 
 #[test]
-fn check_without_r_files_exits_two() {
+fn check_without_r_files_reports_nothing_and_exits_clean() {
     let directory = project(&[]);
     let output = roughly(directory.path(), &["check"]);
-    assert_eq!(exit_code(&output), 2, "stderr: {}", stderr(&output));
+    // A tree with no R in it yet is not a usage error: failing here would fail
+    // a pipeline over a stage that simply has nothing to check.
+    assert_eq!(exit_code(&output), 0, "stderr: {}", stderr(&output));
     assert!(
-        stderr(&output).contains("no R files found"),
-        "expected the empty-target error, got: {}",
-        stderr(&output)
+        stdout(&output).contains("0 files checked, no problems"),
+        "expected the empty-target summary, got: {}",
+        stdout(&output)
+    );
+}
+
+#[test]
+fn check_answer_is_independent_of_how_the_paths_are_named() {
+    // A `#: @alias` declared in one package file, referenced from another: the
+    // reference must resolve however the command spells the paths, or
+    // `check R/` and `check $(git diff --name-only)` cannot gate a pipeline.
+    let directory = project(&[
+        ("roughly.toml", "[check]\ntyping = true\n"),
+        (
+            "R/types.R",
+            "#: @alias Config {list{id: character}}\nNULL\n",
+        ),
+        (
+            "R/build.R",
+            "#: fn(id: character) -> Config\nbuild <- function(id) list(id = id)\n",
+        ),
+    ]);
+    for arguments in [
+        vec!["check", "."],
+        vec!["check", "R"],
+        vec!["check", "R/build.R"],
+        vec!["check", "R/build.R", "R/types.R"],
+    ] {
+        let output = roughly(directory.path(), &arguments);
+        assert_eq!(
+            exit_code(&output),
+            0,
+            "`{}` must agree with every other spelling: {}",
+            arguments.join(" "),
+            stderr(&output)
+        );
+    }
+}
+
+#[test]
+fn check_reports_only_the_paths_it_was_given() {
+    let directory = project(&[
+        ("roughly.toml", "[check]\ntyping = true\n"),
+        ("R/inside.R", "package_bad <- 1L + \"x\"\n"),
+        ("driver.R", "script_bad <- 2L + \"y\"\n"),
+    ]);
+    let output = roughly(directory.path(), &["check", "R"]);
+    let rendered = stderr(&output);
+    assert!(
+        rendered.contains("R/inside.R") && !rendered.contains("driver.R"),
+        "analysis covers the project, reporting covers the request: {rendered}"
+    );
+}
+
+#[test]
+fn check_summary_names_extensions_it_cannot_analyse() {
+    let directory = project(&[("report.Rmd", "```{r}\nx <- 1\n```\n")]);
+    let output = roughly(directory.path(), &["check"]);
+    assert_eq!(exit_code(&output), 0, "stderr: {}", stderr(&output));
+    assert!(
+        stdout(&output).contains("skipped `.Rmd`"),
+        "a tree of unanalysable files must not look clean: {}",
+        stdout(&output)
     );
 }
 
