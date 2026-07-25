@@ -47,6 +47,20 @@ f <- function() {
 #++++
 f: fn() -> integer
 
+#---- one_origin_reported_once_however_many_uses
+frame <- data.frame(a = 1)
+value <- frame$a
+first <- value
+second <- value
+third <- value
+#++++
+frame: Unknown
+value: Unknown
+first: Unknown
+second: Unknown
+third: Unknown
+9..26 error[strict] strict mode: could not determine the type of `frame`; add a type annotation
+
 #==== directives
 #---- typing_comment_sets_the_mode
 # typing: strict
@@ -97,6 +111,7 @@ add_column: <T> fn(dt: T) -> T
 pick <- function(df) subset(df, cyl > 4)
 #++++
 pick: <T> fn(df: T) -> Unknown
+21..40 error[strict] strict mode: this expression has an undetermined type (`Unknown`)
 
 #---- base_indexing_keeps_checking
 f <- function() {
@@ -130,7 +145,7 @@ fact: fn(n: integer) -> integer
 x <- list(v = 1, w = x)
 #++++
 x: Unknown
-21..22 error[strict] strict mode: could not determine the type of `x`; it has no known type
+0..23 error[strict] strict mode: could not determine the full type of `x`; it is defined recursively — add a type annotation
 
 #---- pure_self_call_is_attributed
 f <- function() f()

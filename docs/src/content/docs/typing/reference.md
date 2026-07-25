@@ -298,6 +298,14 @@ Definite assignment:
   read, and after `n <- 1L`, `n <- n + 0.5` types the rebinding as `double`. A name with no
   known cross-item binding (or only a self-referential one) stays tolerated as `Unknown`.
 
+**A failing item's export.** An item whose check reports an error exports `Unknown`, so later items
+do not check against a shape the checker could not establish and one mistake does not cascade across
+a file. An item carrying an explicit **declaration** is the exception: a `#:` annotation is what the
+author says the binding is, and it stays that whether or not the body honours it. So a function whose
+body violates its annotation reports the body error *and* keeps checking every call site against the
+declared signature — otherwise a caller's mistake would stay hidden until the body was fixed, which
+inverts the order anyone works in.
+
 Unused (dead-store) analysis follows from the same reaching sets when the `unused` check is
 enabled: an assignment whose written value no read can observe on any path warns
 ``warning[unused] `x` is assigned but never used.`` on the assigned name — not on the whole
@@ -2442,7 +2450,15 @@ The following are explicitly **not** strict origins:
   not double-report it (an unresolved name is a naming diagnostic, not an `Unknown` origin).
 
 Because every downstream use of a flagged `Unknown` is a propagation site rather than an origin, a
-single origin used in many later expressions produces exactly one strict diagnostic.
+single origin used in many later expressions produces exactly one strict diagnostic. That includes a
+**cross-item** reference: reading a name this project defines — an earlier script statement, a
+package definition — propagates, because that definition has its own attributable site. Only a name
+with no such site (a stub or import the corpus cannot type) originates at the reference.
+
+A call whose callee has no expressible signature yet — a stub declared as bare `Any`, such as
+`subset` or `data.frame` — is an origin **at the call**. That is where the `Unknown` enters the
+program, and attributing it to whatever later line first reads the result is what made one untyped
+binding produce a diagnostic per line that touched it.
 
 ### Composition with library typing
 

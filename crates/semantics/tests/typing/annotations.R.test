@@ -69,21 +69,21 @@ id: <T> fn(x: T) -> T
 #: fn(x: integer) -> character
 f <- function(x) x
 #++++
-f: Unknown
+f: fn(x: integer) -> character
 48..49 error[type-mismatch] expected `character`, found `integer`
 
 #---- parameter_name_mismatch
 #: fn(x: integer) -> integer
 f <- function(y) 1L
 #++++
-f: Unknown
+f: fn(x: integer) -> integer
 34..48 error[type-mismatch] this annotation names a parameter `x`, but the function does not define one — annotation parameter names must match the function's parameter names
 
 #---- rigid_refuses_undeclared_bound
 #: <T> fn(x: T) -> T
 bad <- function(x) x + 1L
 #++++
-bad: Unknown
+bad: <T> fn(x: T) -> T
 40..41 error[type-mismatch] expected a numeric value (`integer` or `double`), found `T`
 
 #---- declared_numeric_bound_admits_arithmetic
@@ -107,7 +107,7 @@ n <- 1L
 bad <- 2L
 #++++
 n: integer
-bad: Unknown
+bad: character
 39..41 error[type-mismatch] expected `character`, found `integer`
 
 #==== trusted
@@ -158,7 +158,7 @@ f <- function(x) {
   y
 }
 #++++
-f: Unknown
+f: fn(x: integer) -> character
 66..67 error[type-mismatch] expected `character`, found `integer`
 
 #---- duplicate_type_declarations_error_at_every_site
@@ -334,28 +334,28 @@ f: <T> fn(x: T[], y: Id[]) -> integer[]
 #: fn(count: integer, [label]: character) -> integer
 double_count <- function(count, label) count + count
 #++++
-double_count: Unknown
+double_count: fn(count: integer, [label]: character) -> integer
 69..105 error[type-mismatch] expected `fn(count: integer, [label]: character) -> integer`, found `fn(count: integer, label: character) -> integer`
 
 #---- rest_position_must_match_the_formals
 #: fn(...: Any, x: integer) -> integer
 f <- function(x, ...) x
 #++++
-f: Unknown
+f: fn(...: Any, x: integer) -> integer
 44..62 error[type-mismatch] expected `fn(...: Any, x: integer) -> integer`, found `fn(x: integer, ...: Any) -> integer`
 
 #---- fixed_annotation_on_a_variadic_function_is_rejected
 #: fn(x: integer) -> integer
 f <- function(x, ...) x
 #++++
-f: Unknown
+f: fn(x: integer) -> integer
 34..52 error[type-mismatch] expected `fn(x: integer) -> integer`, found `fn(x: integer, ...: Any) -> integer`
 
 #---- variadic_annotation_on_a_fixed_function_is_rejected
 #: fn(x: integer, ...: Any) -> integer
 f <- function(x) x
 #++++
-f: Unknown
+f: fn(x: integer, ...: Any) -> integer
 44..57 error[type-mismatch] expected `fn(x: integer, ...: Any) -> integer`, found `fn(x: integer) -> integer`
 
 #---- matching_shapes_are_fine
@@ -515,7 +515,7 @@ f: fn(a: integer, b: character) -> character
 #: fn(count: integer) -> integer
 f <- function(n) n
 #++++
-f: Unknown
+f: fn(count: integer) -> integer
 38..51 error[type-mismatch] this annotation names a parameter `count`, but the function does not define one — annotation parameter names must match the function's parameter names
 
 #---- callback_parameter_contravariance

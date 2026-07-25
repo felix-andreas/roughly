@@ -156,7 +156,7 @@ total: fn(path: character) -> Unknown
 #: fn(path: character) -> integer
 wrong <- function(path) fread(path)[, .(m = 1)]
 #++++
-wrong: Unknown
+wrong: fn(path: character) -> integer
 91..114 error[type-mismatch] expected `integer`, found `data.table`
 
 #==== dplyr

@@ -227,6 +227,15 @@ pub trait GlobalEnv<'db> {
         None
     }
 
+    /// Whether the name is defined by an item of THIS project (a script
+    /// statement, a package definition) rather than by a stub or an import.
+    /// A project definition has its own attributable site, so a reference to
+    /// it propagates an `Unknown` instead of re-originating one.
+    fn defined_in_project(&self, name: &str, deferred: bool) -> bool {
+        let _ = (name, deferred);
+        false
+    }
+
     /// The project's `@type` / `@alias` definitions by name.
     fn type_definitions(&self) -> FxHashMap<Name<'db>, crate::annotations::NamedDefinition<'db>> {
         FxHashMap::default()
@@ -308,6 +317,11 @@ pub fn check_item_with_annotation<'db>(
         }
     }
     let mut scheme = None;
+    // Whether `scheme` is the user's DECLARED contract rather than an inferred
+    // one. A declaration stays trustworthy even when the body fails to honour
+    // it — it is what the author said the function is — so it survives the
+    // failure cut below and every call site keeps being checked.
+    let mut scheme_is_declared = false;
     if let Some(root) = module.root {
         let declared_fn = annotation.filter(|a| !a.trusted).and_then(|a| {
             let declared = a.declared.as_ref()?;
@@ -333,6 +347,7 @@ pub fn check_item_with_annotation<'db>(
                 context.check_declared_function(*value, &function);
                 context.recorded.insert(root, declared.body);
                 scheme = Some(declared);
+                scheme_is_declared = true;
             }
             (ExpressionKind::Assign { value, .. }, _) => {
                 let root_ty = context.infer(root);
@@ -390,6 +405,7 @@ pub fn check_item_with_annotation<'db>(
                                     });
                                 }
                             }
+                            scheme_is_declared = true;
                             Some(declared)
                         }
                         None => Some(context.generalize(value_ty)),
@@ -422,7 +438,7 @@ pub fn check_item_with_annotation<'db>(
     // later checks read a poisoned value as an absent fact rather than
     // cascading off it.
     let mut errors = context.errors;
-    let scheme = if errors.is_empty() {
+    let scheme = if errors.is_empty() || scheme_is_declared {
         // Inference variables are table-scoped: a scheme crossing the item
         // boundary must never carry one (a foreign table cannot resolve it).
         // At the export edge a residual variable CARRYING A CONSTRAINT
@@ -431,12 +447,12 @@ pub fn check_item_with_annotation<'db>(
         // unconstrained one (no information) erases to `Unknown`.
         scheme.map(|scheme| close_scheme(db, &mut context.table, scheme))
     } else {
-        // Speculative paths (overload probing, guard edges) can record the
-        // same failure twice; the report is one finding per site and kind.
-        errors.sort_by_key(|error| (error.range.start(), error.range.end()));
-        errors.dedup();
         scheme.map(|_| TypeScheme::monomorphic(unknown(db)))
     };
+    // Speculative paths (overload probing, guard edges) can record the same
+    // failure twice; the report is one finding per site and kind.
+    errors.sort_by_key(|error| (error.range.start(), error.range.end()));
+    errors.dedup();
     let mut top_level_bindings = Vec::new();
     for info in naming.bindings.values() {
         if info.kind != crate::naming::BindingKind::TopLevel {
@@ -1498,10 +1514,18 @@ impl<'db> Checker<'db, '_> {
                 })
             {
                 let instantiated = self.instantiate(&scheme);
+                // Origins, not propagation: a name this project defines owns
+                // its `Unknown` at its own defining site, so reading it here
+                // propagates. Re-originating turned one untyped binding into
+                // one diagnostic per line that touched it.
+                let deferred = self.naming.deferred_non_locals.contains(&id);
                 if matches!(
                     self.table.resolve(self.db, instantiated).kind(self.db),
                     TyKind::Unknown
-                ) {
+                ) && !self
+                    .globals
+                    .is_some_and(|globals| globals.defined_in_project(&name, deferred))
+                {
                     self.record_strict_origin(id, StrictOriginKind::UndeterminedReference(name));
                 }
                 return instantiated;
@@ -3286,6 +3310,10 @@ impl<'db> Checker<'db, '_> {
             self.infer_call_arguments(range, arguments);
             self.errors.truncate(recorded_errors);
             self.strict_origins.truncate(recorded_origins);
+            // This call IS where the `Unknown` enters the program: the callee
+            // has no expressible signature yet, so strict mode attributes it
+            // here rather than at whatever later line first reads the result.
+            self.record_strict_origin(id, StrictOriginKind::UnsupportedConstruct);
             return self.unknown();
         }
         let call_arguments = self.infer_call_arguments(range, arguments);

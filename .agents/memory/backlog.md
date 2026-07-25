@@ -15,8 +15,6 @@ numerical-computing user; docs + `--help` only, no source access) simulated real
 converged on the same walls. What they found and is now fixed is in the ledger; what remains is
 below, ranked by how often a real user hits it.
 
-- **A body that fails its own annotation silences every call site of that binding** — the caller's
-  mistake goes unreported until the body is fixed, which inverts the usual fix order.
 - **Overload selection is skipped whenever an argument's type contains an inference variable** —
   true of every lambda and every unannotated function — so the *last* candidate is forced. Proven
   with a two-candidate project stub: an annotated callback selects correctly, a lambda does not.
@@ -31,10 +29,6 @@ below, ranked by how often a real user hits it.
   nothing about a transposed dimension. `%in%` and user `%op%` are likewise untyped — the
   `.Rtypes` grammar now *accepts* `%op%` declaration names, so the remaining work is the checker's
   `Special` operator path, which currently refuses wholesale.
-- **Strict mode reports at every *use*, not at the origin**, contradicting its own documented
-  "origins, not propagation" rule: `df <- data.frame(a = 1); y <- df$a` then three `print(y)` lines
-  produce four diagnostics instead of one. The blame also lands on `df` rather than on the `$` access
-  that produced the `Unknown`, and the wording differs from the documented text.
 - **`match.arg` + `switch` yields `fn | NULL`, which is then uncallable** — it made a reviewer add
   provably dead guard code.
 - **`lapply` drops names**, so "named list in, named list out" is inexpressible. A list of

@@ -1255,6 +1255,14 @@ impl<'db> check::GlobalEnv<'db> for SalsaGlobals<'db> {
         library.schemes.get(name)?.last().cloned()
     }
 
+    fn defined_in_project(&self, name: &str, deferred: bool) -> bool {
+        self.script_definition(name, deferred).is_some()
+            || self
+                .definitions
+                .as_ref()
+                .is_some_and(|winners| winners.contains_key(name))
+    }
+
     fn overloads(&self, name: &str, deferred: bool) -> Option<Vec<types::TypeScheme<'db>>> {
         // A script-local or package definition wins over the stub set,
         // disabling per-call overload selection for that name.
@@ -1311,6 +1319,10 @@ impl<'db> check::GlobalEnv<'db> for SccGlobals<'db, '_> {
             return None;
         }
         self.base.overloads(name, deferred)
+    }
+
+    fn defined_in_project(&self, name: &str, deferred: bool) -> bool {
+        self.members.contains_key(name) || self.base.defined_in_project(name, deferred)
     }
 
     fn type_definitions(

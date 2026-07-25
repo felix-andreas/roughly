@@ -76,6 +76,17 @@ helper <- function(count) {
 helper: <T: numeric> fn(count: T) -> T
 0..6 warning[unused] `helper` is assigned but never used.
 
+#---- a_declared_contract_survives_a_failing_body
+#: fn(spec: character) -> integer
+steps_for <- function(spec) "not an integer"
+count <- steps_for(42L)
+print(count)
+#++++
+steps_for: fn(spec: character) -> integer
+count: Unknown
+62..78 error[type-mismatch] expected `integer`, found `character`
+98..101 error[type-mismatch] expected `character`, found `integer`
+
 #==== resolution
 #---- use_before_any_definition_is_unresolved
 b <- a
