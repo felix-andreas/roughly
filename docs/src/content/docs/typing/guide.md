@@ -311,9 +311,26 @@ ada <- list(name = "Ada", age = 36)
 
 `@type` declares a **nominal** type: values only have it where you introduce it with
 `@new`, and another `@type` with the same shape is a *different* type. Use it for
-domain concepts — `Meters` and `Seconds` can both wrap `double` and still never mix.
+domain concepts — `Meters` and `Seconds` can both wrap `double`, and passing one where
+the other is declared is an error:
+
+```r
+#: fn(m: Meters) -> Meters
+scale_up <- function(m) m
+
+scale_up(elapsed)   # error: expected `Meters`, found `Seconds`
+```
+
 The `@new` introduction checks the value against the declared representation, so a
 nominal type is a checked claim, not a cast.
+
+**Where the separation holds.** It holds wherever a type is written down: annotations,
+parameters, returns, record fields. It does *not* hold under arithmetic and comparison —
+a nominal with a representation projects to that representation for operators, so
+`distance + elapsed` is accepted and yields `double`. If you want operator-level
+separation too, declare the class's
+[operator methods](/typing/reference#arithmetic-operators): once `Arith.Meters` exists,
+only the pairings it names are allowed and `Meters + Seconds` is an error.
 
 Nominal types can be generic too (`@type Pair<T, U> {...}`, introduced with
 `@new Pair<integer, character>`), and type arguments are checked with the variance

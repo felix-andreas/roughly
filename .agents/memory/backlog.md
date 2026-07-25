@@ -38,18 +38,20 @@ below, ranked by how often a real user hits it.
   data-frame-heavy code annotations look protective and are not. This is the design consequence that
   decides the tool's value for analysis users; it needs at minimum a way to *see* that a check was
   skipped (strict mode, once it reports origins).
-- **`@type` nominals still mix under operators** unless the class declares an operator method, so
-  the guide's `Meters`/`Seconds` "never mix" promise holds only at annotation and parameter
-  boundaries. Operator dispatch now gives the mechanism to fix this: a nominal that declares
-  `Arith.Meters` gets exactly the pairings it names. Decide whether declaring *any* operator method
-  should make the nominal opaque to the numeric fallback.
+- **Operator methods for a PROJECT-declared nominal need ergonomics.** A `#: @type Meters {double}`
+  declared in R projects to its representation under operators, so `Meters + Seconds` is accepted;
+  the separation holds only where a type is written down (annotations, parameters, returns). Declaring
+  `Arith.Meters` fixes it — the guide and reference now say so — but the only place to write that
+  declaration today is a `.Rtypes` stub, and a stub cannot see a `@type` the R source declares
+  (`this declaration does not load: I do not know the type Meters`). Decide the spelling for
+  declaring an operator method next to a project `#: @type`, and make the stub/`#:` vocabularies
+  agree so the documented remedy is reachable without moving the type into a stub.
 - **Smaller, each with a one-line repro in the reports:** messages leak unbound type variables (`list[T] | T[]`) and expand an alias on
   only one side of an expected/found pair; `unused` false-positives on a write followed by `break`;
   closure re-entry is unmodelled, so the `if (!is.null(cache)) return(cache); cache <<- v` memo idiom
   yields `T | NULL`; a generic parameter cannot have a non-`NULL` default; the `unused` write-then-`break`
   false positive is NOT reproducible (verified across `for`/`while`/`repeat` and both used and genuinely
-  dead writes) — drop it unless a concrete shape resurfaces; `export(name)` in `NAMESPACE`
-  is not validated; hover renders a polymorphic scheme without its `<...>` binder while inlay hints
+  dead writes) — drop it unless a concrete shape resurfaces; hover renders a polymorphic scheme without its `<...>` binder while inlay hints
   include it; no `--fix`, no stdin, and no CLI way to ask "what type is this?" (which makes debugging an inference surprise guesswork for a
   CLI-only user). `sum(1, 2, 3,)` formatting to `sum(1, 2, 3, )` is NOT a defect and stays: the
   trailing comma introduces a missing argument, so it parses identically to the `alist(, )` idiom the

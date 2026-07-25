@@ -602,6 +602,49 @@ fn check_answer_is_independent_of_how_the_paths_are_named() {
 }
 
 #[test]
+fn check_reports_an_export_the_package_does_not_define() {
+    let directory = project(&[
+        ("DESCRIPTION", "Package: expkg\n"),
+        (
+            "NAMESPACE",
+            "export(add_one)\nexport(missing_fn)\nexportPattern(\"^get_\")\n",
+        ),
+        (
+            "R/a.R",
+            "add_one <- function(x) x + 1L\nget_thing <- function() 1L\n",
+        ),
+    ]);
+    let output = roughly(directory.path(), &["check", "."]);
+    let rendered = stderr(&output);
+    assert!(
+        rendered.contains(
+            "`missing_fn` is exported but this package defines no such top-level object."
+        ) && !rendered.contains("add_one` is exported")
+            && !rendered.contains("get_thing` is exported"),
+        "only the undefined export is reported: {rendered}"
+    );
+}
+
+#[test]
+fn check_roots_a_nested_package_at_its_own_description() {
+    // An ancestor `roughly.toml` must not swallow a package in a
+    // subdirectory: that package's own DESCRIPTION is nearer, so its `R/`
+    // files are package source and their top-level bindings are not unused.
+    let directory = project(&[
+        ("roughly.toml", "[check]\ntyping = true\n"),
+        ("pkg/DESCRIPTION", "Package: inner\n"),
+        ("pkg/R/a.R", "helper <- function() 1L\n"),
+    ]);
+    let output = roughly(directory.path(), &["check", "pkg"]);
+    let rendered = stderr(&output);
+    assert_eq!(exit_code(&output), 0, "stderr: {rendered}");
+    assert!(
+        !rendered.contains("unused"),
+        "a package-visible binding is not unused: {rendered}"
+    );
+}
+
+#[test]
 fn check_reports_only_the_paths_it_was_given() {
     let directory = project(&[
         ("roughly.toml", "[check]\ntyping = true\n"),

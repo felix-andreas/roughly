@@ -103,7 +103,7 @@ pub fn check(
             eprintln!("{err}");
             CommandError
         })?;
-        let root = project_root_for_target(&target, &config);
+        let root = project_root_for_target(&target);
         match groups.iter_mut().find(|(existing, _, _)| *existing == root) {
             Some((_, _, requested)) => requested.push(target),
             None => groups.push((root, config, vec![target])),
@@ -426,6 +426,17 @@ pub fn check(
                 |package: &str, name: &str| semantics::stubs::namespace_exports(&db, package, name);
             let mut problems =
                 namespace::namespace_import_problems(&namespace_imports, &knows, &exports);
+            // `export(name)` naming nothing the package defines is `R CMD
+            // check`'s "undefined exports", caught here instead of at install.
+            let defines = |name: &str| {
+                semantics::ProjectFiles::try_get(&db).is_some_and(|files| {
+                    semantics::package_definitions(&db, files).contains_key(name)
+                })
+            };
+            problems.extend(namespace::namespace_export_problems(
+                &semantics::metadata::parse_namespace_exports(namespace_source),
+                &defines,
+            ));
             problems.extend(namespace::unused_import_diagnostics(
                 &namespace_imports,
                 &used_tokens,
@@ -822,21 +833,22 @@ fn render_json_diagnostic(
     println!("{record}");
 }
 
-/// The project root a target is analysed in: the directory holding the
-/// `roughly.toml` that configures it, else the nearest ancestor carrying a
-/// `DESCRIPTION`, else the target's own directory. This is what makes the
-/// answer independent of how the command names its paths.
-fn project_root_for_target(target: &Path, config: &config::Config) -> PathBuf {
-    if let Some(directory) = &config.source_directory {
-        return directory.clone();
-    }
+/// The project root a target is analysed in: the NEAREST ancestor carrying a
+/// `roughly.toml` or a `DESCRIPTION`, else the target's own directory. This is
+/// what makes the answer independent of how the command names its paths.
+///
+/// Nearest wins whichever marker it is, so a `roughly.toml` at a repository
+/// root does not swallow a package in a subdirectory — that package's own
+/// `DESCRIPTION` is closer, and its `R/` must still be package source. The
+/// ancestor config still *configures* it; only the root is decided here.
+fn project_root_for_target(target: &Path) -> PathBuf {
     let mut current = if target.is_dir() {
         Some(target)
     } else {
         target.parent()
     };
     while let Some(directory) = current {
-        if directory.join("DESCRIPTION").is_file() {
+        if directory.join("roughly.toml").is_file() || directory.join("DESCRIPTION").is_file() {
             return directory.to_path_buf();
         }
         current = directory.parent();

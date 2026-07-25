@@ -7,7 +7,7 @@ use semantics::diagnostics::{Diagnostic, Severity};
 use semantics::lints::LintLevel;
 pub use semantics::metadata::{NamespaceImport, parse_namespace_imports};
 use std::collections::BTreeSet;
-use syntax::SyntaxKind;
+use syntax::{SyntaxKind, TextRange};
 
 /// One warning per `importFrom(pkg, name)` whose namespace the export table
 /// knows but whose name it does not list — the same fact `pkg::name`
@@ -32,6 +32,29 @@ pub fn namespace_import_problems(
                 message: format!("`{name}` is not exported by `{}`.", import.namespace),
                 related: Vec::new(),
             })
+        })
+        .collect()
+}
+
+/// One error per `export(name)` in the NAMESPACE naming something the package
+/// defines nowhere at top level — `R CMD check`'s "undefined exports", which
+/// otherwise surfaces only at install time. `defines` is the package's whole
+/// top-level name set, so a name bound by any file (in any order) counts.
+pub fn namespace_export_problems(
+    exports: &[(String, TextRange)],
+    defines: &dyn Fn(&str) -> bool,
+) -> Vec<Diagnostic> {
+    exports
+        .iter()
+        .filter(|(name, _)| !defines(name))
+        .map(|(name, range)| Diagnostic {
+            range: *range,
+            severity: Severity::Error,
+            code: "unresolved",
+            message: format!(
+                "`{name}` is exported but this package defines no such top-level object."
+            ),
+            related: Vec::new(),
         })
         .collect()
 }

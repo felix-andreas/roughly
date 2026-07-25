@@ -994,7 +994,9 @@ as bare `@type NAME` — see [Standard library stubs](/stdlib-stubs). For these:
 - every such access is an unsupported construct under [strict mode](#strict-mode): the untyped
   result is deliberate and visible, not silent
 - all other structural requirements on an opaque nominal (arithmetic, loop iteration, ...) remain
-  type errors, and the nominal identity itself still checks exactly like any other nominal type
+  type errors *unless the class declares the corresponding
+  [operator method](#arithmetic-operators)*, and the nominal identity itself still checks exactly
+  like any other nominal type
 
 Examples:
 

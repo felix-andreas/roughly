@@ -270,6 +270,51 @@ pub fn parse_namespace_imports(source: &str) -> Vec<NamespaceImport> {
     imports
 }
 
+/// The names an `export(...)` directive lists, with the range of each. Only
+/// explicit `export()` names are collected: `exportPattern` is a regex over
+/// names R resolves at load time, and `exportClasses`/`exportMethods`/
+/// `S3method` name S4 and S3 entities rather than bindings, so none of them can
+/// be validated against the package's top-level definitions.
+pub fn parse_namespace_exports(source: &str) -> Vec<(String, TextRange)> {
+    let parse = syntax::parse(source);
+    let mut exports = Vec::new();
+    for node in parse.syntax_node().children() {
+        if node.kind() != SyntaxKind::CALL_EXPR {
+            continue;
+        }
+        let Some(callee) = node
+            .children()
+            .find(|child| child.kind() != SyntaxKind::ARGUMENT_LIST)
+        else {
+            continue;
+        };
+        if callee.kind() != SyntaxKind::NAME || callee.text() != "export" {
+            continue;
+        }
+        let values = node
+            .children()
+            .find(|child| child.kind() == SyntaxKind::ARGUMENT_LIST)
+            .map(|list| {
+                list.children()
+                    .filter(|child| child.kind() == SyntaxKind::ARGUMENT)
+                    .filter_map(|argument| {
+                        argument
+                            .children()
+                            .filter(|child| syntax::ast::is_expression_kind(child.kind()))
+                            .last()
+                    })
+                    .collect::<Vec<SyntaxNode>>()
+            })
+            .unwrap_or_default();
+        for value in values {
+            if let Some((name, range)) = name_argument(&value) {
+                exports.push((name, range));
+            }
+        }
+    }
+    exports
+}
+
 /// The import facts of a parsed NAMESPACE, normalized for the
 /// [`PackageMetadata`] input: sorted and deduplicated so directive order and
 /// formatting edits do not invalidate downstream queries.

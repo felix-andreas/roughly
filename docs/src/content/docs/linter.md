@@ -58,6 +58,11 @@ Semantics checks enforce coding conventions and best practices that won't necess
   method's formals are never reported at all — `format.myclass(x, ...)` that ignores `x` is
   matching its generic, which R requires. A name counts as an S3 method when the part before its
   last dot is a name the standard-library corpus declares, so `my.helper` is still checked
+- **undefined exports**: an `export(name)` in the `NAMESPACE` naming something the package defines
+  nowhere at top level is an error — `R CMD check`'s "undefined exports", reported before install
+  rather than at it. Only explicit `export()` names are checked: `exportPattern` is a regex R
+  resolves at load time, and `exportClasses`/`exportMethods`/`S3method` name S4 and S3 entities
+  rather than bindings
 - **`unused-import`** *(off by default)*: Flags an `importFrom(pkg, name)` in the `NAMESPACE` whose
   `name` appears in no checked source. Off unless enabled (`[lint] unused-import = "warn"`); usage is
   a conservative token scan (a name used via `pkg::name` or an operator import like `%>%` counts), so
