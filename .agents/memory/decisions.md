@@ -236,6 +236,54 @@ Three call-site rules keep selection sound (implemented in `try_overloaded_call`
 
 All-fail = one `NoMatchingOverload` diagnostic naming the callee and candidate count, carrying the first candidate's failure as the concrete hint.
 
+## R's object systems — the boundary is dispatch, not Hindley-Milner
+
+A recurring claim is that S3/S4/R6 support is fundamentally at odds with a Hindley-Milner core, and
+that supporting it therefore costs soundness or speed. **That is the wrong diagnosis, and it is
+recorded here so it is not re-derived.** The declarative core of all three systems maps onto
+machinery the checker already has and already relies on: nominal types with a checked representation
+(`@type` + `@new`), record field projection on a nominal, and declaration-ordered overload sets.
+The existence proof is that **S3 dispatch already runs inside the inference core**: an operator on a
+nominal is dispatched through `+.Class` / `Arith.Class` / `Ops.Class`, statically, soundly, today.
+S4 inverts the claim hardest — `setClass` is a record declaration with slot types written literally
+in source, `new(...)` a named-argument constructor call, `x@slot` a field projection,
+`setMethod(signature = ...)` an overload candidate — so it is *more* statically declared than the
+`#:` annotations the checker already consumes. Hand-writing the equivalent (`@type` + a wrapper
+constructor carrying `@new`) yields full checking of slot types and constructor arity with no strain
+on inference at all; the gap is a lowering pass, not type theory.
+
+**Three things genuinely do keep dispatch out, and they are the real reasons:**
+
+- **Dispatch needs a class known at the call site.** Inside an unannotated `function(x) speak(x)` the
+  argument is an open inference variable, so there is nothing to dispatch on and the only sound
+  answer is `Unknown`. R code is most dynamic exactly where dispatch matters most, so generic
+  dispatch structurally underdelivers where it would be used. (Same shape as overload selection with
+  a flexible argument: never guess, fall back.)
+- **Inheritance is subtyping, and there is none.** `TyKind::Named` matches by exact name (type
+  arguments aside); no hierarchy exists anywhere in the compatibility relation. S4's `contains=` and
+  R6's `inherit=` require one, and nominal subtyping is a new axis in `compatible` and in the
+  union/join rules — the one place where a soundness regression is a real risk rather than a worry.
+- **A generic's method set is global mutable state, which fights the interface firewall.** Any file
+  may add `print.foo`. If "the methods of generic G" is an input to every call of G, one new method
+  invalidates every call site in the workspace. Incremental support needs a separately memoized
+  method-set query per generic, so that adding a method invalidates only calls to that generic and
+  editing a method body invalidates nothing. Getting this wrong turns a single edit into a full
+  revalidate at 300k LoC.
+
+**Therefore one decision splits into three, decided separately:**
+
+1. **False positives are defects, not deferred features.** `setGeneric("f", ...)` not defining `f`
+   (so every call to a project's own S4 generic reports `unresolved`) and the absent R6 stub
+   (`R6::R6Class` reporting an unknown namespace) are bugs. They cost nothing in soundness or speed
+   and are fixed independently of any object-system ambition.
+2. **Declarations may become nominals; this is the cheap win.** Recognizing `setClass` and
+   `R6Class(public = list(...))` as class declarations that produce a nominal with typed slots or
+   fields catches the mistakes users actually make (slot and field typos, constructor arity) with no
+   subtyping, no new global state, and per-file firewalling like any other item.
+3. **Dispatch and inheritance stay unmodelled** on the three grounds above, and an unmodelled
+   construct stays `Unknown` — a coverage limit reported by strict mode, never a guess. Revisit only
+   with a memoized per-generic method-set query and a decided nominal-subtyping design.
+
 ## `T[]` — atomic-element constraint, not traits
 
 The core vector generalizes to carry an element *type* (so it can hold a variable), with a new **atomic-element constraint** kind on inference variables — the same mechanism as the existing numeric constraint (`<T: numeric>`), rendered `<T: atomic>`. This resolves the former open question (typing-design §1) in favor of option (a): the constraint mechanism is already built, proven, and fast; a trait system is not justified by this need alone.

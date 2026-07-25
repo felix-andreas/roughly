@@ -2249,6 +2249,83 @@ Example:
 apply_renderer <- function(render_count, count) { render_count(count) }
 ```
 
+## Object systems (S3, S4, R6)
+
+Roughly checks the parts of R's object systems that are **written down as declarations**, and
+declines the parts that are **decided at run time from a value's class attribute**. The boundary is
+deliberate, not a to-do list, so this section states both what happens and why.
+
+| Construct | What the checker does |
+| --- | --- |
+| An operator on a nominal (`+.Class`, `Arith.Class`, `Ops.Class`) | **Dispatches statically** — see [operator methods on a class](#operators) |
+| A directly called S3 method (`speak.dog(x)`) | An ordinary call, checked against that function's own signature |
+| `UseMethod("speak")`, and any call to an S3 generic | Result is `Unknown`, a strict-mode origin |
+| `structure(list(...), class = "dog")` | A plain record — the `class` attribute is data, not a type |
+| `setClass` / `setGeneric` / `setMethod` / `new` | Not modelled; `new(...)` is `Unknown` |
+| `x@slot` read or write | Fully lowered, types as `Unknown` (see below) |
+| `R6Class(...)`, `$new(...)`, fields, methods | Not modelled; `Unknown` |
+| `self` / `private` / `super` inside an R6 method | Resolve as names, type as `Unknown` |
+
+`x@slot` reads (and `x@slot <- v` writes) an S4 object slot. The slot's type is unknown, but the
+construct is not a hole:
+
+- a slot read types as `Unknown` and is a strict-mode origin
+- the subject expression is inferred, so its own type errors surface
+- the subject's variable read counts for naming, unused analysis, references, and rename
+- a slot write is an ordinary replacement-form assignment of its base variable
+
+### You can give your own classes a checked type today
+
+A class is a nominal with a representation, and that is [something you can
+declare](#type-parameters-aliases-and-nominal-types). Wrapping the constructor is enough to get
+slot types, constructor arity, and field access checked on an S4 or R6 class right now:
+
+```r
+#: @type Point {list{x: double, y: double}}
+
+setClass("Point", representation(x = "numeric", y = "numeric"))
+
+#: fn(x: double, y: double) -> Point
+make_point <- function(x, y) {
+  #: @new Point
+  new("Point", x = x, y = y)
+}
+
+#: fn(p: Point) -> double
+norm2 <- function(p) sqrt(p$x^2 + p$y^2)
+
+norm2("nope")
+# error[type-mismatch]: expected `Point`, found `character`
+make_point(1)
+# error[type-mismatch]: this call supplies 1 argument, but the function requires 2
+#                       — a required argument is missing
+```
+
+The `setClass` call stays opaque; the annotation is what the checker reads. Operators on the class
+work the same way — declare `Arith.Point` and `p1 + p2` is checked.
+
+### Why the boundary falls there
+
+Not because of the inference algorithm. Nominal types, record projection and declaration-ordered
+overload sets are all part of the checker, and S3 *operator* dispatch already runs on top of them —
+dispatching on a class is a mechanism Roughly has. Three specific properties of run-time dispatch
+keep the rest out:
+
+- **Dispatch needs a class the checker knows at the call site.** Inside an unannotated
+  `function(x) speak(x)` the argument's type is still undetermined, so there is nothing to dispatch
+  on. Guessing a method would be unsound, so the result is `Unknown` — and R code is most dynamic
+  exactly where dispatch matters most.
+- **Inheritance is subtyping.** Nominal types match by name; there is no class hierarchy in the
+  compatibility rules. S4's `contains=` and R6's `inherit=` need one, and adding subtyping changes
+  how *every* type relates to every other, not just classes.
+- **A generic's method set is open.** Any file, and any package loaded at run time, may add
+  `print.foo`. A static answer is therefore always incomplete, and treating the method set as an
+  input to every call site of a generic would make one new method re-check an entire workspace.
+
+The consequence is a limit on **coverage, not soundness**: an unmodelled construct is `Unknown`,
+never a guess, and [strict mode](#strict-mode) reports every place where that happened, so a project
+that wants the full guarantee can see exactly what the checker could not see.
+
 ## Unsupported constructs
 
 - when the checker encounters a syntactically valid construct that is not yet supported, the construct may infer as `Unknown`
@@ -2275,16 +2352,6 @@ conclusions from source that failed to parse.
 The practical consequence in an editor: while one construct is half-typed, the rest of the file —
 and every other file in the package — keeps its diagnostics, hovers, and completions stable; the
 only new squiggle is the syntax error itself.
-
-### S4 slot access
-
-`x@slot` reads (and `x@slot <- v` writes) an S4 object slot. S4 objects are not modeled, but the
-construct is fully lowered:
-
-- a slot read types as `Unknown` and is a strict-mode origin
-- the subject expression is inferred; its own type errors surface
-- the subject's variable read counts for naming, unused analysis, references, and rename
-- a slot write is an ordinary replacement-form assignment of its base variable
 
 ## Strict mode
 

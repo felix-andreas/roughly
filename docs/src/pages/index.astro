@@ -38,25 +38,60 @@ const capabilities = [
   },
 ]
 
-const lspTabs = [
-  { key: 'completion', label: 'Completion' },
-  { key: 'hover', label: 'Hover' },
-  { key: 'gotodef', label: 'Go-to-definition' },
-  { key: 'refs', label: 'Find references' },
-  { key: 'rename', label: 'Rename' },
-  { key: 'inlay', label: 'Inlay hints' },
+// Every editor mock, diagnostic and diff on this page is captured from the
+// real binary: hovers, completions and inlay hints from `roughly server` over
+// LSP, diagnostics from `roughly check`, diffs from `roughly fmt --diff`.
+// Re-capture rather than hand-edit them, so the page keeps telling the truth.
+const lspFeatures = [
+  {
+    key: 'completion',
+    label: 'Completion',
+    note: 'The fields of a record type, each with its inferred type.',
+    method: 'textDocument/completion',
+  },
+  {
+    key: 'hover',
+    label: 'Hover',
+    note: 'The inferred signature, plus where the name is defined.',
+    method: 'textDocument/hover',
+  },
+  {
+    key: 'definition',
+    label: 'Go to definition',
+    note: 'Jump to the binding — in this file, another file, or a stdlib stub.',
+    method: 'textDocument/definition',
+  },
+  {
+    key: 'references',
+    label: 'Find references',
+    note: 'Every read and write of the name, across the whole workspace.',
+    method: 'textDocument/references',
+  },
+  {
+    key: 'rename',
+    label: 'Rename',
+    note: 'One rename, applied everywhere the name is bound.',
+    method: 'textDocument/rename',
+  },
+  {
+    key: 'inlay',
+    label: 'Inlay hints',
+    note: 'Inferred types shown inline. Nothing was annotated here.',
+    method: 'textDocument/inlayHint',
+  },
 ]
 
 const analysisTabs = [
-  { key: 'typecheck', label: 'Type checking' },
-  { key: 'inference', label: 'Inference' },
-  { key: 'linting', label: 'Linting' },
+  { key: 'lint', label: 'Lints', config: 'no configuration' },
+  { key: 'types', label: 'Type errors', config: 'roughly.toml · [check] typing = true' },
+  { key: 'inference', label: 'Inference', config: 'roughly.toml · [check] typing = true' },
 ]
 
 const formatterTabs = [
-  { key: 'spacing', label: 'Auto-bracing' },
-  { key: 'pipeline', label: 'Spacing' },
-  { key: 'normalize', label: 'Indentation' },
+  { key: 'spacing', label: 'Spacing', file: 'totals.R' },
+  { key: 'braces', label: 'Braces & loops', file: 'regions.R' },
+  { key: 'indent', label: 'Indentation', file: 'options.R' },
+  { key: 'annotations', label: 'Annotations', file: 'pricing.R' },
 ]
 
 const year = new Date().getFullYear()

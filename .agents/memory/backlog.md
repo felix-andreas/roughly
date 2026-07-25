@@ -58,14 +58,19 @@ below, ranked by how often a real user hits it.
   data-frame-heavy code annotations look protective and are not. This is the design consequence that
   decides the tool's value for analysis users; it needs at minimum a way to *see* that a check was
   skipped (strict mode, once it reports origins).
-- **Operator methods for a PROJECT-declared nominal need ergonomics.** A `#: @type Meters {double}`
-  declared in R projects to its representation under operators, so `Meters + Seconds` is accepted;
-  the separation holds only where a type is written down (annotations, parameters, returns). Declaring
-  `Arith.Meters` fixes it — the guide and reference now say so — but the only place to write that
-  declaration today is a `.Rtypes` stub, and a stub cannot see a `@type` the R source declares
-  (`this declaration does not load: I do not know the type Meters`). Decide the spelling for
-  declaring an operator method next to a project `#: @type`, and make the stub/`#:` vocabularies
-  agree so the documented remedy is reachable without moving the type into a stub.
+- **An S3 method declared in R is reported `unused`.** `Arith.Point <- function(e1, e2) ...` with a
+  `#:` annotation *works* — `p + q` dispatches through it and `p + 1L` is correctly refused — but the
+  binding warns `assigned but never used`, because dispatch is not a read. The lints already know
+  `generic.class` names (`is_s3_method_name`, used for the unused-formal and naming-style
+  exemptions); the unused analysis needs the same knowledge, at least for a method whose generic or
+  operator group the checker dispatches through.
+- **Only the STUB route to an operator method on a project nominal is blocked.** Declaring the method
+  as an annotated R function works (verified above), which is what an author writes anyway for a real
+  S3 class; the gap is narrower than "operator methods need ergonomics" — a `.Rtypes` stub cannot see
+  a `@type` the R source declares (`this declaration does not load: I do not know the type Meters`),
+  so only the stub spelling is unreachable. Decide whether stub sources should see project `@type`
+  declarations at all, or whether the R-side declaration is simply the answer and the docs should say
+  so.
 - **Smaller, each with a one-line repro in the reports:** messages leak unbound type variables (`list[T] | T[]`) and expand an alias on
   only one side of an expected/found pair; `unused` false-positives on a write followed by `break`;
   closure re-entry is unmodelled, so the `if (!is.null(cache)) return(cache); cache <<- v` memo idiom
