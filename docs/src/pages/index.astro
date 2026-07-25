@@ -52,7 +52,7 @@ const lspFeatures = [
   {
     key: 'hover',
     label: 'Hover',
-    note: 'The inferred signature, plus where the name is defined.',
+    note: 'The inferred type, and where the name is bound.',
     method: 'textDocument/hover',
   },
   {
@@ -82,17 +82,213 @@ const lspFeatures = [
 ]
 
 const analysisTabs = [
-  { key: 'lint', label: 'Lints', config: 'no configuration' },
-  { key: 'types', label: 'Type errors', config: 'roughly.toml · [check] typing = true' },
-  { key: 'inference', label: 'Inference', config: 'roughly.toml · [check] typing = true' },
+  {
+    key: 'lint',
+    label: 'Lints',
+    split: '1fr',
+    file: 'R/sales.R',
+    config: 'no configuration',
+    note:
+      'Lints and unresolved names need no setup. Each diagnostic names the code you would put in a ' +
+      '<code># roughly: allow(...)</code> comment.',
+  },
+  {
+    key: 'types',
+    label: 'Type errors',
+    split: '1.3fr',
+    file: 'R/pricing.R',
+    config: 'roughly.toml · [check] typing = true',
+    note:
+      '<code>fee_rate</code> wants the region, not the amount. Annotations live in <code>#:</code> ' +
+      'comments — ordinary comments to R and to every other tool you run.',
+  },
+  {
+    key: 'inference',
+    label: 'Inference',
+    split: '2fr',
+    file: 'R/booking.R',
+    config: 'roughly.toml · [check] typing = true',
+    note:
+      'Not one annotation in this file. Inference recovers the signatures — the grey text is what ' +
+      'your editor shows — and the <code>numeric</code> bound alone rejects the string.',
+  },
 ]
 
 const formatterTabs = [
-  { key: 'spacing', label: 'Spacing', file: 'totals.R' },
-  { key: 'braces', label: 'Braces & loops', file: 'regions.R' },
-  { key: 'indent', label: 'Indentation', file: 'options.R' },
-  { key: 'annotations', label: 'Annotations', file: 'pricing.R' },
+  {
+    key: 'spacing',
+    label: 'Spacing',
+    file: 'totals.R',
+    meta: 'operators, commas, quotes',
+    note: '1 file would be reformatted, 0 files already formatted',
+  },
+  {
+    key: 'braces',
+    label: 'Braces & loops',
+    file: 'regions.R',
+    meta: 'loop and if bodies',
+    note: 'Braces go in wherever leaving them out could change what runs.',
+  },
+  {
+    key: 'indent',
+    label: 'Indentation',
+    file: 'options.R',
+    meta: 'multi-line call arguments',
+    note: 'Every argument snaps to one indent step. Your line breaks are kept.',
+  },
+  {
+    key: 'annotations',
+    label: 'Annotations',
+    file: 'pricing.R',
+    meta: '#: type annotations',
+    note:
+      "Annotations are re-rendered with the type checker's own grammar. Anything it cannot parse is " +
+      'left byte-for-byte alone.',
+  },
 ]
+
+const ideCode = `<div class="cl" data-line="1"><span class="ln" aria-hidden="true">1</span><span class="cx"><span class="t-com"># one sale, and what is left of it after fees</span></span></div>
+<div class="cl" data-line="2"><span class="ln" aria-hidden="true">2</span><span class="cx"><span class="t-id">sale</span><span class="inlay" data-for="inlay">: list{region: character, amount: double, closed: logical}</span><span class="t-op"> &lt;- </span><span class="t-fn">list</span><span class="t-op">(</span><span class="t-id">region</span><span class="t-op"> = </span><span class="t-str">"north"</span><span class="t-op">, </span><span class="t-id">amount</span><span class="t-op"> = </span><span class="t-num">1240.5</span><span class="t-op">, </span><span class="t-id">closed</span><span class="t-op"> = </span><span class="t-kw">TRUE</span><span class="t-op">)</span></span></div>
+<div class="cl" data-line="3"><span class="ln" aria-hidden="true">3</span><span class="cx"></span></div>
+<div class="cl" data-line="4"><span class="ln" aria-hidden="true">4</span><span class="cx"><span class="tok" data-mark="def-target references rename"><span class="t-id">margin</span></span><span class="inlay" data-for="inlay">: &lt;T: numeric, U: numeric&gt; fn(gross: T, rate: U) -&gt; double</span><span class="t-op"> &lt;- </span><span class="t-kw">function</span><span class="t-op">(</span><span class="t-id">gross</span><span class="t-op">, </span><span class="t-id">rate</span><span class="t-op">) </span><span class="t-id">gross</span><span class="t-op"> * (</span><span class="t-num">1</span><span class="t-op"> - </span><span class="t-id">rate</span><span class="t-op">)</span><span class="renamebadge" data-for="rename" aria-hidden="true">3 edits · 2 files</span></span></div>
+<div class="cl" data-line="5"><span class="ln" aria-hidden="true">5</span><span class="cx"></span></div>
+<div class="cl" data-line="6"><span class="ln" aria-hidden="true">6</span><span class="cx"><span class="t-id">net</span><span class="inlay" data-for="inlay">: double</span><span class="t-op"> &lt;- </span><span class="tok t-fn" data-mark="def-source references rename-ghost"><span class="t-id">margin</span></span><span class="t-op">(</span><span class="t-id" data-mark="hover-anchor"><span class="t-id">sale</span></span><span class="t-op">$</span><span class="t-id">amount</span><span class="t-op">, </span><span class="t-num">0.18</span><span class="t-op">)</span><span class="card hovercard" data-for="hover" aria-hidden="true"><code class="card-code"><span class="t-id">sale</span>: <span class="t-type">list{region: character, amount: double, closed: logical}</span></code><span class="card-meta">Package global, defined at <code>R/sales.R:2:1</code></span><span class="card-notch"></span></span><span class="caretbar" data-for="completion" aria-hidden="true"></span><span class="card comp" data-for="completion" aria-hidden="true"><span class="comp-row is-active"><span class="ckind">field</span><span class="cname">amount</span><span class="cdetail">double</span></span><span class="comp-row"><span class="ckind">field</span><span class="cname">closed</span><span class="cdetail">logical</span></span><span class="comp-row"><span class="ckind">field</span><span class="cname">region</span><span class="cdetail">character</span></span></span></span></div>
+<div class="cl" data-line="7"><span class="ln" aria-hidden="true">7</span><span class="cx"><span class="t-id">label</span><span class="inlay" data-for="inlay">: character</span><span class="t-op"> &lt;- </span><span class="t-fn">paste0</span><span class="t-op">(</span><span class="t-id">sale</span><span class="t-op">$</span><span class="t-id">region</span><span class="t-op">, </span><span class="t-str">": "</span><span class="t-op">, </span><span class="t-fn">round</span><span class="t-op">(</span><span class="t-id">net</span><span class="t-op">, </span><span class="t-num">2</span><span class="t-op">))</span></span></div>
+<div class="cl" data-line="8"><span class="ln" aria-hidden="true">8</span><span class="cx"></span></div>
+<div class="cl" data-line="9"><span class="ln" aria-hidden="true">9</span><span class="cx"><span class="t-fn">message</span><span class="t-op">(</span><span class="t-id">label</span><span class="t-op">)</span></span></div>`
+
+const analysisCode = {
+  lint: `<div class="cl" data-line="1"><span class="ln" aria-hidden="true">1</span><span class="cx"><span class="t-id">read_sales</span><span class="t-op"> &lt;- </span><span class="t-kw">function</span><span class="t-op">(</span><span class="t-id">path</span><span class="t-op">) {</span></span></div>
+<div class="cl" data-line="2"><span class="ln" aria-hidden="true">2</span><span class="cx"><span class="t-op">  </span><span class="t-fn">read.csv</span><span class="t-op">(</span><span class="t-id">path</span><span class="t-op">, </span><span class="t-id">stringsAsFactors</span><span class="t-op"> = </span><span class="t-kw">FALSE</span><span class="t-op">)</span></span></div>
+<div class="cl" data-line="3"><span class="ln" aria-hidden="true">3</span><span class="cx"><span class="t-op">}</span></span></div>
+<div class="cl" data-line="4"><span class="ln" aria-hidden="true">4</span><span class="cx"></span></div>
+<div class="cl" data-line="5"><span class="ln" aria-hidden="true">5</span><span class="cx"><span class="t-id">top_regions</span><span class="t-op"> &lt;- </span><span class="t-kw">function</span><span class="t-op">(</span><span class="t-id">sales</span><span class="t-op">, </span><span class="t-id">n</span><span class="t-op">) {</span></span></div>
+<div class="cl" data-line="6"><span class="ln" aria-hidden="true">6</span><span class="cx"><span class="t-op">  </span><span class="t-id">ranked</span><span class="t-op"> </span><span class="squig warn"><span class="t-op">=</span></span><span class="t-op"> </span><span class="t-id">sales</span><span class="t-op">[</span><span class="t-fn">order</span><span class="t-op">(-</span><span class="t-id">sales</span><span class="t-op">$</span><span class="t-id">amount</span><span class="t-op">), ]</span></span></div>
+<div class="cl" data-line="7"><span class="ln" aria-hidden="true">7</span><span class="cx"><span class="t-op">  </span><span class="t-fn">head</span><span class="t-op">(</span><span class="t-fn">unique</span><span class="t-op">(</span><span class="t-id">ranked</span><span class="t-op">$</span><span class="t-id">region</span><span class="t-op">), </span><span class="t-id">n</span><span class="t-op">)</span></span></div>
+<div class="cl" data-line="8"><span class="ln" aria-hidden="true">8</span><span class="cx"><span class="t-op">}</span></span></div>
+<div class="cl" data-line="9"><span class="ln" aria-hidden="true">9</span><span class="cx"></span></div>
+<div class="cl" data-line="10"><span class="ln" aria-hidden="true">10</span><span class="cx"><span class="t-id">report</span><span class="t-op"> &lt;- </span><span class="t-kw">function</span><span class="t-op">(</span><span class="t-id">sales</span><span class="t-op">, </span><span class="t-id">regions</span><span class="t-op">) {</span></span></div>
+<div class="cl" data-line="11"><span class="ln" aria-hidden="true">11</span><span class="cx"><span class="t-op">  </span><span class="t-fn">message</span><span class="t-op">(</span><span class="squig warn"><span class="t-id">nrwo</span></span><span class="t-op">(</span><span class="t-id">sales</span><span class="t-op">), </span><span class="t-str">" rows in "</span><span class="t-op">, </span><span class="t-fn">length</span><span class="t-op">(</span><span class="t-id">regions</span><span class="t-op">), </span><span class="t-str">" regions"</span><span class="t-op">)</span></span></div>
+<div class="cl" data-line="12"><span class="ln" aria-hidden="true">12</span><span class="cx"><span class="t-op">  </span><span class="t-fn">invisible</span><span class="t-op">(</span><span class="t-id">regions</span><span class="t-op">)</span></span></div>
+<div class="cl" data-line="13"><span class="ln" aria-hidden="true">13</span><span class="cx"><span class="t-op">}</span></span></div>
+<div class="cl" data-line="14"><span class="ln" aria-hidden="true">14</span><span class="cx"></span></div>
+<div class="cl" data-line="15"><span class="ln" aria-hidden="true">15</span><span class="cx"><span class="t-id">sales</span><span class="t-op"> &lt;- </span><span class="t-fn">read_sales</span><span class="t-op">(</span><span class="t-str">"sales.csv"</span><span class="t-op">)</span></span></div>
+<div class="cl" data-line="16"><span class="ln" aria-hidden="true">16</span><span class="cx"><span class="t-id">regions</span><span class="t-op"> &lt;- </span><span class="t-fn">top_regions</span><span class="t-op">(</span><span class="t-id">sales</span><span class="t-op">, </span><span class="t-num">5</span><span class="t-op">)</span></span></div>
+<div class="cl" data-line="17"><span class="ln" aria-hidden="true">17</span><span class="cx"></span></div>
+<div class="cl" data-line="18"><span class="ln" aria-hidden="true">18</span><span class="cx"><span class="t-id">verbose</span><span class="t-op"> &lt;- </span><span class="squig warn"><span class="t-id">T</span></span></span></div>
+<div class="cl" data-line="19"><span class="ln" aria-hidden="true">19</span><span class="cx"><span class="t-kw">if</span><span class="t-op"> (</span><span class="t-id">verbose</span><span class="t-op">) </span><span class="t-fn">report</span><span class="t-op">(</span><span class="t-id">sales</span><span class="t-op">, </span><span class="t-id">regions</span><span class="t-op">)</span></span></div>`,
+  types: `<div class="cl" data-line="1"><span class="ln" aria-hidden="true">1</span><span class="cx"><span class="t-com">#: fn(gross: </span><span class="t-type">double</span><span class="t-com">, rate: </span><span class="t-type">double</span><span class="t-com">) -&gt; </span><span class="t-type">double</span></span></div>
+<div class="cl" data-line="2"><span class="ln" aria-hidden="true">2</span><span class="cx"><span class="t-id">net_of_fees</span><span class="t-op"> &lt;- </span><span class="t-kw">function</span><span class="t-op">(</span><span class="t-id">gross</span><span class="t-op">, </span><span class="t-id">rate</span><span class="t-op">) {</span></span></div>
+<div class="cl" data-line="3"><span class="ln" aria-hidden="true">3</span><span class="cx"><span class="t-op">  </span><span class="t-id">gross</span><span class="t-op"> * (</span><span class="t-num">1</span><span class="t-op"> - </span><span class="t-id">rate</span><span class="t-op">)</span></span></div>
+<div class="cl" data-line="4"><span class="ln" aria-hidden="true">4</span><span class="cx"><span class="t-op">}</span></span></div>
+<div class="cl" data-line="5"><span class="ln" aria-hidden="true">5</span><span class="cx"></span></div>
+<div class="cl" data-line="6"><span class="ln" aria-hidden="true">6</span><span class="cx"><span class="t-com">#: fn(region: </span><span class="t-type">character</span><span class="t-com">) -&gt; </span><span class="t-type">double</span></span></div>
+<div class="cl" data-line="7"><span class="ln" aria-hidden="true">7</span><span class="cx"><span class="t-id">fee_rate</span><span class="t-op"> &lt;- </span><span class="t-kw">function</span><span class="t-op">(</span><span class="t-id">region</span><span class="t-op">) {</span></span></div>
+<div class="cl" data-line="8"><span class="ln" aria-hidden="true">8</span><span class="cx"><span class="t-op">  </span><span class="t-kw">if</span><span class="t-op"> (</span><span class="t-id">region</span><span class="t-op"> == </span><span class="t-str">"north"</span><span class="t-op">) </span><span class="t-num">0.18</span><span class="t-op"> </span><span class="t-kw">else</span><span class="t-op"> </span><span class="t-num">0.22</span></span></div>
+<div class="cl" data-line="9"><span class="ln" aria-hidden="true">9</span><span class="cx"><span class="t-op">}</span></span></div>
+<div class="cl" data-line="10"><span class="ln" aria-hidden="true">10</span><span class="cx"></span></div>
+<div class="cl" data-line="11"><span class="ln" aria-hidden="true">11</span><span class="cx"><span class="t-com">#: fn(rows: list{region: </span><span class="t-type">character</span><span class="t-com">, amount: </span><span class="t-type">double</span><span class="t-com">}) -&gt; </span><span class="t-type">double</span></span></div>
+<div class="cl" data-line="12"><span class="ln" aria-hidden="true">12</span><span class="cx"><span class="t-id">book_total</span><span class="t-op"> &lt;- </span><span class="t-kw">function</span><span class="t-op">(</span><span class="t-id">rows</span><span class="t-op">) {</span></span></div>
+<div class="cl" data-line="13"><span class="ln" aria-hidden="true">13</span><span class="cx"><span class="t-op">  </span><span class="t-fn">net_of_fees</span><span class="t-op">(</span><span class="t-id">rows</span><span class="t-op">$</span><span class="t-id">amount</span><span class="t-op">, </span><span class="t-fn">fee_rate</span><span class="t-op">(</span><span class="squig err"><span class="t-id">rows</span><span class="t-op">$</span><span class="t-id">amount</span></span><span class="t-op">))</span></span></div>
+<div class="cl" data-line="14"><span class="ln" aria-hidden="true">14</span><span class="cx"><span class="t-op">}</span></span></div>
+<div class="cl" data-line="15"><span class="ln" aria-hidden="true">15</span><span class="cx"></span></div>
+<div class="cl" data-line="16"><span class="ln" aria-hidden="true">16</span><span class="cx"><span class="t-id">quote</span><span class="t-op"> &lt;- </span><span class="t-fn">list</span><span class="t-op">(</span><span class="t-id">region</span><span class="t-op"> = </span><span class="t-str">"north"</span><span class="t-op">, </span><span class="t-id">amount</span><span class="t-op"> = </span><span class="t-num">1240.5</span><span class="t-op">)</span></span></div>
+<div class="cl" data-line="17"><span class="ln" aria-hidden="true">17</span><span class="cx"><span class="t-id">total</span><span class="t-op"> &lt;- </span><span class="t-fn">book_total</span><span class="t-op">(</span><span class="t-id">quote</span><span class="t-op">)</span></span></div>
+<div class="cl" data-line="18"><span class="ln" aria-hidden="true">18</span><span class="cx"><span class="t-id">label</span><span class="t-op"> &lt;- </span><span class="t-fn">paste0</span><span class="t-op">(</span><span class="t-str">"total: "</span><span class="t-op">, </span><span class="t-id">total</span><span class="t-op">)</span></span></div>`,
+  inference: `<div class="cl" data-line="1"><span class="ln" aria-hidden="true">1</span><span class="cx"><span class="t-id">net_of_fees</span><span class="inlay is-on">: &lt;T: numeric, U: numeric&gt; fn(gross: T, rate: U) -&gt; double</span><span class="t-op"> &lt;- </span><span class="t-kw">function</span><span class="t-op">(</span><span class="t-id">gross</span><span class="t-op">, </span><span class="t-id">rate</span><span class="t-op">) {</span></span></div>
+<div class="cl" data-line="2"><span class="ln" aria-hidden="true">2</span><span class="cx"><span class="t-op">  </span><span class="t-id">gross</span><span class="t-op"> * (</span><span class="t-num">1</span><span class="t-op"> - </span><span class="t-id">rate</span><span class="t-op">)</span></span></div>
+<div class="cl" data-line="3"><span class="ln" aria-hidden="true">3</span><span class="cx"><span class="t-op">}</span></span></div>
+<div class="cl" data-line="4"><span class="ln" aria-hidden="true">4</span><span class="cx"></span></div>
+<div class="cl" data-line="5"><span class="ln" aria-hidden="true">5</span><span class="cx"><span class="t-id">fee_rate</span><span class="inlay is-on">: &lt;T&gt; fn(region: T) -&gt; double</span><span class="t-op"> &lt;- </span><span class="t-kw">function</span><span class="t-op">(</span><span class="t-id">region</span><span class="t-op">) {</span></span></div>
+<div class="cl" data-line="6"><span class="ln" aria-hidden="true">6</span><span class="cx"><span class="t-op">  </span><span class="t-kw">if</span><span class="t-op"> (</span><span class="t-id">region</span><span class="t-op"> == </span><span class="t-str">"north"</span><span class="t-op">) </span><span class="t-num">0.18</span><span class="t-op"> </span><span class="t-kw">else</span><span class="t-op"> </span><span class="t-num">0.22</span></span></div>
+<div class="cl" data-line="7"><span class="ln" aria-hidden="true">7</span><span class="cx"><span class="t-op">}</span></span></div>
+<div class="cl" data-line="8"><span class="ln" aria-hidden="true">8</span><span class="cx"></span></div>
+<div class="cl" data-line="9"><span class="ln" aria-hidden="true">9</span><span class="cx"><span class="t-id">book_total</span><span class="inlay is-on">: &lt;T, U: numeric&gt; fn(rows: T, rate: U) -&gt; double</span><span class="t-op"> &lt;- </span><span class="t-kw">function</span><span class="t-op">(</span><span class="t-id">rows</span><span class="t-op">, </span><span class="t-id">rate</span><span class="t-op">) {</span></span></div>
+<div class="cl" data-line="10"><span class="ln" aria-hidden="true">10</span><span class="cx"><span class="t-op">  </span><span class="t-fn">net_of_fees</span><span class="t-op">(</span><span class="t-id">rows</span><span class="t-op">$</span><span class="t-id">amount</span><span class="t-op">, </span><span class="t-id">rate</span><span class="t-op">)</span></span></div>
+<div class="cl" data-line="11"><span class="ln" aria-hidden="true">11</span><span class="cx"><span class="t-op">}</span></span></div>
+<div class="cl" data-line="12"><span class="ln" aria-hidden="true">12</span><span class="cx"></span></div>
+<div class="cl" data-line="13"><span class="ln" aria-hidden="true">13</span><span class="cx"><span class="t-id">quote</span><span class="inlay is-on">: list{region: character, amount: double}</span><span class="t-op"> &lt;- </span><span class="t-fn">list</span><span class="t-op">(</span><span class="t-id">region</span><span class="t-op"> = </span><span class="t-str">"north"</span><span class="t-op">, </span><span class="t-id">amount</span><span class="t-op"> = </span><span class="t-num">1240.5</span><span class="t-op">)</span></span></div>
+<div class="cl" data-line="14"><span class="ln" aria-hidden="true">14</span><span class="cx"><span class="t-id">total</span><span class="t-op"> &lt;- </span><span class="t-fn">book_total</span><span class="t-op">(</span><span class="t-id">quote</span><span class="t-op">, </span><span class="squig err"><span class="t-str">"0.18"</span></span><span class="t-op">)</span></span></div>
+<div class="cl" data-line="15"><span class="ln" aria-hidden="true">15</span><span class="cx"><span class="t-id">label</span><span class="inlay is-on">: character</span><span class="t-op"> &lt;- </span><span class="t-fn">paste0</span><span class="t-op">(</span><span class="t-str">"total: "</span><span class="t-op">, </span><span class="t-id">total</span><span class="t-op">)</span></span></div>`,
+}
+
+const analysisOutput = {
+  lint: `<div class="tl"><span class="sh">$</span> roughly check</div>
+<div class="tl msg"><span class="dwarn">warning[assignment-operator]</span><span class="dmsg">: Use &lt;-, not =, for assignment</span></div>
+<div class="tl"> <span class="darrow">--&gt;</span> R/sales.R:6:10</div>
+<div class="tl"><span class="dgutter">6 |</span>   ranked = sales[order(-sales$amount), ]</div>
+<div class="tl">             <span class="dcaret-warn">^</span></div>
+<div class="tl gap"></div>
+<div class="tl msg"><span class="dwarn">warning[unresolved]</span><span class="dmsg">: I could not resolve \`nrwo\` in this package, its imports, or builtins. Did you mean \`nrow\`?</span></div>
+<div class="tl">  <span class="darrow">--&gt;</span> R/sales.R:11:11</div>
+<div class="tl"><span class="dgutter">11 |</span>   message(nrwo(sales), " rows in ", length(regions), " regions")</div>
+<div class="tl">               <span class="dcaret-warn">^^^^</span></div>
+<div class="tl gap"></div>
+<div class="tl msg"><span class="dwarn">warning[boolean-shorthand]</span><span class="dmsg">: Use TRUE, not T, for Boolean values</span></div>
+<div class="tl">  <span class="darrow">--&gt;</span> R/sales.R:18:12</div>
+<div class="tl"><span class="dgutter">18 |</span> verbose &lt;- T</div>
+<div class="tl">                <span class="dcaret-warn">^</span></div>
+<div class="tl gap"></div>
+<div class="tl"><span class="dsum">3 problems in 1 file</span></div>`,
+  types: `<div class="tl"><span class="sh">$</span> roughly check</div>
+<div class="tl msg"><span class="derr">error[type-mismatch]</span><span class="dmsg">: expected \`character\`, found \`double\`</span></div>
+<div class="tl">  <span class="darrow">--&gt;</span> R/pricing.R:13:37</div>
+<div class="tl"><span class="dgutter">13 |</span>   net_of_fees(rows$amount, fee_rate(rows$amount))</div>
+<div class="tl">                                         <span class="dcaret-err">^^^^^^^^^^^</span></div>
+<div class="tl gap"></div>
+<div class="tl"><span class="dsum">1 problem in 1 file</span></div>`,
+  inference: `<div class="tl"><span class="sh">$</span> roughly check</div>
+<div class="tl msg"><span class="derr">error[type-mismatch]</span><span class="dmsg">: expected a numeric value (\`integer\` or \`double\`), found \`character\`</span></div>
+<div class="tl">  <span class="darrow">--&gt;</span> R/booking.R:14:28</div>
+<div class="tl"><span class="dgutter">14 |</span> total &lt;- book_total(quote, "0.18")</div>
+<div class="tl">                                <span class="dcaret-err">^^^^^^</span></div>
+<div class="tl gap"></div>
+<div class="tl"><span class="dsum">1 problem in 1 file</span></div>`,
+}
+
+const formatterCode = {
+  spacing: {
+    before: `<div class="cl is-changed" style="--i:0"><span class="ln" aria-hidden="true">1</span><span class="cx"><span class="t-id">totals</span><span class="t-op">&lt;-</span><span class="t-fn">sapply</span><span class="t-op">(</span><span class="t-id">sales</span><span class="t-op">,</span><span class="t-kw">function</span><span class="t-op">(</span><span class="t-id">s</span><span class="t-op">)</span><span class="t-id">s</span><span class="t-op">$</span><span class="t-id">amount</span><span class="t-op">)</span></span></div>
+<div class="cl is-changed" style="--i:1"><span class="ln" aria-hidden="true">2</span><span class="cx"><span class="t-id">top</span><span class="t-op">&lt;-</span><span class="t-id">sales</span><span class="t-op">[</span><span class="t-id">totals</span><span class="t-op">&gt;</span><span class="t-id">threshold</span><span class="t-op"> ,]</span></span></div>
+<div class="cl is-changed" style="--i:2"><span class="ln" aria-hidden="true">3</span><span class="cx"><span class="t-fn">message</span><span class="t-op">(</span><span class="t-fn">paste0</span><span class="t-op">(</span><span class="t-str">'kept: '</span><span class="t-op">,</span><span class="t-fn">length</span><span class="t-op">(</span><span class="t-id">top</span><span class="t-op">),</span><span class="t-str">' of '</span><span class="t-op">,</span><span class="t-fn">length</span><span class="t-op">(</span><span class="t-id">sales</span><span class="t-op">)))</span></span></div>`,
+    after: `<div class="cl is-changed" style="--i:0"><span class="ln" aria-hidden="true">1</span><span class="cx"><span class="t-id">totals</span><span class="t-op"> &lt;- </span><span class="t-fn">sapply</span><span class="t-op">(</span><span class="t-id">sales</span><span class="t-op">, </span><span class="t-kw">function</span><span class="t-op">(</span><span class="t-id">s</span><span class="t-op">) </span><span class="t-id">s</span><span class="t-op">$</span><span class="t-id">amount</span><span class="t-op">)</span></span></div>
+<div class="cl is-changed" style="--i:1"><span class="ln" aria-hidden="true">2</span><span class="cx"><span class="t-id">top</span><span class="t-op"> &lt;- </span><span class="t-id">sales</span><span class="t-op">[</span><span class="t-id">totals</span><span class="t-op"> &gt; </span><span class="t-id">threshold</span><span class="t-op">, ]</span></span></div>
+<div class="cl is-changed" style="--i:2"><span class="ln" aria-hidden="true">3</span><span class="cx"><span class="t-fn">message</span><span class="t-op">(</span><span class="t-fn">paste0</span><span class="t-op">(</span><span class="t-str">"kept: "</span><span class="t-op">, </span><span class="t-fn">length</span><span class="t-op">(</span><span class="t-id">top</span><span class="t-op">), </span><span class="t-str">" of "</span><span class="t-op">, </span><span class="t-fn">length</span><span class="t-op">(</span><span class="t-id">sales</span><span class="t-op">)))</span></span></div>`,
+  },
+  braces: {
+    before: `<div class="cl is-changed" style="--i:0"><span class="ln" aria-hidden="true">1</span><span class="cx"><span class="t-kw">for</span><span class="t-op">(</span><span class="t-id">region</span><span class="t-op"> </span><span class="t-kw">in</span><span class="t-op"> </span><span class="t-id">regions</span><span class="t-op">) </span><span class="t-fn">accumulate</span><span class="t-op">(</span><span class="t-id">region</span><span class="t-op">)</span></span></div>
+<div class="cl is-changed" style="--i:1"><span class="ln" aria-hidden="true">2</span><span class="cx"><span class="t-kw">if</span><span class="t-op">(</span><span class="t-fn">nrow</span><span class="t-op">(</span><span class="t-id">top</span><span class="t-op">)==</span><span class="t-num">0</span><span class="t-op">)</span></span></div>
+<div class="cl" style="--i:2"><span class="ln" aria-hidden="true">3</span><span class="cx"><span class="ws">··</span><span class="t-fn">warning</span><span class="t-op">(</span><span class="t-str">"no rows"</span><span class="t-op">)</span></span></div>`,
+    after: `<div class="cl is-changed" style="--i:0"><span class="ln" aria-hidden="true">1</span><span class="cx"><span class="t-kw">for</span><span class="t-op"> (</span><span class="t-id">region</span><span class="t-op"> </span><span class="t-kw">in</span><span class="t-op"> </span><span class="t-id">regions</span><span class="t-op">) {</span></span></div>
+<div class="cl is-changed" style="--i:1"><span class="ln" aria-hidden="true">2</span><span class="cx"><span class="ws">··</span><span class="t-fn">accumulate</span><span class="t-op">(</span><span class="t-id">region</span><span class="t-op">)</span></span></div>
+<div class="cl is-changed" style="--i:2"><span class="ln" aria-hidden="true">3</span><span class="cx"><span class="t-op">}</span></span></div>
+<div class="cl is-changed" style="--i:3"><span class="ln" aria-hidden="true">4</span><span class="cx"><span class="t-kw">if</span><span class="t-op"> (</span><span class="t-fn">nrow</span><span class="t-op">(</span><span class="t-id">top</span><span class="t-op">) == </span><span class="t-num">0</span><span class="t-op">) {</span></span></div>
+<div class="cl" style="--i:4"><span class="ln" aria-hidden="true">5</span><span class="cx"><span class="ws">··</span><span class="t-fn">warning</span><span class="t-op">(</span><span class="t-str">"no rows"</span><span class="t-op">)</span></span></div>
+<div class="cl is-changed" style="--i:5"><span class="ln" aria-hidden="true">6</span><span class="cx"><span class="t-op">}</span></span></div>`,
+  },
+  indent: {
+    before: `<div class="cl" style="--i:0"><span class="ln" aria-hidden="true">1</span><span class="cx"><span class="t-id">opts</span><span class="t-op"> &lt;- </span><span class="t-fn">list</span><span class="t-op">(</span></span></div>
+<div class="cl is-changed" style="--i:1"><span class="ln" aria-hidden="true">2</span><span class="cx"><span class="ws">······</span><span class="t-id">host</span><span class="t-op"> = </span><span class="t-str">"localhost"</span><span class="t-op">,</span></span></div>
+<div class="cl is-changed" style="--i:2"><span class="ln" aria-hidden="true">3</span><span class="cx"><span class="ws">·</span><span class="t-id">port</span><span class="t-op"> = </span><span class="t-num">8080</span><span class="t-op">,</span></span></div>
+<div class="cl is-changed" style="--i:3"><span class="ln" aria-hidden="true">4</span><span class="cx"><span class="ws">········</span><span class="t-id">retries</span><span class="t-op"> = </span><span class="t-num">3</span></span></div>
+<div class="cl" style="--i:4"><span class="ln" aria-hidden="true">5</span><span class="cx"><span class="t-op">)</span></span></div>`,
+    after: `<div class="cl" style="--i:0"><span class="ln" aria-hidden="true">1</span><span class="cx"><span class="t-id">opts</span><span class="t-op"> &lt;- </span><span class="t-fn">list</span><span class="t-op">(</span></span></div>
+<div class="cl is-changed" style="--i:1"><span class="ln" aria-hidden="true">2</span><span class="cx"><span class="ws">··</span><span class="t-id">host</span><span class="t-op"> = </span><span class="t-str">"localhost"</span><span class="t-op">,</span></span></div>
+<div class="cl is-changed" style="--i:2"><span class="ln" aria-hidden="true">3</span><span class="cx"><span class="ws">··</span><span class="t-id">port</span><span class="t-op"> = </span><span class="t-num">8080</span><span class="t-op">,</span></span></div>
+<div class="cl is-changed" style="--i:3"><span class="ln" aria-hidden="true">4</span><span class="cx"><span class="ws">··</span><span class="t-id">retries</span><span class="t-op"> = </span><span class="t-num">3</span></span></div>
+<div class="cl" style="--i:4"><span class="ln" aria-hidden="true">5</span><span class="cx"><span class="t-op">)</span></span></div>`,
+  },
+  annotations: {
+    before: `<div class="cl is-changed" style="--i:0"><span class="ln" aria-hidden="true">1</span><span class="cx"><span class="t-com">#:fn( gross:</span><span class="t-type">double</span><span class="t-com">,rate:</span><span class="t-type">double</span><span class="t-com"> )-&gt;</span><span class="t-type">double</span></span></div>
+<div class="cl" style="--i:1"><span class="ln" aria-hidden="true">2</span><span class="cx"><span class="t-id">margin</span><span class="t-op"> &lt;- </span><span class="t-kw">function</span><span class="t-op">(</span><span class="t-id">gross</span><span class="t-op">, </span><span class="t-id">rate</span><span class="t-op">) </span><span class="t-id">gross</span><span class="t-op"> * (</span><span class="t-num">1</span><span class="t-op"> - </span><span class="t-id">rate</span><span class="t-op">)</span></span></div>
+<div class="cl is-changed" style="--i:2"><span class="ln" aria-hidden="true">3</span><span class="cx"><span class="t-com">#: list[ named : </span><span class="t-type">double</span><span class="t-com"> ]</span></span></div>
+<div class="cl" style="--i:3"><span class="ln" aria-hidden="true">4</span><span class="cx"><span class="t-id">weights</span><span class="t-op"> &lt;- </span><span class="t-fn">list</span><span class="t-op">(</span><span class="t-id">a</span><span class="t-op"> = </span><span class="t-num">1.0</span><span class="t-op">)</span></span></div>`,
+    after: `<div class="cl is-changed" style="--i:0"><span class="ln" aria-hidden="true">1</span><span class="cx"><span class="t-com">#: fn(gross: </span><span class="t-type">double</span><span class="t-com">, rate: </span><span class="t-type">double</span><span class="t-com">) -&gt; </span><span class="t-type">double</span></span></div>
+<div class="cl" style="--i:1"><span class="ln" aria-hidden="true">2</span><span class="cx"><span class="t-id">margin</span><span class="t-op"> &lt;- </span><span class="t-kw">function</span><span class="t-op">(</span><span class="t-id">gross</span><span class="t-op">, </span><span class="t-id">rate</span><span class="t-op">) </span><span class="t-id">gross</span><span class="t-op"> * (</span><span class="t-num">1</span><span class="t-op"> - </span><span class="t-id">rate</span><span class="t-op">)</span></span></div>
+<div class="cl is-changed" style="--i:2"><span class="ln" aria-hidden="true">3</span><span class="cx"><span class="t-com">#: list[named: </span><span class="t-type">double</span><span class="t-com">]</span></span></div>
+<div class="cl" style="--i:3"><span class="ln" aria-hidden="true">4</span><span class="cx"><span class="t-id">weights</span><span class="t-op"> &lt;- </span><span class="t-fn">list</span><span class="t-op">(</span><span class="t-id">a</span><span class="t-op"> = </span><span class="t-num">1.0</span><span class="t-op">)</span></span></div>`,
+  },
+}
 
 const year = new Date().getFullYear()
 ---
@@ -250,24 +446,24 @@ const year = new Date().getFullYear()
 
           <!--
             All six features share one editor and one file, so the code is written once and each
-            feature only adds its own overlay: `data-feature` on the showcase selects which
+            feature contributes only its own overlay: `data-feature` on the showcase selects which
             overlays and token decorations are visible. One reused tabpanel therefore backs the
-            whole tablist; `aria-labelledby` follows the selected tab so the region is always
+            whole tablist, and `aria-labelledby` follows the selection so the region is always
             named by the feature it is showing.
           -->
           <div class="showcase ide" data-tabs="ide" data-feature="completion">
             <div class="seg" role="tablist" aria-label="Language server features">
               {
-                lspFeatures.map((f, i) => (
+                lspFeatures.map((feature, index) => (
                   <button
                     role="tab"
-                    id={`tab-${f.key}`}
-                    data-key={f.key}
+                    id={`tab-${feature.key}`}
+                    data-key={feature.key}
                     aria-controls="ide-panel"
-                    aria-selected={i === 0 ? 'true' : 'false'}
-                    tabindex={i === 0 ? 0 : -1}
+                    aria-selected={index === 0 ? 'true' : 'false'}
+                    tabindex={index === 0 ? 0 : -1}
                   >
-                    {f.label}
+                    {feature.label}
                   </button>
                 ))
               }
@@ -290,128 +486,18 @@ const year = new Date().getFullYear()
 
               <div class="stage-body ide-body">
                 <div class="code-scroll">
-                <div class="code" data-gutter>
-                  <div class="cl" data-line="1">
-                    <span class="ln" aria-hidden="true">1</span>
-                    <span class="cx"
-                      ><span class="t-id" data-mark="ren-src">sale</span><span class="t-op"> &lt;- </span
-                      ><span class="t-fn">list</span><span class="t-op">(</span><span class="t-id">region</span
-                      ><span class="t-op"> = </span><span class="t-str">"north"</span><span class="t-op">, </span
-                      ><span class="t-id">amount</span><span class="t-op"> = </span><span class="t-num">1240.5</span
-                      ><span class="t-op">, </span><span class="t-id">closed</span><span class="t-op"> = </span
-                      ><span class="t-kw">TRUE</span><span class="t-op">)</span><span
-                        class="inlay"
-                        data-for="inlay"
-                        data-col="4"
-                        >: list&#123;region: character, amount: double, closed: logical&#125;</span
-                      ></span
-                    >
-                  </div>
-                  <div class="cl" data-line="2">
-                    <span class="ln" aria-hidden="true">2</span><span class="cx"></span>
-                  </div>
-                  <div class="cl" data-line="3">
-                    <span class="ln" aria-hidden="true">3</span>
-                    <span class="cx"
-                      ><span class="tok" data-mark="def-target references rename">margin</span
-                      ><span class="t-op"> &lt;- </span><span class="t-kw">function</span
-                      ><span class="t-op">(</span><span class="t-id">gross</span><span class="t-op">, </span
-                      ><span class="t-id">rate</span><span class="t-op">) </span><span class="t-id">gross</span
-                      ><span class="t-op"> * (</span><span class="t-num">1</span><span class="t-op"> - </span
-                      ><span class="t-id">rate</span><span class="t-op">)</span><span
-                        class="inlay"
-                        data-for="inlay"
-                        data-col="6"
-                        >: &lt;T: numeric, U: numeric&gt; fn(gross: T, rate: U) -&gt; double</span
-                      ><span class="renamebadge" data-for="rename" aria-hidden="true"
-                        >3 edits · 2 files</span
-                      ></span
-                    >
-                  </div>
-                  <div class="cl" data-line="4">
-                    <span class="ln" aria-hidden="true">4</span><span class="cx"></span>
-                  </div>
-                  <div class="cl" data-line="5">
-                    <span class="ln" aria-hidden="true">5</span>
-                    <span class="cx"
-                      ><span class="t-id">net</span><span class="t-op"> &lt;- </span><span
-                        class="tok t-fn"
-                        data-mark="def-source hover-anchor references rename-ghost">margin</span
-                      ><span class="t-op">(</span><span class="t-id" data-mark="ren-src">sale</span
-                      ><span class="t-op">$</span><span class="t-id">amount</span><span class="t-op">, </span
-                      ><span class="t-num">0.18</span><span class="t-op">)</span><span
-                        class="inlay"
-                        data-for="inlay"
-                        data-col="3"
-                        >: double</span
-                      >
-
-                      <!-- hover: rendered exactly as the server sends it -->
-                      <span class="card hovercard" data-for="hover" aria-hidden="true">
-                        <code class="card-code"
-                          ><span class="t-id">margin</span>: <span class="t-type"
-                            >&lt;T: numeric, U: numeric&gt;</span
-                          > fn(gross: <span class="t-type">T</span>, rate: <span class="t-type">U</span>) -&gt;
-                          <span class="t-type">double</span></code
-                        >
-                        <span class="card-meta"
-                          >Package global, defined at <code>R/sales.R:3:1</code></span
-                        >
-                        <span class="card-notch"></span>
-                      </span>
-
-                      <!-- completion: real items, real details, server order -->
-                      <span class="caretbar" data-for="completion" aria-hidden="true"></span>
-                      <span class="card comp" data-for="completion" aria-hidden="true">
-                        <span class="comp-row is-active">
-                          <span class="ckind">field</span><span class="cname">amount</span
-                          ><span class="cdetail">double</span>
-                        </span>
-                        <span class="comp-row">
-                          <span class="ckind">field</span><span class="cname">closed</span
-                          ><span class="cdetail">logical</span>
-                        </span>
-                        <span class="comp-row">
-                          <span class="ckind">field</span><span class="cname">region</span
-                          ><span class="cdetail">character</span>
-                        </span>
-                      </span>
-                    </span>
-                  </div>
-                  <div class="cl" data-line="6">
-                    <span class="ln" aria-hidden="true">6</span><span class="cx"></span>
-                  </div>
-                  <div class="cl" data-line="7">
-                    <span class="ln" aria-hidden="true">7</span>
-                    <span class="cx"
-                      ><span class="t-id">label</span><span class="t-op"> &lt;- </span><span class="t-fn"
-                        >paste0</span
-                      ><span class="t-op">(</span><span class="t-id" data-mark="ren-src">sale</span
-                      ><span class="t-op">$</span><span class="t-id">region</span><span class="t-op">, </span
-                      ><span class="t-str">": "</span><span class="t-op">, </span><span class="t-fn">round</span
-                      ><span class="t-op">(</span><span class="t-id">net</span><span class="t-op">, </span
-                      ><span class="t-num">2</span><span class="t-op">))</span><span
-                        class="inlay"
-                        data-for="inlay"
-                        data-col="5"
-                        >: character</span
-                      ></span
-                    >
-                  </div>
+                  <div class="code" set:html={ideCode} />
                 </div>
-                </div>
-
-                <!-- references: the three occurrences the server actually returns -->
-                <div class="peek" data-for="references" aria-hidden="true">
+                <div class="peek" data-for="references">
                   <div class="peek-head"><span class="peek-count">3</span> references</div>
                   <div class="peek-row">
-                    <span class="peek-file">R/sales.R</span><span class="peek-pos">3:1</span
+                    <span class="peek-file">R/sales.R</span><span class="peek-pos">4:1</span
                     ><span class="peek-src"
                       ><mark>margin</mark> &lt;- function(gross, rate) gross * (1 - rate)</span
                     >
                   </div>
                   <div class="peek-row">
-                    <span class="peek-file">R/sales.R</span><span class="peek-pos">5:8</span
+                    <span class="peek-file">R/sales.R</span><span class="peek-pos">6:8</span
                     ><span class="peek-src">net &lt;- <mark>margin</mark>(sale$amount, 0.18)</span>
                   </div>
                   <div class="peek-row">
@@ -426,18 +512,18 @@ const year = new Date().getFullYear()
               <div class="stage-foot">
                 <span class="foot-notes">
                   {
-                    lspFeatures.map((f) => (
-                      <span class="foot-note" data-for={f.key}>
-                        {f.note}
+                    lspFeatures.map((feature) => (
+                      <span class="foot-note" data-for={feature.key}>
+                        {feature.note}
                       </span>
                     ))
                   }
                 </span>
                 <span class="foot-methods" aria-hidden="true">
                   {
-                    lspFeatures.map((f) => (
-                      <code class="foot-method" data-for={f.key}>
-                        {f.method}
+                    lspFeatures.map((feature) => (
+                      <code class="foot-method" data-for={feature.key}>
+                        {feature.method}
                       </code>
                     ))
                   }
@@ -451,8 +537,8 @@ const year = new Date().getFullYear()
               >Language server docs <span aria-hidden="true">→</span></a
             >
             <span class="band-aside"
-              >Also: signature help, document and workspace symbols, folding, semantic highlighting
-              of <code>#:</code> annotations, and format-on-save.</span
+              >Also: signature help, document and workspace symbols, folding ranges, semantic
+              highlighting of <code>#:</code> annotations, and format-on-save.</span
             >
           </p>
         </div>
@@ -465,170 +551,67 @@ const year = new Date().getFullYear()
             <p class="eyebrow"><span class="eyebrow-mark" aria-hidden="true"></span>check</p>
             <h2>Catch it before you run it.</h2>
             <p class="lede">
-              <code>roughly check</code> lints out of the box. Turn on the type checker and it also
-              reads your code the way a compiler would — and because inference runs whether or not
-              you annotate anything, it catches the mistake either way.
+              <code>roughly check</code> lints out of the box. Switch the type checker on and it
+              reads your code the way a compiler would — and since inference runs whether or not you
+              annotate anything, it catches the mistake either way.
             </p>
           </header>
 
           <div class="showcase" data-tabs="check">
             <div class="seg" role="tablist" aria-label="What roughly check reports">
               {
-                analysisTabs.map((t, i) => (
+                analysisTabs.map((tab, index) => (
                   <button
                     role="tab"
-                    id={`tab-${t.key}`}
-                    aria-controls={`panel-${t.key}`}
-                    aria-selected={i === 0 ? 'true' : 'false'}
-                    tabindex={i === 0 ? 0 : -1}
+                    id={`tab-${tab.key}`}
+                    aria-controls={`panel-${tab.key}`}
+                    aria-selected={index === 0 ? 'true' : 'false'}
+                    tabindex={index === 0 ? 0 : -1}
                   >
-                    {t.label}
+                    {tab.label}
                   </button>
                 ))
               }
             </div>
 
-            <!-- Lints -->
-            <div class="stage split" role="tabpanel" id="panel-lint" aria-labelledby="tab-lint" tabindex="0">
-              <div class="stage-head">
-                <span class="ftabs"><span class="ftab is-active">R/sales.R</span></span>
-                <span class="stage-meta">no configuration</span>
-              </div>
-              <div class="stage-body">
-                <div class="pane pane-src">
-                  <div class="code" data-gutter>
-                    <div class="cl"><span class="ln" aria-hidden="true">1</span><span class="cx"><span class="t-id">read_sales</span><span class="t-op"> &lt;- </span><span class="t-kw">function</span><span class="t-op">(</span><span class="t-id">path</span><span class="t-op">) &#123;</span></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">2</span><span class="cx">  <span class="t-fn">read.csv</span><span class="t-op">(</span><span class="t-id">path</span><span class="t-op">, </span><span class="t-id">stringsAsFactors</span><span class="t-op"> = </span><span class="t-kw">FALSE</span><span class="t-op">)</span></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">3</span><span class="cx"><span class="t-op">&#125;</span></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">4</span><span class="cx"></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">5</span><span class="cx"><span class="t-id">top_regions</span><span class="t-op"> &lt;- </span><span class="t-kw">function</span><span class="t-op">(</span><span class="t-id">sales</span><span class="t-op">, </span><span class="t-id">n</span><span class="t-op">) &#123;</span></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">6</span><span class="cx">  <span class="t-id">ranked</span> <span class="squig warn t-op">=</span> <span class="t-id">sales</span><span class="t-op">[</span><span class="t-fn">order</span><span class="t-op">(-</span><span class="t-id">sales</span><span class="t-op">$</span><span class="t-id">amount</span><span class="t-op">), ]</span></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">7</span><span class="cx">  <span class="t-fn">head</span><span class="t-op">(</span><span class="t-fn">unique</span><span class="t-op">(</span><span class="t-id">ranked</span><span class="t-op">$</span><span class="t-id">region</span><span class="t-op">), </span><span class="t-id">n</span><span class="t-op">)</span></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">8</span><span class="cx"><span class="t-op">&#125;</span></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">9</span><span class="cx"></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">10</span><span class="cx"><span class="t-id">sales</span><span class="t-op"> &lt;- </span><span class="t-fn">read_sales</span><span class="t-op">(</span><span class="t-str">"sales.csv"</span><span class="t-op">)</span></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">11</span><span class="cx"><span class="t-id">regions</span><span class="t-op"> &lt;- </span><span class="t-fn">top_regions</span><span class="t-op">(</span><span class="t-id">sales</span><span class="t-op">, </span><span class="t-num">5</span><span class="t-op">)</span></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">12</span><span class="cx"></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">13</span><span class="cx"><span class="t-fn">message</span><span class="t-op">(</span><span class="squig warn"><span class="t-fn">nrwo</span></span><span class="t-op">(</span><span class="t-id">sales</span><span class="t-op">), </span><span class="t-str">" rows in "</span><span class="t-op">, </span><span class="t-fn">length</span><span class="t-op">(</span><span class="t-id">regions</span><span class="t-op">), </span><span class="t-str">" regions"</span><span class="t-op">)</span></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">14</span><span class="cx"><span class="t-id">verbose</span><span class="t-op"> &lt;- </span><span class="squig warn"><span class="t-kw">T</span></span></span></div>
+            {
+              analysisTabs.map((tab, index) => (
+                <div
+                  class="stage split"
+                  role="tabpanel"
+                  id={`panel-${tab.key}`}
+                  aria-labelledby={`tab-${tab.key}`}
+                  tabindex="0"
+                  hidden={index !== 0}
+                  style={`--split: ${tab.split}`}
+                >
+                  <div class="stage-head">
+                    <span class="ftabs">
+                      <span class="ftab is-active">{tab.file}</span>
+                    </span>
+                    <span class="stage-meta">{tab.config}</span>
+                  </div>
+                  <div class="stage-body">
+                    <div class="pane pane-src">
+                      <div class="code" set:html={analysisCode[tab.key]} />
+                    </div>
+                    <div class="pane pane-out">
+                      <div class="term" set:html={analysisOutput[tab.key]} />
+                    </div>
+                  </div>
+                  <div class="stage-foot">
+                    <span class="foot-note is-on" set:html={tab.note} />
+                    <code class="foot-method is-on">exit 1</code>
                   </div>
                 </div>
-                <div class="pane pane-out">
-                  <div class="term"><div class="tl"><span class="sh">$</span> roughly check</div>
-<div class="tl msg"><span class="dwarn">warning[assignment-operator]</span><span class="dmsg">: Use &lt;-, not =, for assignment</span></div>
-<div class="tl"> <span class="darrow">--&gt;</span> R/sales.R:6:10</div>
-<div class="tl"><span class="dgutter">6 |</span>   ranked = sales[order(-sales$amount), ]</div>
-<div class="tl">             <span class="dcaret-warn">^</span></div>
-<div class="tl gap"></div>
-<div class="tl msg"><span class="dwarn">warning[unresolved]</span><span class="dmsg">: I could not resolve `nrwo` in this package, its imports, or builtins. Did you mean `nrow`?</span></div>
-<div class="tl">  <span class="darrow">--&gt;</span> R/sales.R:13:9</div>
-<div class="tl"><span class="dgutter">13 |</span> message(nrwo(sales), " rows in ", length(regions), " regions")</div>
-<div class="tl">             <span class="dcaret-warn">^^^^</span></div>
-<div class="tl gap"></div>
-<div class="tl msg"><span class="dwarn">warning[boolean-shorthand]</span><span class="dmsg">: Use TRUE, not T, for Boolean values</span></div>
-<div class="tl">  <span class="darrow">--&gt;</span> R/sales.R:14:12</div>
-<div class="tl"><span class="dgutter">14 |</span> verbose &lt;- T</div>
-<div class="tl">                <span class="dcaret-warn">^</span></div>
-<div class="tl gap"></div>
-<div class="tl">3 problems in 1 file</div></div>
-                </div>
-              </div>
-              <div class="stage-foot">
-                <span class="foot-note is-on"
-                  >Lints and unresolved names run with no setup — every diagnostic carries the code
-                  you would put in a <code># roughly: allow(...)</code> comment.</span
-                >
-                <code class="foot-method is-on">exit 1</code>
-              </div>
-            </div>
-
-            <!-- Type errors -->
-            <div class="stage split" role="tabpanel" id="panel-types" aria-labelledby="tab-types" tabindex="0" hidden>
-              <div class="stage-head">
-                <span class="ftabs"><span class="ftab is-active">R/pricing.R</span></span>
-                <span class="stage-meta">roughly.toml · [check] typing = true</span>
-              </div>
-              <div class="stage-body">
-                <div class="pane pane-src">
-                  <div class="code" data-gutter>
-                    <div class="cl"><span class="ln" aria-hidden="true">1</span><span class="cx"><span class="t-com">#: </span><span class="t-com">fn(gross: </span><span class="t-type">double</span><span class="t-com">, rate: </span><span class="t-type">double</span><span class="t-com">) -&gt; </span><span class="t-type">double</span></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">2</span><span class="cx"><span class="t-id">net_of_fees</span><span class="t-op"> &lt;- </span><span class="t-kw">function</span><span class="t-op">(</span><span class="t-id">gross</span><span class="t-op">, </span><span class="t-id">rate</span><span class="t-op">) &#123;</span></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">3</span><span class="cx">  <span class="t-id">gross</span><span class="t-op"> * (</span><span class="t-num">1</span><span class="t-op"> - </span><span class="t-id">rate</span><span class="t-op">)</span></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">4</span><span class="cx"><span class="t-op">&#125;</span></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">5</span><span class="cx"></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">6</span><span class="cx"><span class="t-com">#: fn(rows: </span><span class="t-type">list&#123;amount: double&#125;</span><span class="t-com">, rate: </span><span class="t-type">double</span><span class="t-com">) -&gt; </span><span class="t-type">double</span></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">7</span><span class="cx"><span class="t-id">book_total</span><span class="t-op"> &lt;- </span><span class="t-kw">function</span><span class="t-op">(</span><span class="t-id">rows</span><span class="t-op">, </span><span class="t-id">rate</span><span class="t-op">) &#123;</span></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">8</span><span class="cx">  <span class="t-fn">net_of_fees</span><span class="t-op">(</span><span class="t-id">rows</span><span class="t-op">$</span><span class="t-id">amount</span><span class="t-op">, </span><span class="t-id">rate</span><span class="t-op">)</span></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">9</span><span class="cx"><span class="t-op">&#125;</span></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">10</span><span class="cx"></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">11</span><span class="cx"><span class="t-id">quote</span><span class="t-op"> &lt;- </span><span class="t-fn">list</span><span class="t-op">(</span><span class="t-id">amount</span><span class="t-op"> = </span><span class="t-num">1240.5</span><span class="t-op">)</span></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">12</span><span class="cx"><span class="t-id">total</span><span class="t-op"> &lt;- </span><span class="t-fn">book_total</span><span class="t-op">(</span><span class="t-id">quote</span><span class="t-op">, </span><span class="squig err"><span class="t-str">"0.18"</span></span><span class="t-op">)</span></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">13</span><span class="cx"><span class="t-id">label</span><span class="t-op"> &lt;- </span><span class="t-fn">paste0</span><span class="t-op">(</span><span class="t-str">"total: "</span><span class="t-op">, </span><span class="t-id">total</span><span class="t-op">)</span></span></div>
-                  </div>
-                </div>
-                <div class="pane pane-out">
-                  <div class="term"><div class="tl"><span class="sh">$</span> roughly check</div>
-<div class="tl msg"><span class="derr">error[type-mismatch]</span><span class="dmsg">: expected `double`, found `character`</span></div>
-<div class="tl">  <span class="darrow">--&gt;</span> R/pricing.R:12:28</div>
-<div class="tl"><span class="dgutter">12 |</span> total &lt;- book_total(quote, "0.18")</div>
-<div class="tl">                                <span class="dcaret-err">^^^^^^</span></div>
-<div class="tl gap"></div>
-<div class="tl">1 problem in 1 file</div></div>
-                </div>
-              </div>
-              <div class="stage-foot">
-                <span class="foot-note is-on"
-                  >Annotations live in <code>#:</code> comments — ordinary comments to R, RStudio and
-                  every other tool you already run.</span
-                >
-                <code class="foot-method is-on">exit 1</code>
-              </div>
-            </div>
-
-            <!-- Inference -->
-            <div class="stage split" role="tabpanel" id="panel-inference" aria-labelledby="tab-inference" tabindex="0" hidden>
-              <div class="stage-head">
-                <span class="ftabs"><span class="ftab is-active">R/pricing.R</span></span>
-                <span class="stage-meta">roughly.toml · [check] typing = true</span>
-              </div>
-              <div class="stage-body">
-                <div class="pane pane-src">
-                  <div class="code" data-gutter>
-                    <div class="cl"><span class="ln" aria-hidden="true">1</span><span class="cx"><span class="t-id">net_of_fees</span><span class="t-op"> &lt;- </span><span class="t-kw">function</span><span class="t-op">(</span><span class="t-id">gross</span><span class="t-op">, </span><span class="t-id">rate</span><span class="t-op">) &#123;</span><span class="inlay is-on">: &lt;T: numeric, U: numeric&gt; fn(gross: T, rate: U) -&gt; double</span></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">2</span><span class="cx">  <span class="t-id">gross</span><span class="t-op"> * (</span><span class="t-num">1</span><span class="t-op"> - </span><span class="t-id">rate</span><span class="t-op">)</span></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">3</span><span class="cx"><span class="t-op">&#125;</span></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">4</span><span class="cx"></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">5</span><span class="cx"><span class="t-id">book_total</span><span class="t-op"> &lt;- </span><span class="t-kw">function</span><span class="t-op">(</span><span class="t-id">rows</span><span class="t-op">, </span><span class="t-id">rate</span><span class="t-op">) &#123;</span><span class="inlay is-on">: &lt;T, U: numeric&gt; fn(rows: T, rate: U) -&gt; double</span></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">6</span><span class="cx">  <span class="t-fn">net_of_fees</span><span class="t-op">(</span><span class="t-id">rows</span><span class="t-op">$</span><span class="t-id">amount</span><span class="t-op">, </span><span class="t-id">rate</span><span class="t-op">)</span></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">7</span><span class="cx"><span class="t-op">&#125;</span></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">8</span><span class="cx"></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">9</span><span class="cx"><span class="t-id">quote</span><span class="t-op"> &lt;- </span><span class="t-fn">list</span><span class="t-op">(</span><span class="t-id">amount</span><span class="t-op"> = </span><span class="t-num">1240.5</span><span class="t-op">)</span><span class="inlay is-on">: list&#123;amount: double&#125;</span></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">10</span><span class="cx"><span class="t-id">total</span><span class="t-op"> &lt;- </span><span class="t-fn">book_total</span><span class="t-op">(</span><span class="t-id">quote</span><span class="t-op">, </span><span class="squig err"><span class="t-str">"0.18"</span></span><span class="t-op">)</span></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">11</span><span class="cx"><span class="t-id">label</span><span class="t-op"> &lt;- </span><span class="t-fn">paste0</span><span class="t-op">(</span><span class="t-str">"total: "</span><span class="t-op">, </span><span class="t-id">total</span><span class="t-op">)</span><span class="inlay is-on">: character</span></span></div>
-                  </div>
-                </div>
-                <div class="pane pane-out">
-                  <div class="term"><div class="tl"><span class="sh">$</span> roughly check</div>
-<div class="tl msg"><span class="derr">error[type-mismatch]</span><span class="dmsg">: expected a numeric value (`integer` or `double`), found `character`</span></div>
-<div class="tl">  <span class="darrow">--&gt;</span> R/pricing.R:10:28</div>
-<div class="tl"><span class="dgutter">10 |</span> total &lt;- book_total(quote, "0.18")</div>
-<div class="tl">                                <span class="dcaret-err">^^^^^^</span></div>
-<div class="tl gap"></div>
-<div class="tl">1 problem in 1 file</div></div>
-                </div>
-              </div>
-              <div class="stage-foot">
-                <span class="foot-note is-on"
-                  >The same file with every annotation deleted. Inference recovers the generic
-                  signatures — grey text above is what the editor shows — and still catches the bug.</span
-                >
-                <code class="foot-method is-on">exit 1</code>
-              </div>
-            </div>
+              ))
+            }
           </div>
 
           <p class="band-foot">
-            <a class="doclink" href="/typing/guide">Type checker guide <span aria-hidden="true">→</span></a>
+            <a class="doclink" href="/typing/guide"
+              >Type checker guide <span aria-hidden="true">→</span></a
+            >
             <a class="doclink" href="/linter">Linter rules <span aria-hidden="true">→</span></a>
             <span class="band-aside"
               >Type checking is opt-in; lints are not. <code>roughly check</code> reads
@@ -646,160 +629,64 @@ const year = new Date().getFullYear()
             <p class="eyebrow"><span class="eyebrow-mark" aria-hidden="true"></span>ship</p>
             <h2>One consistent style, in place.</h2>
             <p class="lede">
-              <code>roughly fmt</code> is deliberately non-invasive: it fixes spacing, braces and
-              indentation, and it never splits a line you chose to keep on one line. Run it over the
-              whole project, or use <code>--diff</code> in CI.
+              <code>roughly fmt</code> is deliberately non-invasive. It fixes spacing, braces and
+              indentation, and it never splits a line you chose to keep on one line. Run it across
+              the project, or use <code>--diff</code> in CI.
             </p>
           </header>
 
           <div class="showcase fmt" data-tabs="fmt">
             <div class="seg" role="tablist" aria-label="Formatter examples">
               {
-                formatterTabs.map((t, i) => (
+                formatterTabs.map((tab, index) => (
                   <button
                     role="tab"
-                    id={`tab-${t.key}`}
-                    aria-controls={`panel-${t.key}`}
-                    aria-selected={i === 0 ? 'true' : 'false'}
-                    tabindex={i === 0 ? 0 : -1}
+                    id={`tab-${tab.key}`}
+                    aria-controls={`panel-${tab.key}`}
+                    aria-selected={index === 0 ? 'true' : 'false'}
+                    tabindex={index === 0 ? 0 : -1}
                   >
-                    {t.label}
+                    {tab.label}
                   </button>
                 ))
               }
             </div>
 
-            <!-- Spacing -->
-            <div class="stage split" role="tabpanel" id="panel-spacing" aria-labelledby="tab-spacing" tabindex="0">
-              <div class="stage-head">
-                <span class="ftabs"><span class="ftab is-active">totals.R</span></span>
-                <span class="stage-meta">operators, commas, quotes</span>
-              </div>
-              <div class="stage-body">
-                <div class="pane pane-src">
-                  <div class="pane-label">before</div>
-                  <div class="code" data-gutter>
-                    <div class="cl is-del"><span class="ln" aria-hidden="true">1</span><span class="cx"><span class="t-id">totals</span><span class="t-op">&lt;-</span><span class="t-fn">sapply</span><span class="t-op">(</span><span class="t-id">sales</span><span class="t-op">,</span><span class="t-kw">function</span><span class="t-op">(</span><span class="t-id">s</span><span class="t-op">)</span><span class="t-id">s</span><span class="t-op">$</span><span class="t-id">amount</span><span class="t-op">)</span></span></div>
-                    <div class="cl is-del"><span class="ln" aria-hidden="true">2</span><span class="cx"><span class="t-id">top</span><span class="t-op">&lt;-</span><span class="t-id">sales</span><span class="t-op">[</span><span class="t-id">totals</span><span class="t-op">&gt;</span><span class="t-id">threshold</span><span class="t-op"> ,]</span></span></div>
-                    <div class="cl is-del"><span class="ln" aria-hidden="true">3</span><span class="cx"><span class="t-fn">message</span><span class="t-op">(</span><span class="t-fn">paste0</span><span class="t-op">(</span><span class="t-str">'kept: '</span><span class="t-op">,</span><span class="t-fn">length</span><span class="t-op">(</span><span class="t-id">top</span><span class="t-op">),</span><span class="t-str">' of '</span><span class="t-op">,</span><span class="t-fn">length</span><span class="t-op">(</span><span class="t-id">sales</span><span class="t-op">)))</span></span></div>
-                  </div>
-                </div>
-                <div class="pane pane-out">
-                  <div class="pane-label">after</div>
-                  <div class="code" data-gutter>
-                    <div class="cl is-add" style="--i:0"><span class="ln" aria-hidden="true">1</span><span class="cx"><span class="t-id">totals</span><span class="t-op"> &lt;- </span><span class="t-fn">sapply</span><span class="t-op">(</span><span class="t-id">sales</span><span class="t-op">, </span><span class="t-kw">function</span><span class="t-op">(</span><span class="t-id">s</span><span class="t-op">) </span><span class="t-id">s</span><span class="t-op">$</span><span class="t-id">amount</span><span class="t-op">)</span></span></div>
-                    <div class="cl is-add" style="--i:1"><span class="ln" aria-hidden="true">2</span><span class="cx"><span class="t-id">top</span><span class="t-op"> &lt;- </span><span class="t-id">sales</span><span class="t-op">[</span><span class="t-id">totals</span><span class="t-op"> &gt; </span><span class="t-id">threshold</span><span class="t-op">, ]</span></span></div>
-                    <div class="cl is-add" style="--i:2"><span class="ln" aria-hidden="true">3</span><span class="cx"><span class="t-fn">message</span><span class="t-op">(</span><span class="t-fn">paste0</span><span class="t-op">(</span><span class="t-str">"kept: "</span><span class="t-op">, </span><span class="t-fn">length</span><span class="t-op">(</span><span class="t-id">top</span><span class="t-op">), </span><span class="t-str">" of "</span><span class="t-op">, </span><span class="t-fn">length</span><span class="t-op">(</span><span class="t-id">sales</span><span class="t-op">)))</span></span></div>
-                  </div>
-                </div>
-              </div>
-              <div class="stage-foot">
-                <code class="foot-cmd is-on"><span class="sh">$</span> roughly fmt --diff totals.R</code>
-                <span class="foot-note is-on">1 file would be reformatted, 0 files already formatted</span>
-              </div>
-            </div>
-
-            <!-- Braces & loops -->
-            <div class="stage split" role="tabpanel" id="panel-braces" aria-labelledby="tab-braces" tabindex="0" hidden>
-              <div class="stage-head">
-                <span class="ftabs"><span class="ftab is-active">regions.R</span></span>
-                <span class="stage-meta">loop and if bodies</span>
-              </div>
-              <div class="stage-body">
-                <div class="pane pane-src">
-                  <div class="pane-label">before</div>
-                  <div class="code" data-gutter>
-                    <div class="cl is-del"><span class="ln" aria-hidden="true">1</span><span class="cx"><span class="t-kw">for</span><span class="t-op">(</span><span class="t-id">region</span> <span class="t-kw">in</span> <span class="t-id">regions</span><span class="t-op">) </span><span class="t-fn">accumulate</span><span class="t-op">(</span><span class="t-id">region</span><span class="t-op">)</span></span></div>
-                    <div class="cl is-del"><span class="ln" aria-hidden="true">2</span><span class="cx"><span class="t-kw">if</span><span class="t-op">(</span><span class="t-fn">nrow</span><span class="t-op">(</span><span class="t-id">top</span><span class="t-op">)==</span><span class="t-num">0</span><span class="t-op">)</span></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">3</span><span class="cx">  <span class="t-fn">warning</span><span class="t-op">(</span><span class="t-str">"no rows"</span><span class="t-op">)</span></span></div>
-                  </div>
-                </div>
-                <div class="pane pane-out">
-                  <div class="pane-label">after</div>
-                  <div class="code" data-gutter>
-                    <div class="cl is-add" style="--i:0"><span class="ln" aria-hidden="true">1</span><span class="cx"><span class="t-kw">for</span><span class="t-op"> (</span><span class="t-id">region</span> <span class="t-kw">in</span> <span class="t-id">regions</span><span class="t-op">) &#123;</span></span></div>
-                    <div class="cl is-add" style="--i:1"><span class="ln" aria-hidden="true">2</span><span class="cx">  <span class="t-fn">accumulate</span><span class="t-op">(</span><span class="t-id">region</span><span class="t-op">)</span></span></div>
-                    <div class="cl is-add" style="--i:2"><span class="ln" aria-hidden="true">3</span><span class="cx"><span class="t-op">&#125;</span></span></div>
-                    <div class="cl is-add" style="--i:3"><span class="ln" aria-hidden="true">4</span><span class="cx"><span class="t-kw">if</span><span class="t-op"> (</span><span class="t-fn">nrow</span><span class="t-op">(</span><span class="t-id">top</span><span class="t-op">) == </span><span class="t-num">0</span><span class="t-op">) &#123;</span></span></div>
-                    <div class="cl" style="--i:4"><span class="ln" aria-hidden="true">5</span><span class="cx">  <span class="t-fn">warning</span><span class="t-op">(</span><span class="t-str">"no rows"</span><span class="t-op">)</span></span></div>
-                    <div class="cl is-add" style="--i:5"><span class="ln" aria-hidden="true">6</span><span class="cx"><span class="t-op">&#125;</span></span></div>
-                  </div>
-                </div>
-              </div>
-              <div class="stage-foot">
-                <code class="foot-cmd is-on"><span class="sh">$</span> roughly fmt --diff regions.R</code>
-                <span class="foot-note is-on">Braces go in wherever leaving them out could change what runs.</span>
-              </div>
-            </div>
-
-            <!-- Indentation -->
-            <div class="stage split" role="tabpanel" id="panel-indent" aria-labelledby="tab-indent" tabindex="0" hidden>
-              <div class="stage-head">
-                <span class="ftabs"><span class="ftab is-active">options.R</span></span>
-                <span class="stage-meta">multi-line call arguments</span>
-              </div>
-              <div class="stage-body">
-                <div class="pane pane-src">
-                  <div class="pane-label">before</div>
-                  <div class="code" data-gutter>
-                    <div class="cl"><span class="ln" aria-hidden="true">1</span><span class="cx"><span class="t-id">opts</span><span class="t-op"> &lt;- </span><span class="t-fn">list</span><span class="t-op">(</span></span></div>
-                    <div class="cl is-del"><span class="ln" aria-hidden="true">2</span><span class="cx"><span class="ws">······</span><span class="t-id">host</span><span class="t-op"> = </span><span class="t-str">"localhost"</span><span class="t-op">,</span></span></div>
-                    <div class="cl is-del"><span class="ln" aria-hidden="true">3</span><span class="cx"><span class="ws">·</span><span class="t-id">port</span><span class="t-op"> = </span><span class="t-num">8080</span><span class="t-op">,</span></span></div>
-                    <div class="cl is-del"><span class="ln" aria-hidden="true">4</span><span class="cx"><span class="ws">········</span><span class="t-id">retries</span><span class="t-op"> = </span><span class="t-num">3</span></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">5</span><span class="cx"><span class="t-op">)</span></span></div>
-                  </div>
-                </div>
-                <div class="pane pane-out">
-                  <div class="pane-label">after</div>
-                  <div class="code" data-gutter>
-                    <div class="cl" style="--i:0"><span class="ln" aria-hidden="true">1</span><span class="cx"><span class="t-id">opts</span><span class="t-op"> &lt;- </span><span class="t-fn">list</span><span class="t-op">(</span></span></div>
-                    <div class="cl is-add" style="--i:1"><span class="ln" aria-hidden="true">2</span><span class="cx"><span class="ws">··</span><span class="t-id">host</span><span class="t-op"> = </span><span class="t-str">"localhost"</span><span class="t-op">,</span></span></div>
-                    <div class="cl is-add" style="--i:2"><span class="ln" aria-hidden="true">3</span><span class="cx"><span class="ws">··</span><span class="t-id">port</span><span class="t-op"> = </span><span class="t-num">8080</span><span class="t-op">,</span></span></div>
-                    <div class="cl is-add" style="--i:3"><span class="ln" aria-hidden="true">4</span><span class="cx"><span class="ws">··</span><span class="t-id">retries</span><span class="t-op"> = </span><span class="t-num">3</span></span></div>
-                    <div class="cl" style="--i:4"><span class="ln" aria-hidden="true">5</span><span class="cx"><span class="t-op">)</span></span></div>
-                  </div>
-                </div>
-              </div>
-              <div class="stage-foot">
-                <code class="foot-cmd is-on"><span class="sh">$</span> roughly fmt --diff options.R</code>
-                <span class="foot-note is-on">Every argument snaps to one indent step. Your line breaks are kept.</span>
-              </div>
-            </div>
-
-            <!-- Annotations -->
-            <div class="stage split" role="tabpanel" id="panel-annotations" aria-labelledby="tab-annotations" tabindex="0" hidden>
-              <div class="stage-head">
-                <span class="ftabs"><span class="ftab is-active">pricing.R</span></span>
-                <span class="stage-meta">#: type annotations</span>
-              </div>
-              <div class="stage-body">
-                <div class="pane pane-src">
-                  <div class="pane-label">before</div>
-                  <div class="code" data-gutter>
-                    <div class="cl is-del"><span class="ln" aria-hidden="true">1</span><span class="cx"><span class="t-com">#:fn( gross:</span><span class="t-type">double</span><span class="t-com">,rate:</span><span class="t-type">double</span><span class="t-com"> )-&gt;</span><span class="t-type">double</span></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">2</span><span class="cx"><span class="t-id">margin</span><span class="t-op"> &lt;- </span><span class="t-kw">function</span><span class="t-op">(</span><span class="t-id">gross</span><span class="t-op">, </span><span class="t-id">rate</span><span class="t-op">) </span><span class="t-id">gross</span><span class="t-op"> * (</span><span class="t-num">1</span><span class="t-op"> - </span><span class="t-id">rate</span><span class="t-op">)</span></span></div>
-                    <div class="cl is-del"><span class="ln" aria-hidden="true">3</span><span class="cx"><span class="t-com">#: list[ named : </span><span class="t-type">double</span><span class="t-com"> ]</span></span></div>
-                    <div class="cl"><span class="ln" aria-hidden="true">4</span><span class="cx"><span class="t-id">weights</span><span class="t-op"> &lt;- </span><span class="t-fn">list</span><span class="t-op">(</span><span class="t-id">a</span><span class="t-op"> = </span><span class="t-num">1.0</span><span class="t-op">)</span></span></div>
-                  </div>
-                </div>
-                <div class="pane pane-out">
-                  <div class="pane-label">after</div>
-                  <div class="code" data-gutter>
-                    <div class="cl is-add" style="--i:0"><span class="ln" aria-hidden="true">1</span><span class="cx"><span class="t-com">#: fn(gross: </span><span class="t-type">double</span><span class="t-com">, rate: </span><span class="t-type">double</span><span class="t-com">) -&gt; </span><span class="t-type">double</span></span></div>
-                    <div class="cl" style="--i:1"><span class="ln" aria-hidden="true">2</span><span class="cx"><span class="t-id">margin</span><span class="t-op"> &lt;- </span><span class="t-kw">function</span><span class="t-op">(</span><span class="t-id">gross</span><span class="t-op">, </span><span class="t-id">rate</span><span class="t-op">) </span><span class="t-id">gross</span><span class="t-op"> * (</span><span class="t-num">1</span><span class="t-op"> - </span><span class="t-id">rate</span><span class="t-op">)</span></span></div>
-                    <div class="cl is-add" style="--i:2"><span class="ln" aria-hidden="true">3</span><span class="cx"><span class="t-com">#: list[</span><span class="t-type">named: double</span><span class="t-com">]</span></span></div>
-                    <div class="cl" style="--i:3"><span class="ln" aria-hidden="true">4</span><span class="cx"><span class="t-id">weights</span><span class="t-op"> &lt;- </span><span class="t-fn">list</span><span class="t-op">(</span><span class="t-id">a</span><span class="t-op"> = </span><span class="t-num">1.0</span><span class="t-op">)</span></span></div>
-                  </div>
-                </div>
-              </div>
-              <div class="stage-foot">
-                <code class="foot-cmd is-on"><span class="sh">$</span> roughly fmt --diff pricing.R</code>
-                <span class="foot-note is-on"
-                  >Annotations are parsed with the type checker's own grammar, then re-rendered.
-                  Anything it cannot parse is left byte-for-byte alone.</span
+            {
+              formatterTabs.map((tab, index) => (
+                <div
+                  class="stage split"
+                  role="tabpanel"
+                  id={`panel-${tab.key}`}
+                  aria-labelledby={`tab-${tab.key}`}
+                  tabindex="0"
+                  hidden={index !== 0}
                 >
-              </div>
-            </div>
+                  <div class="stage-head">
+                    <span class="ftabs">
+                      <span class="ftab is-active">{tab.file}</span>
+                    </span>
+                    <span class="stage-meta">{tab.meta}</span>
+                  </div>
+                  <div class="stage-body">
+                    <div class="pane pane-src">
+                      <div class="pane-label">as written</div>
+                      <div class="code" set:html={formatterCode[tab.key].before} />
+                    </div>
+                    <div class="pane pane-out">
+                      <div class="pane-label">roughly fmt</div>
+                      <div class="code" set:html={formatterCode[tab.key].after} />
+                    </div>
+                  </div>
+                  <div class="stage-foot">
+                    <code class="foot-cmd is-on">
+                      <span class="sh">$</span> roughly fmt --diff {tab.file}
+                    </code>
+                    <span class="foot-note is-on" set:html={tab.note} />
+                  </div>
+                </div>
+              ))
+            }
           </div>
 
           <p class="band-foot">
@@ -1543,6 +1430,7 @@ roughly check .</code></pre>
           }
         }
         function playRename() {
+          resetRename()
           const input = root.querySelector('[data-mark~="rename"]') as HTMLElement | null
           const ghosts = Array.from(
             root.querySelectorAll('[data-mark~="rename-ghost"]')
@@ -2121,18 +2009,6 @@ roughly check .</code></pre>
       pre {
         font-family: 'Geist Mono', ui-monospace, monospace;
       }
-      .sr-only {
-        position: absolute;
-        width: 1px;
-        height: 1px;
-        padding: 0;
-        margin: -1px;
-        overflow: hidden;
-        clip: rect(0, 0, 0, 0);
-        white-space: nowrap;
-        border: 0;
-      }
-
       /* ---------- nav (docs header parity) ---------- */
       .nav {
         position: fixed;
@@ -2448,6 +2324,7 @@ roughly check .</code></pre>
       /* ---------- editorial bands ---------- */
       .band {
         position: relative;
+        scroll-margin-top: 72px;
         padding: clamp(2.6rem, 5vw, 4rem) clamp(1.2rem, 5vw, 2.5rem);
         border-bottom: 1px solid var(--border);
         overflow: hidden;
@@ -2605,12 +2482,6 @@ roughly check .</code></pre>
       .doclink:hover span {
         transform: translateX(2px);
       }
-      .doclink-row {
-        display: flex;
-        gap: 1.6rem;
-        flex-wrap: wrap;
-        margin: 0;
-      }
       .inline-link {
         color: var(--foreground);
         border-bottom: 1px solid var(--border-strong);
@@ -2621,6 +2492,13 @@ roughly check .</code></pre>
       }
 
       /* ---------- capabilities triad ---------- */
+      #capabilities .col,
+      #capabilities .show-col {
+        max-width: var(--stage-frame);
+      }
+      #capabilities {
+        padding-inline: clamp(1.1rem, 4vw, 2.5rem);
+      }
       .cap-grid {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
@@ -2712,30 +2590,6 @@ roughly check .</code></pre>
       .c-muted {
         color: var(--muted);
       }
-      .c-kw {
-        color: oklch(0.88 0 0);
-      }
-      .c-fn {
-        color: var(--foreground);
-      }
-      .c-str {
-        color: oklch(0.82 0 0);
-      }
-      .caret {
-        color: var(--foreground);
-        letter-spacing: 0;
-        white-space: pre;
-      }
-      /* true diff colors */
-      .c-del {
-        color: var(--del);
-        text-decoration: line-through;
-        text-decoration-color: color-mix(in oklch, var(--del) 60%, transparent);
-      }
-      .c-add {
-        color: var(--add);
-      }
-
       .band-spotlight {
         background: color-mix(in oklab, var(--card) 28%, var(--background));
       }
@@ -2829,6 +2683,10 @@ roughly check .</code></pre>
         --lh: 1.62;
         display: flex;
         flex-direction: column;
+        /* `<-` and `->` must render as the characters you actually type; the
+           mono face would otherwise ligate them into arrows. */
+        font-variant-ligatures: none;
+        font-feature-settings: 'calt' 0, 'liga' 0;
         min-width: 0;
         background: var(--pane-bg);
         border: 1px solid var(--border);
@@ -2859,6 +2717,7 @@ roughly check .</code></pre>
       }
       .stage-foot {
         min-height: 40px;
+        flex-wrap: wrap;
         padding: 9px 12px;
         border-top: 1px solid var(--border);
         background: color-mix(in oklab, var(--pane-bg) 84%, #000);
@@ -2931,9 +2790,6 @@ roughly check .</code></pre>
       }
       /* The formatter's footer quotes the CLI's own summary line, so it keeps
          the terminal's typeface rather than the page's prose face. */
-      .fmt .stage-foot {
-        flex-direction: row-reverse;
-      }
       .fmt .foot-note {
         font-family: 'Geist Mono', ui-monospace, monospace;
         font-size: 11.5px;
@@ -2957,10 +2813,6 @@ roughly check .</code></pre>
         font-family: 'Geist Mono', ui-monospace, monospace;
         font-size: var(--code-size);
         line-height: var(--lh);
-        /* `<-` and `->` must render as the two characters you actually type;
-           the mono face would otherwise ligate them into arrows. */
-        font-variant-ligatures: none;
-        font-feature-settings: 'calt' 0, 'liga' 0;
         padding: 13px 0;
         width: max-content;
         min-width: 100%;
@@ -2971,6 +2823,20 @@ roughly check .</code></pre>
         min-height: 0;
         overflow-x: auto;
         overscroll-behavior-x: contain;
+      }
+      .code-scroll,
+      .stage.split .pane {
+        scrollbar-width: thin;
+        scrollbar-color: oklch(1 0 0 / 0.16) transparent;
+      }
+      .code-scroll::-webkit-scrollbar,
+      .stage.split .pane::-webkit-scrollbar {
+        height: 8px;
+      }
+      .code-scroll::-webkit-scrollbar-thumb,
+      .stage.split .pane::-webkit-scrollbar-thumb {
+        background: oklch(1 0 0 / 0.16);
+        border-radius: 4px;
       }
       .cl {
         display: flex;
@@ -3051,9 +2917,9 @@ roughly check .</code></pre>
         position: relative;
         display: grid;
         grid-template-rows: 1fr;
-        min-height: 268px;
+        min-height: 322px;
       }
-      .ide [data-for] {
+      .ide-body [data-for] {
         display: none;
       }
       .ide[data-feature='hover'] .hovercard,
@@ -3068,9 +2934,17 @@ roughly check .</code></pre>
       }
 
       /* the cursor's line, and the token the feature is about */
-      .ide[data-feature='definition'] .cl[data-line='3'],
-      .ide[data-feature='rename'] .cl[data-line='3'] {
+      .ide[data-feature='definition'] .cl[data-line='4'],
+      .ide[data-feature='rename'] .cl[data-line='4'] {
         background: oklch(1 0 0 / 0.035);
+      }
+      .ide[data-feature='definition'] .cl[data-line='4'] {
+        animation: jumpLand 900ms ease;
+      }
+      @keyframes jumpLand {
+        from {
+          background: color-mix(in oklch, var(--cap) 22%, transparent);
+        }
       }
       .ide[data-feature='definition'] [data-mark~='def-source'] {
         color: var(--cap);
@@ -3083,7 +2957,7 @@ roughly check .</code></pre>
         background: color-mix(in oklch, var(--cap) 20%, transparent);
         box-shadow: 0 0 0 1px color-mix(in oklch, var(--cap) 45%, transparent);
       }
-      .ide[data-feature='definition'] .cl[data-line='3'] .ln::after {
+      .ide[data-feature='definition'] .cl[data-line='4'] .ln::after {
         content: '';
         position: absolute;
         left: 0;
@@ -3104,7 +2978,15 @@ roughly check .</code></pre>
         color: var(--foreground);
         background: color-mix(in oklch, var(--cap) 10%, transparent);
         box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--cap) 60%, transparent);
-        border-right: 1.5px solid var(--cap);
+      }
+      .ide[data-feature='rename'] [data-mark~='rename']::after {
+        content: '';
+        display: inline-block;
+        width: 1.5px;
+        height: 1.1em;
+        margin-left: 1px;
+        vertical-align: text-bottom;
+        background: var(--cap);
         animation: caretBlink 1.05s steps(1, end) infinite;
       }
       .ide[data-feature='rename'] [data-mark~='rename-ghost'] {
@@ -3132,7 +3014,7 @@ roughly check .</code></pre>
         text-align: left;
       }
       .hovercard {
-        left: 7ch;
+        left: 14ch;
         bottom: calc(100% + 7px);
         width: max-content;
         max-width: min(62ch, 76vw);
@@ -3240,7 +3122,7 @@ roughly check .</code></pre>
         display: flex;
         align-items: center;
         gap: 0.5ch;
-        padding: 7px 12px 5px;
+        padding: 6px 12px 4px;
         color: var(--muted);
         font-size: 11.5px;
         border-bottom: 1px solid var(--border);
@@ -3252,12 +3134,12 @@ roughly check .</code></pre>
         display: flex;
         align-items: baseline;
         gap: 1.4ch;
-        padding: 3px 12px;
+        padding: 1px 12px;
         white-space: nowrap;
         overflow: hidden;
       }
       .peek-row:last-child {
-        padding-bottom: 8px;
+        padding-bottom: 7px;
       }
       .peek-file {
         flex: none;
@@ -3295,16 +3177,7 @@ roughly check .</code></pre>
         display: inline;
       }
 
-      /* rename input, drawn over the token being renamed */
-      .renamebox {
-        display: inline-flex;
-        align-items: center;
-        border-radius: 3px;
-        padding: 0 1px;
-        color: var(--foreground);
-        background: color-mix(in oklch, var(--cap) 10%, transparent);
-        box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--cap) 65%, transparent);
-      }
+      /* the "N edits in M files" the rename response actually reports */
       .renamebadge {
         margin-left: 1.5ch;
         padding: 0 5px;
@@ -3322,7 +3195,7 @@ roughly check .</code></pre>
          ================================================================== */
       .stage.split .stage-body {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1.12fr);
+        grid-template-columns: minmax(0, var(--split, 1fr)) minmax(0, 1fr);
         align-items: stretch;
       }
       .stage.split .pane {
@@ -3343,10 +3216,40 @@ roughly check .</code></pre>
       @media (max-width: 900px) {
         .stage.split .stage-body {
           grid-template-columns: minmax(0, 1fr);
+          /* Stacked panes size to their own content; the leftover height of the
+             shared cell collects once at the bottom instead of twice. */
+          grid-auto-rows: min-content;
+          align-content: start;
         }
         .stage.split .pane + .pane {
           border-left: 0;
           border-top: 1px solid var(--border);
+        }
+      }
+      @media (max-width: 640px) {
+        .stage-head {
+          flex-wrap: wrap;
+          gap: 0.4rem;
+        }
+        .stage-foot {
+          gap: 0.4rem;
+        }
+        /* On a phone the stacked footer notes would reserve the tallest note's
+           height on every tab; the small reflow is the better trade there. */
+        .foot-notes,
+        .foot-methods {
+          display: block;
+        }
+        .foot-notes > .foot-note,
+        .foot-methods > .foot-method {
+          display: none;
+        }
+        .foot-notes > .foot-note.is-on,
+        .foot-methods > .foot-method.is-on {
+          display: block;
+        }
+        .fmt .foot-note {
+          text-align: left;
         }
       }
       .pane-label {
@@ -3420,12 +3323,10 @@ roughly check .</code></pre>
       }
 
       /* ---------- formatter panes ---------- */
-      .fmt .cl.is-del .ln,
-      .fmt .cl.is-add .ln {
-        color: oklch(0.55 0 0);
+      .fmt .cl.is-changed .ln {
+        color: oklch(0.56 0 0);
       }
-      .fmt .cl.is-del::before,
-      .fmt .cl.is-add::before {
+      .fmt .cl.is-changed::before {
         content: '';
         position: absolute;
         left: 0;
@@ -3434,21 +3335,26 @@ roughly check .</code></pre>
         width: 2px;
         z-index: 3;
       }
-      .fmt .cl.is-del {
-        background: color-mix(in oklch, var(--d-del) 6%, transparent);
+      .fmt .pane-src .cl.is-changed {
+        background: color-mix(in oklch, var(--d-del) 7%, transparent);
       }
-      .fmt .cl.is-del::before {
+      .fmt .pane-src .cl.is-changed::before {
         background: color-mix(in oklch, var(--d-del) 70%, transparent);
       }
-      .fmt .cl.is-add {
-        background: color-mix(in oklch, var(--d-add) 6%, transparent);
+      .fmt .pane-out .cl.is-changed {
+        background: color-mix(in oklch, var(--d-add) 7%, transparent);
       }
-      .fmt .cl.is-add::before {
+      .fmt .pane-out .cl.is-changed::before {
         background: color-mix(in oklch, var(--d-add) 70%, transparent);
       }
-      .fmt .pane-src .ln,
-      .fmt .pane-out .ln {
+      .fmt .ln {
         background: transparent;
+      }
+      .fmt .pane-out {
+        background: var(--pane-bg);
+      }
+      .fmt .pane-src {
+        background: color-mix(in oklab, var(--pane-bg) 88%, #000);
       }
       /* The formatted pane settles in line by line when the panel becomes
          visible, so the reader watches the rewrite rather than reading a
@@ -3470,7 +3376,7 @@ roughly check .</code></pre>
           transform: translateY(0);
         }
       }
-      .fmt .stage.is-playing .pane-src .cl.is-del {
+      .fmt .stage.is-playing .pane-src .cl.is-changed {
         animation: delFade 420ms ease both;
       }
       @keyframes delFade {
@@ -3483,14 +3389,27 @@ roughly check .</code></pre>
       .stage {
         --code-size: 13px;
       }
+      /* Split panes are half the frame, so their code sits one notch smaller. */
+      .stage.split {
+        --code-size: 12.5px;
+      }
       @media (max-width: 1100px) {
         .stage {
           --code-size: 12.5px;
+        }
+        .stage.split {
+          --code-size: 12px;
+        }
+        .ide-body {
+          min-height: 314px;
         }
       }
       @media (max-width: 640px) {
         .stage {
           --code-size: 11.5px;
+        }
+        .stage.split {
+          --code-size: 11px;
         }
         .comp {
           left: 0;
@@ -3502,7 +3421,7 @@ roughly check .</code></pre>
           left: 14px;
         }
         .ide-body {
-          min-height: 250px;
+          min-height: 296px;
         }
         .stage-head,
         .stage-foot {
@@ -3513,15 +3432,6 @@ roughly check .</code></pre>
         }
       }
 
-      @media (prefers-reduced-motion: reduce) {
-        .caretbar {
-          animation: none;
-        }
-        .fmt .stage.is-playing .pane-out .cl,
-        .fmt .stage.is-playing .pane-src .cl.is-del {
-          animation: none !important;
-        }
-      }
       /* ---------- closer ---------- */
       .band-closer {
         position: relative;
@@ -3598,32 +3508,12 @@ roughly check .</code></pre>
         .cap-icon .tick {
           transition: none;
         }
-        .caret-blink {
-          animation: none;
-        }
-        [role='tabpanel'].play,
-        .play .comp-pop,
-        .play .comp-rowhl,
-        .play .hover-underline,
-        .play .hover-tip,
-        .play .gd-name,
-        .play .gotodef-connector .gd-line,
-        .play .gotodef-connector .gd-arrow,
-        .play .ref,
-        .play .inlay-pill,
-        .play .inlay-arg,
-        .play .squig,
-        .play .caret-line,
-        .play .err-line,
-        .play .param,
-        .play .infer-hint,
-        .play .lint-cmd,
-        .play .lint-err,
-        .play .lint-warn {
+        .caretbar,
+        .ide[data-feature='rename'] [data-mark~='rename']::after,
+        .ide[data-feature='definition'] .cl[data-line='4'],
+        .fmt .stage.is-playing .pane-out .cl,
+        .fmt .stage.is-playing .pane-src .cl.is-changed {
           animation: none !important;
-        }
-        .lint-cmd {
-          width: auto !important;
         }
       }
     </style>
