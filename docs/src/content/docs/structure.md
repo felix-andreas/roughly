@@ -78,8 +78,8 @@ The preserving formatter over the syntax tree, plus its configuration types.
 - `diagnostics.rs` — the shared diagnostics assembly (config gating, strict
   escalation, suppression comments) used by both the server and the CLI
 - `namespace.rs` — NAMESPACE import parsing and validation
-- `position.rs` — the line index: byte offsets ↔ line/column in bytes or
-  UTF-16 code units
+- `position.rs` — the line index: byte offsets ↔ line/column in bytes,
+  characters (what the CLI reports), or UTF-16 code units (the LSP default)
 - `stats.rs` — the performance diagnosis behind `roughly debug stats`
 - `repl_completer.rs` — completion for the interactive console
 

@@ -18,6 +18,7 @@ repository = "https://github.com/felix-andreas/roughly"
 [workspace.dependencies]
 clap = { version = "4.5.40", features = ["derive"] }
 console = "0.16.0"
+unicode-width = "0.2"
 ignore = "0.4.23"
 indoc = "2.0.6"
 itertools = "0.14.0"

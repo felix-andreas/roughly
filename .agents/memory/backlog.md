@@ -143,9 +143,10 @@ permanently yes, including CI. That gap is three bugs, not a redesign."**
    helper functions reported `unused`, and every *correct* call to them reported `unresolved`,
    indistinguishable from their planted typo. It also killed the wrong-arity catch, which works well
    within a file.
-5. **Reported columns are byte offsets, not characters, so the caret visibly misaligns** on any line
-   containing `é`, `—` or `–` — char column 31 reported as 42, same in the JSON. `getting-started.mdx`
-   promises every reported line *and column* points at the original file; lines do, columns do not.
+5. **Byte-offset columns and the misaligned caret FIXED.** A reported column now counts characters —
+   in the rendered header, in `--output json`, and in the server's `file:line:column` hover strings —
+   and the caret is padded by terminal cells, so it lands under the glyph even for double-width text.
+   See the decision record; the JSON field documentation moved with it.
 6. **5 of 10 planted bugs caught, and all 5 were cosmetic** (`=`, `T`/`F`, trailing comma). Missed:
    two column typos, two function-name typos, one wrong arity. Unknown *functions* inside `mutate`
    and `filter` are swallowed along with the column names.
@@ -517,6 +518,12 @@ below, ranked by how often a real user hits it.
 - CRAN stub auto-generation via R introspection, R-version-keyed corpora, stubtest validation (R-dependent). (NAMESPACE/DESCRIPTION awareness moved to Open — semantics by user ask.)
 
 ## Shipped ledger (one line each; rationale in `decisions.md`, contracts in the docs site)
+
+- **Reported columns count characters, and the caret lands under the glyph:** byte columns disagreed
+  with every editor on any line carrying non-ASCII text and pushed the caret right of the code it
+  accused — sometimes past the end of the line. Columns are characters now (header, JSON, and the
+  server's human-readable locations); caret padding is terminal cells, so double-width text aligns
+  too. The `--output json` field documentation changed with it (see `decisions.md`).
 
 - **S3 dispatch counts as a use, and a project's own generics are real generics:** the default-on
   `unused` lint called `speak.dog` dead and the opt-in `unused-parameter` called a generic's dispatch

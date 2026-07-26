@@ -137,8 +137,8 @@ else, so the stream stays parseable while human-readable progress goes to stderr
 | Field | Meaning |
 | ----- | ------- |
 | `path` | Absolute path of the file |
-| `line`, `column` | 1-based start position, in bytes |
-| `endLine`, `endColumn` | 1-based end position, in bytes (exclusive) |
+| `line`, `column` | 1-based start position; the column counts **characters**, the same number the rendered output and your editor show |
+| `endLine`, `endColumn` | 1-based end position, exclusive, columns in characters |
 | `severity` | `"error"` or `"warning"` |
 | `code` | The stable diagnostic code, the same one `# roughly: allow(...)` takes |
 | `message` | The rendered message |

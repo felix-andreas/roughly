@@ -908,7 +908,7 @@ impl Worker {
         let sources = semantics::stubs::StubSources::try_get(&self.db)?;
         let (_, text) = sources.sources(&self.db).get(target.source_index)?;
         let index = LineIndex::new(text);
-        let position = index.line_column(target.range.start());
+        let position = index.line_column_chars(target.range.start(), text);
         Some(format!(
             "{}:{}:{}",
             path.file_name()?.to_string_lossy(),
@@ -953,7 +953,7 @@ impl Worker {
             .display();
         let text = self.text(target.file);
         let index = LineIndex::new(&text);
-        let position = index.line_column(target.range.start());
+        let position = index.line_column_chars(target.range.start(), &text);
         Some(format!(
             "{display}:{}:{}",
             position.line + 1,

@@ -1,8 +1,14 @@
 //! Line/column addressing over a document's text. Analysis speaks absolute
-//! byte offsets; the CLI renders 1-based line and byte-column pairs, and the
-//! language server converts to the negotiated LSP encoding (UTF-16 code units
-//! or UTF-8 bytes) at the protocol edge — always against the target
+//! byte offsets; the CLI renders 1-based line and **character**-column pairs,
+//! and the language server converts to the negotiated LSP encoding (UTF-16 code
+//! units or UTF-8 bytes) at the protocol edge — always against the target
 //! document's own text.
+//!
+//! A reported column is the one a person counts and an editor shows, so it
+//! counts characters: a byte column disagrees with both on any line containing
+//! non-ASCII text, which R source carries as soon as a string holds a name or a
+//! unit. Caret art is a separate question — a glyph can occupy two terminal
+//! cells — so the renderer pads by display width, not by either column unit.
 
 use syntax::TextSize;
 
@@ -14,8 +20,8 @@ pub struct LineIndex {
     text_len: u32,
 }
 
-/// A zero-based line paired with a zero-based column in some unit (bytes or
-/// UTF-16 code units, per the function that produced it).
+/// A zero-based line paired with a zero-based column in some unit (bytes,
+/// characters, or UTF-16 code units, per the function that produced it).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LineColumn {
     pub line: u32,
@@ -68,6 +74,19 @@ impl LineIndex {
         LineColumn {
             line: line as u32,
             column: offset - self.line_starts[line],
+        }
+    }
+
+    /// Zero-based line and **character** column of a byte offset — what the CLI
+    /// reports and what an editor's status bar shows.
+    pub fn line_column_chars(&self, offset: TextSize, text: &str) -> LineColumn {
+        let position = self.line_column(offset);
+        let start = self.line_starts[position.line as usize] as usize;
+        LineColumn {
+            line: position.line,
+            column: text[start..start + position.column as usize]
+                .chars()
+                .count() as u32,
         }
     }
 
@@ -126,6 +145,21 @@ mod tests {
         let position = index.line_column(TextSize::from(5));
         assert_eq!((position.line, position.column), (1, 1));
         assert_eq!(index.offset(position, text), TextSize::from(5));
+    }
+
+    #[test]
+    fn character_columns_ignore_utf8_width() {
+        // The reported column of `=` on `x <- "café" ; y = 2L` is what a person
+        // counts, not how many bytes precede it.
+        let text = "x <- \"café\" ; y = 2L\n";
+        let index = LineIndex::new(text);
+        let equals = TextSize::from(text.find("= 2L").expect("the assignment is there") as u32);
+        assert_eq!(index.line_column(equals).column, 17, "byte column");
+        assert_eq!(
+            index.line_column_chars(equals, text).column,
+            16,
+            "character column"
+        );
     }
 
     #[test]

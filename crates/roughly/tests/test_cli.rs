@@ -704,6 +704,57 @@ fn check_reports_an_export_the_package_does_not_define() {
     );
 }
 
+// A column is what a person counts and an editor shows, so non-ASCII text
+// earlier on the line must not shift it — and the caret has to sit beneath the
+// glyph, which means padding by terminal cells, not by characters.
+#[test]
+fn check_reports_character_columns_and_aligns_the_caret() {
+    let directory = project(&[(
+        "accents.R",
+        "x <- \"résumé — café\" ; y = 2L\nprint(x)\nprint(y)\n",
+    )]);
+    let output = roughly(directory.path(), &["check", "accents.R"]);
+    let rendered = stderr(&output);
+    assert!(
+        rendered.contains("accents.R:1:26"),
+        "the `=` is at character column 26: {rendered}"
+    );
+    let caret_line = rendered
+        .lines()
+        .find(|line| line.trim_start().starts_with('^'))
+        .expect("a caret line");
+    let source_line = rendered
+        .lines()
+        .find(|line| line.contains("résumé"))
+        .expect("the snippet line");
+    // Both positions are measured in terminal cells, which is the whole point:
+    // comparing byte offsets would pass on a broken renderer and fail on a
+    // correct one, since only the snippet line carries multibyte text.
+    let cells_before = |line: &str, index: usize| {
+        unicode_width::UnicodeWidthStr::width(line.get(..index).unwrap_or_default())
+    };
+    let caret_at = cells_before(caret_line, caret_line.find('^').expect("a caret"));
+    let equals_at = cells_before(
+        source_line,
+        source_line.find("= 2L").expect("the assignment"),
+    );
+    assert_eq!(
+        caret_at, equals_at,
+        "the caret must sit under the `=`: {rendered}"
+    );
+
+    let json = roughly(
+        directory.path(),
+        &["check", "--output", "json", "accents.R"],
+    );
+    let record: serde_json::Value =
+        serde_json::from_str(stdout(&json).trim()).expect("diagnostic line is not valid JSON");
+    assert_eq!(
+        record["column"], 26,
+        "JSON columns agree with the rendered ones: {record}"
+    );
+}
+
 // A generic and its methods routinely live in different files of one package,
 // and dispatch is not a read, so the S3 carve-out has to see the whole
 // namespace rather than one file.

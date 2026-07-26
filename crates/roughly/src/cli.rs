@@ -174,7 +174,7 @@ pub fn check(
                         render_human_diagnostic(stub_path, stub_text, &stub_index, &diagnostic, &[])
                     }
                     OutputFormat::Json => {
-                        render_json_diagnostic(stub_path, &stub_index, &diagnostic, &[])
+                        render_json_diagnostic(stub_path, stub_text, &stub_index, &diagnostic, &[])
                     }
                 }
             }
@@ -373,9 +373,11 @@ pub fn check(
                                     .filter_map(|related| {
                                         let related_path = path_by_file.get(&related.file)?;
                                         let related_index = LineIndex::new(related.file.text(&db));
-                                        let start =
-                                            related_index.line_column(related.range.start());
-                                        let end = related_index.line_column(related.range.end());
+                                        let related_text = related.file.text(&db);
+                                        let start = related_index
+                                            .line_column_chars(related.range.start(), related_text);
+                                        let end = related_index
+                                            .line_column_chars(related.range.end(), related_text);
                                         Some(RelatedNote {
                                             path: (*related_path).clone(),
                                             line: start.line,
@@ -408,7 +410,7 @@ pub fn check(
                         render_human_diagnostic(path, source, &line_index, diagnostic, related)
                     }
                     OutputFormat::Json => {
-                        render_json_diagnostic(path, &line_index, diagnostic, related)
+                        render_json_diagnostic(path, source, &line_index, diagnostic, related)
                     }
                 }
             }
@@ -456,9 +458,13 @@ pub fn check(
                         &diagnostic,
                         &[],
                     ),
-                    OutputFormat::Json => {
-                        render_json_diagnostic(&namespace_path, &index, &diagnostic, &[])
-                    }
+                    OutputFormat::Json => render_json_diagnostic(
+                        &namespace_path,
+                        namespace_source,
+                        &index,
+                        &diagnostic,
+                        &[],
+                    ),
                 }
             }
         }
@@ -714,8 +720,8 @@ fn render_human_diagnostic(
     };
     eprintln!("{header}{}", style(&diagnostic.message).bold());
 
-    let start = index.line_column(diagnostic.range.start());
-    let end = index.line_column(diagnostic.range.end());
+    let start = index.line_column_chars(diagnostic.range.start(), source);
+    let end = index.line_column_chars(diagnostic.range.end(), source);
     let gutter_width = (end.line as usize + 1).to_string().len();
     // Paths render relative to the working directory when they are under it.
     let display_path = std::env::current_dir()
@@ -749,17 +755,22 @@ fn render_human_diagnostic(
         first_line_text
     );
     let trailing_lines = (end.line - start.line) as usize;
-    let caret_column = start.column as usize;
-    let caret_end = if trailing_lines == 0 {
-        usize::max(caret_column + 1, end.column as usize)
+    // Caret art is measured in terminal cells, not characters: a column tells
+    // the reader where to look in their editor, but the underline has to sit
+    // beneath the glyphs, and a CJK character or an emoji occupies two cells.
+    let byte_column = index.line_column(diagnostic.range.start()).column as usize;
+    let caret_indent = display_width(&first_line_text[..byte_column]);
+    let underlined = if trailing_lines == 0 {
+        let byte_end = index.line_column(diagnostic.range.end()).column as usize;
+        &first_line_text[byte_column..byte_end.max(byte_column)]
     } else {
-        first_line_text.chars().count().max(caret_column + 1)
+        &first_line_text[byte_column..]
     };
-    let caret_width = caret_end - caret_column;
+    let caret_width = display_width(underlined).max(1);
     eprintln!(
         "{}{}  {}",
         " ".repeat(gutter_width + 1),
-        " ".repeat(caret_column),
+        " ".repeat(caret_indent),
         {
             let carets = style("^".repeat(caret_width)).bold();
             match diagnostic.severity {
@@ -800,8 +811,16 @@ fn render_human_diagnostic(
 /// Renders one diagnostic as a JSON Lines record on stdout for CI use.
 /// Positions are 1-based like the human renderer; the field names are a
 /// documented contract.
+/// A string's width in terminal cells: the unit caret art has to be measured
+/// in, since a CJK character or an emoji occupies two cells while a combining
+/// mark occupies none.
+fn display_width(text: &str) -> usize {
+    unicode_width::UnicodeWidthStr::width(text)
+}
+
 fn render_json_diagnostic(
     path: &Path,
+    source: &str,
     index: &LineIndex,
     diagnostic: &Diagnostic,
     related: &[RelatedNote],
@@ -810,8 +829,8 @@ fn render_json_diagnostic(
         Severity::Warning => "warning",
         Severity::Error => "error",
     };
-    let start = index.line_column(diagnostic.range.start());
-    let end = index.line_column(diagnostic.range.end());
+    let start = index.line_column_chars(diagnostic.range.start(), source);
+    let end = index.line_column_chars(diagnostic.range.end(), source);
     let related: Vec<serde_json::Value> = related
         .iter()
         .map(|note| {
