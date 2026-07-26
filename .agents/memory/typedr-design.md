@@ -1,52 +1,134 @@
-# TypedR — a compiled dialect with inline types (design proposal)
+# TypedR — a typed dialect of R that compiles to R
 
-Status: **proposal, not scheduled**. Nothing here is implemented; no contract
-page exists yet. This document records the intended shape so a future slice
-can start from a settled design instead of re-deriving it. Promote the
-decided parts to a docs-site page when implementation begins.
+Status: **proposal. Nothing is implemented, and one question has to be answered
+before anything should be** (§3). This document exists so that whoever picks it
+up starts from a reasoned design instead of re-deriving one, and so the costs are
+visible before the work starts rather than after.
 
-## The idea
+Read it in order. Each section earns the next one.
 
-A package gains a `TypedR/` source folder next to `R/`. Files in it are
-written in **TypedR**: R with inline type annotations plus a small set of
-constructs R lacks — first-class records and tuples, and tagged unions with
-`match`. Every TypedR file compiles automatically to a plain R file in `R/`,
-which is what R itself runs and what CRAN ships. Plain-R consumers never see
-TypedR; the compiled output is idiomatic, readable R.
+## 1. The problem this is meant to solve
 
-The existing `#:` comment annotations stay fully supported and are not
-deprecated: they are the zero-cost path for annotating plain R. TypedR is
-the opt-in path for code that wants types (and richer data modeling) as
-first-class syntax.
+R gives you one compound data structure that people use for everything: the
+list. In practice a list plays five different roles.
 
-## Why this fits Roughly specifically
+```r
+person  <- list(name = "Ada", age = 36)          # a record: fields by name
+pair    <- list("celsius", 21.5)                 # a tuple: meaning by position
+options <- list()                                # a map: keys known at run time
+options[[key]] <- value
+circle  <- structure(list(r = 2), class = "Circle")   # an object of some kind
+shape   <- if (round) circle else rectangle           # one of several kinds
+```
 
-Three assets make this a frontend, not a second product:
+The checker handles the first three well: they are shapes, and shapes are what a
+type system is for. The last two are where it stops, and the reason is
+structural rather than a missing feature. **In R, "what kind of thing is this"
+is a string in an attribute.** `structure(list(r = 2), class = "Circle")` says
+"Circle" the same way a comment says it: to a reader, not to a tool. The
+matching read is `inherits(x, "Circle")` — another string, unconnected to the
+first by anything a checker can follow.
 
-1. **The type system is already carrier-agnostic.** The typing reference
-   defines semantics over types, not over `#:` comments. Records and tuples
-   already exist as list shapes (`list{name: T}`, `list{T1, T2}`) — the
-   reference explicitly leaves room for "distinct tuple and record
-   constructors later, even if they remain runtime aliases of R lists".
-   Tagged unions decompose into machinery that exists: nominal types
-   (`@type` / `@new`), unions, and guard narrowing.
-2. **The type grammar is already written.** The lexer tokenizes full type
-   syntax inside `#:` regions (`in_annotation` mode) and the annotation
-   parser builds real syntax nodes for it. TypedR promotes that grammar
-   from comment trivia into expression positions; it does not invent a
-   second type syntax.
-3. **The pipeline is item-granular and dialect-tolerant.** Items lower to
-   HIR independently; naming, inference, the package interface, and the IDE
-   layer consume HIR and types, not surface syntax. A TypedR item that
-   lowers to the same HIR shapes flows through every downstream stage —
-   including incremental analysis — unchanged.
+This is not a corner case. In an adoption review where a package author turned
+on the strictest checking, **31 of their 34 findings traced to a single call
+shape**: `structure(list(...), class = ...)`. That is the idiom real R packages
+are built out of, and it is opaque by construction.
 
-## Surface design
+The consequence that matters is not the missing type. It is the missing
+**exhaustiveness**. When a value is one of several kinds, R's idiom for handling
+it is a chain:
 
-File extension: `.tR` (R-family at a glance). Windows case-insensitivity
-makes `.tr` equivalent; the tools treat them identically.
+```r
+area <- function(shape) {
+  if (inherits(shape, "Circle")) {
+    pi * shape$r^2
+  } else if (inherits(shape, "Rectangle")) {
+    shape$w * shape$h
+  }
+}
+```
 
-### Inline annotations (phase 1)
+Add a third kind later and this function silently returns `NULL` for it. `NULL`
+then flows onward and fails somewhere else entirely — the exact failure mode the
+whole tool exists to catch. Nothing in R, and nothing a comment can add, will
+tell you that this function forgot a case.
+
+So the gap is: **R has no way to say "this value is one of these N shapes" that
+a reader or a checker can verify, and no way to be told when a use of it is
+incomplete.**
+
+## 2. Why comment annotations reach a ceiling here
+
+The `#:` comment annotations are the right answer for types, and this proposal
+does not deprecate or replace them. They cost nothing: every other R tool sees a
+comment, the file stays ordinary R, and there is no build step. For declaring
+what a function takes and returns, they are already the whole job.
+
+They have also already been pushed at *this* problem. `@type` and `@new` let you
+declare a named type and mint values of it, and it works — the same reviewer who
+lost 31 findings to `structure()` got from 34 findings down to 9 with four lines
+of annotation. But note what they had to do: hand-declare a type describing a
+`list()` the checker was looking straight at. The annotation restates what the
+code already said.
+
+The harder half does not fit at all, and it is worth being precise about why.
+Exhaustive case analysis needs three things: a place to *declare* the set of
+kinds, a place to *construct* one and have the construction checked, and a
+place to *use* one where the checker can see every case and complain about the
+missing one. The first two can be expressed in comments. The third cannot,
+because there is no R construct to attach it to. The closest thing R has is
+`switch(class(x)[1], ...)`, and that is an ordinary function call. To make it
+checkable you would have to teach the checker that *this particular call to this
+particular function* is a case analysis — that is, to bless a magic call shape.
+
+That is a real option, not a dead end. It is the fork in §3.
+
+## 3. The fork to settle first: a blessed library, or a dialect
+
+There are two honest routes to exhaustive case analysis in R, and they lead to
+different products. **This has to be decided before any implementation starts,
+because the answer decides whether the rest of this document gets built.**
+
+**Route A — a library the checker knows specially.** Ship an R package with tag
+constructors and a `match` function. Files stay ordinary `.R`. The checker
+recognises calls to those specific functions and checks exhaustiveness on them.
+
+- Keeps every advantage the tool currently sells: your code is R, every other
+  tool works, no build step, nothing to install for a collaborator.
+- Costs: the checker gains special knowledge of particular function names, which
+  is a category of complexity the design bar is normally hostile to. Construction
+  is a function call, so it can be checked but not *restricted* — nothing stops
+  someone building the underlying list by hand and bypassing the contract. And
+  the notation is whatever R's call syntax allows, which for pattern matching is
+  clumsy: named arguments standing in for patterns, with no place to bind a
+  variant's fields.
+
+**Route B — a dialect with real syntax** (the rest of this document). A separate
+source language, compiled to plain R.
+
+- Gets real declaration, construction and `match` syntax, and can restrict
+  construction because the constructor is syntax rather than a callable
+  function.
+- Costs a build step and an ecosystem split. §5 states this in full; it is the
+  serious objection.
+
+**A recorded direction points at Route A.** `typing-design.md` §1 carries an
+earlier instruction: provide tags "through a stdlib the checker knows specially,
+not through new R syntax — annotated R stays ordinary R". This document is Route
+B and therefore contradicts it. That is not an oversight to route around: the
+two routes want the same capability, and building both would be waste. Settle
+the fork explicitly, record the answer in `decisions.md`, and delete the losing
+half.
+
+The rest of this document assumes Route B, so that the choice is between two
+designs rather than between a design and a sketch.
+
+## 4. What the dialect adds
+
+Three layers. They are ordered so that each is useful alone and the later ones
+need the earlier ones.
+
+### Layer 1 — types where the code is
 
 ```
 half <- function(x: integer, scale: double = 1) -> double {
@@ -55,33 +137,40 @@ half <- function(x: integer, scale: double = 1) -> double {
 count: integer <- 0L
 ```
 
-- Parameter types, return types, and binding ascriptions use the existing
-  type grammar verbatim (same names, same generics `<T: numeric>`, same
-  shapes).
-- Compilation is **pure erasure onto `#:` comments**: the generated R keeps
-  the declaration as the equivalent `#:` annotation, so the output of the
-  compiler is exactly the input language the checker already speaks.
+Same type notation as the comment form — same names, same generics
+(`<T: numeric>`), same shapes. Nothing new is expressible; this is the comment
+annotation moved into the code, which removes the attachment rules (which
+comment belongs to which statement) and the duplication of parameter names.
 
-### Records and tuples (phase 2)
+Be honest about the value: **this layer is ergonomics, not capability.** On its
+own it does not justify a dialect. It is worth building first because it is the
+cheapest way to prove the machinery — the source folder, the compiler, the
+editor integration, the position mapping — with almost no new meaning to get
+wrong.
+
+### Layer 2 — naming shapes
 
 ```
 type Point = {x: double, y: double}
 
-origin <- Point{x = 0, y = 0}      # record construction, checked fields
-pair <- #(1L, "one")               # tuple construction, fixed positions
+origin <- Point{x = 0, y = 0}
+pair   <- #(1L, "one")
 ```
 
-- `type Name = {field: T, ...}` is surface syntax for the existing
-  record-like list shape (an `@alias` in today's terms); `Point{...}`
-  construction checks field names and types at the construction site.
-- Tuples get a constructor form (`#(a, b)` is a placeholder spelling — the
-  final token is an open question) for the existing tuple-like shape.
-- Both **compile to `list(...)`** — they are runtime aliases of R lists, as
-  the typing reference anticipated. A nominal record (opaque outside its
-  constructor) is the existing `@type` + `@new` semantics with `new Point{...}`
-  surface syntax.
+`type Name = {...}` names a record shape; `Point{...}` constructs one and the
+construction is checked against the declaration, so a misspelled or missing
+field is caught where the mistake is rather than at some later read. Tuples get
+a constructor for the positional shape. (`#(...)` is a placeholder spelling —
+see §13.)
 
-### Tagged unions and `match` (phase 3)
+Both compile to `list(...)`. They are names for shapes the type system already
+has, and the typing reference already anticipated exactly this: it notes that
+distinct record and tuple constructors may arrive later "even if they remain
+runtime aliases of R lists".
+
+### Layer 3 — kinds, and being told when you miss one
+
+This is the reason to do any of it.
 
 ```
 type Shape =
@@ -90,148 +179,258 @@ type Shape =
 
 area <- function(shape: Shape) -> double {
   match (shape) {
-    Circle(radius) -> pi * radius^2
+    Circle(radius)          -> pi * radius^2
     Rectangle(width, height) -> width * height
   }
 }
 ```
 
-**Decision: classic nominal sum types, not polymorphic variants.**
-Rationale:
+Add a `Triangle` variant and `area` becomes an error that names the case it does
+not handle. A `_ ->` arm opts out deliberately. Each arm sees the variant's
+fields as ordinary bound names, so there is no `shape$radius` on a value that
+might not have one.
 
-- Each variant maps onto machinery that exists: a variant is a nominal
-  record type; the sum name is an alias for the union of its variants;
-  `match` narrowing is the guard-narrowing machinery applied per arm;
-  exhaustiveness is union coverage — all four are implemented concepts.
-- The compiled form is **idiomatic S3**: constructors emit
-  `structure(list(radius = radius), class = c("Circle", "Shape"))`, so
-  plain-R consumers can `inherits(x, "Shape")` and even write S3 methods on
-  variants. The dialect's data types remain first-class citizens of the
-  host ecosystem — this is the property that makes TypedR adoptable
-  mid-package.
-- Polymorphic variants require row polymorphism: a new constraint kind, a
-  harder inference problem, and notoriously worse error messages. The
-  design bar (simplest correct model; diagnostics quality) rules them out;
-  nothing prevents revisiting once nominal sums prove insufficient in
-  practice.
+**Kinds are nominal, not structural.** A variant belongs to the union it was
+declared in, rather than any record with a `radius` field being a `Circle`. Two
+reasons. It maps onto machinery that exists — a variant is a named type, the sum
+is a union of those names, per-arm narrowing is the flow narrowing already
+implemented, exhaustiveness is union coverage. And the structural alternative
+needs types that talk about "any record with at least these fields", which is a
+harder inference problem with a well-earned reputation for unreadable error
+messages. Diagnostics quality is a stated goal; this is where that goal cashes
+out as a design constraint. Nothing prevents revisiting if nominal kinds prove
+too rigid in practice.
 
-`match` compiles to a `switch` on the class tag with field bindings in each
-arm. The checker enforces exhaustiveness (a missing variant is an error
-naming it; a `_ ->` default arm opts out) and per-arm narrowing.
+**The compiled form is ordinary S3**, and this is load-bearing rather than
+incidental:
 
-## Compilation model
+```r
+Circle <- function(radius) structure(list(radius = radius), class = c("Circle", "Shape"))
+```
 
-- **Target = annotated plain R.** The compiler emits `#:` annotations for
-  everything expressible as one, so the generated file independently
-  type-checks under today's contract. This closes the loop cheaply: the
-  semantic-preservation gate is "checking `TypedR/foo.tR` and checking the
-  generated `R/foo.R` produce identical findings" (ranges mapped), which is
-  a differential in the house style.
-- **Line-preserving erasure wherever possible.** Inline annotations erase
-  in place (the `#:` line is emitted above the statement, which does shift
-  lines — so full 1:1 line identity is not achievable; instead the compiler
-  maintains a per-file line map, and every diagnostic surface reports
-  TypedR positions). Sugar constructs expand on their own lines with the
-  formatter normalizing output.
-- **Generated files are committed.** R packaging and CRAN need real files
-  under `R/`; reviewers need readable diffs of what actually ships. Each
-  generated file carries a header (`# Generated by roughly from
-  TypedR/foo.tR — do not edit`), and `roughly build --check` fails CI on
-  drift (same shape as `roughly format --check`). Determinism comes free:
-  the emitter renders through the existing formatter.
-- **Editing the generated file is an error the tools catch**, not a merge
-  problem: the drift check compares a content hash recorded in the header.
+A plain-R consumer can `inherits(x, "Shape")`, write S3 methods on variants, and
+print them — so a typed data structure is still a first-class citizen of the
+host ecosystem. That property is what makes it possible to adopt the dialect in
+one file of an existing package instead of all of it.
 
-## Fit with the existing crates
+## 5. What it costs
 
-- `syntax` — one grammar, a `Dialect` parameter on `parse` (`R` |
-  `TypedR`). The TypedR dialect enables: type positions after `:` in
-  parameters and bindings, `-> T` in function heads, `type` declarations,
-  record/tuple constructors, `match`. New node kinds (TYPE_ASCRIPTION,
-  TYPE_DECL, RECORD_EXPR, TUPLE_EXPR, MATCH_EXPR, MATCH_ARM, VARIANT) join
-  the existing tree; the type-syntax nodes are shared with the annotation
-  grammar. The R dialect is byte-for-byte unaffected — the corpus,
-  round-trip, and acceptance gates pin that.
-- `semantics` — lowering maps TypedR constructs to HIR: ascriptions become
-  the same annotation seams `#:` attachment uses today; `type` declarations
-  become alias/nominal definitions; record/tuple constructors lower to the
-  existing list-shape expressions (checked against the declared shape at
-  the construction site); `match` gets a native HIR node (exhaustiveness
-  and arm narrowing need variant knowledge that desugaring would erase).
-  The type system gains **no new type formers** for phases 1–2; phase 3
-  adds only "sum alias = union of variant nominals + variant field
-  records", expressible in the current `TyKind` vocabulary.
-- `format` — the formatter learns the new nodes (the annotation renderer
-  already formats type syntax); TypedR files format like R files
-  otherwise. The emitter reuses this for deterministic compiled output.
-- `ide` — hover/completion/goto over TypedR files come from the same
-  HIR/type queries; the type-vocabulary completion pool already exists for
-  annotation positions and applies to inline type positions directly.
-- `roughly` (CLI/LSP) — `ProjectFiles` gains TypedR documents; a TypedR
-  file **shadows its generated twin** (the generated `R/foo.R` is excluded
-  from analysis when `TypedR/foo.tR` exists, so items are defined once).
-  The LSP watches `TypedR/`, republishes diagnostics on the source, and
-  compiles on save; `roughly build` compiles the folder; `roughly build
-  --check` gates CI. Generated files never carry diagnostics — findings
-  map back through the line map.
+The current pitch is: *your code stays ordinary R, and every other R tool keeps
+working*. A dialect inverts that, and pretending otherwise would make this
+document useless.
 
-## Diagnostics
+A `.Rt` file is not R. Until it is compiled, `roxygen2` does not document it,
+`devtools::load_all()` does not load it, RStudio does not highlight it, and CRAN
+will not take it. Every contributor who touches the typed source needs Roughly
+installed. Code review sees two files where it saw one. A runtime error's
+traceback names the generated file, not the file the author wrote.
 
-TypedR diagnostics point at TypedR source, always. Two new classes:
+The mitigations are real but partial. What ships *is* R, so consumers of the
+package are unaffected. The generated output is committed and formatted, so a
+reviewer can read it and a debugger can point at it. Adoption is per-file, so a
+package can hold one typed file and thirty plain ones.
 
-- compile-blocking dialect errors (a `match` on a non-sum type, a record
-  construction with a missing field) — same wording bar as everything else
-  (Rust/Elm style, precise ranges);
-- drift errors (`R/foo.R` edited by hand or stale) at the project level.
+The comparison worth making is TypeScript, which won this trade decisively — but
+its users already ran a build step for every project, and R package authors
+mostly do not. That difference is the whole risk, and it is a judgement about R
+programmers rather than about compilers. It should be made deliberately, ideally
+against something real: build Layer 1, put it in front of R package authors, and
+find out whether a build step is a shrug or a wall.
 
-Runtime R errors reference generated lines; the committed, readable,
-formatter-normalized output plus the header pointer is the debugging story
-(same trade every compiled-to-JS language makes).
+## 6. File layout and naming
 
-## Testing (pipeline-wide from day one, per the standing doctrine)
+A package gains a `TypedR/` folder beside `R/`. Each file in it compiles to a
+file of the same stem under `R/`, which is what R runs and what ships.
 
-- **Transpile fixtures**: `.tR` input → golden generated R, in the fixture
-  harness (readable diffs; the emitter is deterministic).
-- **Typing fixtures** over TypedR sources, same renderer as today's suites.
-- **Equivalence differential**: check(source) == check(compiled) findings,
-  range-mapped — the semantic-preservation gate.
-- **Round-trip**: generated output must parse under the R dialect with zero
-  errors, always (a fuzz invariant, not just a fixture).
-- **Fuzzing**: the TypedR dialect joins the parser invariant battery
-  (never-panic, lossless, geometry, determinism) and gets a
-  coverage-guided target; the compiler gets compile-then-parse and
-  compile-idempotence (recompiling the committed output is a no-op)
-  invariants; `match`/record/tuple generators join the semantics fuzzer.
-- The R dialect's existing gates (corpus, differential vs legacy oracle)
-  are untouched and must stay green throughout — TypedR must be provably
-  zero-cost for plain-R users.
+```
+TypedR/shapes.Rt     →  R/shapes.R
+```
 
-## Delivery phases (each lands whole: grammar + checker + emitter +
-formatter + fixtures + fuzz)
+**The extension is `.Rt`.** Derivation, since this is the kind of choice that
+otherwise gets re-argued: every extension in R's family puts the `R` first —
+`.Rmd`, `.Rnw`, `.Rd`, `.Rout`, `.Rproj`, `.Rprofile`, `.Rbuildignore`. Nothing
+in the ecosystem front-loads a qualifier. `.Rt` follows that convention, sorts
+beside `.R` in a listing, and is unclaimed by R's own tooling. Two rejected
+alternatives: `.tR` reverses R's convention and reads as a typo of `.R` (and on
+a case-insensitive filesystem collapses to `.tr`, which signals nothing);
+`.TypedR` is self-documenting but no language ships its full name as an
+extension — TypeScript is `.ts`, PureScript is `.purs` — because the cost is
+paid every time somebody types it.
 
-1. **Inline annotations** — pure erasure; no new types, no new runtime
-   shapes. Proves the dialect plumbing (folder, shadowing, build, drift
-   check, line maps) with minimal semantic surface.
-2. **Records and tuples** — constructor syntax over existing list shapes;
-   settles the typing reference's open constructor question.
-3. **Sum types and `match`** — nominal variants, S3-class compilation,
-   exhaustiveness.
+**Stub files stay `.Rtypes`.** The convention elsewhere is host extension plus a
+marker — `.d.ts`, `.pyi`, `.rbi` — which here would suggest `.Ri`, and as pure
+family design (`.R` source, `.Rt` typed, `.Ri` declarations) it is tidier. It is
+not worth a user-visible break: `.Rtypes` is shipped, documented, referenced by
+the project-override convention, and says what it is. `.Rt` and `.Rtypes`
+already read as siblings.
 
-## Open questions
+## 7. Compiling to R
 
-- Final spellings: the tuple constructor token; `new Point{...}` vs
-  `Point{...}` for nominal vs structural records; `match (x)` vs `match x`.
-- Whether a TypedR file may also contain `#:` annotations (leaning no —
-  one carrier per dialect keeps attachment rules simple).
-- Whether `roughly build` also formats sibling plain-R files (leaning no —
-  build stays orthogonal to format).
-- srcref fidelity: whether to emit `#line`-style markers for R debuggers
-  or rely on the line map + readable output alone.
-- Package metadata: does `TypedR/` need a DESCRIPTION field (a
-  `Config/roughly/...` entry) so R tooling ignores it cleanly everywhere?
-- Standalone scripts: the compilation model above is package-centric
-  (committed twins under `R/`), but `roughly run foo.tR` — typecheck,
-  compile in memory, execute through the embedded runtime — would give
-  TypedR a script story with no generated file on disk. The execution
-  backend is the REPL's planned headless runner (`repl-design.md`); decide
-  whether standalone `.tR` scripts land with it or with a dialect phase.
+**The target is annotated plain R.** Everything expressible as a `#:` comment is
+emitted as one, so the generated file independently type-checks under the
+existing contract. This is worth more than tidiness: it gives a cheap and
+complete correctness test — checking the source and checking its output must
+produce the same findings (§11).
+
+**Generated files are committed.** R packaging needs real files under `R/`, and a
+reviewer needs to see what actually ships. Each carries a header naming its
+source and a hash of it:
+
+```r
+# Generated by roughly from TypedR/shapes.Rt — do not edit.
+```
+
+**Editing a generated file is caught, not merged.** The hash in the header
+detects both a hand edit and a stale file, and `roughly build --check` fails on
+either — the same shape as `roughly fmt --check`, which projects already run in
+CI. Output is deterministic because it is rendered through the existing
+formatter, so the check has no false alarms.
+
+**Positions are mapped, not preserved.** A `#:` line emitted above a statement
+shifts the lines below it, so one-to-one line identity is not achievable. The
+compiler keeps a per-file line map, and every diagnostic reports the position in
+the file the author wrote. Generated files never carry findings of their own.
+
+## 8. Who writes files: the editor never does
+
+The obvious design is "the language server compiles on save". It should not,
+and the reason generalises.
+
+If the editor writes files, then two editors open on one project — a second
+window, or a terminal session alongside an IDE — are two processes writing the
+same path. That is a torn-file risk, a redundant-work problem, and a potential
+loop where one server's write is the other's file-change event. Solving it means
+electing a leader between processes that cannot see each other.
+
+The way out is to notice that **no established typed dialect generates output
+from its language server.** TypeScript's server does not emit JavaScript;
+`tsc --watch` or the bundler does. The compile step belongs to a build tool.
+
+So: the language server is **read-only with respect to `R/`**. It analyses the
+`TypedR/` sources directly, publishes findings on them, and never writes
+anything. Two servers can both do that safely, because analysis is pure. This
+costs nothing in editor experience, because the editor never needed the
+generated file: a typed source **shadows** its generated twin (the twin is
+excluded from analysis when the source exists, so each definition is seen once).
+Generated R is needed only to run the code, to ship it, and for plain-R
+consumers — all build-time or run-time concerns.
+
+Generation therefore happens in exactly two places: `roughly build` (explicit),
+and `roughly build --watch` as a single process the user starts when they want
+the twins kept fresh while iterating.
+
+If two builds ever do overlap, three properties make it safe without any
+coordination protocol, and they are all properties the design wants anyway:
+output is deterministic, so two compilers of the same source produce the same
+bytes; the header hash means a compile whose output already matches **writes
+nothing at all**; and writes are atomic (write a temporary file, rename it), so
+no reader ever sees a half-written file. An advisory lock under `.roughly/` is
+available as a backstop but should not be load-bearing. (The REPL already has
+this shape internally: concurrent R sessions in one process are serialised by a
+session lock rather than by hoping.)
+
+**On sharing analysis between editors:** worth naming as considered and
+declined. No mainstream language server does it, because the protocol is a
+stateful one-to-one conversation — unsaved buffer contents, per-client document
+versions — so a shared process needs a session-multiplexing layer in exchange
+for a modest saving. The tractable version of the same wish is a **persistent
+on-disk cache**, which gives cold-start speed to every process with no
+coordination at all. That is the durability-tier lever already noted in
+`backlog.md`, and it is the thing to build if start-up cost is the actual
+complaint.
+
+## 9. Running typed code
+
+Two paths, and they want different things.
+
+For a package, the answer is the committed twin: R runs `R/shapes.R` like any
+other file, so `load_all`, `R CMD check` and CRAN all work unchanged.
+
+For a standalone script there is no reason to leave a file on disk.
+`roughly run script.Rt` should type-check, compile in memory, and execute —
+which is possible because the REPL already embeds a real R runtime and has a
+headless runner for exactly this shape of job (`repl-design.md`). The same
+applies to the interactive console: a typed prompt is the REPL feeding compiled
+lines to the same runtime. This is the most attractive small piece of the whole
+proposal — a typed scripting language with no build artifacts — and it is worth
+weighing whether it lands before the package story rather than after, since it
+avoids the entire generated-file question.
+
+## 10. Why this is a frontend, not a second product
+
+The reason the estimate is not enormous is that the existing pipeline is
+already separated along the right seam.
+
+- **The type system does not know where types are written.** The typing
+  reference defines meaning over types, not over comments. Records and tuples
+  already exist as list shapes. Kinds decompose into named types, unions, and
+  flow narrowing — all implemented.
+- **The type notation is already a real grammar**, tokenized and parsed into
+  proper syntax nodes inside `#:` regions. The dialect promotes that grammar
+  from comments into code positions; it does not invent a second notation.
+- **Everything after parsing consumes the internal representation, not the
+  surface text.** Naming, inference, the package interface, the editor features
+  and the incremental machinery see lowered items and types. A dialect construct
+  that lowers to the same shapes flows through all of it unchanged.
+
+Concretely: `syntax` gains a dialect switch on the parser and a handful of node
+kinds, with the R dialect byte-for-byte unaffected (the existing corpus and
+round-trip gates pin that); `semantics` lowers the new constructs onto shapes it
+already has, adding no new kind of type for Layers 1–2 and only "a sum is a
+union of its variants" for Layer 3; `format` learns the new nodes and doubles as
+the compiler's emitter; `ide` gets the new files for free; `roughly` grows the
+source folder, the twin shadowing, and `build`.
+
+## 11. How we would know it works
+
+Testing follows the standing doctrine — every stage gets coverage as it is
+built, not afterwards — and one gate does most of the work.
+
+- **Source and output must agree.** Checking `TypedR/shapes.Rt` and checking the
+  generated `R/shapes.R` must produce the same findings, with positions mapped.
+  This is the whole correctness argument for the compiler in one test.
+- **Compilation fixtures**: typed input, expected R output, as readable diffs.
+- **Type-checking fixtures** over typed sources, with the existing renderers.
+- **Generated output always parses as R**, with zero errors — a property to
+  fuzz, not just to sample.
+- **Recompiling committed output is a no-op**, which is the determinism the
+  drift check depends on.
+- The fuzzing battery gains the dialect: never panic, keep the source
+  recoverable from the tree, stay deterministic; plus compile-then-parse.
+- **The R dialect's existing gates stay green throughout.** The claim that
+  plain-R users pay nothing has to be evidence, not intent.
+
+## 12. Delivery, with a decision gate
+
+Each layer lands whole — grammar, checking, compiler, formatter, fixtures,
+fuzzing — because a half-landed dialect has no users to learn from.
+
+1. **Layer 1, types where the code is.** Pure translation onto comment
+   annotations: no new meaning, no new runtime shapes. Proves the folder, the
+   twin shadowing, `build`, the drift check and the position mapping.
+2. **Decision gate.** Put Layer 1 in front of R package authors and answer the
+   §5 question: is a build step a shrug or a wall? A dialect that only sugars
+   annotations is not worth shipping if the answer is "wall" — the honest
+   outcome then is to stop, keep comments as the only carrier, and take Route A
+   in §3 for case analysis.
+3. **Layer 2, records and tuples.** Constructor syntax over existing shapes;
+   settles the constructor question the typing reference left open.
+4. **Layer 3, kinds and `match`.** Nominal variants, S3 output, exhaustiveness.
+   The actual prize.
+
+## 13. Open questions
+
+- The fork in §3, before anything else.
+- Whether the standalone-script path (§9) should lead instead of follow, since it
+  sidesteps generated files entirely.
+- Spellings: the tuple constructor; whether nominal and structural records are
+  distinguished at the construction site (`new Point{...}` versus `Point{...}`);
+  `match (x)` versus `match x`.
+- Whether a typed file may also contain `#:` comments. Leaning no: one carrier
+  per file keeps the attachment rules from mattering at all.
+- Whether `roughly build` also formats sibling plain-R files. Leaning no: build
+  and format stay separate commands.
+- Whether to emit line-directive markers for R's debugger, or rely on the line
+  map plus readable committed output.
+- Whether `TypedR/` needs a `DESCRIPTION` entry so R's own tooling ignores it
+  cleanly everywhere it walks a package.

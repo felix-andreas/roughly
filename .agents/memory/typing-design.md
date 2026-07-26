@@ -10,6 +10,8 @@ Forward-looking design space for Roughly's type system: questions that are **not
 
 **Direction (user):** provide them through a stdlib the checker knows specially, not through new R syntax — annotated R stays ordinary R. Post-beta.
 
+**Unresolved tension:** `typedr-design.md` proposes the opposite route — real syntax in a compiled dialect — for the same capability. Both reach exhaustive case analysis; they differ in whether the checker blesses particular call shapes or owns a grammar, and in whether a build step is acceptable. Building both is waste, so settle the fork (it is §3 of that document) before either is implemented, and delete the losing half.
+
 **Design space to work out before building:**
 - representation: a tagged value is presumably `list(tag = "Name", value = ...)` at runtime — does the type system model it as `union` of nominal-ish tag types, or as a new core form?
 - exhaustiveness: `match(x, Some = fn, None = fn)` — checking that the named arguments cover the union members needs literal argument-name awareness at one blessed callee; how special is that call form allowed to be?
