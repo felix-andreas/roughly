@@ -51,7 +51,7 @@ annotation forms are not type expressions at all and have no inline position:
 an earlier draft leaned toward — would make the dialect **strictly less expressive
 than plain R**: no record types, no nominals, no generic aliases.
 
-Keeping both carriers also makes conversion additive. A `.R` file becomes a `.Rt`
+Keeping both carriers also makes conversion additive. A `.R` file becomes a `.ry`
 file by renaming it; nothing must be rewritten, and annotations move inline one at
 a time or never. The division is clean enough to state in one line: **inline syntax
 carries types on code; `#:` carries declarations and directives.**
@@ -110,7 +110,7 @@ duplication and attachment are the compiler's problem there, not a human's.
 
 **The generated file under `R/` is the runtime truth for everyone else.** R runs
 it, `source()` reads it, other packages see it, CRAN ships it. Nothing outside this
-tool ever reads a `.Rt` file. That is the whole of the interop story and it should
+tool ever reads a `.ry` file. That is the whole of the interop story and it should
 be stated rather than implied.
 
 **Analysis reads the source; a stale twin is reported, not ignored.** A typed
@@ -136,32 +136,21 @@ the fallback every compiled-to-host language relies on.
 otherwise be two processes writing one path, and determinism plus the header hash
 means a redundant build writes nothing at all.
 
-## 5. The file extension: `.Rt`
+## 5. Naming — decided elsewhere
 
-R's family puts the `R` first, then a short lowercase mnemonic: `.Rmd`, `.Rnw`,
-`.Rd`, `.Rout`, `.Rproj`, `.Rbuildignore`. `.Rt` follows that, sorts beside `.R`,
-and is unclaimed in R's own tooling (checked against the `tools` package and R's
-`share` tree). The prefix already means "R-family, not R itself" — `.Rmd` is
-markdown — so it promises nothing about being executable.
+Source files are **`.ry`**, in a **`Ry/`** directory beside `R/`; type declarations
+are **`base.ry.stub`**. `backlog.md` §"naming: the `ry` toolchain and its file
+extensions" carries the decisions, the rejected alternatives, and the migration
+work, including the compound-extension matcher trap. Two consequences that belong
+to *this* design rather than to the naming decision:
 
-Rejected: **`.tR`** reverses the convention, which nothing in R's ecosystem does,
-and reads as a typo of `.R`. **`.TypedR`** is a full language name, which no
-language ships as an extension, and mixed case mid-extension invites mistakes.
-**`.ty`** is taken by an existing typed-R project (§8) and is not R-family.
-**`.Rty`** is the runner-up if `.Rt` proves too terse.
-
-Two corrections to arguments an earlier draft made here. Case-insensitive
-filesystems are not a reason to prefer `.Rt` over `.tR` — `.Rt` collapses to `.rt`
-just as `.tR` collapses to `.tr`, and R's own file collector already accepts both
-`.R` and `.r`. And typed sources *can* physically live in `R/`: R's collector
-ignores unknown extensions there. A sibling directory is still right — for tarball
-hygiene, for roxygen, and so a reader is never unsure which file ships — and
-whatever it is called it belongs in `.Rbuildignore`, since `R CMD check` notes
-non-standard top-level directories.
-
-**Stub files stay `.Rtypes`.** `.Ri` would make a tidier family alongside `.d.ts`,
-`.pyi` and `.rbi`, but renaming a shipped, documented surface for symmetry is not
-worth it.
+- The dialect names itself rather than borrowing R's extension family, so nothing
+  about the filename implies R can execute the file. Good, because it cannot.
+- `Ry/` must be listed in `.Rbuildignore`. `R CMD check` notes non-standard
+  top-level directories, and the generated R under `R/` is what should ship. Typed
+  sources *could* physically sit in `R/` — R's file collector ignores unknown
+  extensions — but a sibling directory keeps tarball hygiene and roxygen simple and
+  leaves no doubt about which file ships.
 
 ## 6. The parser work, honestly
 
@@ -226,7 +215,7 @@ frontend and becomes a language.
 
 ## 8. The cost, and what would actually test it
 
-A `.Rt` file is not R. Until compiled, roxygen2 will not document it,
+A `.ry` file is not R. Until compiled, roxygen2 will not document it,
 `devtools::load_all()` will not load it, RStudio will not highlight it, CRAN will
 not accept it, and every contributor who touches it needs this tool. The risk is
 not that a build step is unfamiliar — `R CMD build` is one and roxygen2 is code
@@ -234,7 +223,7 @@ generation most packages already run. It is that the source of truth stops being
 for collaborators and for CRAN.
 
 **Standalone scripts are the cheap place to start and they do not test that risk.**
-`roughly run script.Rt` — type-check, compile in memory, execute through the R
+`ry run script.ry` — type-check, compile in memory, execute through the R
 runtime the REPL already embeds — needs no generated file, no packaging and no
 collaborator toolchain. That makes it a good way to find out whether inline typing
 is *pleasant*, and no evidence at all about whether package authors will accept a

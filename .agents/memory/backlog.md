@@ -537,6 +537,72 @@ below, ranked by how often a real user hits it.
 - **Analysis-backed Tab completion SHIPPED** (first analysis rung; `repl-design.md` has the seam design): typed signatures for stdlib names, session bindings, `pkg::` exports, manifest names — `SessionCompleter` seam keeps the repl crate syntax-only, `AnalysisCompleter` in roughly runs `ide::completion` over the session-as-script. **Open — remaining rungs:** live-session facts (the R environment listing unioned into completions), pre-evaluation diagnostics on pending input, hover on the input line, graphics-device story (versioned mirror structs, see the design record). The headless runner is shipped.
 - **REPL Windows: real-machine smoke test pending.** The embedding is implemented (`repl-design.md` has the recipe: Rstart callbacks via R_DefParamsEx's version handshake, sibling-DLL preloading, RGui→LinkDLL switch, UserBreak+deferred interrupt pair) and compile/clippy-verified against x86_64-pc-windows-gnu — but no Windows machine with R has ever executed it. Smoke: `roughly repl` (prompt, evaluate, Ctrl-C, vi mode) and `roughly run` (output, exit 0/1). Known caveat to watch: terminal VT input handling in the editor layer.
 
+## Open — naming: the `ry` toolchain and its file extensions
+
+**Decided by the user:** the typed dialect's source extension is **`.ry`**, and its sources live in a
+**`Ry/`** directory beside `R/` (`typedr-design.md` is the dialect design; note it still spells the
+extension `.Rt`, which this supersedes — the R-family convention argument was released deliberately).
+
+**Recommended and not yet settled:** rename the CLI binary from `roughly` to **`ry`** — two characters
+for a command run in a loop, and `ry` reads as "R-y". Keep **Roughly as the project name**; a project
+name differing from its binary is ordinary (ripgrep/`rg`). **Not `ryc`:** the `-c` suffix means
+*compiler* (`rustc`, `tsc`, `javac`), and this tool's product is analysis — it emits no code, and
+rust-analyzer is deliberately not `rustc`. If the dialect ships, compiling is `ry build`, a subcommand.
+`ry` is taken on crates.io by an unrelated crate, which blocks `cargo install ry` but not the binary
+name — the crate can stay `roughly` with `[[bin]] name = "ry"`.
+
+**Extension family**, if the rename lands:
+
+| File | Now | Proposed |
+|---|---|---|
+| Typed dialect source | — | `Ry/model.ry` |
+| Type declarations for a namespace | `types/base.Rtypes` | `types/base.ry.stub` |
+| Generated export manifest | `types/base.exports` | `types/base.ry.exports` |
+| Project config | `roughly.toml` | `ry.toml` |
+| Suppression comment | `# roughly: allow(...)` | `# ry: allow(...)` |
+
+Why the stub extension has that shape, so it is not re-litigated:
+
+- **Compound, tool first, what-it-is last.** `base.ry.stub` is never matched by a `*.ry` glob, so it
+  can never be compiled or formatted as dialect source — which is correct, because a stub file has no
+  code in it at all. This is the `.js.flow` precedent (tool last so host tooling ignores it), the
+  opposite of `.d.ts` (host last so host tooling picks it up). Reversing to `base.stub.ry` would buy
+  free editor support and cost an exclusion in every tool that walks `Ry/`.
+- **Singular `.stub`, not `.stubs`.** Every per-module declaration file is named for what the file
+  *is*, not how many things it lists: `.d.ts`, `.h`, `.pyi`, `.mli`. Plural extensions belong to
+  free-standing lists (`.gitattributes`, `.gitmodules`) — which is also why `.exports` stays plural,
+  since that file is a flat list of names and nothing else. The asymmetry between `.stub` and
+  `.exports` is precision, not sloppiness.
+- **`stub` is already the product's word for the file** — it is the name of the diagnostic code, whose
+  text reads "reported against the stub". A `.stub` extension matches it exactly.
+- **Qualifying with `ry` fixes what `.Rtypes` loses once `.ry` exists.** "Types" stops distinguishing
+  anything when source files also carry types inline; "stub" names the property that still separates
+  them, which is having no implementation.
+
+Work, and the traps:
+
+- **The extension matcher must change shape, not just its string.** Three sites match
+  `extension == "Rtypes"` (`crates/roughly/src/server.rs` twice, `crates/roughly/src/cli.rs` once).
+  `Path::extension()` returns only the component after the *last* dot, so `base.ry.stub` yields
+  `"stub"` — the fix is a filename suffix test (`ends_with(".ry.stub")`). **The trap is matching
+  `extension == "stub"`**, which would swallow any other tool's `.stub` file and hand back exactly the
+  generic-word collision the `ry` qualifier exists to prevent.
+- **Two things checked and confirmed harmless:** the shipped corpus maps namespace to file explicitly
+  in code (`stubs::shipped_stub_sources`), and project override filenames are arbitrary — so no
+  namespace is ever parsed out of a filename stem, and the extra dot breaks nothing there.
+- **The suppression comment is the only surface inside user source files**, so it is the one whose
+  migration cost grows with every adopter: renaming it either breaks every file containing one or
+  means carrying both prefixes. Accept `# ry: allow(...)` and keep `# roughly: allow(...)` working as
+  a permanent alias. Same treatment for `roughly.toml`, though that is one file per project rather than
+  one occurrence per suppression. Deciding early is much cheaper than deciding late.
+- Also user-visible and needing migration: the VS Code settings keys (`roughly.path`, `roughly.args`,
+  `roughly.experimentalFeatures`), every `roughly` invocation across the docs site, and the extension
+  identifier itself.
+- **Open:** whether project overrides stay one file per package under `stubs/` or collapse into a
+  single `ry.stub` at the project root beside `ry.toml`. Nothing blocks the single file — those
+  filenames carry no meaning — but per-package mirrors how the shipped corpus is organised and keeps a
+  project with several dependencies separable. Decidable later; it does not disturb the extension.
+
 ## Post-beta (explicitly out of scope for now)
 
 - Tags / discriminated unions via a compiler-known stdlib `match` (design in `typing-design.md` first).
