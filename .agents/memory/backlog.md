@@ -31,12 +31,19 @@ measured the competition). The accuracy fixes landed; what remains is below.
 - **The accumulator idiom errors where R returns `NULL`.** `args <- list(); if (x) args$escape <-
   TRUE; args$escape`. Worth a design decision rather than a patch: a *definitely* absent field
   should error (that is the flagship win), a *possibly* absent one should yield `T | NULL`.
-- **A non-breaking space in `.Rmd` prose produces a spurious `syntax-error`**, rendered against a
-  blank line with an orphan caret. Twenty of data.table's diagnostics come from its French
-  vignettes this way.
+- **Literate-document prose blanking FIXED, and it hid a worse bug.** A non-breaking space is
+  whitespace to Rust's `char::is_whitespace` and an unexpected character to R's lexer, so prose
+  containing one reported a syntax error against a blank line. The same code blanked per
+  *character* rather than per *byte*, so any non-ASCII prose shifted every byte offset after it —
+  every downstream range is a byte offset, so diagnostics in later chunks were silently
+  misplaced. Both are fixed by blanking each character to its own `len_utf8()` in spaces; the unit
+  test that was supposed to catch this asserted char count instead of byte length.
 - **Self-checking ggplot2 reports 1132 findings and takes 2.4s** — the one package a stub ships
-  for. The shipped stub appears to collide with the package's own definitions; a project defining
-  a name the corpus declares is supposed to win.
+  for. The proposed cause (the shipped stub colliding with the package's own definitions) does
+  **not** reproduce minimally: a package named `ggplot2` that defines `geom_point` and calls it
+  checks clean, so project-wins-over-corpus works. The real cause is unidentified and needs the
+  actual source (fetch the corpus); the likely candidates are ggplot2's own ggproto/R6 layer and
+  its NSE, both known gaps, in which case the number is honest rather than a bug.
 - **Duplicate type names go unreported in script files.** `reference.md` says the duplicate-`@type`
   error fires "regardless of file"; it fires in package files only. The value-name analogue is
   deliberately exempt for scripts, type names are not.

@@ -44,19 +44,18 @@ pub fn r_source_of_literate(text: &str) -> String {
         if keep {
             out.push_str(body);
         } else {
-            out.extend(body.chars().map(|character| {
-                // Blank per CHARACTER, not per byte: pushing one space for a
-                // multi-byte character would shorten the text and shift every
-                // range after it. A space per character keeps char offsets
-                // aligned, and the byte length too whenever the source is
-                // ASCII — the case where a range could otherwise land inside a
-                // character.
-                if character.is_whitespace() {
-                    character
-                } else {
-                    ' '
+            for character in body.chars() {
+                // Blank a character to as many spaces as it occupies BYTES.
+                // Every range downstream is a byte offset, so anything else
+                // shifts each diagnostic after a non-ASCII prose character.
+                // Exotic whitespace is blanked with the rest: a non-breaking
+                // space is whitespace to Rust and an unexpected character to
+                // R's lexer, so keeping it verbatim reports a syntax error in
+                // prose the chunk never contained.
+                for _ in 0..character.len_utf8() {
+                    out.push(' ');
                 }
-            }));
+            }
         }
         out.push_str(terminator);
     }
@@ -149,13 +148,30 @@ mod tests {
     }
 
     #[test]
-    fn multibyte_prose_keeps_offsets_aligned() {
+    fn multibyte_prose_keeps_byte_offsets_aligned() {
+        // Byte length is the property that matters: every range downstream is
+        // a byte offset into the original file.
         let document = "prosé — ünicode\n```{r}\nx <- 1L\n```\n";
         let converted = r_source_of_literate(document);
+        assert_eq!(converted.len(), document.len(), "{converted:?}");
         assert_eq!(
-            converted.chars().count(),
-            document.chars().count(),
-            "{converted:?}"
+            document.find("x <- 1L"),
+            converted.find("x <- 1L"),
+            "the chunk must sit at the same byte offset"
+        );
+    }
+
+    #[test]
+    fn exotic_whitespace_in_prose_is_blanked() {
+        // A non-breaking space is whitespace to Rust and an unexpected
+        // character to R's lexer, so leaving it in reports a syntax error
+        // against prose.
+        let document = "texte\u{a0}ins\u{e9}cable\n```{r}\nx <- 1L\n```\n";
+        let converted = r_source_of_literate(document);
+        assert_eq!(converted.len(), document.len(), "{converted:?}");
+        assert!(
+            !converted.contains('\u{a0}'),
+            "prose must not survive: {converted:?}"
         );
         assert!(converted.contains("x <- 1L"));
     }

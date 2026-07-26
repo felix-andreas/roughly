@@ -33,6 +33,7 @@ export default defineConfig({
 						{ slug: 'linter' },
 						{ slug: 'language-server' },
 						{ slug: 'configuration' },
+						{ slug: 'limitations' },
 					],
 				},
 				{

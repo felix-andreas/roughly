@@ -39,10 +39,11 @@ mean what you wrote.
 
 ## Catch bugs before you run
 
-The checker infers types for ordinary R code (Hindley-Milner style, the same
-family of inference behind ML and Rust), so unannotated code is checked for
-real. Wrong argument types, missing arguments, calling a value that isn't a
-function, using a maybe-`NULL` value without a guard — all caught statically:
+You do not annotate anything to get this. Roughly works out what your code
+means from how you use it — `a + b` makes `a` and `b` numbers, `paste0` makes
+its arguments strings — so ordinary, unannotated R is checked for real. Wrong
+argument types, missing arguments, calling a value that isn't a function, using
+a maybe-`NULL` value without a guard: all caught statically.
 
 ```r
 ratio <- function(numerator, denominator) {
@@ -168,3 +169,5 @@ call to a helper defined in a sibling file reports `unresolved`.
 - [Typing guide](/typing/guide) — the type system, one concept at a time
 - [Formatter](/formatter), [Linter](/linter), [Language server](/language-server)
 - [Configuration](/configuration) — every `roughly.toml` option
+- [Limitations](/limitations) — what Roughly cannot check yet, and how to adopt it on an existing
+  codebase

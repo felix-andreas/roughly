@@ -48,7 +48,7 @@ y <-
 
 Semantics checks enforce coding conventions and best practices that won't necessarily cause errors but may lead to bugs or reduce code quality. Each check has a stable code, shown in brackets in diagnostics (`warning[naming-style]`) and usable in [suppression comments](#suppressing-diagnostics):
 
-- **`naming-style`**: Enforces consistent naming style (snake_case or camelCase) for variables and function parameters, according to your configuration
+- **`naming-style`**: Enforces consistent naming style (snake_case or camelCase) for variables and function parameters, according to your configuration. `SCREAMING_SNAKE_CASE` conforms under either style at any scope — it is R's universal spelling for a constant, so the check never rewrites it
 - **`assignment-operator`**: Recommends using `<-` rather than `=` for variable assignment
 - **`trailing-comma`**: Flags an unnecessary trailing comma after a call's last argument. (An earlier `missing-comma` lint is retired — the parser now rejects `f(1 2)` with a syntax error, exactly as R does; the config key still parses and is ignored)
 - **`boolean-shorthand`**: Use `TRUE` and `FALSE` over `T` and `F`
@@ -58,6 +58,9 @@ Semantics checks enforce coding conventions and best practices that won't necess
   method's formals are never reported at all — `format.myclass(x, ...)` that ignores `x` is
   matching its generic, which R requires. A name counts as an S3 method when the part before its
   last dot is a name the standard-library corpus declares, so `my.helper` is still checked
+- **`stub`**: a problem in a `.Rtypes` [stub file](/stdlib-stubs) the project ships — a declaration
+  that does not parse, or one naming a type no vocabulary declares. Reported against the stub file
+  itself, since a stub that does not load silently withdraws the types it was meant to provide
 - **undefined exports**: an `export(name)` in the `NAMESPACE` naming something the package defines
   nowhere at top level is an error — `R CMD check`'s "undefined exports", reported before install
   rather than at it. Only explicit `export()` names are checked: `exportPattern` is a regex R
@@ -138,15 +141,15 @@ strict = true    # report expressions whose type the checker could not determine
 
 For details on configuring the linter, see the [Configuration](/configuration) page.
 
-## Roadmap
+## Not implemented yet
 
-Roughly's static analysis will continue to expand in future versions to include:
-
-- **Unreachable code**: Identification of code that will never be executed
-- **Control flow analysis**: Detecting potential infinite loops or missing return statements
-- **Package-specific rules**: Special rules for popular packages like dplyr, ggplot2, and data.table
-
-These features are not yet implemented.
+- **Unreachable code** — statements that can never be executed
+- **Control-flow analysis** — potential infinite loops, missing returns
+- **Package-specific lint rules** — checks that encode a particular package's conventions. Note
+  this is about *lints*: `dplyr`, `data.table`, `ggplot2` and `testthat` are already understood by
+  the type checker, including their data-masked verbs, through
+  [conditional stub namespaces](/stdlib-stubs#conditional-namespaces)
+- **Automatic fixes** — every finding is reported, none are rewritten; there is no `--fix`
 
 ## Integration
 

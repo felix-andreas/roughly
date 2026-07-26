@@ -106,8 +106,8 @@ still shows honest ratios. `roughly debug ast <file>` prints a file's syntax tre
 
 To work on this documentation site, run `just docs` (a live preview) or `cd docs && npx astro build`.
 The formatter page (`docs/src/content/docs/formatter.md`) is generated — edit
-`crates/format/tests/formatter.template.md` and re-bless `cargo test -p format --test
-test_format_docs` instead.
+`crates/format/tests/formatter.template.md` and regenerate with
+`ROUGHLY_BLESS=1 cargo test -p format --test test_format_docs` instead.
 
 ## VS Code Extension Setup
 

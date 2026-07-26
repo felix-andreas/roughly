@@ -4,9 +4,10 @@ description: A guided tour of Roughly's static type checker for R — from infer
 ---
 
 Roughly includes a static type checker for R. R has no type system of its own, so
-Roughly defines one: it infers types for ordinary R code and lets you add optional
-annotations to tighten and document those types. Inference is Hindley-Milner style,
-so most code is checked without any annotations at all.
+Roughly defines one: it works out the types of ordinary R code from how that code
+uses its values, and lets you add optional annotations to tighten and document them.
+Most code is checked without any annotations at all — the inference is the same
+algorithm family behind Haskell, OCaml and Rust, which is what makes that possible.
 
 Because R has no type-annotation syntax, annotations live in `#:` comments. They look
 like comments to every other R tool, so annotated code stays fully compatible with

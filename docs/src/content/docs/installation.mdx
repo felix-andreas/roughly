@@ -147,6 +147,41 @@ else, so the stream stays parseable while human-readable progress goes to stderr
 The summary line `check` prints at the end goes to stdout too, but only in human mode — a JSON run
 emits nothing but diagnostics. These field names are a contract, safe to build CI on.
 
+## Continuous integration
+
+Roughly is one binary with no R dependency, so a CI job is a download and two commands. Both
+`check` and `fmt --check` exit 1 on findings, which is what fails the job:
+
+```yaml
+# .github/workflows/roughly.yml
+name: roughly
+on: [push, pull_request]
+
+jobs:
+  roughly:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Roughly
+        run: cargo install --git https://github.com/felix-andreas/roughly roughly
+      - name: Check
+        run: roughly check
+      - name: Format
+        run: roughly fmt --check
+```
+
+To skip the build, download the binary for the runner's platform from the
+[Releases](https://github.com/felix-andreas/roughly/releases) page and put it on the `PATH`
+instead — nothing else about the job changes.
+
+Two adjustments worth knowing:
+
+- **Warnings fail the build by default.** A warnings-only run still exits 1. Pass
+  `--min-severity error` to gate on errors alone while you work through a backlog of warnings.
+- **`--output json` gives one JSON object per diagnostic** on stdout, with progress on stderr, if
+  you want to post findings somewhere rather than read the log.
+
 ## Next steps
 
 - [Typing guide](/typing/guide) — how inference and `#:` annotations work
