@@ -161,6 +161,52 @@ loses them where its showcase uses `list(...)`: swapping it for `read.csv()` mak
 mistake report nothing, and the page calls that "the whole pitch" with no caveat at the point of
 contact.
 
+### From the ETL engineer (919-line data.table/DBI pipeline, 12 planted mistakes, 8 caught)
+
+Their verdict: `fmt --check` in CI today; `check --min-severity error` after two fixes; `typing =
+true` as a merge gate **not yet** — "not because it's noisy, but because after #1, #2 and #10 a green
+run doesn't yet mean what it needs to mean at 3am". Adoption cost: 34 warnings on first run, 30 of
+them `unknown package namespace 'DBI'`, fixed by a **3-line `DESCRIPTION` with `Imports:`** that no
+doc page mentions for this purpose — while the path the docs *do* recommend (hand-writing
+`stubs/*.Rtypes`) cost five files, fixed less, and was actively harmful (see 3).
+
+1. **Column-name typos inside `DT[...]` are invisible** — `orders[, net := gross_ammount * 1.19]` and
+   `by = currrency` both silently accepted. Meanwhile the only name it *did* report was a correct one
+   (see 5). Exactly inverted: silent where the typo is real, noisy where the name is right. A known
+   gap, but `limitations.md` should say plainly that column names are never validated.
+2. **`library(pkg)` for an unstubbed package disables `unresolved` project-wide** — the **fourth
+   independent report**, and their version is the most damning: `library(totallyMadeUpPackage)`, a
+   package that *does not exist*, buys the same blanket tolerance. Their "clean run was a mirage".
+3. **CI BREAKER: setting `[check] exclude` disables the built-in `renv/`/`packrat/` skip.** No key →
+   1 file; `exclude = []` → 1 file; `exclude = ["nothing-here/"]`, matching nothing → renv and
+   packrat both walked. The docs' own example `exclude = ["scripts/"]` would drag an entire renv
+   library into CI. The user-supplied list must *extend* the vendored defaults, not replace them.
+4. **Any `stubs/` file deactivates the shipped conditional namespaces.** One stub for an unrelated
+   package made 19 `data.table::` calls unresolved while bare `fread` still resolved, and made
+   `data.table` unusable as an annotation type name — which silently suppressed a real type error.
+5. **`setkey`/`setorder` report *correct* column names as unresolved** (the `v`-suffixed forms are
+   fine), and **`unique(DT, by = ...)` is an error**, which fails `--min-severity error` on correct
+   code.
+6. **`data.table` is rejected where `data.frame` is expected, and the wrong direction is accepted.**
+   `needs_df(data.table(a = 1L))` is legal R and reports `expected data.frame, found data.table`;
+   `needs_dt(data.frame(a = 1L))`, the direction that really is wrong, reports nothing.
+7. **`on.exit()` reads do not count as uses**, so the canonical rollback guard
+   (`committed <- TRUE` ... `on.exit(if (!committed) dbRollback(con))`) is reported unused — and the
+   "obvious fix" a user would apply makes every transaction roll back. A false positive that leads
+   directly to a data-loss bug.
+8. **Recursion defeats `is.logical()` narrowing** — the identical non-recursive function is clean.
+9. **A maybe-`NULL` value is only caught by arithmetic.** `toupper`, `nchar` and `substr` on a
+   `character | NULL` all pass, despite the guide promising this class of check.
+
+What they praised: record-field inference from a plain `list()` with `Did you mean batch_size?`
+("excellent and worth adopting for alone"); named-argument typo suggestions, arity checks,
+argument-order errors ranged on the argument, branch-union arithmetic and non-function calls all
+correct with "the best error wording I've seen in an R tool"; and **the data.table bracket really
+works** — a 162-line transform module using `:=`, `.SD`, `.SDcols`, `.N`, `dcast` and a non-equi join
+with `by = .EACHI` produced zero NSE complaints. Exit codes, JSON Lines, `--min-severity`, config
+discovery, unknown-key warnings and suppression comments all matched the docs. 0.15s on 919 lines in
+a debug build.
+
 ## Open — documentation review findings
 
 Four independent reviews read the docs cold (a first-hour newcomer, an information architect, an
