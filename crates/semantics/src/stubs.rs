@@ -158,6 +158,30 @@ pub fn shipped_export_manifests() -> Vec<(String, String)> {
         ("dplyr", include_str!("../../../types/dplyr.exports")),
         ("ggplot2", include_str!("../../../types/ggplot2.exports")),
         ("testthat", include_str!("../../../types/testthat.exports")),
+        // Manifest-only: no typed declarations, so every name is `Unknown` —
+        // what they buy is a knowable export set, which is what keeps
+        // unresolved-name detection alive in a project that attaches them.
+        ("tibble", include_str!("../../../types/tibble.exports")),
+        ("tidyr", include_str!("../../../types/tidyr.exports")),
+        ("readr", include_str!("../../../types/readr.exports")),
+        ("purrr", include_str!("../../../types/purrr.exports")),
+        ("stringr", include_str!("../../../types/stringr.exports")),
+        ("forcats", include_str!("../../../types/forcats.exports")),
+        (
+            "lubridate",
+            include_str!("../../../types/lubridate.exports"),
+        ),
+        ("magrittr", include_str!("../../../types/magrittr.exports")),
+        ("rlang", include_str!("../../../types/rlang.exports")),
+        ("glue", include_str!("../../../types/glue.exports")),
+        ("scales", include_str!("../../../types/scales.exports")),
+        ("knitr", include_str!("../../../types/knitr.exports")),
+        ("jsonlite", include_str!("../../../types/jsonlite.exports")),
+        ("R6", include_str!("../../../types/R6.exports")),
+        (
+            "tidyverse",
+            include_str!("../../../types/tidyverse.exports"),
+        ),
     ]
     .into_iter()
     .map(|(namespace, text)| (namespace.to_owned(), text.to_owned()))
@@ -168,7 +192,56 @@ pub fn shipped_export_manifests() -> Vec<(String, String)> {
 /// the library only when the project declares or attaches the package
 /// (`metadata::namespace_active`), so `fread` and `mutate` never resolve —
 /// and never steal a typo warning — in a project that does not use them.
-pub const CONDITIONAL_NAMESPACES: &[&str] = &["data.table", "dplyr", "ggplot2", "testthat"];
+///
+/// Most of these carry only an [export manifest](`shipped_export_manifests`),
+/// no typed declarations. That is deliberate and it is the point: attaching a
+/// package whose export set the checker cannot see disables unresolved-name
+/// detection for the whole project (the export set is unknowable, so guessing
+/// would cost false positives), and a manifest makes the set knowable. Every
+/// name from a manifest-only namespace types as `Unknown` — no precision
+/// claimed — while a typo beside it is a typo again.
+pub const CONDITIONAL_NAMESPACES: &[&str] = &[
+    "data.table",
+    "dplyr",
+    "ggplot2",
+    "testthat",
+    "tibble",
+    "tidyr",
+    "readr",
+    "purrr",
+    "stringr",
+    "forcats",
+    "lubridate",
+    "magrittr",
+    "rlang",
+    "glue",
+    "scales",
+    "knitr",
+    "jsonlite",
+    "R6",
+    "tidyverse",
+];
+
+/// A meta-package and the packages it ATTACHES rather than re-exports.
+/// `library(tidyverse)` puts `mutate` and `read_csv` within bare reach without
+/// exporting either, so activating the members alongside it is what matches R
+/// — and it hands such a project the members' *typed* declarations (dplyr's,
+/// ggplot2's) instead of a manifest's `Unknown`. `scripts/export-manifests.R`
+/// prints the membership a live session reports, so this list is checkable.
+pub const META_PACKAGE_MEMBERS: &[(&str, &[&str])] = &[(
+    "tidyverse",
+    &[
+        "dplyr",
+        "forcats",
+        "ggplot2",
+        "lubridate",
+        "purrr",
+        "readr",
+        "stringr",
+        "tibble",
+        "tidyr",
+    ],
+)];
 
 /// Namespaces R ships but does not put on the default search path: `pkg::`
 /// reads work in every R session (their manifests always validate qualified

@@ -77,15 +77,22 @@ Outside those, a data-masking function Roughly does not know about will report i
 unresolved. The ecosystem's standard escape hatch works — a top-level
 `utils::globalVariables(c("a", "b"))` silences them for the whole package.
 
-**Attaching an unstubbed package weakens the `unresolved` check.** A `library(pkg)` for a package
-Roughly ships no stub for means any bare name *could* be one of its exports, so otherwise-unresolved
+**Attaching a package Roughly does not know weakens the `unresolved` check.** A `library(pkg)` whose
+exports Roughly cannot enumerate means any bare name *could* be one of them, so otherwise-unresolved
 bare names are tolerated rather than reported — project-wide, not just in that file. This is what
-keeps the tool usable on real code, but it means a clean run says less than it looks like it does.
-Three things narrow the hole. A near miss of a name your own project binds — a top-level definition,
-or a local or parameter in scope — is reported anyway, because `library(shiny)` cannot explain
-`repositry` next to a `repository` parameter. A `library()` naming **your own package** buys nothing
-at all, so the `library(yourpkg)` in `tests/testthat.R` does not weaken anything. And writing a
-two-line `stubs/<pkg>.Rtypes` for the package restores full checking, as well as silencing the
+keeps the tool usable on real code, but where it applies a clean run says less than it looks like it
+does.
+
+Four things narrow the hole, and the first is the big one. **Roughly ships the export lists of the
+packages R code attaches most**: the standard library, the tidyverse (including `library(tidyverse)`
+itself, which activates the nine packages it attaches), `data.table`, `testthat`, `knitr`, `rlang`,
+`glue`, `magrittr`, `scales`, `jsonlite` and `R6`. Attaching any of those keeps the check fully on —
+a real export resolves, a typo beside it is still reported with a suggestion. Beyond that list: a
+near miss of a name your own project binds — a top-level definition, or a local or parameter in scope
+— is reported anyway, because `library(shiny)` cannot explain `repositry` next to a `repository`
+parameter; a `library()` naming **your own package** buys nothing at all, so the `library(yourpkg)`
+in `tests/testthat.R` does not weaken anything; and writing a two-line `stubs/<pkg>.Rtypes` for a
+package Roughly does not ship restores full checking there too, as well as silencing the
 unknown-namespace warning. `strict = true`
 also makes the tolerated reads visible.
 

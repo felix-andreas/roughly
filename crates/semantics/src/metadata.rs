@@ -128,10 +128,18 @@ pub fn declared_dependency(db: &dyn Db, package: &str) -> bool {
 /// `library()`-family call. Reads only the metadata input, so stub assembly
 /// stays free of per-file dependencies.
 pub fn namespace_active(db: &dyn Db, package: &str) -> bool {
-    if declared_dependency(db, package) {
-        return true;
-    }
-    PackageMetadata::try_get(db).is_some_and(|metadata| metadata.attached(db).contains(package))
+    let named = |name: &str| {
+        declared_dependency(db, name)
+            || PackageMetadata::try_get(db)
+                .is_some_and(|metadata| metadata.attached(db).contains(name))
+    };
+    named(package)
+        // A meta-package attaches its members instead of re-exporting them, so
+        // `library(tidyverse)` has to activate them too — that is what puts
+        // `mutate` within bare reach in R.
+        || crate::stubs::META_PACKAGE_MEMBERS
+            .iter()
+            .any(|(meta, members)| members.contains(&package) && named(meta))
 }
 
 /// The attach union over a file set — how hosts assemble

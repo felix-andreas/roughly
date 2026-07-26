@@ -8,8 +8,10 @@ The standard-library stub format ships. The corpus is ~930 typed declarations ac
 declaration-only `.Rtypes` stub files in the repository's top-level `types/` directory (`base`,
 `stats`, `utils`, `methods`, `graphics`, `grDevices`, `datasets`, plus the conditional
 `data.table`, `dplyr`, `ggplot2` and `testthat`), alongside generated `.exports` [manifests](#export-manifests) covering
-every namespace R ships (the attached ones, the `::`-only ones such as `tools` and `parallel`,
-and the conditional packages), all loaded and bound into the checker as a **set-once input** that
+every namespace R ships (the attached ones, the `::`-only ones such as `tools` and `parallel`, and
+the conditional packages) plus fifteen manifest-only CRAN namespaces (the tidyverse and its
+meta-package, `knitr`, `rlang`, `glue`, `jsonlite`, `R6` and friends) whose export sets keep
+unresolved-name detection alive, all loaded and bound into the checker as a **set-once input** that
 never invalidates a package edit (see [Incremental hygiene](#incremental-hygiene)). Project
 [overrides](#override-precedence), [overload sets](#overloads-and-generics), and `pkg::name`
 qualified access (with unknown-namespace warnings and not-exported errors) are supported. What is not
@@ -200,8 +202,20 @@ more, every real export outside that subset would warn as unresolved — the che
 `recover` (a real `utils` export) from a typo. The **export manifests** close that gap: each shipped
 namespace's `.Rtypes` file is paired with a `types/<namespace>.exports` file listing every name the
 namespace really exports, one per line, generated from a live R session by
-`scripts/export-manifests.R` (the header records the R version; rerun the script against a newer R
-to refresh all eighteen).
+`scripts/export-manifests.R` (the header records the R version; rerun the script against a newer R to
+refresh them — it refuses to overwrite a manifest recorded against a *newer* R than the session's,
+because regenerating on an older one silently drops the names the newer version added and turns every
+use of one into a false `unresolved`).
+
+A manifest does not need a `.Rtypes` file beside it. **Manifest-only namespaces** — `tibble`,
+`tidyr`, `readr`, `purrr`, `stringr`, `forcats`, `lubridate`, `magrittr`, `rlang`, `glue`, `scales`,
+`knitr`, `jsonlite`, `R6`, `tidyverse` — carry no typed declarations at all, so every name from them
+is `Unknown`. What they buy is a **knowable export set**, and that is worth more than it sounds:
+attaching a package whose exports the checker cannot enumerate turns off unresolved-name detection for
+the whole project (see [the tolerance](/typing/reference#name-resolution)), so before these manifests
+existed a single `library(stringr)` meant a clean run said nothing about typos anywhere. Adding
+declarations to any of them later is additive — the manifest stays the export set, the `.Rtypes` file
+supplies types.
 
 Manifest names are known globals with the weakest possible claim:
 
@@ -229,9 +243,15 @@ The manifests mirror how R exposes each namespace, in three tiers:
   `tcltk`): `pkg::` reads validate in every project — `tools::file_ext(path)` needs no
   `library(tools)`, exactly as in R — while bare reads resolve only once the project attaches
   or declares the package
-- **conditional** (`data.table`, `dplyr`, `ggplot2`, `testthat`): manifest and stubs activate together
+- **conditional** (`data.table`, `dplyr`, `ggplot2`, `testthat`, plus every manifest-only CRAN
+  namespace): manifest and stubs activate together
   ([Conditional namespaces](#conditional-namespaces)); inactive packages' names warn, bare and
-  qualified alike
+  qualified alike. A **meta-package** activates the members it attaches: `library(tidyverse)`
+  re-exports almost nothing itself and instead attaches `dplyr`, `ggplot2`, `tibble`, `tidyr`,
+  `readr`, `purrr`, `stringr`, `forcats` and `lubridate`, so those nine activate with it — which is
+  also how such a project gets dplyr's and ggplot2's *typed* declarations rather than a manifest's
+  `Unknown`. The membership is checkable: the generator script prints what a live
+  `library(tidyverse)` attaches
 
 The manifests vendor R's export lists so analysis never needs an R installation; they are data, not
 types — adding a manifest name costs nothing at check time until code actually reads it.
@@ -320,10 +340,11 @@ override winning a name's type never un-exports it from its declaring namespace.
 
 ### Conditional namespaces
 
-Some shipped stubs describe packages R does **not** attach by default — today `data.table`, `dplyr`,
-`ggplot2` and `testthat`. Folding them in unconditionally would let `fread`, `mutate` or `expect_equal` resolve
-(and steal a typo warning) in projects that never use them, so a conditional namespace joins the
-assembly only when the project uses the package:
+Some shipped namespaces describe packages R does **not** attach by default — `data.table`, `dplyr`,
+`ggplot2` and `testthat` with types, and the [manifest-only](#export-manifests) CRAN set without.
+Folding them in unconditionally would let `fread`, `mutate` or `str_to_upper` resolve (and steal a
+typo warning) in projects that never use them, so a conditional namespace joins the assembly only
+when the project uses the package:
 
 - a `DESCRIPTION` dependency field (`Depends`/`Imports`/`Suggests`/`Enhances`) names it, or any
   `NAMESPACE` `import`/`importFrom` uses it as a source, or
@@ -332,7 +353,9 @@ assembly only when the project uses the package:
   (the signal script workspaces have, since only packages carry metadata files), or
 - the project ships its own `stubs/<pkg>.Rtypes` override for the namespace — writing one is
   itself the clearest declaration that the project uses the package, and the override then folds
-  over the shipped declarations as usual.
+  over the shipped declarations as usual, or
+- a **meta-package** that attaches it is active: `library(tidyverse)` activates the nine packages it
+  attaches, because attaching is how R makes their names reachable.
 
 `testthat` earns its place for a different reason than the data packages: a package's `tests/`
 directory is a third of its source and every line of it calls these names, so without the corpus the

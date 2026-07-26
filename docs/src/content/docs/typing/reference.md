@@ -195,10 +195,18 @@ with neither file) behaves as if both were empty.
   for `pkg` exist.
 - A `library(pkg)` / `require(pkg)` call anywhere in the project is the script world's equivalent
   of `import(pkg)`, and follows the same rule: it attaches every export of `pkg` to the search
-  path, so when no stubs describe `pkg` its export set is unknowable and every
-  otherwise-unresolved bare read is tolerated. This is what keeps a script that opens with
-  `library(ggplot2)` from reporting one warning per plotting call. The tolerance is project-wide,
-  because R's search path is, and it lifts as soon as stubs for `pkg` exist.
+  path, so when nothing describes `pkg` its export set is unknowable and every
+  otherwise-unresolved bare read is tolerated. The tolerance is project-wide, because R's search
+  path is, and it lifts as soon as Roughly knows the package's exports — which for a long list of
+  common packages it now does. An [export manifest](/stdlib-stubs#export-manifests) is enough;
+  types are not required. The tidyverse, `knitr`, `rlang`, `glue`, `jsonlite`, `R6` and the rest of
+  the shipped manifest set therefore keep unresolved-name detection *on*, while a package Roughly
+  has never heard of still switches it off — and a two-line `stubs/<pkg>.Rtypes` of your own turns
+  it back on.
+- Attaching a **meta-package** activates the packages it attaches rather than exports:
+  `library(tidyverse)` makes `mutate`, `read_csv` and `str_to_upper` reachable because it attaches
+  `dplyr`, `readr` and `stringr`, so those namespaces activate with it — types included where they
+  have them.
 - Attaching or importing **the project's own package** — the name in `DESCRIPTION`'s `Package`
   field — earns no tolerance, even though no stubs describe it. Its export set is not unknowable:
   those exports are the project's own definitions, which the checker already sees. Without this

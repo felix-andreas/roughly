@@ -122,15 +122,18 @@ Their verdict: **"today, no"** — they would hit the ggplot2 errors within an h
 end of day, *never knowing the default checks were not running*. **"With #1, #2, #3 fixed,
 permanently yes, including CI. That gap is three bugs, not a redesign."**
 
-1. **`library()` of any package without a shipped stub silently kills unresolved-name checking,
-   project-wide.** `tidyverse`, `knitr`, `readr`, `tidyr`, `stringr`, `tibble`, `purrr`, `lubridate`,
-   `scales`, `glue`, `janitor` all disable it; only the four stubbed namespaces keep it on, and
-   `require()` counts too. Not file-scoped: two files where one attaches tidyverse gives
-   `no problems`, and deleting that file makes the *other* file's typo appear. **This is the THIRD
-   independent report of this hole** (the Shiny user's #1 and the package author's #2) — it is now
-   the top-priority item in the whole backlog. A clean run is indistinguishable from "not checked".
-   Their note: the two-line `stubs/<pkg>.Rtypes` remedy both silences the namespace warning *and*
-   restores checking, but it is only described on the contributor-facing stubs page.
+1. **`library()` of a common package killing unresolved-name checking project-wide FIXED** — the
+   third and loudest report of the same hole. The fix is that **a manifest is enough**: a namespace
+   with an `.exports` list has a knowable export set, so the blanket tolerance never applies to it,
+   and no types are needed. Fifteen manifest-only CRAN namespaces now ship (`tibble`, `tidyr`,
+   `readr`, `purrr`, `stringr`, `forcats`, `lubridate`, `magrittr`, `rlang`, `glue`, `scales`,
+   `knitr`, `jsonlite`, `R6`, `tidyverse`), every name from them typing `Unknown` while typos beside
+   them report with suggestions. `library(tidyverse)` additionally activates the nine packages it
+   *attaches* (`stubs::META_PACKAGE_MEMBERS`) — a meta-package re-exports almost nothing, and
+   activating members is also what hands such a project dplyr's and ggplot2's typed declarations
+   instead of a manifest's `Unknown`. A package with no manifest (`janitor`) still earns the
+   tolerance, correctly. Remaining: `janitor` and any other package a user names — the remedy is a
+   two-line project stub, and the limitations page now says so on the user-facing side.
 2. **ggplot2 `+` chains FIXED.** The corpus declared `+.ggplot` but nothing for a component pair,
    so `theme_minimal() + theme(...)` and a chain whose left operand was lost through `%>%` fell
    through to the numeric rules and reported arithmetic on a `gg`. R routes all of it through the
@@ -524,6 +527,16 @@ below, ranked by how often a real user hits it.
 - CRAN stub auto-generation via R introspection, R-version-keyed corpora, stubtest validation (R-dependent). (NAMESPACE/DESCRIPTION awareness moved to Open — semantics by user ask.)
 
 ## Shipped ledger (one line each; rationale in `decisions.md`, contracts in the docs site)
+
+- **A manifest is enough to keep unresolved detection alive, and fifteen CRAN namespaces now ship
+  one:** attaching a package whose exports the checker cannot enumerate disables the check
+  project-wide, which three independent adoption reviews reported as the single worst hole — a clean
+  run was indistinguishable from "not checked". Manifest-only namespaces (no `.Rtypes`, every name
+  `Unknown`) close it for the tidyverse, `knitr`, `rlang`, `glue`, `magrittr`, `scales`, `jsonlite`
+  and `R6`; `library(tidyverse)` activates the nine members it attaches, so dplyr's and ggplot2's
+  *typed* declarations come with it. The generator script now refuses to overwrite a manifest recorded
+  against a newer R than the running session, because doing so drops the names that version added and
+  turns each use into a false `unresolved`.
 
 - **A bad `NAMESPACE` `importFrom` is an error, and the strict severity jump is documented:** R
   refuses to load a package whose import names a non-export, so a warning let it pass a

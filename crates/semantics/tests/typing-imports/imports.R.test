@@ -65,6 +65,7 @@ library(jsonlite)
 f <- function(x) zzframboz(x)
 #++++
 f: <T> fn(x: T) -> Unknown
+64..73 warning[unresolved] I could not resolve `zzframboz` in this package, its imports, or builtins.
 
 #---- a_blanket_tolerance_still_reports_a_typo_of_the_project_s_own_name
 library(testthat)
@@ -76,6 +77,31 @@ validate_url: <T> fn(url: T) -> logical
 check_one: <T> fn(url: T) -> Unknown
 use_library_name: <T> fn(x: T) -> T
 91..102 warning[unresolved] I could not resolve `validte_url` in this package, its imports, or builtins. Did you mean `validate_url`?
+
+#---- attaching_a_manifested_cran_package_keeps_typo_detection_alive
+# The shape three separate adoption reviews reported: one `library()` of a
+# popular package used to switch unresolved detection off for the whole project.
+# A shipped export manifest makes the export set knowable, so real names resolve
+# and a typo beside them is still a typo.
+library(stringr)
+shout <- function(x) str_to_upper(x)
+oops <- function(x) str_to_uper(x)
+#++++
+shout: <T> fn(x: T) -> Unknown
+oops: <T> fn(x: T) -> Unknown
+353..364 warning[unresolved] I could not resolve `str_to_uper` in this package, its imports, or builtins. Did you mean `str_to_upper`?
+
+#---- a_meta_package_activates_the_members_it_attaches
+# `library(tidyverse)` re-exports almost nothing and attaches its members
+# instead, so activating them is what matches R — and it gives the project the
+# members' typed declarations, not just their names: dplyr's verbs are
+# class-preserving here.
+library(tidyverse)
+#: fn(frame: data.frame) -> integer
+wrong <- function(frame) frame |> filter(cyl > 4) |> mutate(ratio = 1)
+#++++
+wrong: fn(frame: data.frame) -> integer
+331..376 error[type-mismatch] expected `integer`, found `data.frame`
 
 #---- a_transposition_is_suggested_but_a_distant_name_is_not
 f <- function(x) lenght(x)
