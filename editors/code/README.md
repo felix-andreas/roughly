@@ -22,7 +22,7 @@ ry aims to support the following language server features (some are experimental
 
 - **Diagnostics**
   - Syntax errors - *including missing or trailing commas*
-  - Basic linting rules - *[full list here](https://ry.felixandreas.me/reference/diagnostic-codes)*
+  - Basic linting rules - *[full list here](https://ry-lang.org/reference/diagnostic-codes)*
   - Warning for unused variables *(🧪 experimental)*
   - Error for undefined variable *(⚠️ missing)*
   - Argument validation for function calls *(⚠️ missing)*
@@ -63,21 +63,21 @@ You can customize the ry extension in VS Code through the following settings:
 
 ### Format Document
 
-![Format Document](https://assets-felixandreas-me.pages.dev/ry/format.gif)
+![Format Document](https://assets-felixandreas-me.pages.dev/roughly/format.gif)
 
 ### Workspace Symbol Search <kbd>Ctrl</kbd> + <kbd>T</kbd>
 
-![Workspace Symbol Search](https://assets-felixandreas-me.pages.dev/ry/workspace-symbols.gif)
+![Workspace Symbol Search](https://assets-felixandreas-me.pages.dev/roughly/workspace-symbols.gif)
 
 ### Document Symbol Search  <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd>
 
-![Document Symbol Search](https://assets-felixandreas-me.pages.dev/ry/document-symbols.gif)
+![Document Symbol Search](https://assets-felixandreas-me.pages.dev/roughly/document-symbols.gif)
 
 ### Syntax Errors
 
-![Syntax Errors](https://assets-felixandreas-me.pages.dev/ry/syntax-errors.gif)
+![Syntax Errors](https://assets-felixandreas-me.pages.dev/roughly/syntax-errors.gif)
 
 ## Links
 
 * [📦 Source Code](https://github.com/felix-andreas/ry)
-* [📚 Documentation](https://ry.felixandreas.me/)
+* [📚 Documentation](https://ry-lang.org/)

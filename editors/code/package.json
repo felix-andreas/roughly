@@ -6,7 +6,7 @@
 	"version": "0.3.0",
 	"publisher": "felix-andreas",
 	"license": "UPL-1.0",
-	"homepage": "https://ry.felixandreas.me",
+	"homepage": "https://ry-lang.org",
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/felix-andreas/ry"

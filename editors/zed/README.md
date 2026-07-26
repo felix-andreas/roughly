@@ -61,4 +61,4 @@ colors come from the server as LSP semantic tokens, which Zed leaves off by defa
 }
 ```
 
-See the [language server documentation](https://ry.felixandreas.me/reference/configuration#editor-settings) for every setting.
+See the [language server documentation](https://ry-lang.org/reference/configuration#editor-settings) for every setting.

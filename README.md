@@ -55,11 +55,11 @@ ry aims to support the following language server features (some are experimental
 
 - **Diagnostics**
   - Syntax errors - *including missing or trailing commas*
-  - Basic linting rules - *[full list here](https://ry.felixandreas.me/reference/diagnostic-codes)*
+  - Basic linting rules - *[full list here](https://ry-lang.org/reference/diagnostic-codes)*
   - Warning for unused variables *(opt-in: `[check] unused`)*
   - Error for undefined variable *(⚠️ missing)*
   - Argument validation for function calls *(part of type checking)*
-  - Static type checking — HM-style inference with nominal/structural types, function types, nullable unions, and numeric constraints, driven by [`#:` typing comments](https://ry.felixandreas.me/type-checking/concepts). Inferred types power editor features by default; `type-mismatch` diagnostics are opt-in via `[check] typing`.
+  - Static type checking — HM-style inference with nominal/structural types, function types, nullable unions, and numeric constraints, driven by [`#:` typing comments](https://ry-lang.org/type-checking/concepts). Inferred types power editor features by default; `type-mismatch` diagnostics are opt-in via `[check] typing`.
 
 - **Editing**
   - Autocomplete local and global variables
@@ -181,7 +181,7 @@ its README has the three steps.
 
 ## RStudio Integration
 
-ry can be used as an external formatter in RStudio. See the [RStudio setup guide](https://ry.felixandreas.me/installation#rstudio) for detailed instructions.
+ry can be used as an external formatter in RStudio. See the [RStudio setup guide](https://ry-lang.org/installation#rstudio) for detailed instructions.
 
 ## Configuration
 
@@ -218,7 +218,7 @@ Type checking and unused-variable warnings are no longer experimental — config
 
 ## Development
 
-See our [development documentation](https://ry.felixandreas.me/contributing/development).
+See our [development documentation](https://ry-lang.org/contributing/development).
 
 ## License
 
