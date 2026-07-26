@@ -207,6 +207,64 @@ with `by = .EACHI` produced zero NSE complaints. Exit codes, JSON Lines, `--min-
 discovery, unknown-key warnings and suppression comments all matched the docs. 0.15s on 919 lines in
 a debug build.
 
+### From the time-series quant (620 lines, 10 planted mistakes, 3 caught)
+
+Their headline: "the date/time operator modelling is the best static checking of R dates I have
+seen — and it is surrounded by false positives that fire on ordinary code, plus a `Date` type that
+evaporates the moment a date touches `c()`, `[`, `min()`, or a `for` loop." They would adopt lints
+and `unresolved` today, and `typing` on one module "because the date operator work is worth real
+money" — but not tell anyone with matrix-heavy code to turn typing on until (1) and (3) are fixed.
+
+1. **SOUNDNESS — `min(dates)` is typed `integer`, so a `Date` passes into an `integer` parameter.**
+   `double_it(min(dates))` against `#: fn(n: integer)` reports nothing, and `min(dates) +
+   max(dates)` is accepted; R then fails with `binary + is not defined for "Date" objects`. This is a
+   **wrong answer, not a skipped check**, so it breaks the quality bar's "never silently mistyped"
+   and contradicts `limitations.md` in the same breath. Highest-severity finding of the round.
+   Related: a numeric bound accepts `Date` even when written explicitly as `<T: numeric>`, which is
+   also how their "adding two dates via a helper" bug escaped. `sort`/`head`/`rev` on dates report
+   ``found `T[]` ``, leaking an unbound type variable into a user-facing message.
+2. **FP — `x[i, j]` on an unannotated parameter is an error**, and it was 5 of the 8 findings on their
+   untouched project. It contradicts `reference.md`, which says `[` on an unannotated parameter
+   yields `Unknown` precisely "because refusing here would flag ordinary code". It fires only when the
+   receiver is still an inference variable (annotating `matrix` or `@trust Any` both pass), and it is
+   internally inconsistent: `p[1:2, ]` is accepted, `p[1, , drop = FALSE]` is not.
+3. **FP — `c(d1, d2)` errors with ``expected `integer`, found `Date` ``**, and so does `c(d1)` alone.
+   R returns a `Date` vector. The message is nonsense to a reader: nothing in the expression is an
+   integer.
+4. **FP — `vapply(x, f, numeric(1))` errors whenever the callback is not statically `double`.** R
+   accepts a wider template; they confirmed with `roughly run` that
+   `vapply(1:3, function(i) i, numeric(1))` works.
+5. **`Date` does not survive real code.** Survives `d + 1L`, `d2 - d1`, `d1 < d2`, `format`,
+   `seq.Date` and `while` cursors; **lost to `Unknown`** through `dates[i]`, `dates[mask]`,
+   `for (d in dates)` and `Reduce`; **wrong** through `min`/`max`; **an error** through `c()`. The
+   same bug is caught in one place and missed in another — `cursor + cursor` after a `while` loop is
+   flagged, the identical `d + d` inside `for (d in dates)` is not. No doc describes this boundary.
+6. **`#: @type TradeDate {Date}` disables all Date arithmetic** — `settle - trade` is rejected — which
+   kills the guide's own recipe for domain types over dates. The working route is a project
+   `.Rtypes` declaring `-.SettleDate`, which the guide never mentions (and a stub cannot see an
+   inline `@type`, the gap already recorded below). Also **`Date[]` is inexpressible**, and
+   `Days + Days` yields `double`, so a units tag dies on arithmetic.
+7. **Strict mode's own advice does not work.** The message says "add a type annotation" and **no
+   annotation form silences it** — `#:`, `@if-unknown`, `@trust` and `#: Any` all still report, the
+   last contradicting `reference.md` directly. Only `# roughly: allow(strict)` works.
+8. **`&` and `|` are unmodelled**, so `TRUE & FALSE` is `Unknown` and every logical mask kills
+   downstream checking. The reference documents `&&`/`||` with no counterpart, and the only mention
+   of `&` is a parenthetical inside the NSE discussion.
+9. **Formatter — `m[i, , drop = FALSE]` becomes `m[i,, drop = FALSE]`**, removing the space that makes
+   the empty dimension slot visible, in exactly the code where miscounting slots is the bug. It is
+   idempotent, so deliberate, and undocumented.
+10. **Misleading message — any `X[Y]` annotation reports "only one compact annotation fits in a `#:`
+    block — separate the annotations with a blank line" when there is only one annotation.**
+
+What they praised: **every date expression R rejects or warns on was caught across 21 probes, with
+zero misses and zero false alarms**, including `Sys.time() - Sys.Date()` — which R only *warns*
+about and which they have shipped to production. `` `-` is not defined between `POSIXct` and
+`Date` `` is "the best message in the tool". Also: field-typo detection with the full inferred record
+shape, cross-file resolution with typo suggestions at zero config, arity messages in plain language,
+syntax-error recovery, clean CI-ready JSON, 31.5k lines across 120 files in 2.2s on a debug build,
+and `roughly run` with an embedded R letting them verify every claim ("underadvertised"). Units
+nominals and domain matrix types both work and produce excellent messages.
+
 ## Open — documentation review findings
 
 Four independent reviews read the docs cold (a first-hour newcomer, an information architect, an
