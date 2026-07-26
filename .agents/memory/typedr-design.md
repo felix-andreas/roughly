@@ -1,9 +1,10 @@
 # TypedR — a typed dialect of R that compiles to R
 
-Status: **proposal. Nothing is implemented, and one question has to be answered
-before anything should be** (§3). This document exists so that whoever picks it
-up starts from a reasoned design instead of re-deriving one, and so the costs are
-visible before the work starts rather than after.
+Status: **proposal, and the recommendation is currently NOT to build the package
+half of it** (§3). Nothing is implemented. This document exists so that whoever
+picks it up starts from a reasoned design instead of re-deriving one, so the costs
+are visible before the work starts rather than after, and so the existing attempt
+at the same idea (§13) is read before the second one begins.
 
 Read it in order. Each section earns the next one.
 
@@ -120,8 +121,48 @@ two routes want the same capability, and building both would be waste. Settle
 the fork explicitly, record the answer in `decisions.md`, and delete the losing
 half.
 
-The rest of this document assumes Route B, so that the choice is between two
-designs rather than between a design and a sketch.
+**Route A's stated cost is avoidable, which changes the balance.** The objection
+above — that the checker would gain hardcoded knowledge of particular function
+names — assumes the knowledge lives in the checker. It does not have to. The
+corpus already carries exactly this kind of fact as a declaration attribute:
+`@masked` marks a function whose rest arguments evaluate inside a data frame, and
+the checker reads that from the stub rather than knowing dplyr's verb names. Case
+analysis can ride the same mechanism:
+
+```
+match : @exhaustive fn(x: Any, ...: Any) -> Any
+```
+
+The attribute says "the named arguments of this call are cases over the first
+argument's kinds; report any kind no argument covers". The checker gains one
+general rule, the *names* stay data, a project can declare its own equivalent for
+a hand-rolled dispatcher, and the whole thing is overridable like every other
+stub. That is the same shape as every other special form already supported, and it
+passes the design bar that the original objection said it would fail.
+
+What Route A still cannot do is *restrict* construction — nothing stops someone
+building the underlying list by hand and skipping the constructor. Weigh that
+honestly: this is a gradual checker with `Any` as a sanctioned escape hatch and
+`Unknown` wherever a construct is unmodelled. It tolerates far larger holes than
+that one, deliberately. The unrestrictable constructor is a real cost and a small
+one.
+
+**Recommendation: take Route A for the capability, and do not build a package
+dialect.** The reasoning is in §5 and in the prior art (§14): the tool's
+distinguishing property is that it works on R nobody has modified, and a dialect
+spends exactly that to buy notation. Route A keeps it and gets the part that
+matters — being told when a case is missing.
+
+That leaves one place where a dialect costs almost nothing, and it is worth
+keeping alive: **standalone scripts run through the REPL** (§9), where there is no
+generated file, no packaging, and no collaborator who needs a toolchain. If a
+dialect ships at all, that is where it should ship first — and it is the corner
+the existing prior art does not occupy.
+
+The rest of this document specifies Route B in full anyway, for two reasons: the
+fork should be decided between two designs rather than between a design and a
+sketch, and the script-only dialect above is Route B minus its packaging half, so
+the specification is what it would be built from.
 
 ## 4. What the dialect adds
 
@@ -418,7 +459,111 @@ fuzzing — because a half-landed dialect has no users to learn from.
 4. **Layer 3, kinds and `match`.** Nominal variants, S3 output, exhaustiveness.
    The actual prize.
 
-## 13. Open questions
+## 13. Prior art, and what it settles
+
+A typed R that compiles to R is not a new idea, and the existing attempt is
+informative enough to change this document's recommendation rather than merely
+decorate it.
+
+### TypR (`we-data-ch/typr`)
+
+A typed language for R, implemented in Rust, transpiling to R. Extension `.ty`.
+Its own example:
+
+```
+type Person = list {
+	name: char,
+	age: int
+};
+
+new_person <- fn(name: char, age: int): Person {
+	list(name = name, age = age)
+};
+
+is_minor <- fn(p: Person): bool {
+	p$age < 18
+};
+
+alice <- new_person("Alice", 35);
+alice.is_minor()
+```
+
+Three of its choices are worth studying, and only the third is one to copy.
+
+**It is a sibling language, not a superset.** `fn(...)` replaces `function(...)`,
+the return type follows a colon, statements end in semicolons, booleans are
+`true`/`false` rather than `TRUE`/`FALSE`. An existing R file cannot become a
+TypR file by adding anything; it has to be rewritten. That forfeits the property
+this project treats as its core asset — useful answers about R that nobody has
+modified — and it forfeits it for every user, not just the ones who opt in,
+because there is nothing to opt into short of a rewrite.
+
+Be fair about what breaking R's syntax *buys*, though, because it is real:
+`alice.is_minor()` — a method-style call meaning `is_minor(alice)` — is genuinely
+nice, since a completion list after `.` is the best discovery mechanism a typed
+language has. **We cannot have it**, and the reason is worth recording so nobody
+proposes it later: `.` is an ordinary character in R identifiers (`is.na`,
+`as.character`, `my.var`), so `alice.is_minor` is already a legal variable name.
+A dialect that stays R-compatible cannot reclaim the dot. Their willingness to
+break compatibility is what makes their syntax pleasanter, and it is the same
+decision that costs them incremental adoption. That trade is the fork in §3 in
+concrete form.
+
+**Its type reasoning runs on Prolog.** The tool requires SWI-Prolog installed
+alongside R and Rust, and emits a Prolog file (`adt.pl`) that carries the type
+reasoning. A logic engine is a powerful choice — subtyping, class hierarchies and
+algebraic-datatype relations are all natural to express declaratively — but it
+buys that with unbounded search, an external system dependency at build time, and
+no path to incremental re-checking. It cannot become an editor experience that
+answers in tens of milliseconds on a large package without being replaced.
+
+This is the road not taken, running in public. The standing rule — admit only
+what is fast to check, which means unification rather than search
+(`decisions.md`) — was decided on principle; TypR is what the other principle
+looks like when built. Their own README calls the project a prototype that is
+"really buggy", and it would be unfair to pin that on the engine choice, but the
+architectural consequence stands regardless of maturity: a Prolog-backed checker
+and a keystroke-latency language server are different programs.
+
+**It leads with package authoring, not with types.** Its stated aim is a better
+experience building R packages and an easier path from a research paper to code.
+That is the choice to copy. It correctly identifies that the felt pain is the
+whole authoring experience, not the absence of a type annotation — and it is a
+useful corrective to a proposal that could easily be written as "types, but as
+syntax".
+
+**What it validates:** that there is real appetite (a self-described buggy
+prototype has attracted a few hundred stars), and that the destination — typed
+source compiling to ordinary R — is one people find plausible. **What it leaves
+open:** the whole editing experience, incremental checking, and working on
+unmodified code. That is the space this project already occupies.
+
+### Other attempts worth knowing
+
+- **Runtime checking in R itself.** Packages exist that add type annotations
+  enforced when the code runs (the `typed` package's `?` operator; `checkmate`
+  and `assertthat` for argument assertions; `dgkf/typewriter` for annotations
+  plus runtime checks). They prove the notation is welcome and confirm the gap:
+  none of them can tell you anything before the line executes.
+- **Academic work on typing R** exists, notably a paper titled "Towards a Type
+  System for R" (ICOOOLPS 2019). Read it before designing the sum-type layer; it
+  is the closest thing to a survey of which R idioms resist static description.
+- **The compiles-to-host lineage**, which is where the packaging model here comes
+  from: TypeScript to JavaScript, Sorbet's `.rbi` for Ruby, stub files for Python.
+  The pattern every one of them converged on — declarations in a separate file
+  for foreign code, annotations inline for your own — is the pattern already in
+  place here (`.Rtypes` and `#:`).
+
+### The honest limit of this survey
+
+TypR's documentation site could not be read while writing this; the account above
+comes from its README, its published crate metadata, its release history and
+secondary sources. Its treatment of pattern matching and exhaustiveness in
+particular is unconfirmed — if it has them, the "what it leaves open" claim above
+needs revisiting, though not the conclusions about the engine or the syntax
+break.
+
+## 14. Open questions
 
 - The fork in §3, before anything else.
 - Whether the standalone-script path (§9) should lead instead of follow, since it
