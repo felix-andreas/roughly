@@ -537,6 +537,36 @@ below, ranked by how often a real user hits it.
 - **Analysis-backed Tab completion SHIPPED** (first analysis rung; `repl-design.md` has the seam design): typed signatures for stdlib names, session bindings, `pkg::` exports, manifest names — `SessionCompleter` seam keeps the repl crate syntax-only, `AnalysisCompleter` in roughly runs `ide::completion` over the session-as-script. **Open — remaining rungs:** live-session facts (the R environment listing unioned into completions), pre-evaluation diagnostics on pending input, hover on the input line, graphics-device story (versioned mirror structs, see the design record). The headless runner is shipped.
 - **REPL Windows: real-machine smoke test pending.** The embedding is implemented (`repl-design.md` has the recipe: Rstart callbacks via R_DefParamsEx's version handshake, sibling-DLL preloading, RGui→LinkDLL switch, UserBreak+deferred interrupt pair) and compile/clippy-verified against x86_64-pc-windows-gnu — but no Windows machine with R has ever executed it. Smoke: `roughly repl` (prompt, evaluate, Ctrl-C, vi mode) and `roughly run` (output, exit 0/1). Known caveat to watch: terminal VT input handling in the editor layer.
 
+## Open — delete the `rofy` crate (user-approved, unlike the other legacy crates)
+
+**The user has given an explicit go for `rofy` alone, conditional on parity in every sense.** Every
+other crate under `legacy/` still needs its own explicit go and must stay in-tree until then.
+
+Why this one is different: `rofy` is the *predecessor* of a shipped component, not a frozen oracle.
+It embeds R through `extendr`/libR-sys, so bindgen runs at build time against a local R and the
+binary carries a load-time dependency on libR — which is exactly why it is excluded from CI and from
+every gate. `crates/repl` replaced that approach with runtime symbol binding (`repl-design.md`), is
+e2e-verified against real R on both Unix ptys and Windows ConPTY, and already exceeds it: headless
+runner, vi keybindings, SIGINT routing, analysis-backed Tab completion. `rofy` is 266 lines across
+`lib.rs` and `main.rs`, with no graphics-device code, so the parity surface is small.
+
+**The payoff is not the deleted lines, it is the gate.** `--exclude rofy` currently rides along in
+every command in CI (`.github/pending-ci.yml`), the docs, `MEMORY.md`, and every agent's muscle
+memory. Deleting the crate reduces the canonical invocation to
+`cargo test --workspace --exclude zed_roughly`, and one fewer exclusion is one fewer thing a future
+session gets wrong.
+
+Do this before deleting:
+
+- **Establish parity explicitly rather than by assumption.** Enumerate what `rofy` does, confirm
+  `crates/repl` does each, and record any deliberate non-goal. Two files is a short read; do the read
+  instead of trusting this note.
+- **Confirm nothing depends on it** — workspace members, `Cargo.toml` feature wiring, scripts, and
+  the R-`parse()` acceptance cross-check, which `decisions.md` describes as "run locally like `rofy`"
+  and which must keep working after the crate is gone.
+- **Then drop `--exclude rofy` everywhere it appears** in the same change, and say so in
+  `MEMORY.md` — the exclusion outliving the crate would be worse than either.
+
 ## Open — naming: the `ry` toolchain and its file extensions
 
 **Decided by the user:** the typed dialect's source extension is **`.ry`**, and its sources live in a
