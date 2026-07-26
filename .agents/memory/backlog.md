@@ -62,19 +62,17 @@ but documented nowhere; five smaller `language-server.mdx` items (a `bun run pac
 `package.json`, three wrong VS Code palette titles, 4-of-5 code actions, `PAREN_EXPR` folding
 omitted, a `--verbose` example whose own help says it is ignored).
 
-**The structural problem, which is bigger than any single fix.** The site is organised around
-Roughly's subsystems rather than around anything a reader wants to *do*, so there is no tutorial
-and no how-to layer at all: `typing/guide.md` restates `typing/reference.md` in the reference's own
-order for eleven of its thirteen sections and never asks the reader to run anything, and
-`stdlib-stubs.md` is an internal design RFC (`## Problem`, sections titled "not buildable here")
-sitting in the user sidebar. Six pages are missing, in value order: **adopting Roughly on an
-existing codebase** (partly done: the ladder is now on the limitations page, but it deserves its own
-how-to), **why a type checker for R** (the explanation page — where the intrigue lives), and
-**comparison** (Air, Jarl, lintr, styler, languageserver, checkmate — a page that concedes
-formatting and lint breadth openly, because one that wins everything reads as marketing).
-**DONE from that list:** the diagnostics reference (`diagnostics.md` — all fourteen codes, tables
-built by running the tool, which caught `trailing-comma` defaulting to error and `duplicate` being
-package-only), CI (a real workflow on the installation page), and limitations (`limitations.md`).
+**The structural problem.** The site was organised around Roughly's subsystems rather than around
+anything a reader wants to *do*. Largely addressed: `typing/guide.md` is now a **tutorial** — eight
+numbered steps from a zero-config first run to strict mode, each with a runnable example and output
+captured from the binary, ending where the reference begins — and `stdlib-stubs.md` is no longer an
+internal RFC. Also landed: the diagnostics reference (all fourteen codes, tables built by running
+the tool), a CI workflow, and `limitations.md`.
+
+**Still missing, in value order:** a **"why a type checker for R"** explanation page (where the
+intrigue lives), a dedicated **adoption how-to** (the ladder is on the limitations page but deserves
+its own), and a **comparison** page (Air, Jarl, lintr, styler, languageserver, checkmate — it must
+concede formatting and lint breadth openly, because one that wins everything reads as marketing).
 
 **Positioning.** The headline leads with the formatter and linter — the two things Roughly loses at
 today (Posit's Air is bundled in Positron; Jarl ships 71 rules with `--fix` and an LSP, 140× faster
