@@ -506,6 +506,24 @@ below, ranked by how often a real user hits it.
 - Overload candidates when touched: `is`, `extends`, `grep(value =)`, `cor` (vector vs matrix — needs matrix nominals). `Date`/`POSIXct` arithmetic refuses loudly today — revisit if real code makes it noisy.
 - **A list operation over a RECORD still loses the field types.** `rev`/`unique`/`head`/`tail`/`Filter` now declare a `list[named: T]` candidate ahead of the plain list one, so a name survives and a field read is `T | NULL` instead of a missing-field error — but a fixed-shape input coerces to a name-keyed list on the way in, so the exact field types are gone and the read stays nullable. Only a shape-mirroring return ("the same record") fixes it, and the type language has no way for a stub to say that; `rev` is the case where the claim would be exactly right (it reorders and drops nothing), while `head`/`tail`/`Filter` genuinely may drop a name and are correctly nullable. Same family as the data.frame row-type and matrix-shape designs.
 
+## Open — the formatter is slower than the type checker
+
+Measured on a release build over 3,835 files / 703,289 lines / 30 MiB of real CRAN sources, in a
+throttled container (so treat the absolute numbers as an upper bound, and see the parallel-cold-pass
+note before drawing conclusions about scaling):
+
+- `ry check .` with `typing = true` — 5.6 s, 5.8 s, 6.0 s
+- `ry fmt --check .` — 10.1 s, 9.9 s
+
+**Formatting costs roughly twice what parsing, naming, inference, type checking and lint assembly cost
+together, which is backwards.** `fmt --check` should be the cheaper command: it parses and renders, but
+it never builds an item tree, never resolves a name, and never runs inference. Worth an
+`analysis-stats`-style phase breakdown before assuming a cause — plausible candidates are that
+`--check` renders every file to a string and compares whole buffers rather than short-circuiting on the
+first difference, that it is single-threaded where `check` fans out, or that the render path allocates
+per node. Whichever it is, it is the kind of thing a user notices, because `fmt` is the command they
+run most often.
+
 ## Open — editor & polish
 
 - Hover type fences (user-confirmed: no highlighting in current editor builds): the server tags the fences `roughly-type` and the VS Code extension in-repo ships a grammar for that id — needs a released extension update to reach users. Zed renders the fence plain until its extension registers an equivalent fence language (tree-sitter grammar required); consider falling back to tagging fences `r` for Zed if that proves distant.
