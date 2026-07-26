@@ -372,7 +372,10 @@ rev : <T> fn(x: list[T]) -> list[T]
 rev : fn(x: Any) -> Any
 unique : <T> fn(x: T[], [incomparables]: Any, [fromLast]: logical, [nmax]: Any) -> T[]
 unique : <T> fn(x: list[T], [incomparables]: Any, [fromLast]: logical, [nmax]: Any) -> list[T]
-unique : fn(x: Any, [incomparables]: Any, [fromLast]: logical, [nmax]: Any) -> Any
+# The fallback candidate is variadic because `unique` is a generic and its
+# methods take arguments base's signature does not name — `unique(DT, by = "id")`
+# is `unique.data.table`. The typed candidates above stay exact.
+unique : fn(x: Any, ...: Any, [incomparables]: Any, [fromLast]: logical, [nmax]: Any) -> Any
 duplicated : fn(x: Any, [incomparables]: Any, [fromLast]: logical, [nmax]: Any) -> logical
 anyDuplicated : fn(x: Any, [incomparables]: Any, [fromLast]: logical) -> integer
 union : <T> fn(x: T[], y: T[]) -> T[]

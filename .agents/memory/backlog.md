@@ -183,12 +183,22 @@ doc page mentions for this purpose — while the path the docs *do* recommend (h
 4. **Any `stubs/` file deactivates the shipped conditional namespaces.** One stub for an unrelated
    package made 19 `data.table::` calls unresolved while bare `fread` still resolved, and made
    `data.table` unusable as an annotation type name — which silently suppressed a real type error.
-5. **`setkey`/`setorder` report *correct* column names as unresolved** (the `v`-suffixed forms are
-   fine), and **`unique(DT, by = ...)` is an error**, which fails `--min-severity error` on correct
-   code.
+5. **`setkey`/`setorder`/`unique(DT, by=)` FIXED.** `setkey` and `setorder` name columns rather than
+   values, so they are `@masked` like the other NSE verbs (the `v`-suffixed forms take a character
+   vector and never needed it). `unique`'s fallback candidate is variadic now, because `unique` is a
+   generic whose methods take arguments base's signature does not name — the typed candidates stay
+   exact, so `unique(c(1L, 2L))` is still `integer[]`. Verifying that turned up one more: every
+   column-name parameter in the data.table stub was declared scalar `character`, so
+   `setkeyv(DT, c("id", "date"))` — the whole point of the `v` forms — was an error. They are
+   `character[]` now, which accepts one name or several.
 6. **`data.table` is rejected where `data.frame` is expected, and the wrong direction is accepted.**
    `needs_df(data.table(a = 1L))` is legal R and reports `expected data.frame, found data.table`;
-   `needs_dt(data.frame(a = 1L))`, the direction that really is wrong, reports nothing.
+   `needs_dt(data.frame(a = 1L))`, the direction that really is wrong, reports nothing. This is
+   **nominal subtyping** — R's class vector for a data.table is `c("data.table", "data.frame")` — and
+   it is the same deferred design as S4's `contains=` and R6's `inherit=`: `TyKind::Named` matches by
+   exact name and nothing in the compatibility relation carries a hierarchy. The tractable corner is a
+   *declared*, acyclic nominal-extends-nominal relation in the stub vocabulary; do it as that design,
+   not as a data.table special case.
 7. **`on.exit()` reads FIXED.** R stores the expression and runs it at return, so it observes the
    *last* value of what it reads; a read inside it now keeps every write of that name in the frame
    alive, exactly as a closure capture does. A genuine dead store beside a guard still reports.

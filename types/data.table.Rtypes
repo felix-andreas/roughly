@@ -10,7 +10,7 @@
 
 @type data.table
 
-data.table : fn(...: Any, [keep.rownames]: logical | character, [check.names]: logical, [key]: character, [stringsAsFactors]: logical) -> data.table
+data.table : fn(...: Any, [keep.rownames]: logical | character, [check.names]: logical, [key]: character[], [stringsAsFactors]: logical) -> data.table
 as.data.table : fn(x: Any, [keep.rownames]: logical | character, ...: Any) -> data.table
 is.data.table : fn(x: Any) -> logical
 copy : <T> fn(x: T) -> T
@@ -19,16 +19,18 @@ fwrite : fn(x: Any, [file]: character, ...: Any) -> NULL
 rbindlist : fn(l: Any, [use.names]: logical | character, [fill]: logical, [idcol]: character | logical) -> data.table
 
 # The set*() family mutates by reference and returns its input invisibly.
-setDT : fn(x: Any, [keep.rownames]: logical | character, [key]: character, [check.names]: logical) -> data.table
+setDT : fn(x: Any, [keep.rownames]: logical | character, [key]: character[], [check.names]: logical) -> data.table
 setDF : fn(x: Any, [rownames]: character) -> data.frame
 set : fn(x: Any, [i]: integer, [j]: Any, [value]: Any) -> data.table
 setnames : fn(x: Any, old: Any, [new]: Any, [skip_absent]: logical) -> data.table
-setkey : fn(x: Any, ...: Any, [verbose]: logical, [physical]: logical) -> data.table
-setkeyv : fn(x: Any, cols: character, [verbose]: logical, [physical]: logical) -> data.table
+# `setkey(DT, id, date)` names columns, not values — the `v`-suffixed forms take
+# a character vector instead, which is why only these need masking.
+setkey : @masked fn(x: Any, ...: Any, [verbose]: logical, [physical]: logical) -> data.table
+setkeyv : fn(x: Any, cols: character[], [verbose]: logical, [physical]: logical) -> data.table
 setindex : fn(x: Any, ...: Any) -> data.table
 setindexv : fn(x: Any, cols: Any) -> data.table
-setorder : fn(x: Any, ...: Any, [na.last]: logical) -> data.table
-setorderv : fn(x: Any, [cols]: character, [order]: integer, [na.last]: logical) -> data.table
+setorder : @masked fn(x: Any, ...: Any, [na.last]: logical) -> data.table
+setorderv : fn(x: Any, [cols]: character[], [order]: integer, [na.last]: logical) -> data.table
 setcolorder : fn(x: Any, [neworder]: Any, [before]: Any, [after]: Any) -> data.table
 setattr : fn(x: Any, name: character, value: Any) -> Any
 setDTthreads : fn([threads]: integer, [restore_after_fork]: logical, [percent]: double, [throttle]: integer) -> integer
@@ -42,7 +44,7 @@ merge : fn(x: Any, y: Any, ...: Any) -> data.table
 transpose : fn(l: Any, [fill]: Any, [ignore.empty]: logical, [keep.names]: character, [make.names]: Any) -> Any
 
 # Grouped/vector helpers usable outside brackets too.
-uniqueN : fn(x: Any, [by]: character, [na.rm]: logical) -> integer
+uniqueN : fn(x: Any, [by]: character[], [na.rm]: logical) -> integer
 fifelse : <T> fn(test: logical | logical[], yes: T, no: T, [na]: T) -> T
 fifelse : fn(test: Any, yes: Any, no: Any, [na]: Any) -> Any
 fcase : fn(...: Any, [default]: Any) -> Any
