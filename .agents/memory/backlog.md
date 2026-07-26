@@ -51,7 +51,8 @@ Their own top three, in their order:
    positive this round spent its time removing.
 
 Also from them: `$` on an unannotated parameter constrains nothing, so the parameter accepts
-anything; `unresolved` silently changes severity when `strict` is on; R6 is invisible (correctly
+anything; `unresolved` changes severity when `strict` is on (documented now, in the diagnostics table
+and the reference); R6 is invisible (correctly
 documented, cost recorded); and they asked for a page saying what does and does not work for Shiny.
 
 ### From the TDD package author (`tallyr`, 500 lines, green in real R 4.3.3)
@@ -94,8 +95,10 @@ five opt-in lints are unusable on a package with an S3 class and a testthat suit
    in `R/speak.R` covers `speak.dog` in `R/dog.R`; the generic itself is exempt too, since it declares
    the dispatch argument and never touches it. `is_s3_method_name`/`s3_generics` live in
    `semantics.rs` beside the other project-level projections, shared by the lint and the unused walk.
-6. **A bad `importFrom` is a warning, but R refuses to install the package** (`object 'setNmaes' is
-   not exported`). Under `--min-severity error` that ships.
+6. **A bad `importFrom` FIXED — it is an error now**, matching its `export()` sibling: R refuses to
+   *load* such a package, so it is not survivable advice and must not pass a `--min-severity error`
+   gate. A bad `pkg::name` *read* stays a warning, and the reference says why: a bad import stops
+   loading outright, a bad qualified read fails only if that line runs.
 7. **`#: @new` does not stop `structure()` being a strict origin** — the documented S3 remedy failing
    at exactly the site it exists for. Related to (1).
 8. **S3 generic/method signature consistency is unchecked** — both planted violations missed, and
@@ -154,8 +157,11 @@ permanently yes, including CI. That gap is three bugs, not a redesign."**
    `check` already did. A stage with nothing to do must not fail a pipeline, and a pre-commit hook
    handing the formatter a literate document it deliberately skips must not fail the commit.
 8. An unclosed chunk reports their English prose as an unresolved variable rather than the missing
-   fence. And `strict = true` silently escalates `unresolved` from warning to error (12 on their
-   project) — the second user to be surprised by that.
+   fence. **The `strict` severity escalation is no longer silent** — the `unresolved` row of
+   `diagnostics.md` and the strict-mode section of the reference both say that turning strict on
+   raises every `unresolved` finding to an error without changing the count, and why that matters to a
+   `--min-severity error` gate. The behaviour itself is right (a name the checker cannot see is a hole
+   in the checked surface); being undocumented where a user looks was the bug.
 
 What they praised, and it is worth recording because it was the part they expected to be broken:
 **the literate handling itself is the strongest part of the tool.** Line numbers exact across all 545
@@ -518,6 +524,13 @@ below, ranked by how often a real user hits it.
 - CRAN stub auto-generation via R introspection, R-version-keyed corpora, stubtest validation (R-dependent). (NAMESPACE/DESCRIPTION awareness moved to Open — semantics by user ask.)
 
 ## Shipped ledger (one line each; rationale in `decisions.md`, contracts in the docs site)
+
+- **A bad `NAMESPACE` `importFrom` is an error, and the strict severity jump is documented:** R
+  refuses to load a package whose import names a non-export, so a warning let it pass a
+  `--min-severity error` gate — it now matches its `export()` sibling. A bad `pkg::name` read stays a
+  warning (it fails only if the line runs), and the reference states the asymmetry. Separately, two
+  reviews were surprised that `strict = true` raises every `unresolved` finding to an error; the
+  behaviour is right, so the diagnostics table and the strict-mode section now say so.
 
 - **Reported columns count characters, and the caret lands under the glyph:** byte columns disagreed
   with every editor on any line carrying non-ASCII text and pushed the caret right of the code it

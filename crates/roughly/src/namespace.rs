@@ -9,10 +9,15 @@ pub use semantics::metadata::{NamespaceImport, parse_namespace_imports};
 use std::collections::BTreeSet;
 use syntax::{SyntaxKind, TextRange};
 
-/// One warning per `importFrom(pkg, name)` whose namespace the export table
-/// knows but whose name it does not list — the same fact `pkg::name`
-/// validation checks, surfaced at the import site. Unknown namespaces produce
-/// nothing: without stubs there is no export set to check against.
+/// One error per `importFrom(pkg, name)` whose namespace the export table knows
+/// but whose name it does not list — the same fact `pkg::name` validation
+/// checks, surfaced at the import site. Unknown namespaces produce nothing:
+/// without stubs there is no export set to check against.
+///
+/// An error, not a warning, for the same reason its `export()` sibling below is
+/// one: R refuses to *load* the package (`object 'x' is not exported by
+/// 'namespace:pkg'`), so the code cannot run at all. As a warning it shipped
+/// through a `--min-severity error` gate.
 pub fn namespace_import_problems(
     imports: &[NamespaceImport],
     knows_namespace: &dyn Fn(&str) -> bool,
@@ -27,9 +32,12 @@ pub fn namespace_import_problems(
             }
             Some(Diagnostic {
                 range: import.range,
-                severity: Severity::Warning,
+                severity: Severity::Error,
                 code: "unresolved",
-                message: format!("`{name}` is not exported by `{}`.", import.namespace),
+                message: format!(
+                    "`{name}` is not exported by `{}`, so this package will not load.",
+                    import.namespace
+                ),
                 related: Vec::new(),
             })
         })
@@ -162,9 +170,29 @@ mod tests {
     }
 
     #[test]
-    fn known_namespace_with_a_typo_warns() {
-        let problems = problems_for("importFrom(stats, sd, medain)\n");
-        assert_eq!(problems, ["`medain` is not exported by `stats`."]);
+    fn known_namespace_with_a_typo_is_an_error() {
+        let db = semantics::RootDatabase::default();
+        semantics::stubs::install_shipped_stubs(&db);
+        let (knows, exports) = stub_backed(&db);
+        let problems = namespace_import_problems(
+            &parse_namespace_imports("importFrom(stats, sd, medain)\n"),
+            &knows,
+            &exports,
+        );
+        assert_eq!(
+            problems
+                .iter()
+                .map(|problem| problem.message.as_str())
+                .collect::<Vec<_>>(),
+            ["`medain` is not exported by `stats`, so this package will not load."]
+        );
+        // R refuses to load the package, so this is not survivable advice.
+        assert!(
+            problems
+                .iter()
+                .all(|problem| problem.severity == Severity::Error),
+            "{problems:?}"
+        );
     }
 
     #[test]
@@ -178,7 +206,10 @@ mod tests {
         let problems = problems_for(
             "export(run)\nS3method(print, thing)\nimportFrom(\"stats\", \"nope_not_real\")\n",
         );
-        assert_eq!(problems, ["`nope_not_real` is not exported by `stats`."]);
+        assert_eq!(
+            problems,
+            ["`nope_not_real` is not exported by `stats`, so this package will not load."]
+        );
     }
 
     fn unused_for(namespace: &str, sources: &[&str], level: LintLevel) -> Vec<String> {

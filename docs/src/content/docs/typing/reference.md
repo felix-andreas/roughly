@@ -186,7 +186,8 @@ with neither file) behaves as if both were empty.
 - `importFrom(pkg, name)` makes `name` a known bare read: it is never reported unresolved. The
   read types as the stub corpus's declaration for the name when one exists and `Unknown`
   otherwise. Import typos are validated once at the import site — an `importFrom` naming
-  something a stub-described namespace does not export warns there — never at every use site.
+  something a stub-described namespace does not export is an error there, since R refuses to load
+  such a package — never at every use site.
 - `import(pkg)` of a namespace the stub corpus describes makes exactly `pkg`'s exports known
   bare reads. When no stubs describe `pkg`, its export set is unknowable, so every
   otherwise-unresolved bare read in the package is tolerated rather than guessed at (the
@@ -1372,7 +1373,10 @@ lexical scoping.
   bare name; a name only the namespace's [export manifest](#standard-library-exports) lists
   validates the same way and types `Unknown`
 - an unknown namespace warns (`unknown package namespace `foobar``); a known namespace that
-  neither declares nor manifest-lists the name warns (``bazqux` is not exported by `stats``)
+  neither declares nor manifest-lists the name warns (``bazqux` is not exported by `stats``). A
+  warning here and an error for the same mistake in a `NAMESPACE` `importFrom` is not an
+  inconsistency: a bad import stops the package from loading at all, while a bad qualified read fails
+  only if that line runs
 - exports are declaration-level: a project stub overriding a shipped name's *type* does not remove
   the name from its shipped namespace, so `stats::sd` stays valid under an `sd` override
 - an unvalidated qualified read types as `Unknown`, and that reference is a strict origin
@@ -2470,10 +2474,16 @@ Unresolved references carry the `unresolved` diagnostic code:
 
 - a bare name the resolver cannot find in the package, its imports, or builtins
 - an unknown package namespace in `pkg::name`
-- a name a known namespace does not export
+- a name a known namespace does not export, read as `pkg::name`
 
 Outside strict mode these are warnings. Under strict (configured, or via the per-file directive)
-they are **errors**: a name the checker cannot see is a hole in the checked surface, not a hint.
+they are **errors**: a name the checker cannot see is a hole in the checked surface, not a hint. So
+turning strict on can raise the severity of findings that were already there, without their count
+changing — worth knowing before a `--min-severity error` gate sees them.
+
+Two `unresolved` findings are errors whatever the mode, because they stop the package from loading
+rather than describing a gap in the checker's view: a `NAMESPACE` `importFrom` naming something the
+namespace does not export, and an `export()` naming something the package never defines.
 
 ### Per-file directive
 

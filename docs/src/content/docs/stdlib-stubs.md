@@ -12,7 +12,7 @@ every namespace R ships (the attached ones, the `::`-only ones such as `tools` a
 and the conditional packages), all loaded and bound into the checker as a **set-once input** that
 never invalidates a package edit (see [Incremental hygiene](#incremental-hygiene)). Project
 [overrides](#override-precedence), [overload sets](#overloads-and-generics), and `pkg::name`
-qualified access (with unknown-namespace and not-exported warnings) are supported. What is not
+qualified access (with unknown-namespace warnings and not-exported errors) are supported. What is not
 built is listed at the [end of this page](#what-is-not-built-yet). The authoritative typing
 contract remains the [Typing Reference](/typing/reference); this page describes how the standard
 library feeds that contract.
@@ -352,8 +352,10 @@ sweep on a keystroke.
 
 Both `roughly check` and the language server validate a package's `NAMESPACE` file against the
 loaded stubs: every `importFrom(pkg, name)` whose namespace the stub corpus knows (shipped or
-project) but does not export `name` warns on the import site (`` `medain` is not exported by
-`stats`. ``). Namespaces without stubs are not checked — the stubs are the only export source the
+project) but does not export `name` is an **error** on the import site (`` `medain` is not exported
+by `stats`, so this package will not load. ``) — R refuses to load a package with such an import, so
+the code cannot run at all, exactly like the `export()` of a name the package never defines.
+Namespaces without stubs are not checked — the stubs are the only export source the
 checker has — and resolution semantics are unchanged: stubbed names resolve bare with or without an
 import. The check is interner-free (a string-keyed export table built once from the loaded corpus),
 so an open `NAMESPACE` editor buffer is validated live without touching the engine's shared

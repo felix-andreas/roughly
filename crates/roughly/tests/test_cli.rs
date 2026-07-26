@@ -235,8 +235,10 @@ fn check_validates_namespace_imports_against_stubs() {
     let rendered = stderr(&output);
     assert_eq!(exit_code(&output), 1, "stderr: {rendered}");
     assert!(
-        rendered.contains("`medain` is not exported by `stats`."),
-        "expected the typo warning, got: {rendered}"
+        rendered.contains("error[unresolved]")
+            && rendered
+                .contains("`medain` is not exported by `stats`, so this package will not load."),
+        "an import R refuses to load is an error, not advice: {rendered}"
     );
     assert!(
         !rendered.contains("mutate") && !rendered.contains("`sd`"),

@@ -1022,19 +1022,24 @@ async fn namespace_buffer_publishes_import_validation() {
     assert_eq!(
         published.diagnostics.len(),
         1,
-        "only the known-namespace typo warns: {:?}",
+        "only the known-namespace typo is reported: {:?}",
         published.diagnostics
     );
     let diagnostic = &published.diagnostics[0];
     assert!(
         diagnostic
             .message
-            .contains("`medain` is not exported by `stats`."),
+            .contains("`medain` is not exported by `stats`, so this package will not load."),
         "unexpected message: {diagnostic:?}"
     );
     assert_eq!(
+        diagnostic.severity,
+        Some(async_lsp::lsp_types::DiagnosticSeverity::ERROR),
+        "R refuses to load such a package: {diagnostic:?}"
+    );
+    assert_eq!(
         diagnostic.range.start.line, 1,
-        "warns on the importFrom line"
+        "reports on the importFrom line"
     );
 
     // Fixing the typo republishes a clean report.

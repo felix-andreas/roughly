@@ -66,7 +66,10 @@ Semantics checks enforce coding conventions and best practices that won't necess
 - **`stub`**: a problem in a `.Rtypes` [stub file](/stdlib-stubs) the project ships — a declaration
   that does not parse, or one naming a type no vocabulary declares. Reported against the stub file
   itself, since a stub that does not load silently withdraws the types it was meant to provide
-- **undefined exports**: an `export(name)` in the `NAMESPACE` naming something the package defines
+- **NAMESPACE imports and exports**: an `importFrom(pkg, name)` naming something `pkg` does not
+  export is an error — R refuses to *load* such a package, so it is not survivable advice; only
+  namespaces Roughly has stubs for are checked, since the stubs are the only export set it knows.
+  Likewise an `export(name)` in the `NAMESPACE` naming something the package defines
   nowhere at top level is an error — `R CMD check`'s "undefined exports", reported before install
   rather than at it. Only explicit `export()` names are checked: `exportPattern` is a regex R
   resolves at load time, and `exportClasses`/`exportMethods`/`S3method` name S4 and S3 entities

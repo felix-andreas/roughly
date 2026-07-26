@@ -29,6 +29,10 @@ turn whole classes on or off.
 | `type-mismatch` | A type error: incompatible argument, missing or surplus argument, calling a non-function, an operator applied to operands it is not defined for | No — `[check] typing = true` |
 | `strict` | A place where the checker genuinely could not determine a type, so the value became `Unknown` and checks there were skipped | No — `[check] strict = true` |
 
+Turning `strict` on also **raises every `unresolved` finding from warning to error** — under strict, a
+name the checker cannot see is a hole in the checked surface rather than a hint. The count does not
+change; the severity does, which matters if `--min-severity error` gates your build.
+
 `strict` deserves a note: it does not find *errors*, it finds *silence*. Turning it on is how you
 learn how much of a file is actually being checked. See [strict mode](/typing/reference#strict-mode)
 and [limitations](/limitations).
