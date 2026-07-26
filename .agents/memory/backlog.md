@@ -8,6 +8,48 @@
 - **Performance:** keystroke-to-diagnostics p50 ≤ 30 ms / p95 ≤ 100 ms at 300k LoC (read against the raw-parse floor the instrument prints — latency numbers swing ~1.4x with machine load); budgets pinned by `stats_witness` (per-line wall/memory/resolve-step ceilings) with the measurement instruments in `legacy/differential/tests/test_stats.rs`.
 - **No server-killing input** (no `unwrap` panics on protocol-legal messages).
 
+## Open — test-user round 2 findings
+
+Five simulated users, each on a distinct project of their own writing, learning the tool from the
+docs alone (no source access) and trying to reach a clean run. Reports are the
+`users/feedback-*.md` files from that round. **Recorded here before any of it is fixed**, per user
+directive.
+
+### From the Shiny dashboard user (571-line app, 15 planted mistakes, reached a clean run in ~40 min)
+
+Their verdict: three real bugs found and welcomed, but "a clean run on a Shiny project means much
+less than the docs imply" — they finished with exit code 0 and five real bugs still in the code.
+Their own top three, in their order:
+
+1. **One `library(pkg)` anywhere in the project disables nearly all bare-name resolution, including
+   typos of in-scope locals and parameters.** Their repro: a file containing only `library(shiny)`
+   makes `repositry` — a one-letter typo of a **parameter in lexical scope on the same line** — stop
+   being reported, along with every other bare unresolved name. On the real app, three planted typos
+   (`renderTabel`, `showNotifcation`, `repositry`) all survived a `no problems` run. The blanket
+   tolerance itself is the right call (the package's export set is unknowable) — but **the near-miss
+   carve-out that already survives tolerance covers only top-level project symbols**, not locals and
+   parameters. Extending it to a name one edit away from a binding in the enclosing function should
+   recover most of the value at no false-positive cost: such a name is a typo, not a package export.
+   Also undocumented where a user would look — `diagnostics.md`'s `unresolved` row implies the check
+   always fires, and the only mention of the tolerance is oblique, inside a `testthat` rationale.
+2. **A required/optional annotation mismatch is reported at every CALL SITE instead of at the
+   annotation.** `#: fn(settings: DbSettings)` on `function(settings = db_settings)` makes correct R
+   (`db_pool()`) an error in another file, with no mention of the annotation that caused it — "my
+   first reaction was that the tool can't read default arguments, and I nearly stopped there". The
+   asymmetry proves the information is there: the *reverse* mismatch (annotation says `[optional]`,
+   formal has no default) is reported **at the function** with a good message. The remedy — the
+   `[name]:` bracket form — is in the reference and **not in the guide**, which is the page
+   getting-started sends readers to.
+3. **A parameter's type is not seeded from its default value**, so field-typo detection dies at a
+   default argument: `f <- function(s = settings) s$hsot` is missed while both `settings$hsot` and a
+   local alias `s <- settings; s$hsot` are caught. The guide's own headline pitch (`config$tax_rate`)
+   is exactly this shape on real code. Default-value expressions are already typechecked, so the
+   type exists — it just does not reach the parameter when the caller omits the argument.
+
+Also from them: `$` on an unannotated parameter constrains nothing, so the parameter accepts
+anything; `unresolved` silently changes severity when `strict` is on; R6 is invisible (correctly
+documented, cost recorded); and they asked for a page saying what does and does not work for Shiny.
+
 ## Open — documentation review findings
 
 Four independent reviews read the docs cold (a first-hour newcomer, an information architect, an
