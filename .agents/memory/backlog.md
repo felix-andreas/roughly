@@ -50,6 +50,59 @@ Also from them: `$` on an unannotated parameter constrains nothing, so the param
 anything; `unresolved` silently changes severity when `strict` is on; R6 is invisible (correctly
 documented, cost recorded); and they asked for a page saying what does and does not work for Shiny.
 
+### From the TDD package author (`tallyr`, 500 lines, green in real R 4.3.3)
+
+Their package **passes in real R** (`pkgload::load_all` + `test_dir`), so every warning below is
+provably a false positive. Clean run cost 5 edits on 500 lines; they would enable `typing` in CI
+tomorrow and would **not** enable `strict`, `shadows-namespace` or `unused-parameter` — "three of
+five opt-in lints are unusable on a package with an S3 class and a testthat suite".
+
+1. **`structure(list(...), class = "x")` erases the record type — and the docs say otherwise.**
+   `limitations.md` and `reference.md` both promise "a plain record; the class attribute is data";
+   it is actually `Unknown`. So the field typo the guide headlines is caught on a bare `list()` and
+   **silently dropped** once `class =` is added — the objects real packages are built from.
+   **31 of their 34 strict findings traced to this one call.** The documented `@type`/`@new` remedy
+   does work (4 annotation lines took strict from 34 to 9), but they had to hand-declare a type the
+   checker was already handed as a `list()` literal. This is the single highest-leverage fix in the
+   round, and the doc claim is one this project wrote without verifying — fix the code to match it.
+2. **`library(yourpkg)` in `tests/testthat.R` disables unresolved detection project-wide.**
+   `usethis` generates that file, so every testthat package has it. **Independently the same finding
+   as the Shiny user's #1**, which settles its priority. Their sharper framing: *your own package is
+   the one export set you do know*, so a `library()` naming the project under check should not buy
+   any tolerance at all.
+3. **`tests/testthat/helper-*.R` produces two false positives per helper** — `unused` at the
+   definition and `unresolved` at every use. That is testthat's documented loading mechanism, and it
+   was the *entire* finding list on their first run. `tests/testthat/` is not mentioned anywhere in
+   the docs.
+4. **`shadows-namespace` fires on locals inside `test_that()` and calls them "Top-level binding".**
+   The same assignment inside `function() {...}` or `local({...})` is correctly ignored, so a braced
+   **call argument** is being treated as top level. `graphics` exports `lines`, `text`, `title`,
+   `grid`, `legend`, `axis`, `box`, `points` and `rect`, so ordinary variable names collide: 6
+   warnings from 3 names. The wording is its own bug — they re-read `linter.md` convinced they had
+   misunderstood the lint.
+5. **`unused-parameter` flags every user-defined S3 generic and its methods.**
+   `speak <- function(x, ...) UseMethod("speak")` reports "parameter `x` is never used" with
+   `UseMethod("speak")` three characters away. The existing carve-out only recognizes methods whose
+   generic is in the *stdlib* corpus, so a project's own generics lose it.
+6. **A bad `importFrom` is a warning, but R refuses to install the package** (`object 'setNmaes' is
+   not exported`). Under `--min-severity error` that ships.
+7. **`#: @new` does not stop `structure()` being a strict origin** — the documented S3 remedy failing
+   at exactly the site it exists for. Related to (1).
+8. **S3 generic/method signature consistency is unchecked** — both planted violations missed, and
+   `R CMD check` catches both. Roughly already does the rarer undefined-export check.
+
+Docs gaps they hit: the adjacency rules say a plain `#` comment breaks `#:` attachment and never
+mention `#'`, so interleaving `#: @param` with roxygen's `#' @param` — the first thing a roxygen
+user tries — fails; the guide never shows `...` or `[optional]` in an annotation, and **every** S3
+method needs both; `configuration.md` omits `DESCRIPTION` as a project root marker.
+
+What they praised: the partial-match catch (`sourc =` → `source`, which R silently accepts and
+nothing else in their toolchain catches), `NAMESPACE` being genuinely load-bearing with import-typo
+and undefined-export validation at the right line, **`#:` verified invisible to `R CMD check`**, the
+formatter and JSON output as production-ready, and the annotation-adjacency message for naming
+roxygen2 and giving the fix. They also confirmed the `expect_error` decision was right and that the
+"testing that something is rejected" subsection worked first try.
+
 ## Open — documentation review findings
 
 Four independent reviews read the docs cold (a first-hour newcomer, an information architect, an
