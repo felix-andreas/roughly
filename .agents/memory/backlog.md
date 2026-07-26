@@ -65,14 +65,13 @@ and no how-to layer at all: `typing/guide.md` restates `typing/reference.md` in 
 order for eleven of its thirteen sections and never asks the reader to run anything, and
 `stdlib-stubs.md` is an internal design RFC (`## Problem`, sections titled "not buildable here")
 sitting in the user sidebar. Six pages are missing, in value order: **adopting Roughly on an
-existing codebase** (the per-file `# typing: on` ladder exists and is described in seven scattered
-places, never as a table — every peer type checker leads with this page), a **diagnostics
-reference** (codes are a contract used by `allow(CODE)`, `[lint] CODE = "off"` and the JSON output,
-and no list exists), **CI** (exit codes, `--min-severity`, `fmt --check` and JSON Lines all exist
-*for* CI, and the site has zero YAML), **why a type checker for R**, **limitations** (data frames,
-matrix shape, the three object systems, known false positives), and **comparison** (Air, Jarl,
-lintr, styler, languageserver, checkmate — a page that concedes formatting and lint breadth openly,
-because one that wins everything reads as marketing).
+existing codebase** (partly done: the ladder is now on the limitations page, but it deserves its own
+how-to), **why a type checker for R** (the explanation page — where the intrigue lives), and
+**comparison** (Air, Jarl, lintr, styler, languageserver, checkmate — a page that concedes
+formatting and lint breadth openly, because one that wins everything reads as marketing).
+**DONE from that list:** the diagnostics reference (`diagnostics.md` — all fourteen codes, tables
+built by running the tool, which caught `trailing-comma` defaulting to error and `duplicate` being
+package-only), CI (a real workflow on the installation page), and limitations (`limitations.md`).
 
 **Positioning.** The headline leads with the formatter and linter — the two things Roughly loses at
 today (Posit's Air is bundled in Positron; Jarl ships 71 rules with `--fix` and an LSP, 140× faster
