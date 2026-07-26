@@ -28,9 +28,12 @@ measured the competition). The accuracy fixes landed; what remains is below.
   Matching is now two passes in `argument_targets` — names claim their formals, then positionals
   fill what is left — computed once and shared by the checking loop and the rest-parameter
   forwarding scan, which previously duplicated the accounting and so duplicated the bug.
-- **The accumulator idiom errors where R returns `NULL`.** `args <- list(); if (x) args$escape <-
-  TRUE; args$escape`. Worth a design decision rather than a patch: a *definitely* absent field
-  should error (that is the flagship win), a *possibly* absent one should yield `T | NULL`.
+- **The accumulator idiom FIXED, on the design the report proposed.** `$` on a union subject no
+  longer demands the field on every member: a field some shapes carry and others do not reads as
+  `T | NULL`, because that is what R answers for a name a list lacks. A field **no** shape carries
+  stays an error — the typo check is the whole value — and a structural refusal (`$` on an atomic
+  vector) is still hard from any member. The "did you mean" is drawn from every field the union can
+  carry, so the suggestion survives a member with no fields at all.
 - **Literate-document prose blanking FIXED, and it hid a worse bug.** A non-breaking space is
   whitespace to Rust's `char::is_whitespace` and an unexpected character to R's lexer, so prose
   containing one reported a syntax error against a blank line. The same code blanked per
@@ -174,11 +177,12 @@ below, ranked by how often a real user hits it.
   `Numeric`, replacing both the tie and the `declares_arithmetic` relaxation that lets an
   arithmetic-declaring class satisfy `Numeric` today. Next stub corpus addition that returns a real
   nominal will trip it again.
-- **A type error inside `expect_error(...)` is still reported.** `expect_error(f("bad type"))` is how
-  you test a type-related failure, and the call really is type-incorrect, so the finding is defensible
-  — but it needs a suppression to write that test. Decide whether an expectation that asserts a
-  condition should suppress type findings in its payload, or whether `# roughly: allow(...)` is the
-  answer and the guide should say so.
+- **A type error inside `expect_error(...)` — DECIDED: it stays reported**, and
+  `# roughly: allow(type-mismatch)` is the answer (decision record in `decisions.md`; documented on
+  the diagnostics page). Suppressing inside expectation payloads would blind genuine mistakes in
+  tests and needs an open-ended list of function families. The open follow-up is the stronger form:
+  a suppression that reports when the expected finding does *not* appear, like
+  `@ts-expect-error` — a feature for every code, not a special case.
 
 ## Open
 

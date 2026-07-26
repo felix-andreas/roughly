@@ -1479,6 +1479,21 @@ vectors`), named ones included, so `c(foo = 1L)$foo` is a type error that points
 
 Backtick-quoted names follow the same rule.
 
+**A field on a union subject may be absent from some members.** R answers `NULL` for a name a list
+does not carry, so a field that exists in *some* of the subject's shapes and not others reads as
+that field's type unioned with `NULL` — which is what makes the accumulator idiom check:
+
+```r
+args <- list()
+if (escape) args$escape <- TRUE
+args$escape        # logical | NULL
+```
+
+A field **no** shape carries is still an error, because that is a typo rather than an absence the
+program is prepared for. The "did you mean" suggestion is drawn from every field any member
+carries, so the misspelling above reports ``field `escpae` does not exist … Did you mean
+`escape`?`` even though the branch that lacks it has no fields at all.
+
 #### `[[` on vectors
 
 `[[` is allowed on scalar-like, array-like, and map-like vectors and extracts a single element.

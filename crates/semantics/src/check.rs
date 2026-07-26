@@ -5000,17 +5000,49 @@ impl<'db> Checker<'db, '_> {
         subject: Ty<'db>,
         name: &str,
     ) -> Result<Ty<'db>, TypeError<'db>> {
-        // Member-wise over a union subject: the field must exist on every
-        // shape the subject can take.
+        // Member-wise over a union subject. A shape that lacks the field is
+        // not an error on its own: R answers `NULL` for a name a list does
+        // not carry, which is exactly what the accumulator idiom relies on
+        // (`args <- list(); if (flag) args$escape <- TRUE; args$escape`). So a
+        // missing field contributes `NULL` and the read is nullable — while a
+        // field no shape carries at all stays an error, because that is a
+        // typo rather than an absence the program is prepared for. A
+        // *structural* refusal (`$` on an atomic vector) is a hard error from
+        // any member: no shape makes it legal.
         if let TyKind::Union(members) = subject.kind(self.db).clone() {
             let mut results = Vec::with_capacity(members.len());
+            let mut absent: Option<TypeError<'db>> = None;
             for member in members {
-                let result = self
-                    .dollar_result(origin, range, member, name)
-                    .map_err(|error| widen_error_container(error, subject))?;
-                results.push(result);
+                match self.dollar_result(origin, range, member, name) {
+                    Ok(result) => results.push(result),
+                    Err(error) if matches!(error.kind, TypeErrorKind::FieldDoesNotExist { .. }) => {
+                        absent.get_or_insert(error);
+                    }
+                    Err(error) => return Err(widen_error_container(error, subject)),
+                }
             }
-            return Ok(union_of(self.db, results));
+            return match (results.is_empty(), absent) {
+                (true, Some(mut error)) => {
+                    // The failing member may be the one with no fields at all,
+                    // so a suggestion drawn from it alone would be empty.
+                    // Draw it from every field the union can carry instead.
+                    if let TypeErrorKind::FieldDoesNotExist { suggestion, .. } = &mut error.kind {
+                        *suggestion = crate::diagnostics::nearest_field_name(
+                            name,
+                            union_field_names(self.db, subject)
+                                .iter()
+                                .map(String::as_str),
+                        );
+                    }
+                    Err(widen_error_container(error, subject))
+                }
+                (_, absent) => {
+                    if absent.is_some() {
+                        results.push(crate::types::null(self.db));
+                    }
+                    Ok(union_of(self.db, results))
+                }
+            };
         }
         match subject.kind(self.db).clone() {
             TyKind::Unknown => Ok(self.unknown()),
@@ -5346,6 +5378,22 @@ fn promote_combine_atomic(left: Atomic, right: Atomic) -> Option<Atomic> {
 
 /// A failing union member reports the full union — the subject's actual type —
 /// not the single member that failed.
+/// Every field name any member of a union subject carries, for the
+/// "did you mean" of a field no member carries.
+fn union_field_names<'db>(db: &'db dyn Db, subject: Ty<'db>) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut collect = |ty: Ty<'db>| {
+        if let TyKind::Record(fields) = ty.kind(db) {
+            names.extend(fields.iter().map(|field| field.name.text(db).to_owned()));
+        }
+    };
+    match subject.kind(db) {
+        TyKind::Union(members) => members.iter().for_each(|&member| collect(member)),
+        _ => collect(subject),
+    }
+    names
+}
+
 fn widen_error_container<'db>(mut error: TypeError<'db>, union: Ty<'db>) -> TypeError<'db> {
     match &mut error.kind {
         TypeErrorKind::NotAList { found }

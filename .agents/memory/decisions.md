@@ -224,6 +224,26 @@ Rationale: the old model was verified unsound (`x <- 1L; if (f) x <- "two"; x + 
 
 General unions `A | B | C` (normalized: flat, deduped, order-insensitive; `T | NULL` becomes the special case) are adopted for joins and annotations. **The HM-speed guardrail:** a union imposes no union *constraints* on inference variables (plain substitution-binding of a variable **to** a union value is permitted, like any other type) — unification stays syntactic (a union unifies only with a structurally equal union); all member-wise directional logic lives in `check_compatibility`. This keeps inference decidable and fast and matches the existing unification-is-the-invariant-floor split. Tags/discriminated-union `match` (post-beta) builds on these unions.
 
+## A type error inside a test assertion stays reported
+
+`expect_error(f("bad type"))` is how an author tests that a function refuses bad input, and the
+call inside it really is type-incorrect, so the finding is *true*. The question was whether an
+expectation that asserts a condition should suppress type findings in its payload.
+
+**It should not.** Blanket-suppressing inside `expect_error` and its siblings would also silence a
+genuine mistake in the test — a misspelled callee, the wrong argument passed by accident — and test
+code deserves the same checking as everything else. It would also be a special case for one
+function family with an open-ended tail (`expect_warning`, `expect_condition`, `expect_snapshot(error =
+TRUE)`, `tryCatch`, `try`), which is the kind of accretion the design bar refuses.
+
+The answer is the general mechanism that already exists: `# roughly: allow(type-mismatch)` on the
+assertion. It is explicit, it is local, and it says what it means. Documented on the diagnostics
+page under "testing that something is rejected".
+
+Worth revisiting only for the stronger form TypeScript's `@ts-expect-error` has: a suppression that
+*itself* reports when the expected finding does not appear, turning "ignore this" into "assert a
+finding here". That is a feature, not a special case, and it would apply to every code.
+
 ## Overload sets — bounded ordered probes
 
 Functions whose result type depends on the argument type get **ordered overload sets** (stub surface first; repeating a name within one `.Rtypes` source appends a candidate; a later source replaces a name's whole set). Call sites try schemes in declaration order using the existing probe-then-rollback machinery; first compatible match wins. Principal-type purity is knowingly relaxed *at overload sites only* (declaration order is semantic — the TS/mypy model). Traits/typeclasses remain the possible long-term subsumer; overloads are the pragmatic bridge and must not block a later trait design.

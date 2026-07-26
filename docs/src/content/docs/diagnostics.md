@@ -73,6 +73,23 @@ total = 1L  # roughly: allow(assignment-operator)
 Several codes separated by commas work: `# roughly: allow(unused, naming-style)`, and
 `# roughly: allow(all)` suppresses every finding on that line.
 
+### Testing that something is rejected
+
+A test that asserts bad input is refused contains a call that really is type-incorrect, so the
+finding is true — it is just not what you want to hear:
+
+```r
+test_that("bump rejects a string", {
+  # roughly: allow(type-mismatch)
+  expect_error(bump("x"))
+})
+```
+
+The suppression is deliberate rather than automatic. Silencing type findings inside every
+`expect_error(...)` would also silence a genuine mistake in the test — a misspelled function name,
+or the wrong argument passed by accident — and those are worth catching in test code as much as
+anywhere else.
+
 To silence a lint everywhere instead, set it to `"off"` in `[lint]`. To silence a whole class, use
 the `[check]` switches — or, for one file, the `# typing: off` directive at the top of it.
 
