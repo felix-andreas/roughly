@@ -128,11 +128,14 @@ below, ranked by how often a real user hits it.
   an ordinary call would reject correct code. Lowering `%op%` to the call it is (the documented `|>`
   precedent) would type it and give goto/references on the operator — weigh that against the NSE risk
   and the `unresolved` a bare-script `%>%` would gain.
-- **`lapply` drops names**, so "named list in, named list out" is inexpressible. A list of
-  *functions* is also still rejected — `lapply(list(mean = mean, sd = sd), function(f) f(1:3))` now
-  joins the element to a union of two function types, and the callback check cannot yet satisfy a
-  union in a contravariant parameter position. (The plain heterogeneous case is fixed: an open
-  `list[T]` element takes the join.)
+- **A list of functions FIXED**, and the cause was not the union: `function_compatible` demanded an
+  *exact* parameter count, so `mean` (one required plus two optional) could not serve a
+  one-argument callback interface, and the union of two such functions failed member-wise. Arity is
+  a range now — a function serves an interface when it accepts every call shape the interface
+  promises — so extra optional parameters are fine while requiring too many, or refusing an
+  argument the interface sends, still fail. `lapply(list(mean, sd), function(g) g(1:3))` is
+  `list[double]`. **`lapply` still drops names**, so "named list in, named list out" remains
+  inexpressible.
 - **Everything from a `data.frame` is `Unknown`, and `Unknown` satisfies every annotation** — so on
   data-frame-heavy code annotations look protective and are not. This is the design consequence that
   decides the tool's value for analysis users; it needs at minimum a way to *see* that a check was
@@ -153,7 +156,7 @@ below, ranked by how often a real user hits it.
 - **Smaller, each with a one-line repro in the reports:** messages leak unbound type variables (`list[T] | T[]`) and expand an alias on
   only one side of an expected/found pair; `unused` false-positives on a write followed by `break`;
   closure re-entry is unmodelled, so the `if (!is.null(cache)) return(cache); cache <<- v` memo idiom
-  yields `T | NULL`; a generic parameter cannot have a non-`NULL` default; the `unused` write-then-`break`
+  yields `T | NULL`; (a generic parameter rejecting a non-`NULL` default is CORRECT, not a gap — `<T> fn(x: T, [fallback]: T)` defaulting to `0L` would return `0L` from a call the signature promises returns `character`; `T | NULL` with a `NULL` default works because `NULL` is a declared member); the `unused` write-then-`break`
   false positive is NOT reproducible (verified across `for`/`while`/`repeat` and both used and genuinely
   dead writes) — drop it unless a concrete shape resurfaces; no `--fix`, no stdin, and no CLI way to ask "what type is this?" (which makes debugging an inference surprise guesswork for a
   CLI-only user). `sum(1, 2, 3,)` formatting to `sum(1, 2, 3, )` is NOT a defect and stays: the

@@ -953,11 +953,14 @@ impl<'db> InferenceTable<'db> {
         expected: &FunctionType<'db>,
         depth: usize,
     ) -> bool {
-        if actual.positional.len() + actual.named.len()
-            != expected.positional.len() + expected.named.len()
-        {
-            return false;
-        }
+        // Arity is a range, not a number. An interface promises its callers
+        // every call shape from its required count up to everything it
+        // declares, and a function serves that interface when it accepts all
+        // of them. So it may declare MORE parameters than the interface ever
+        // passes, as long as the extras default — `mean(x, trim, na.rm)`
+        // serves a one-argument callback interface — and it may not require
+        // more than the interface supplies. Both directions are checked while
+        // pairing below, which knows which parameters are optional.
         // Variadic compatibility is conservative: a variadic function is
         // compatible only with another variadic (their rest elements are
         // contravariant, like ordinary parameters), and the rest parameters
@@ -1020,10 +1023,27 @@ impl<'db> InferenceTable<'db> {
                 *slot = positional_expected.next();
             }
         }
+        // An expected parameter with no slot left is one the interface may
+        // pass and the function cannot receive — unless the function is
+        // variadic, whose rest parameter absorbs it (contravariantly, like
+        // every other parameter).
+        for (expected_parameter, _) in positional_expected {
+            let Some(rest) = &actual.variadic else {
+                return false;
+            };
+            if !self.compatible_probe(db, expected_parameter, rest.element, depth + 1) {
+                return false;
+            }
+        }
         for ((_, actual_parameter, actual_optional), slot) in
             actual_parameters.into_iter().zip(paired)
         {
             let Some((expected_parameter, expected_optional)) = slot else {
+                // A parameter the interface never passes is fine when the
+                // function defaults it, and a missing argument otherwise.
+                if actual_optional {
+                    continue;
+                }
                 return false;
             };
             // An expected-optional parameter promises callers they may omit

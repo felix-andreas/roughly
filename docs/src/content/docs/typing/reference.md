@@ -2227,7 +2227,14 @@ Function compatibility is contravariant in parameters and covariant in the retur
 value is compatible with an expected function type when:
 
 - each expected parameter type is compatible with the corresponding actual parameter type
-  (contravariant: the actual function must accept every argument the expected interface may pass)
+  (contravariant: the actual function must accept every argument the expected interface may pass).
+  Parameters pair by **name** where both sides name them, as R matches call arguments; unnamed
+  parameters take the remaining slots left to right
+- **arity is a range, not a number.** An interface promises its callers every call shape from its
+  required count up to everything it declares, and a function serves that interface when it accepts
+  all of them. So the actual function may declare *more* parameters than the interface ever passes,
+  provided the extras have defaults, and it may not *require* more than the interface supplies, nor
+  refuse an argument the interface may send
 - the actual return type is compatible with the expected return type (covariant)
 
 Examples:
@@ -2236,6 +2243,12 @@ Examples:
   expected, because `integer` is compatible with `integer | NULL`
 - a function of type `fn(integer) -> integer` is rejected where `fn(integer | NULL) -> integer` is
   expected, because the expected interface may pass `NULL`, which the actual function does not accept
+- `fn(a: integer, [b]: integer) -> integer` is accepted where `fn(integer) -> integer` is expected:
+  `b` defaults, so the one-argument call the interface makes is valid. This is what lets a stdlib
+  reduction serve a callback interface — `lapply(list(mean, sd), function(g) g(1:3))` types as
+  `list[double]` even though `mean` and `sd` each declare optional formals the callback never passes
+- `fn(a: integer, b: integer) -> integer` is rejected there, because the interface never supplies
+  `b`; so is `fn() -> integer`, which cannot receive the argument the interface sends
 
 #### Callback forwarding at variadic call sites
 
