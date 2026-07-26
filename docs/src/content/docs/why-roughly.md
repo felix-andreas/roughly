@@ -1,65 +1,62 @@
 ---
 title: Why Roughly
-description: Why R needs a unified, fast toolchain with a type checker at its core — and how far along this one is
+description: Why R needs one fast toolchain with a type checker at its core — and how far along this one is
 ---
 
-R has good tools. What it does not have is tooling that understands your code.
+R has good tools, but they are separate tools. Linting, formatting, style, analysis and running the
+code are five programs that each parse your source and each build their own partial picture of it.
+None of them knows what a value *is*, and none of them shares what it learned with the others.
 
-## Knowing what a value is, without running the code
+## Static, not a live session
 
-R's existing language servers do know what your values are — they ask a live R session. That is a real
-advantage, and it is why completion on a fitted model or a loaded data frame works so well in RStudio.
+R's language servers do know what your values are — they ask a live R session. That is why completion
+on a fitted model works so well in RStudio.
 
-It is also the limitation. A live session knows about code that has *already run*, in the state that
-session happens to be in. It cannot tell you about the branch you have not taken, the function nobody
-called yet, or the file you just opened in a fresh session. And it can only answer if the packages are
-installed and the objects exist.
-
-Roughly answers the same questions from the source alone, which makes the answers available everywhere
-the code is — in a pull request, in CI, in a file you have never run:
+It is also the limit. A session knows code that has *already run*, in the state it happens to be in.
+It cannot tell you about the branch you have not taken, the function nobody called, or the file you
+just opened. Roughly answers from the source alone, so the answers exist in a pull request, in CI, and
+in a file you have never run:
 
 - a typo in a variable name
 - an argument in the wrong position, or a call missing a required one
 - a value that is sometimes `NULL`, used as though it never is
-- a name that no longer exists because you deleted it in another file
+- a name you deleted in another file
 
-None of these are style problems, so a tool that only sees syntax cannot find them. R finds them for
-you at runtime, in the middle of the job that mattered.
+And everything is served from **one** understanding: formatting, analysis, editor features and type
+checking are views onto the same knowledge.
 
-The other half is that everything is served from **one** understanding. Formatting, code analysis,
-editor features, and type checking are views onto the same knowledge rather than separate programs each
-parsing your source and building a partial picture of it.
+## Fast enough to leave on
 
-## Tooling written in R is too slow where it matters most
-
-R is a fine language to analyse code *in*, until the codebase gets big. The projects that most need
-help — the package with 40,000 lines, the pipeline that grew for six years — are exactly the ones
-where an R-implemented tool becomes slow enough that you stop running it. Tooling you switch off is
+The projects that most need help — the 40,000-line package, the pipeline that grew for six years — are
+where an R-implemented tool gets slow enough that you stop running it. Tooling you switch off is
 tooling you do not have.
 
-Roughly is written in Rust, and analysis is incremental: an edit re-checks what the edit could have
-affected, not the project. It is built for codebases in the hundreds of thousands of lines, because
-that is where the value is.
+Roughly is Rust, and analysis is incremental: an edit re-checks what that edit could have affected,
+not the project.
 
-It also **needs no R installation**. `check` and `fmt` never load R, never execute your code, and never
-depend on which packages happen to be installed. That is what makes them safe in CI and instant in an
-editor. (The one exception is the [R console](/guides/r-console), which by definition runs R.)
+It also **needs no R installation**. `check` and `fmt` never load R and never execute your code, which
+is what makes them safe in CI and instant in an editor. The one exception is the
+[R console](/guides/r-console), which by definition runs R.
 
 ## Every mature dynamic language grew types
 
-Python has type hints and mypy. JavaScript got TypeScript. Elixir is adding set-theoretic types. Ruby
-has RBS. In each case the language stayed dynamic, the types were optional and gradual, and the
-ecosystem adopted them because the alternative — finding type errors by running the program — stops
-scaling long before the codebase does.
+Python has type hints, JavaScript got TypeScript, Ruby has RBS, Elixir is adding set-theoretic types.
+Each stayed dynamic, kept types optional, and adopted them because finding type errors by running the
+program stops scaling long before the codebase does.
 
-R has not had this. It is not because R is unsuited to it: R code is full of implicit type
-expectations, and they are exactly the expectations that break in production.
+R code is full of implicit type expectations — they are exactly the ones that break in production.
 
-Roughly's answer is deliberately R-shaped. There is no new syntax and no new file format — annotations
-live in `#:` comments, so annotated code is still ordinary R that every other tool reads. Most code
-needs no annotations at all, because [use decides type](/type-checking/concepts): `a + b` makes `a` and
-`b` numbers, `paste0` makes its arguments strings. And type checking is opt-in, so you can adopt it one
-file at a time.
+Roughly's answer is deliberately R-shaped, and rests on **inference**: the checker works out types
+from how values are used, rather than making you declare them.
+
+```r
+scale <- function(x, factor) x * factor
+```
+
+`*` is arithmetic, so both parameters are numbers. Nothing was declared, and `scale("a", 2)` is
+already an error. That is why most R needs no annotations at all — and the ones you do write live in
+`#:` comments, so the file stays ordinary R that every other tool reads. Type checking is opt-in, so
+you can adopt it one file at a time.
 
 ## Project status
 

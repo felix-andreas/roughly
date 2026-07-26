@@ -6,10 +6,10 @@ description: How Roughly's type system works — the vocabulary you need to read
 This page explains the type system. It is meant to be enough on its own: you should be able to read
 everything the checker says without opening the [specification](/reference/type-system).
 
-## Use decides type
+## Inference
 
-Roughly does not require you to declare types. It works out what a value must be from what you do with
-it:
+**Inference** is the checker working out a type instead of being told one. It is the foundation of
+everything else here: what a value must be follows from what you do with it.
 
 ```r
 scale <- function(x, factor) {
@@ -24,7 +24,7 @@ This is the single most important thing to understand about the system, because 
 needs no annotations at all. You annotate where you want to say something the code does not already
 say — a boundary, a domain type, a promise you want held to.
 
-## R has no scalars, so the type system draws the line itself
+## Scalars and vectors
 
 In R, `1L` is an integer vector of length one. There is no separate scalar type, which means the type
 system has to choose a convention. Roughly's is:
@@ -41,7 +41,7 @@ The relationship between them is **one-way**: a scalar is accepted where a vecto
 a length-one vector is a vector. The reverse is not — a vector of unknown length is not accepted where
 a single value is required, because it might have length zero, or seven.
 
-## Atomic types and the numeric ladder
+## Atomic types
 
 The atomic types are `logical`, `integer`, `double`, `complex`, `character`, and `raw`.
 
@@ -59,7 +59,7 @@ Widening happens only when checking whether a value *fits* somewhere. It never h
 is working out what two things have in common — that is a different question, and answering it by
 widening would quietly lose information.
 
-## Containers: fixed shape or unknown shape
+## Containers
 
 This is the distinction that trips people up, so it is worth being explicit. Lists come in two flavours,
 and the difference is whether the checker knows the shape.

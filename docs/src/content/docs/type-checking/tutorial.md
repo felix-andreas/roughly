@@ -96,7 +96,7 @@ not complain at all: `$` on a missing name is `NULL`, and the report goes out wi
 
 This is the whole pitch, and it cost one line of configuration.
 
-## 3. How it knows: use decides type
+## 3. How it knows: inference
 
 Nothing above was annotated. Roughly works out what a value is from what you do with it:
 
