@@ -4,7 +4,7 @@ description: Implementation architecture of Roughly's analysis stack — the han
 ---
 
 This document is the authoritative implementation architecture for Roughly. The
-[Typing Reference](/typing/reference) is the authoritative user-facing typing
+[Typing Reference](/reference/type-system) is the authoritative user-facing typing
 contract; this page defines the implementation boundaries that realize it.
 
 ## Crate graph
@@ -135,7 +135,7 @@ confined to that thread).
 ## Correctness and performance instruments
 
 The fixture suites are the correctness contract; see the [testing
-page](/testing). The cross-implementation parity program that once compared
+page](/contributing/testing). The cross-implementation parity program that once compared
 every finding against the frozen legacy stack is complete and retired — the
 new stack's fixtures stand on their own, and no change needs the old
 implementation's agreement.

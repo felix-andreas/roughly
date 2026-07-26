@@ -22,7 +22,7 @@ Roughly aims to support the following language server features (some are experim
 
 - **Diagnostics**
   - Syntax errors - *including missing or trailing commas*
-  - Basic linting rules - *[full list here](https://roughly.felixandreas.me/linter/#semantics-checks)*
+  - Basic linting rules - *[full list here](https://roughly.felixandreas.me/reference/diagnostic-codes)*
   - Warning for unused variables *(🧪 experimental)*
   - Error for undefined variable *(⚠️ missing)*
   - Argument validation for function calls *(⚠️ missing)*

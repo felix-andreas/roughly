@@ -1,9 +1,9 @@
 ---
-title: Reference
+title: Type system
 description: The precise static-typing semantics contract for Roughly's R type checker
 ---
 
-This is the authoritative specification of Roughly's typing semantics — the precise contract the type checker implements. For a gentler, example-driven introduction, start with the [Type Checker guide](/typing/guide).
+This is the authoritative specification of Roughly's typing semantics — the precise contract the type checker implements. For a gentler, example-driven introduction, start with the [Type Checker guide](/type-checking/tutorial).
 
 This page is the single source of truth for the user-facing typing semantics: the type syntax, the inferred type shapes, the coercion rules, and the rendered type forms that appear in errors and hovers.
 
@@ -198,7 +198,7 @@ with neither file) behaves as if both were empty.
   path, so when nothing describes `pkg` its export set is unknowable and every
   otherwise-unresolved bare read is tolerated. The tolerance is project-wide, because R's search
   path is, and it lifts as soon as Roughly knows the package's exports — which for a long list of
-  common packages it now does. An [export manifest](/stdlib-stubs#export-manifests) is enough;
+  common packages it now does. An [export manifest](/contributing/authoring-stubs#export-manifests) is enough;
   types are not required. The tidyverse, `knitr`, `rlang`, `glue`, `jsonlite`, `R6` and the rest of
   the shipped manifest set therefore keep unresolved-name detection *on*, while a package Roughly
   has never heard of still switches it off — and a two-line `stubs/<pkg>.Rtypes` of your own turns
@@ -222,7 +222,7 @@ with neither file) behaves as if both were empty.
 
 The shipped stub corpus pairs each namespace with a **vendored export manifest** — the complete
 list of names the namespace really exports, generated from a live R session (see the
-[stdlib stubs page](/stdlib-stubs#export-manifests)). Every manifest name is a known global:
+[stdlib stubs page](/contributing/authoring-stubs#export-manifests)). Every manifest name is a known global:
 
 - a bare read of a manifest name always resolves — never an unresolved-name warning — typing as
   the stub corpus's declaration when one exists and `Unknown` otherwise
@@ -1018,7 +1018,7 @@ height + height
 
 **Opaque nominal types** have no representation to project. Standard-library stubs declare types
 the type grammar cannot describe structurally (`data.frame`, `factor`, `connection`, `Date`, ...)
-as bare `@type NAME` — see [Standard library stubs](/stdlib-stubs). For these:
+as bare `@type NAME` — see [Standard library stubs](/type-checking/stubs). For these:
 
 - `$`, `[`, and `[[` are accepted and the result is `Unknown` rather than an error: the R object
   behind such a class commonly supports value-dependent access (`df$amount`, `df[rows, ]`), and
@@ -1376,7 +1376,7 @@ lexical scoping.
 
 - a namespace is **known** when stubs declare it: the shipped standard-library packages, plus any
   project stub file — `stubs/dplyr.Rtypes` declares the namespace `dplyr`
-  (see [Standard library stubs](/stdlib-stubs))
+  (see [Standard library stubs](/type-checking/stubs))
 - when the stubs declare `name` in `pkg`, the qualified read has the stub's type, exactly like the
   bare name; a name only the namespace's [export manifest](#standard-library-exports) lists
   validates the same way and types `Unknown`
@@ -1472,7 +1472,7 @@ rule for formals around the dots:
 ### Overload sets
 
 A standard-library stub name may declare **several signatures** (an ordered overload set — see the
-[stdlib stubs page](/stdlib-stubs) for the declaration surface). Calls to such a name resolve per
+[stdlib stubs page](/type-checking/stubs) for the declaration surface). Calls to such a name resolve per
 call site:
 
 - candidates are tried **in declaration order**, and the call commits the **first** candidate whose
@@ -1517,7 +1517,7 @@ name to accept several shapes, give the parameter a [union type](#union-types) o
 apart into separate functions.
 
 A local or package binding that shadows a stub name disables its overload set — the binding wins
-everywhere, calls included. Project [override stubs](/stdlib-stubs#override-precedence) may declare
+everywhere, calls included. Project [override stubs](/type-checking/stubs#overriding-a-shipped-declaration) may declare
 sets, since a `.Rtypes` file is a declaration file for foreign code wherever it lives.
 
 ### Indexing

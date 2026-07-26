@@ -2,11 +2,11 @@
 
 Roughly is a language tool for R, built as a language server plus CLI. It aims to be world class at three things: code analysis on the level of rust-analyzer — with a static type checker at its core — plus code formatting and linting.
 
-The type checker is central: no static type checker exists for R, so Roughly defines its own typing semantics (the contract lives in the typing reference at `docs/src/content/docs/typing/reference.md`). Because R itself has no type-annotation syntax, annotations are written in `#:` comments using a JSDoc-like notation, which keeps annotated code fully compatible with ordinary R tooling.
+The type checker is central: no static type checker exists for R, so Roughly defines its own typing semantics (the contract lives in the typing reference at `docs/src/content/docs/reference/type-system.md`). Because R itself has no type-annotation syntax, annotations are written in `#:` comments using a JSDoc-like notation, which keeps annotated code fully compatible with ordinary R tooling.
 
 Crates:
 
-- `crates/` — the shipping product: `syntax` (lexer/parser, lossless rowan trees), `semantics` (the salsa-based analysis core and type checker), `format` (the formatter, syntax-only), `ide` (editor features as pure reads), `roughly` (LSP server + CLI), plus the standalone `rofy` REPL experiment
+- `crates/` — the shipping product: `syntax` (lexer/parser, lossless rowan trees), `semantics` (the salsa-based analysis core and type checker), `format` (the formatter, syntax-only), `ide` (editor features as pure reads), `roughly` (LSP server + CLI), and `repl` (the R console behind `roughly repl` and `roughly run` — runtime-loaded R, so the rest of the workspace stays R-less)
 - `legacy/` — the frozen previous implementation (`analysis-legacy`, `engine-legacy`, `roughly-legacy`, its `fixtures` harness) and `differential`, now ONLY the cross-stack benchmark harness (the identity-parity program is complete and retired by user decision — the new stack's fixtures are the contract; no change needs oracle agreement); everything lives here because every dependency edge points at the oracle, so the eventual legacy deletion sweep is one directory removal (its new-stack-only perf witnesses migrate out first)
 
 The project is built by AI agents driving development, with light human steering. Agents keep two written homes current: the docs site (`docs/`) holds the authoritative, user- and contributor-facing specs (they are contracts — mandatory to keep accurate), and `.agents/memory/MEMORY.md` is the agent knowledge base (engineering state, priorities, debt, and non-obvious design rationale, so they are not rediscovered). Update both in the same session as the work that changes them.
@@ -33,7 +33,7 @@ Human engineering instincts — de-risking, staging, keeping diffs small and rev
 
 # Incremental analysis
 
-Implemented: the `engine` crate is a red-green memoized query core with per-symbol interface firewalls, cooperative cancellation, and idle-time diagnostics scheduling; the architecture page (`docs/src/content/docs/architecture.md`) is the contract — read it before touching the engine or the server's scheduling, and keep it accurate. Known deferred levers live in `backlog.md` (sub-linear validation walk, durability tiers).
+Implemented: the `engine` crate is a red-green memoized query core with per-symbol interface firewalls, cooperative cancellation, and idle-time diagnostics scheduling; the architecture page (`docs/src/content/docs/contributing/architecture.md`) is the contract — read it before touching the engine or the server's scheduling, and keep it accurate. Known deferred levers live in `backlog.md` (sub-linear validation walk, durability tiers).
 
 # Working autonomously
 
@@ -126,7 +126,7 @@ The recorded decision must state: the previous source of truth, what was duplica
 - Favor fixture renderers that expose semantic facts rather than implementation detail.
 - When adding a new phase or module, add or extend a fixture suite for that phase before relying on ad hoc unit tests.
 - Use the lightest fixture change that captures the failing shape.
-- Read the testing page in the docs (`docs/src/content/docs/testing.md`) before changing the fixture harness or adding a new fixture suite.
+- Read the testing page in the docs (`docs/src/content/docs/contributing/testing.md`) before changing the fixture harness or adding a new fixture suite.
 - Run focused fixture cases with `FIXTURE_FILTER=group__case cargo test -p analysis --test test_fixtures <suite> -- --nocapture`.
 - Prefer running focused crate tests while iterating; `cargo test -p analysis` is the default crate test command.
 - Keep fixture `group__case` names stable as the test identity, and reject duplicate names across the suite instead of silently shadowing one case with another.

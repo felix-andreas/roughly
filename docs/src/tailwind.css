@@ -25,3 +25,15 @@ Making it a block restores the intended behavior.
 starlight-toc {
 	display: block;
 }
+
+/*
+The page title no longer renders the frontmatter description under the <h1>, so
+the space that subtitle used to occupy became a gap: the theme's
+`.markdown-wrapper` contributes 2rem of top padding and the first block inside
+it adds its own top margin on top of that. Collapsing the first child's margin
+leaves the wrapper's padding as the only gap, which is the spacing the heading
+actually wants.
+*/
+.markdown-wrapper > .sl-markdown-content > :first-child {
+	margin-top: 0;
+}

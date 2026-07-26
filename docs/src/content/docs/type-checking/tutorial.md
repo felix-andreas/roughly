@@ -1,14 +1,17 @@
 ---
-title: Guide
+title: Tutorial
 description: Learn Roughly's type checker for R by using it — from your first run to annotations, domain types, and strict mode
 ---
 
 This is a walkthrough, not a specification. You will turn the checker on, run it on real code,
-read what it says, and add annotations only where they earn their place. Every output on this page
-is what the tool actually prints.
+read what it says, and add annotations only where they earn their place.
 
-For the exact rules behind any of it, the [typing reference](/typing/reference) is the contract.
-For what the checker cannot do, [limitations](/limitations) is honest about it.
+Every output on this page is copied from a real run. The snippets are fragments, so where a run would
+also report an `unused` warning for a function nothing calls yet, that line is left out — it is noise
+about the snippet, not about the point being made.
+
+For the exact rules behind any of it, the [typing reference](/reference/type-system) is the contract.
+For what the checker cannot do, [limitations](/type-checking/limitations) is honest about it.
 
 ## 1. Run it before you configure anything
 
@@ -52,7 +55,7 @@ warning[boolean-shorthand]: Use TRUE, not T, for Boolean values
 ```
 
 No configuration, no annotations, no R installation. Every code in brackets is a
-[stable name](/diagnostics) you can suppress individually.
+[stable name](/reference/diagnostic-codes) you can suppress individually.
 
 Type errors are the one thing you opt into, because they are the part that can be noisy on code
 that has never been checked:
@@ -108,9 +111,13 @@ are the *same* numeric type. The inferred signature is:
 <T: numeric> fn(value: T, factor: T) -> T
 ```
 
-Read that as: for any numeric type `T`, this takes two `T`s and returns a `T`. So
-`scale_by(2L, 3L)` is `integer`, `scale_by(0.5, 2.0)` is `double`, and inference did not force one
-answer where R allows several. Hover the name in your editor to see this without running anything.
+Read that as: for any numeric type `T`, this takes two `T`s and returns a `T`. So `scale_by(2L, 3L)`
+is `integer` and `scale_by(0.5, 2.0)` is `double` — inference did not force one answer where R allows
+several.
+
+One `T` in both positions does mean both arguments must be the *same* numeric type, so
+`scale_by(2L, 0.5)` is reported (`expected integer, found double`) even though R would happily
+compute it. Where you want mixing, widen one side yourself: `scale_by(as.double(2L), 0.5)`.
 
 The same reasoning tracks values through control flow, so guards work:
 
@@ -295,10 +302,8 @@ at once.
 
 ## 8. Turning it on for real code
 
-Enabling `typing = true` across a codebase that has never been checked will find things. Work
-through them in stages rather than in one sitting — the ladder, and the shapes you are most likely
-to hit, are on the [limitations page](/limitations#turning-it-on-for-an-existing-project). The key
-tool is the per-file directive, which overrides the project setting either way:
+You do not have to convert a project all at once. A directive at the top of a file overrides the
+project setting in either direction:
 
 ```r
 # typing: on       # check this file even if the project has typing off
@@ -306,9 +311,14 @@ tool is the per-file directive, which overrides the project setting either way:
 # typing: strict   # hold this module to the stronger standard
 ```
 
+[Adopting an existing codebase](/guides/adopting) has the order that works on a project with findings
+already in it.
+
 ## Where to go next
 
-- [Typing reference](/typing/reference) — the precise rules for everything above
-- [Limitations](/limitations) — data frames, object systems, and the adoption ladder
-- [Diagnostic codes](/diagnostics) — every code, and how to suppress one
-- [Standard library types](/stdlib-stubs) — what ships typed, and how to add your own
+- [Concepts](/type-checking/concepts) — the vocabulary behind everything above, explained properly
+- [Domain modeling](/type-checking/domain-modeling) — nominal types instead of S4, R6, or S7
+- [Adopting an existing codebase](/guides/adopting) — turning it on without drowning in findings
+- [Limitations](/type-checking/limitations) — data frames and object systems, stated plainly
+- [Stubs](/type-checking/stubs) — what ships typed, and how to add your own
+- [Type system reference](/reference/type-system) — the precise rules for everything above

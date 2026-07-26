@@ -521,6 +521,15 @@ below, ranked by how often a real user hits it.
 ## Open — website & docs
 
 - (The landing-page hero animation is user-owned — do not touch.)
+- **One-line installer.** Today the non-Rust route is download-a-tarball-from-Releases; there is no
+  `curl … | sh`, Homebrew, or winget path (uv and Ruff both ship one). The installation page states
+  this is planned with no date — if the plan changes, that claim has to change with it.
+- **Every release is marked a pre-release**, so `releases/latest/` resolves to the old `0.1.1` tag
+  rather than the newest build. The CI guide works around it by pinning an explicit tag; promoting a
+  release would let the docs recommend `latest` instead.
+- **Rework the typing reference's presentation** (`reference/type-system.md`, ~2700 lines): tables and
+  short bullets instead of prose subsections, preserving every normative claim. Deliberately deferred
+  out of the docs restructure so the contract got a dedicated pass.
 
 ## Open — REPL (v1 shipped; the analysis wiring is the open rung)
 

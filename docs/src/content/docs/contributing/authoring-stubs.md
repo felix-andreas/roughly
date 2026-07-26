@@ -1,6 +1,6 @@
 ---
-title: Stdlib Stubs
-description: The standard-library stub format (.Rtypes declaration files) that teaches the type checker base/stats/utils instead of resolving them to Unknown
+title: Authoring stubs
+description: The .Rtypes declaration format, overload sets, export manifests, and the scope rules for what belongs in the corpus
 ---
 
 :::note[Status]
@@ -16,7 +16,7 @@ never invalidates a package edit (see [Incremental hygiene](#incremental-hygiene
 [overrides](#override-precedence), [overload sets](#overloads-and-generics), and `pkg::name`
 qualified access (with unknown-namespace warnings and not-exported errors) are supported. What is not
 built is listed at the [end of this page](#what-is-not-built-yet). The authoritative typing
-contract remains the [Typing Reference](/typing/reference); this page describes how the standard
+contract remains the [Typing Reference](/reference/type-system); this page describes how the standard
 library feeds that contract.
 :::
 
@@ -50,7 +50,7 @@ expression directly into a `TypeScheme`.
 A declared `name` is an R identifier, an infix operator (`%in%`, a project's own `%||%`), or an S3
 **operator method** — `+.Date`, `-.POSIXct`, `Arith.difftime`, `Compare.Date`, `Ops.gg`. The operator
 spellings are how a stub gives a class arithmetic or comparison: see
-[operator methods on a class](/typing/reference#arithmetic-operators) for the dispatch order. The
+[operator methods on a class](/reference/type-system#arithmetic-operators) for the dispatch order. The
 suffix is the nominal's own name, so `+.ggplot : fn(e1: ggplot, e2: Any) -> ggplot` in a project stub
 is all a `+`-based DSL needs.
 
@@ -91,7 +91,7 @@ contain interior dots (`data.frame`), and a project's own `@type`/`@alias` of th
 the stub type. Consumers of these values keep `Any` parameters (R coerces liberally); the nominals
 tighten *returns*. `$`, `[`, and `[[` on an opaque nominal yield `Unknown` instead of erroring —
 `df$amount` and `df[rows, ]` stay usable, with each access surfaced under strict mode (see the
-[Typing Reference](/typing/reference#nominal-types)). Structural `@type NAME {REPRESENTATION}`
+[Typing Reference](/reference/type-system#nominal-types)). Structural `@type NAME {REPRESENTATION}`
 declarations are not expressible in `.Rtypes` — opaque nominals are the stub form.
 
 ### Cross-ecosystem note
@@ -132,7 +132,7 @@ A call to the name commits the **first candidate that accepts the arguments** (s
 `integer` and `sum(1.5, 2.5)` is `double`); the call-site selection rules — probe isolation, the
 fact-over-guess rule for arguments whose type is still undetermined, the two-round literal courtesy,
 and the no-match error — are specified in the Typing Reference under
-[Overload sets](/typing/reference#overload-sets). **Order each set most-specific first and end it
+[Overload sets](/reference/type-system#overload-sets). **Order each set most-specific first and end it
 with the most general candidate** — conventionally an `Any` fallback, which keeps mixtures the
 candidates cannot express (`sum(TRUE, 1L)`) from erroring, and which a non-call use of the name
 (passing it as a value) resolves to, so a value never carries a narrower contract than the calls the
@@ -212,7 +212,7 @@ A manifest does not need a `.Rtypes` file beside it. **Manifest-only namespaces*
 `knitr`, `jsonlite`, `R6`, `tidyverse` — carry no typed declarations at all, so every name from them
 is `Unknown`. What they buy is a **knowable export set**, and that is worth more than it sounds:
 attaching a package whose exports the checker cannot enumerate turns off unresolved-name detection for
-the whole project (see [the tolerance](/typing/reference#name-resolution)), so before these manifests
+the whole project (see [the tolerance](/reference/type-system#naming-and-scoping)), so before these manifests
 existed a single `library(stringr)` meant a clean run said nothing about typos anywhere. Adding
 declarations to any of them later is additive — the manifest stays the export set, the `.Rtypes` file
 supplies types.
@@ -300,7 +300,7 @@ Three former rows of this table have closed. The type-preserving reductions decl
 [overload sets](#overloads-and-generics), and the element-preserving functions (`rev`, `sort`,
 `unique`, `head`, `tail`, `sample`, `rep`, the set operations) declare generic `T[]` signatures —
 the `T[]` suffix carries the atomic-element bound specified in the Typing Reference under
-[Type parameters](/typing/reference#type-parameters-and-generic-application). Function compatibility
+[Type parameters](/reference/type-system#type-parameters-and-generic-application). Function compatibility
 also stopped demanding a matching parameter count: a function serves a callback interface when it
 accepts every call shape the interface promises, so spare *optional* formals are fine and a
 callback-idiom stub can declare its real signature (`lapply(words, nchar)` works with `nchar`'s
@@ -336,7 +336,7 @@ override winning a name's type never un-exports it from its declaring namespace.
 - `pkg::name` resolves against the same flat map: the qualified read has the stub's type exactly
   like the bare name, and the per-namespace export table powers the validation warnings (unknown
   namespace; name not exported by that namespace) specified in the Typing Reference under
-  [Namespace access](/typing/reference#namespace-access).
+  [Namespace access](/reference/type-system#namespace-access).
 
 ### Conditional namespaces
 
@@ -394,7 +394,7 @@ interner — the same isolation the `.Rtypes` stub-buffer path keeps.
 
 ### Incremental hygiene
 
-In the [query engine](/architecture#the-semantics-database) the stub library is a
+In the [query engine](/contributing/architecture#the-semantics-database) the stub library is a
 **set-once input**: it is established once and its revision never advances, so it can never invalidate
 a query that reads it. That is the entire isolation property — a stub never triggers recomputation
 because it never changes — and it is automatic, not something a separate check must enforce.

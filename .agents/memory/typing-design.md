@@ -1,6 +1,6 @@
 # Open type-system design questions
 
-Forward-looking design space for Roughly's type system: questions that are **not yet decided** and the options on the table, with the current stopgap and why. This is distinct from `decisions.md` (the log of what has been *settled*) — entries here are live deliberations. When one is resolved, move the decision + rationale to `decisions.md` and delete it here. The settled contract is always `docs/src/content/docs/typing/reference.md`; nothing here is contract until it lands there.
+Forward-looking design space for Roughly's type system: questions that are **not yet decided** and the options on the table, with the current stopgap and why. This is distinct from `decisions.md` (the log of what has been *settled*) — entries here are live deliberations. When one is resolved, move the decision + rationale to `decisions.md` and delete it here. The settled contract is always `docs/src/content/docs/reference/type-system.md`; nothing here is contract until it lands there.
 
 *(Resolved and moved to `decisions.md` §Beta-semantics: generic vector element types → atomic-element constraint on the existing constraint mechanism; ad-hoc overloading → ordered overload sets with probe-then-rollback, confined to declaration files, traits declined; multi-member unions → join/annotation-only, never bound into unification variables; R variable model → mutable slots with union-at-join reads.)*
 

@@ -6,7 +6,7 @@ Cross-session knowledge base for the agents building Roughly. Three horizons:
 - **Mid-term** — active priorities, open bugs, and technical debt. Lives across sessions until done.
 - **Long-term** — durable, non-obvious design decisions and their rationale. Only things a future agent would otherwise rediscover. Keep terse and point at code or the docs.
 
-Companion documents (kept separate only because they are larger in scope): `backlog.md` (the prioritized work punch-list), `decisions.md` (the settled architecture decision log), `typing-design.md` (open, not-yet-decided type-system design questions), `typedr-design.md` (inline type syntax as a compiled dialect — user-initiated, unscheduled; its own recommendation is NOT to build it for inline typing alone, because the ergonomic case does not survive checking, and to build it only if the later capabilities it enables — checked record/tuple constructors, tagged unions — are wanted), `repl-design.md` (the rofy-successor REPL: runtime-loaded R with no build-time linking — user-initiated design, unscheduled), and the repo-root `NSE.md` (working draft for checking data masking, data.table first — user-requested location; graduates into `typing-design.md` §7 / the typing reference as it settles). Authoritative user- and contributor-facing specs live in the docs site (`docs/src/content/docs/`): `typing/reference.md` + `typing/guide.md` (typing contract + guide), `architecture.md`, `structure.md`, `testing.md` — point at them, don't duplicate. Do not spawn new knowledge files for small things; inline them here. Every entry must be **context-free and timeless** (clear to a reader with zero project history — no milestone/phase/gate names, commit hashes, or "this session") and **high-signal** (terse; point at code/docs).
+Companion documents (kept separate only because they are larger in scope): `backlog.md` (the prioritized work punch-list), `decisions.md` (the settled architecture decision log), `typing-design.md` (open, not-yet-decided type-system design questions), `typedr-design.md` (inline type syntax as a compiled dialect — user-initiated, unscheduled; its own recommendation is NOT to build it for inline typing alone, because the ergonomic case does not survive checking, and to build it only if the later capabilities it enables — checked record/tuple constructors, tagged unions — are wanted), `repl-design.md` (the rofy-successor REPL: runtime-loaded R with no build-time linking — user-initiated design, unscheduled), and the repo-root `NSE.md` (working draft for checking data masking, data.table first — user-requested location; graduates into `typing-design.md` §7 / the typing reference as it settles). Authoritative user- and contributor-facing specs live in the docs site (`docs/src/content/docs/`): `reference/type-system.md` (the typing contract), `type-checking/tutorial.md`, `contributing/{architecture,structure,testing,authoring-stubs}.md` — point at them, don't duplicate. Do not spawn new knowledge files for small things; inline them here. Every entry must be **context-free and timeless** (clear to a reader with zero project history — no milestone/phase/gate names, commit hashes, or "this session") and **high-signal** (terse; point at code/docs).
 
 ## Short-term
 
@@ -54,6 +54,35 @@ Companion documents (kept separate only because they are larger in scope): `back
 - Audit habit: treat "landed" claims in old notes with suspicion; the verified state is `backlog.md` + the fixture suites.
 
 ## Long-term
+
+### Documentation
+
+- **The docs site is organised by purpose, not by component**, in five sidebar groups: Introduction
+  (getting-started, why-roughly, features), Type checking (tutorial, concepts, domain-modeling, stubs,
+  limitations), Guides (adopting, continuous-integration, r-console), Reference (configuration, cli,
+  diagnostic-codes, formatting-rules, type-system), Contributing. The installation page is deliberately
+  absent from the sidebar — getting-started closes with the extension links and a one-line install, and
+  the page itself only covers awkward cases. Introduction pages live at the site root; every other page
+  nests under its group.
+- **The rule that keeps pages from bleeding into each other**: explain a thing once, in prose, where it
+  is introduced; tabulate it once, in Reference; never half-explain it in a third place. The previous
+  layout documented suppression in three pages and configuration in three more. When a page needs a
+  fact it does not own, it links.
+- **Terminology is fixed, no synonyms**: finding (not issue/problem), diagnostic code (not rule/lint
+  code), annotation (not type hint), *check* for the command and *code analysis* for the capability
+  (never "linting" for either), the language server (not "the LSP"), nominal type, project (not
+  workspace).
+- **Breadcrumbs come from the sidebar, not the URL** — `docs/src/components/PageTitle.astro` walks
+  `starlightRoute.sidebar` for the entry marked current. It exists because both Starlight and
+  starlight-theme-black render a hardcoded two-level `Docs > title`. Declaring `components.PageTitle` in
+  `astro.config.ts` makes the theme skip its own override and log a warning; that warning is expected.
+- **`reference/formatting-rules.md` is generated**, not authored — `crates/format/tests/test_format_docs.rs`
+  runs every example in `crates/format/tests/formatter.template.md` through the formatter and writes the
+  page. Edit the template and rebless with `ROUGHLY_BLESS=1`; editing the page directly is always wrong,
+  and a site-wide link rewrite must include the template or the generated page silently keeps stale links.
+- **Docs claims are verified against the binary, never against other docs.** A prior pass shipped a
+  fabricated JSON example and formatter behaviour the tool does not have; the rewrite caught a
+  fabricated `--output json` sample still in the install page. Run examples before writing them down.
 
 ### Architecture
 

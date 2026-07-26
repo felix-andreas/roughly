@@ -6,10 +6,23 @@ import starlightThemeBlack from 'starlight-theme-black'
 
 // https://astro.build/config
 export default defineConfig({
-	// The typing pages moved under /typing/; published links keep working.
+	// Every page published before the docs were reorganised keeps working.
 	redirects: {
-		'/typing': '/typing/guide',
-		'/typing-reference': '/typing/reference',
+		'/formatter': '/reference/formatting-rules',
+		'/linter': '/reference/diagnostic-codes',
+		'/diagnostics': '/reference/diagnostic-codes',
+		'/configuration': '/reference/configuration',
+		'/language-server': '/features',
+		'/limitations': '/type-checking/limitations',
+		'/stdlib-stubs': '/type-checking/stubs',
+		'/typing': '/type-checking/tutorial',
+		'/typing/guide': '/type-checking/tutorial',
+		'/typing/reference': '/reference/type-system',
+		'/typing-reference': '/reference/type-system',
+		'/development': '/contributing/development',
+		'/architecture': '/contributing/architecture',
+		'/structure': '/contributing/structure',
+		'/testing': '/contributing/testing',
 	},
 	integrations: [
 		starlight({
@@ -23,38 +36,63 @@ export default defineConfig({
 				{ label: "Visual Studio Marketplace", icon: "vscode", href: 'https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly' },
 				{ label: "GitHub", icon: "github", href: 'https://github.com/felix-andreas/roughly' },
 			],
+			// The installation page is deliberately absent: getting started closes with
+			// the two extension links and the one-line install, and the page itself is
+			// only for the awkward cases.
 			sidebar: [
 				{
-					label: 'Roughly',
+					label: 'Introduction',
 					items: [
 						{ slug: 'getting-started' },
-						{ slug: 'installation' },
-						{ slug: 'formatter' },
-						{ slug: 'linter' },
-						{ slug: 'language-server' },
-						{ slug: 'configuration' },
-						{ slug: 'diagnostics' },
-						{ slug: 'limitations' },
+						{ slug: 'why-roughly' },
+						{ slug: 'features' },
 					],
 				},
 				{
-					label: 'Typing',
+					label: 'Type checking',
 					items: [
-						{ slug: 'typing/guide' },
-						{ slug: 'typing/reference' },
-						{ slug: 'stdlib-stubs' },
+						{ slug: 'type-checking/tutorial' },
+						{ slug: 'type-checking/concepts' },
+						{ slug: 'type-checking/domain-modeling' },
+						{ slug: 'type-checking/stubs' },
+						{ slug: 'type-checking/limitations' },
+					],
+				},
+				{
+					label: 'Guides',
+					items: [
+						{ slug: 'guides/adopting' },
+						{ slug: 'guides/continuous-integration' },
+						{ slug: 'guides/r-console' },
+					],
+				},
+				{
+					label: 'Reference',
+					items: [
+						{ slug: 'reference/configuration' },
+						{ slug: 'reference/cli' },
+						{ slug: 'reference/diagnostic-codes' },
+						{ slug: 'reference/formatting-rules' },
+						{ slug: 'reference/type-system' },
 					],
 				},
 				{
 					label: 'Contributing',
 					items: [
-						{ slug: 'development' },
-						{ slug: 'architecture' },
-						{ slug: 'structure' },
-						{ slug: 'testing' },
+						{ slug: 'contributing/development' },
+						{ slug: 'contributing/architecture' },
+						{ slug: 'contributing/structure' },
+						{ slug: 'contributing/testing' },
+						{ slug: 'contributing/authoring-stubs' },
 					],
 				},
 			],
+			// Replaces the theme's own PageTitle, whose breadcrumb is a hardcoded
+			// "Docs > title". starlight-theme-black skips its override when one is
+			// declared here, and warns that it did.
+			components: {
+				PageTitle: './src/components/PageTitle.astro',
+			},
 			customCss: ['./src/tailwind.css'],
 			plugins: [
 				starlightThemeBlack({
@@ -64,20 +102,20 @@ export default defineConfig({
 							link: '/getting-started',
 						},
 						{
-							label: 'Formatter',
-							link: '/formatter',
+							label: 'Why Roughly',
+							link: '/why-roughly',
 						},
 						{
-							label: 'Typing',
-							link: '/typing/guide',
+							label: 'Features',
+							link: '/features',
 						},
 						{
-							label: 'Linter',
-							link: '/linter',
+							label: 'Type checking',
+							link: '/type-checking/tutorial',
 						},
 						{
-							label: 'Config',
-							link: '/configuration',
+							label: 'Reference',
+							link: '/reference/configuration',
 						},
 					],
 					footerText: `<div class="py-8 flex items-center justify-between"><div class="flex items-center gap-2"><img src="/logo.svg" width="12" /> Roughly © ${new Date().getFullYear()}</div><a href="https://felixandreas.me/legal-notice/" target="_blank" rel="noopener" class="no-underline text-gray-500">Legal Notice</a></div>`

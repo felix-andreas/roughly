@@ -4,7 +4,7 @@ description: The file structure of the syntax, semantics, ide, format, roughly, 
 ---
 
 This document is the authoritative file structure for Roughly's code. The
-crate graph and phase boundaries live in [Architecture](/architecture); this
+crate graph and phase boundaries live in [Architecture](/contributing/architecture); this
 page records the file split and the role of each file. The `*-legacy` crates
 keep their own (frozen) layout and are not documented here.
 
@@ -80,7 +80,7 @@ The preserving formatter over the syntax tree, plus its configuration types.
 - `namespace.rs` — NAMESPACE import parsing and validation
 - `position.rs` — the line index: byte offsets ↔ line/column in bytes,
   characters (what the CLI reports), or UTF-16 code units (the LSP default)
-- `stats.rs` — the performance diagnosis behind `roughly debug stats`
+- `stats.rs` — the performance diagnosis behind `roughly debug analysis-stats`
 - `repl_completer.rs` — completion for the interactive console
 
 ## `repl` crate (`src/repl.rs` is the root)

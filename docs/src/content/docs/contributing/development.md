@@ -40,8 +40,8 @@ locally before touching the REPL. The predecessor
 experiment (`legacy/rofy`, which linked R at build time through `extendr`) stays frozen until the
 new console reaches feature parity.
 
-The analysis design is documented in [Architecture](/architecture) and the file layout in
-[Structure](/structure). The editor extensions live under `editors/` (`code` for VS Code, `zed` for
+The analysis design is documented in [Architecture](/contributing/architecture) and the file layout in
+[Structure](/contributing/structure). The editor extensions live under `editors/` (`code` for VS Code, `zed` for
 Zed).
 
 ## Build and test
@@ -72,7 +72,7 @@ cargo test -p format --test test_format_fixtures
 ```
 
 Most behavior is verified with **fixture tests** — human-readable `.test` files rendered to expected
-output. Read [Testing](/testing) for the fixture contract before adding or changing tests. Two
+output. Read [Testing](/contributing/testing) for the fixture contract before adding or changing tests. Two
 environment variables matter day to day:
 
 - `ROUGHLY_BLESS=1` rewrites the expected `#++++` blocks in place from the current output (review the
@@ -82,7 +82,7 @@ environment variables matter day to day:
 The real-world corpus some suites and all measurement instruments use is fetched with
 `scripts/fetch-corpus.rs` (a `cargo +nightly -Zscript` single-file script) into the gitignored
 `corpus/`; the resolved inventory is committed as `scripts/corpus-manifest.txt`. The performance and memory instruments live in
-`legacy/differential/tests/test_stats.rs` and are documented on the [Testing](/testing) page.
+`legacy/differential/tests/test_stats.rs` and are documented on the [Testing](/contributing/testing) page.
 
 ## Debug mode
 
@@ -105,7 +105,7 @@ configuration had it off. Build with `--release` when the absolute numbers matte
 still shows honest ratios. `roughly debug ast <file>` prints a file's syntax tree.
 
 To work on this documentation site, run `just docs` (a live preview) or `cd docs && npx astro build`.
-The formatter page (`docs/src/content/docs/formatter.md`) is generated — edit
+The formatter page (`docs/src/content/docs/reference/formatting-rules.md`) is generated — edit
 `crates/format/tests/formatter.template.md` and regenerate with
 `ROUGHLY_BLESS=1 cargo test -p format --test test_format_docs` instead.
 

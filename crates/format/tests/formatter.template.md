@@ -1,8 +1,8 @@
 ---
-title: Formatter
-description: Documentation for Roughly's R code formatter.
+title: Formatting rules
+description: Every rule the formatter applies, with a before-and-after for each
 ---
-<!-- R CODE IN THIS FILE IS FORMATTED AND SAVED TO docs/src/content/docs/formatter.md -->
+<!-- R CODE IN THIS FILE IS FORMATTED AND SAVED TO docs/src/content/docs/reference/formatting-rules.md -->
 
 Roughly includes a non-invasive R code formatter that emphasizes readability while respecting the existing structure of your code.
 
@@ -19,7 +19,7 @@ roughly fmt --diff    # Show a diff of formatting changes without applying them
 
 `--check` and `--diff` exit 1 when any file would change, so they slot straight into CI. Errors
 (for example a file that cannot be parsed) exit 2 — see the full
-[exit-code table](/installation#exit-codes).
+[exit-code table](/reference/cli#exit-codes).
 
 ## Philosophy
 
@@ -28,7 +28,7 @@ Roughly's non-invasive approach means it respects your existing line breaks and 
 * **Single-line expressions remain single-line:** The formatter only adds line breaks if the expression is already multi-line, and will never break single-line expressions into multiple lines (with [one exception](#loops)).
 * **Flexible style preservation:** Both compact ("hugged") and expanded forms for nested expressions are supported, so your preferred style is respected (see [hugging behavior](#hugging-behavior)).
 * **Automatic braces only when needed:** Braces are added automatically only where they prevent subtle bugs (see [auto-bracing](#auto-bracing)).
-* **Minimal configuration:** The formatter works out of the box with sensible defaults, so you can use it immediately without extra setup (see [configuration](/configuration)).
+* **Minimal configuration:** The formatter works out of the box with sensible defaults, so you can use it immediately without extra setup (see [configuration](/reference/configuration)).
 
 ## Formatting Rules
 
@@ -433,7 +433,7 @@ Additional exceptions to this rule are:
 
 ### Type Annotations
 
-Roughly's type annotations are written in `#:` comments. The formatter treats each block of consecutive `#:` lines as one unit: the block is parsed with the same annotation grammar the type checker uses, and — only when it parses — re-rendered with the canonical spacing used throughout the [typing reference](/typing/reference): one space after `#:`, no space before `,` or `:` and one space after, spaces around `|` and `->`, and no padding inside `(`, `[`, `{`, or generic `<...>`. A leading type-parameter binder such as `<T>` is followed by a space.
+Roughly's type annotations are written in `#:` comments. The formatter treats each block of consecutive `#:` lines as one unit: the block is parsed with the same annotation grammar the type checker uses, and — only when it parses — re-rendered with the canonical spacing used throughout the [typing reference](/reference/type-system): one space after `#:`, no space before `,` or `:` and one space after, spaces around `|` and `->`, and no padding inside `(`, `[`, `{`, or generic `<...>`. A leading type-parameter binder such as `<T>` is followed by a space.
 
 ```r
 # type_annotations_compact : compare
@@ -524,6 +524,10 @@ matrix(
 ```
 
 Or, at the end of a line to skip the previous expression:
+
+<!-- The fence below says R, not r, on purpose: the doc harness formats every ```r block, which would
+     defeat a block whose whole point is that `# fmt: skip` left it alone. The cost is that this one
+     block renders without syntax highlighting. Do not "fix" the capital R. -->
 
 ```R
 # the entire matrix(..) call won't be reformatted
