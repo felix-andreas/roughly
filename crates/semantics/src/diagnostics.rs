@@ -1350,10 +1350,19 @@ fn script_unused_bindings(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
             }
         }
     }
+    // An S3 method is reached by dispatch, not by a read of its name, so the
+    // liveness walk above cannot see the use: `speak.dog` is called by every
+    // `speak(x)` on a dog. Reporting it dead is a false positive on code that
+    // works, and the ecosystem's own answer — export it — is unavailable in a
+    // script.
+    let generics = crate::s3_generics(db, file);
     definers
         .into_iter()
         .filter(|definer| {
-            !definer.used && !definer.name.starts_with('.') && !definer.name.starts_with('_')
+            !definer.used
+                && !definer.name.starts_with('.')
+                && !definer.name.starts_with('_')
+                && !crate::is_s3_method_name(db, &definer.name, &generics)
         })
         .map(|definer| Diagnostic {
             range: definer.range,

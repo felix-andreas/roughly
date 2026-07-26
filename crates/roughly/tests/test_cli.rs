@@ -704,6 +704,33 @@ fn check_reports_an_export_the_package_does_not_define() {
     );
 }
 
+// A generic and its methods routinely live in different files of one package,
+// and dispatch is not a read, so the S3 carve-out has to see the whole
+// namespace rather than one file.
+#[test]
+fn check_sees_a_generic_declared_in_another_package_file() {
+    let directory = project(&[
+        ("DESCRIPTION", "Package: speaker\n"),
+        (
+            "R/generic.R",
+            "speak <- function(x, ...) UseMethod(\"speak\")\n",
+        ),
+        ("R/dog.R", "speak.dog <- function(x, ...) \"woof\"\n"),
+        ("R/cat.R", "meow.cat <- function(count) \"meow\"\n"),
+        ("roughly.toml", "[lint]\nunused-parameter = \"warn\"\n"),
+    ]);
+    let output = roughly(directory.path(), &["check", "."]);
+    let rendered = stderr(&output);
+    assert!(
+        !rendered.contains("speak.dog"),
+        "a method of a generic in a sibling file is exempt: {rendered}"
+    );
+    assert!(
+        rendered.contains("parameter `count` is never used"),
+        "a dotted name that dispatches nowhere is still reported: {rendered}"
+    );
+}
+
 // `usethis` writes `library(yourpkg)` into `tests/testthat.R`, so this shape is
 // in every testthat package. Attaching a package with no shipped stub normally
 // tolerates every otherwise-unresolved bare read, and applying that to the

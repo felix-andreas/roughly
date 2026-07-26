@@ -54,10 +54,15 @@ Semantics checks enforce coding conventions and best practices that won't necess
 - **`boolean-shorthand`**: Use `TRUE` and `FALSE` over `T` and `F`
 - **`unused-parameter`** *(off by default)*: Flags function parameters no read ever uses. Off
   unless enabled in `roughly.toml` (`[lint] unused-parameter = "warn"`), because R signatures
-  legitimately carry ignored formals; `.`/`_`-prefixed names are never reported, and an S3
-  method's formals are never reported at all — `format.myclass(x, ...)` that ignores `x` is
-  matching its generic, which R requires. A name counts as an S3 method when the part before its
-  last dot is a name the standard-library corpus declares, so `my.helper` is still checked
+  legitimately carry ignored formals; `.`/`_`-prefixed names are never reported, and S3 is exempt
+  in both directions — a method's formals match its generic, which R requires
+  (`format.myclass(x, ...)` ignoring `x` is correct code), and a generic declares the argument it
+  dispatches on and hands the call to `UseMethod` without touching it, so *every* formal it names is
+  unused by construction. A name counts as an S3 method when the part before its last dot names a
+  generic: one the standard-library corpus declares, or one your own project defines. Your own
+  generics are found by their bodies — a top-level function that calls `UseMethod` — anywhere in the
+  package, so a generic in `R/speak.R` covers `speak.dog` in `R/dog.R`. `my.helper`, with no `helper`
+  generic anywhere, is still checked
 - **`stub`**: a problem in a `.Rtypes` [stub file](/stdlib-stubs) the project ships — a declaration
   that does not parse, or one naming a type no vocabulary declares. Reported against the stub file
   itself, since a stub that does not load silently withdraws the types it was meant to provide
@@ -130,7 +135,10 @@ strict = true    # report expressions whose type the checker could not determine
   function reads. Conditional updates and loop accumulators that a later read observes are *not*
   flagged. Function parameters, `for`-loop variables, package top-level (package-visible)
   bindings, names starting with `.` or `_`, and bindings inside a syntax-error region are never
-  reported.
+  reported. **S3 methods are never reported either**, in a script as well as a package: dispatch is
+  not a read, so nothing in the file mentions `speak.dog` even though every `speak(x)` on a dog calls
+  it. The generic can be one the standard library declares or one your own project defines (a
+  top-level function whose body calls `UseMethod`, anywhere in the package).
 - **Type checking**: Reports type errors and argument mismatches from Roughly's static type
   checker. Type *inference* is always on (it powers editor features); this setting controls whether
   `roughly check` surfaces `type-mismatch` diagnostics. See the [Typing guide](/typing/guide).

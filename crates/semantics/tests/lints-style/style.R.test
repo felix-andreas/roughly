@@ -61,6 +61,23 @@ my.helper <- function(count) 1
 #++++
 22..27 warning[unused-parameter] parameter `count` is never used.
 
+#---- a_projects_own_generic_and_its_methods_are_exempt
+# A generic declares the argument it dispatches on and never touches it — every
+# formal it names is unused by construction — and its methods must then match its
+# signature. The generic being the project's own, not the standard library's,
+# changes nothing.
+speak <- function(x, ...) UseMethod("speak")
+speak.dog <- function(x, ...) "woof"
+speak.default <- function(x, ...) "..."
+#++++
+clean
+
+#---- a_method_of_no_generic_at_all_is_still_reported
+# Nothing here dispatches, so `render.thing` is an ordinary dotted name.
+render.thing <- function(count) 1
+#++++
+98..103 warning[unused-parameter] parameter `count` is never used.
+
 #---- closure_read_counts
 f <- function(count) {
   g <- function() count

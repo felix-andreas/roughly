@@ -196,6 +196,26 @@ guard: <T> fn(con: T) -> integer
 72..80 warning[unresolved] I could not resolve `rollback` in this package, its imports, or builtins.
 89..96 warning[unused] `scratch` is assigned but never used.
 
+#---- s3_dispatch_is_a_use
+# Nothing reads `speak.dog` — every call goes through the generic — so the
+# liveness walk cannot see the use. Calling the method dead is a false positive
+# on code that works, and a script cannot export its way out of it.
+speak <- function(x, ...) UseMethod("speak")
+speak.dog <- function(x, ...) "woof"
+speak.default <- function(x, ...) "..."
+print(speak(structure(list(), class = "dog")))
+#++++
+speak: <T> fn(x: T, ...: Any) -> Any
+speak.dog: <T> fn(x: T, ...: Any) -> character
+speak.default: <T> fn(x: T, ...: Any) -> character
+
+#---- a_dotted_name_that_dispatches_nowhere_is_still_dead
+render.thing <- function(x) x
+print(1L)
+#++++
+render.thing: <T> fn(x: T) -> T
+0..12 warning[unused] `render.thing` is assigned but never used.
+
 #---- operator_use_is_a_use
 `%||%` <- function(a, b) if (is.null(a)) b else a
 fallback <- NULL %||% 3L

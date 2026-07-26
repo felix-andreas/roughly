@@ -19,6 +19,7 @@ pub mod stubs;
 pub mod testing;
 pub mod types;
 
+use rustc_hash::FxHashSet;
 use std::collections::BTreeSet;
 use syntax::Parse;
 use syntax::ast::AstNode as _;
@@ -777,6 +778,67 @@ pub fn package_definitions<'db>(
         }
     }
     winners
+}
+
+/// Whether a name is an S3 method for a known generic: `generic.class`, where
+/// the part before the LAST dot names a generic (so `as.character.myclass`
+/// splits at `as.character`, and an ordinary dotted name like `my.helper` does
+/// not qualify). A generic is one the stub corpus declares or one `generics`
+/// names — a project's own `speak` is as real a generic as `print`.
+///
+/// Dispatch is not a read and not a call the checker can see, so this is what
+/// keeps a method from looking dead (`unused`) and its mandated formals from
+/// looking ignored (`unused-parameter`).
+pub fn is_s3_method_name(db: &dyn Db, name: &str, generics: &FxHashSet<String>) -> bool {
+    let Some((generic, class)) = name.rsplit_once('.') else {
+        return false;
+    };
+    if generic.is_empty() || class.is_empty() {
+        return false;
+    }
+    generics.contains(generic)
+        || crate::stubs::stubs(db).is_some_and(|library| {
+            library.schemes.contains_key(generic)
+                || library
+                    .exports_by_namespace
+                    .values()
+                    .any(|exports| exports.contains(generic))
+        })
+}
+
+/// The S3 generics a file can see: every top-level definition whose body hands
+/// the call to `UseMethod`, in the file itself and — since package files share
+/// one namespace — anywhere else in the package.
+pub fn s3_generics(db: &dyn Db, file: SourceFile) -> FxHashSet<String> {
+    let mut generics = file_s3_generics(db, file).clone();
+    if let Some(files) = ProjectFiles::try_get(db) {
+        for &other in files.files(db) {
+            if other != file && *other.kind(db) == DocumentKind::Package {
+                generics.extend(file_s3_generics(db, other).iter().cloned());
+            }
+        }
+    }
+    generics
+}
+
+/// One file's S3 generics: a top-level definition whose body reads `UseMethod`,
+/// which is how R's own generics are written
+/// (`print <- function(x, ...) UseMethod("print")`). The dispatched name is not
+/// read out of the call's argument — a generic naming something other than its
+/// own binding is a bug R reports when the call runs, not a shape to model.
+/// Riding the read-set projection keeps this off item ranges, so editing one
+/// body does not re-derive the set.
+#[salsa::tracked(returns(ref))]
+fn file_s3_generics(db: &dyn Db, file: SourceFile) -> FxHashSet<String> {
+    let mut generics = FxHashSet::default();
+    for item in item_tree(db, file) {
+        if let Some(name) = item.name(db).clone()
+            && item_interface_reads(db, item).contains("UseMethod")
+        {
+            generics.insert(name);
+        }
+    }
+    generics
 }
 
 /// The non-local names an item's body reads (bare and `pkg::`-qualified),

@@ -87,10 +87,13 @@ five opt-in lints are unusable on a package with an S3 class and a testthat suit
    Adding that must not disturb the unused rules, where `TopLevel` means package-visible; both shadow
    lints are default-off, so this waits for the model change rather than a special case. The wording
    is part of the bug: a local two levels deep should never be called a top-level binding.
-5. **`unused-parameter` flags every user-defined S3 generic and its methods.**
-   `speak <- function(x, ...) UseMethod("speak")` reports "parameter `x` is never used" with
-   `UseMethod("speak")` three characters away. The existing carve-out only recognizes methods whose
-   generic is in the *stdlib* corpus, so a project's own generics lose it.
+5. **`unused-parameter` flagging user-defined S3 generics and their methods FIXED**, along with the
+   default-on `unused` reporting an S3 method as dead (a separate finding from the first round, same
+   missing knowledge). A project's own generics are now discovered by their bodies — a top-level
+   definition whose read set contains `UseMethod` — across the whole package namespace, so a generic
+   in `R/speak.R` covers `speak.dog` in `R/dog.R`; the generic itself is exempt too, since it declares
+   the dispatch argument and never touches it. `is_s3_method_name`/`s3_generics` live in
+   `semantics.rs` beside the other project-level projections, shared by the lint and the unused walk.
 6. **A bad `importFrom` is a warning, but R refuses to install the package** (`object 'setNmaes' is
    not exported`). Under `--min-severity error` that ships.
 7. **`#: @new` does not stop `structure()` being a strict origin** — the documented S3 remedy failing
@@ -426,12 +429,10 @@ below, ranked by how often a real user hits it.
   data-frame-heavy code annotations look protective and are not. This is the design consequence that
   decides the tool's value for analysis users; it needs at minimum a way to *see* that a check was
   skipped (strict mode, once it reports origins).
-- **An S3 method declared in R is reported `unused`.** `Arith.Point <- function(e1, e2) ...` with a
-  `#:` annotation *works* — `p + q` dispatches through it and `p + 1L` is correctly refused — but the
-  binding warns `assigned but never used`, because dispatch is not a read. The lints already know
-  `generic.class` names (`is_s3_method_name`, used for the unused-formal and naming-style
-  exemptions); the unused analysis needs the same knowledge, at least for a method whose generic or
-  operator group the checker dispatches through.
+- **An S3 method declared in R being reported `unused` FIXED** — the unused walk shares the
+  method-name knowledge with the lints, and a project's own generics count, not just the corpus's.
+  Dispatch is still not a read, so the exemption is by name shape (`generic.class` for a generic that
+  exists), which is the same signal R itself uses to find the method.
 - **Only the STUB route to an operator method on a project nominal is blocked.** Declaring the method
   as an annotated R function works (verified above), which is what an author writes anyway for a real
   S3 class; the gap is narrower than "operator methods need ergonomics" — a `.Rtypes` stub cannot see
@@ -516,6 +517,20 @@ below, ranked by how often a real user hits it.
 - CRAN stub auto-generation via R introspection, R-version-keyed corpora, stubtest validation (R-dependent). (NAMESPACE/DESCRIPTION awareness moved to Open — semantics by user ask.)
 
 ## Shipped ledger (one line each; rationale in `decisions.md`, contracts in the docs site)
+
+- **S3 dispatch counts as a use, and a project's own generics are real generics:** the default-on
+  `unused` lint called `speak.dog` dead and the opt-in `unused-parameter` called a generic's dispatch
+  argument ignored — both false positives on working code, since dispatch is neither a read nor a call
+  the checker sees. A generic is now any top-level definition whose read set contains `UseMethod`,
+  unioned across the package namespace (a generic in one file covers a method in another), and both
+  the generic and its `generic.class` methods are exempt. `is_s3_method_name`/`s3_generics` sit in
+  `semantics.rs` with the other project-level projections rather than in the lint module, because two
+  diagnostic layers share them.
+
+- **A package's own `library()` call no longer silences unresolved names:** the unknowable-export-set
+  tolerance skips the project's own name (`DESCRIPTION`'s `Package`, now on the metadata input), so the
+  `library(yourpkg)` `usethis` writes into `tests/testthat.R` stops switching off unresolved detection
+  package-wide. Two independent adoption reviews hit this.
 
 - **Shape-preserving stubs actually preserve the shape:** `Filter` returned `list[T]` for every input, so `Filter(f, c(1, 2, 3)) + 1` — R selects with `[`, which keeps the atomic type — was a hard type error; it now declares the atomic, named-list and plain-list forms in that order. `rev`/`unique`/`head`/`tail` gained the named-list candidate too, so a name read off a reordered or sliced list is no longer a missing-field error (see the residual record in §Open).
 

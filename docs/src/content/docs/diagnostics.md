@@ -23,7 +23,7 @@ turn whole classes on or off.
 | `syntax-error` | Code that does not parse. A broken region reports this and nothing else — the checker draws no conclusions from source that failed to parse | Always |
 | `annotation` | A malformed `#:` annotation: a type that does not parse, an unknown type name, a `@type`/`@alias` block mixed with checked annotations | Always |
 | `unresolved` | A name that resolves nowhere — not in this package, its imports, or the standard library. Includes a "did you mean" suggestion for a near miss. **A `library(pkg)` for a package with no shipped stub tolerates otherwise-unresolved bare names**, since that package's export set is unknowable — with two exceptions that are reported anyway: a near miss of a name your own project binds, and any `library()` naming the project under check (the `library(yourpkg)` in `tests/testthat.R` buys nothing, because your own exports are the definitions already in view) | Always |
-| `unused` | A binding nothing ever reads. Top-level bindings are reported in scripts but not in package files, where any file may use them | Yes — `[check] unused = false` opts out |
+| `unused` | A binding nothing ever reads. Top-level bindings are reported in scripts but not in package files, where any file may use them. An S3 method is never reported: dispatch is not a read | Yes — `[check] unused = false` opts out |
 | `duplicate` | Two top-level definitions of one name in a **package**, reported at both sites — a script is sequential, so rebinding there is ordinary. Also two `@type`/`@alias` declarations of one type name | Always |
 | `stub` | A problem in a `.Rtypes` stub the project ships — reported against the stub, since a stub that fails to load silently withdraws the types it promised | Always |
 | `type-mismatch` | A type error: incompatible argument, missing or surplus argument, calling a non-function, an operator applied to operands it is not defined for | No — `[check] typing = true` |
@@ -50,7 +50,7 @@ unused-parameter = "warn"
 | `boolean-shorthand` | `T` and `F` instead of `TRUE` and `FALSE` — both are ordinary variables in R and can be reassigned | warning |
 | `trailing-comma` | A comma after the last argument, which in R supplies a missing argument rather than being ignored | **error** |
 | `naming-style` | A variable or parameter that does not match the configured style. Configured by value, not level: `[lint] naming-style = "snake_case"` or `"camelCase"`. `SCREAMING_SNAKE_CASE` conforms under either | off |
-| `unused-parameter` | A parameter no read ever uses. Off because R signatures legitimately carry ignored formals; `.`/`_`-prefixed names and S3 method formals are never reported | off |
+| `unused-parameter` | A parameter no read ever uses. Off because R signatures legitimately carry ignored formals; `.`/`_`-prefixed names are never reported, nor the formals of an S3 generic or any of its methods (the generic's own or the standard library's) | off |
 | `unused-import` | An `importFrom(pkg, name)` in the `NAMESPACE` whose name appears in no source. Usage detection is a conservative token scan, so it never fires on a real use | off |
 | `shadows-builtin` | A top-level binding whose name `base` exports | off |
 | `shadows-namespace` | The same, for names from the other standard-library namespaces (`stats::filter`, `utils::head`) | off |

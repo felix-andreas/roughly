@@ -67,19 +67,22 @@ pub fn lint_file(db: &dyn Db, file: SourceFile, config: &LintConfig) -> Vec<Diag
     let root = parse(db, file).syntax_node();
     syntax_lints(&root, config, &mut diagnostics);
     if let Some(severity) = opt_in_severity(config.unused_parameter) {
+        let generics = crate::s3_generics(db, file);
         for span in item_spans(db, file) {
             let Some(naming) = item_naming(db, span.item) else {
                 continue;
             };
             // An S3 method's formals are R's choice, not the author's: the
             // method must match its generic, so `format.myclass(x, ...)` that
-            // ignores `x` is correct code and reporting it is noise.
-            if span
-                .item
-                .name(db)
-                .as_deref()
-                .is_some_and(|name| is_s3_method_name(db, name))
-            {
+            // ignores `x` is correct code and reporting it is noise. The
+            // generic itself is the same case one step earlier — it declares
+            // the argument it dispatches on and hands the call straight to
+            // `UseMethod`, so *every* formal it names is unused by
+            // construction.
+            let exempt = span.item.name(db).as_deref().is_some_and(|name| {
+                crate::is_s3_method_name(db, name, &generics) || generics.contains(name)
+            });
+            if exempt {
                 continue;
             }
             for unused in &naming.unused_parameters {
@@ -99,26 +102,6 @@ pub fn lint_file(db: &dyn Db, file: SourceFile, config: &LintConfig) -> Vec<Diag
     shadow_lints(db, file, config, &mut diagnostics);
     diagnostics.sort_by_key(|diagnostic| (diagnostic.range.start(), diagnostic.range.end()));
     diagnostics
-}
-
-/// Whether a name is an S3 method for a known generic: `generic.class`, where
-/// the part before the LAST dot is a name the stub corpus declares (so
-/// `as.character.myclass` splits at `as.character`, and an ordinary dotted
-/// name like `my.helper` does not qualify).
-fn is_s3_method_name(db: &dyn Db, name: &str) -> bool {
-    let Some((generic, class)) = name.rsplit_once('.') else {
-        return false;
-    };
-    if generic.is_empty() || class.is_empty() {
-        return false;
-    }
-    crate::stubs::stubs(db).is_some_and(|library| {
-        library.schemes.contains_key(generic)
-            || library
-                .exports_by_namespace
-                .values()
-                .any(|exports| exports.contains(generic))
-    })
 }
 
 /// A top-level binding whose name the stub corpus already resolves bare
