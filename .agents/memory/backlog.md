@@ -126,11 +126,12 @@ permanently yes, including CI. That gap is three bugs, not a redesign."**
    through to the numeric rules and reported arithmetic on a `gg`. R routes all of it through the
    single `+.gg` method, which the corpus now declares; a genuine mistake (`plot + 1L`) is still
    caught, naming both classes.
-3. **Inline `` `r expr` `` in prose is invisible — neither a use nor checked.** A value assigned in a
-   chunk and displayed only via inline code is reported `unused`, and a typo'd function inside inline
-   code is not reported at all. It hit three of their headline numbers. Their reaction is the
-   dangerous part: they would believe the warning, delete the binding, and break the report. The
-   literate conversion only recognizes fenced chunks; inline spans are prose to it.
+3. **Inline `` `r expr` `` FIXED.** The conversion recognizes inline spans as code: the delimiter and
+   language tag blank to spaces, the expression keeps its bytes and its offset, and the closing
+   backtick becomes the `;` that separates two inline expressions on one prose line. So a value a
+   report only displays is used rather than unused, and a typo inside an inline expression reports at
+   the right line and column. A plain Markdown code span (`` `total` ``), a span naming another
+   language, `` `rate` `` (not an `r` tag), and an unclosed span all stay prose.
 4. **`source()` is not followed, so a helpers file is pure noise in both directions** — all ten
    helper functions reported `unused`, and every *correct* call to them reported `unresolved`,
    indistinguishable from their planted typo. It also killed the wrong-arity catch, which works well

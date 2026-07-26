@@ -141,8 +141,10 @@ typing = true
 Roughly analyses `.R` and `.r` files. `roughly check` also reads **literate
 documents** — `.Rmd`, `.qmd`, `.Rnw` — as the R program their chunks contain:
 prose is ignored, a fence naming another language is skipped, and the whole
-document is one script, so a chunk sees what earlier chunks defined. Every
-reported line and column points at the original file. The formatter deliberately
+document is one script, so a chunk sees what earlier chunks defined. Inline
+expressions count too — a value a report only displays as `` `r total` `` is used,
+not unused, and a typo inside one is still reported. Every reported line and
+column points at the original file. The formatter deliberately
 leaves them alone (most of an `.Rmd` is prose it has no business rewriting), and
 the editor integration does not cover them yet — `check` and CI do. `source()`
 calls are not followed.

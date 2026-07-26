@@ -44,22 +44,74 @@ pub fn r_source_of_literate(text: &str) -> String {
         if keep {
             out.push_str(body);
         } else {
-            for character in body.chars() {
-                // Blank a character to as many spaces as it occupies BYTES.
-                // Every range downstream is a byte offset, so anything else
-                // shifts each diagnostic after a non-ASCII prose character.
-                // Exotic whitespace is blanked with the rest: a non-breaking
-                // space is whitespace to Rust and an unexpected character to
-                // R's lexer, so keeping it verbatim reports a syntax error in
-                // prose the chunk never contained.
-                for _ in 0..character.len_utf8() {
-                    out.push(' ');
-                }
-            }
+            blank_prose(body, &mut out);
         }
         out.push_str(terminator);
     }
     out
+}
+
+/// One prose line, blanked to spaces — except for inline R, which is code.
+///
+/// A character becomes as many spaces as it occupies BYTES: every range
+/// downstream is a byte offset, so anything else shifts each diagnostic after a
+/// non-ASCII prose character. Exotic whitespace is blanked with the rest — a
+/// non-breaking space is whitespace to Rust and an unexpected character to R's
+/// lexer, so keeping it verbatim reports a syntax error in prose no chunk
+/// contained.
+fn blank_prose(body: &str, out: &mut String) {
+    let mut index = 0;
+    while index < body.len() {
+        if let Some((expression, end)) = inline_expression(body, index) {
+            // `` `r total` `` becomes `   total;`: the delimiter and language
+            // tag blank to spaces, the expression keeps its bytes and its
+            // offset, and the closing backtick becomes the `;` that separates
+            // this statement from the next inline expression on the same line.
+            for _ in index..expression.start {
+                out.push(' ');
+            }
+            out.push_str(&body[expression.clone()]);
+            out.push(';');
+            index = end;
+            continue;
+        }
+        let character = body[index..].chars().next().unwrap_or(' ');
+        for _ in 0..character.len_utf8() {
+            out.push(' ');
+        }
+        index += character.len_utf8();
+        // The loop advances by whole characters and whole spans, so the index
+        // always lands on a character boundary.
+        debug_assert!(body.is_char_boundary(index));
+    }
+}
+
+/// An inline R expression starting at `index`: `` `r EXPR` `` in R Markdown and
+/// Quarto. Returns the expression's byte range and the index just past the
+/// closing backtick. A span naming another language (`` `python x` ``), a plain
+/// Markdown code span (`` `total` ``), a multi-backtick span, and an unclosed
+/// span are all prose.
+fn inline_expression(body: &str, index: usize) -> Option<(std::ops::Range<usize>, usize)> {
+    let rest = body.get(index..)?;
+    let after_tick = rest.strip_prefix('`')?;
+    if after_tick.starts_with('`') {
+        return None;
+    }
+    let after_tag = after_tick.strip_prefix('r')?;
+    // The tag must be delimited: `` `rate` `` is a code span, not R.
+    let tag_gap = after_tag.chars().next()?;
+    if !tag_gap.is_whitespace() {
+        return None;
+    }
+    let expression_start = index + 1 + 1 + tag_gap.len_utf8();
+    let body_after = body.get(expression_start..)?;
+    let close = body_after.find('`')?;
+    let expression = expression_start..expression_start + close;
+    // A span carrying no expression (`` `r ` ``) is nothing to analyse.
+    if body[expression.clone()].trim().is_empty() {
+        return None;
+    }
+    Some((expression, expression_start + close + 1))
 }
 
 /// A fenced R chunk's opening line: ```` ```{r ... } ```` (Markdown) or
@@ -174,6 +226,41 @@ mod tests {
             "prose must not survive: {converted:?}"
         );
         assert!(converted.contains("x <- 1L"));
+    }
+
+    #[test]
+    fn inline_expressions_are_code() {
+        // A value a report only displays inline is still used, and a typo inside
+        // an inline expression is still a typo.
+        let document =
+            "```{r}\ntotal <- 42L\n```\n\nWe sold `r total` units and `r nchar(total)` digits.\n";
+        let converted = r_source_of_literate(document);
+        assert_eq!(converted.len(), document.len(), "{converted:?}");
+        assert_eq!(
+            document.find("total)"),
+            converted.find("total)"),
+            "an inline expression keeps its byte offset"
+        );
+        assert!(converted.contains("total;"), "{converted:?}");
+        assert!(converted.contains("nchar(total);"), "{converted:?}");
+        // Two expressions on one line need a separator to parse as two
+        // statements, which is what the closing backtick becomes.
+        assert!(!converted.contains("units"), "{converted:?}");
+    }
+
+    #[test]
+    fn a_code_span_that_is_not_inline_r_stays_prose() {
+        // `` `total` `` is Markdown showing code, not evaluating it; `` `rate` ``
+        // must not be mistaken for an `r` tag; another language is not R; and an
+        // unclosed span is prose.
+        let document = "See `total` and `rate` and `python x` and `r unclosed\n";
+        let converted = r_source_of_literate(document);
+        assert_eq!(converted.len(), document.len(), "{converted:?}");
+        assert_eq!(
+            converted.trim(),
+            "",
+            "nothing on this line is inline R: {converted:?}"
+        );
     }
 
     #[test]
