@@ -215,45 +215,57 @@ evaporates the moment a date touches `c()`, `[`, `min()`, or a `for` loop." They
 and `unresolved` today, and `typing` on one module "because the date operator work is worth real
 money" — but not tell anyone with matrix-heavy code to turn typing on until (1) and (3) are fixed.
 
-1. **SOUNDNESS — `min(dates)` is typed `integer`, so a `Date` passes into an `integer` parameter.**
-   `double_it(min(dates))` against `#: fn(n: integer)` reports nothing, and `min(dates) +
-   max(dates)` is accepted; R then fails with `binary + is not defined for "Date" objects`. This is a
-   **wrong answer, not a skipped check**, so it breaks the quality bar's "never silently mistyped"
-   and contradicts `limitations.md` in the same breath. Highest-severity finding of the round.
-   Related: a numeric bound accepts `Date` even when written explicitly as `<T: numeric>`, which is
-   also how their "adding two dates via a helper" bug escaped. `sort`/`head`/`rev` on dates report
-   ``found `T[]` ``, leaking an unbound type variable into a user-facing message.
-2. **FP — `x[i, j]` on an unannotated parameter is an error**, and it was 5 of the 8 findings on their
+1. **Their soundness diagnosis is WRONG, and what is actually there is still worth fixing.**
+   Verified: `min(Date)` is not typed `integer` — it selects the corpus's trailing `Any` candidate,
+   so the result is `Any`. That is the sanctioned escape hatch, so a `Date` reaching an `integer`
+   parameter is a *skipped* check, not a wrong answer, and the quality bar holds. **But `Any` is
+   deliberately exempt from strict mode**, which only reports `Unknown` — so a user who turns on
+   `strict` precisely to find gaps does not see this one, while `limitations.md` tells them strict
+   reports "every place a value became `Unknown`". Either the corpus's `Any` fallbacks should
+   return `Unknown`, or strict should report an `Any`-returning overload selection; the current
+   arrangement makes the gap-finding feature miss the most common gap.
+2. **CONFIRMED and genuinely unsound-adjacent: a `<T: numeric>` bound admits a `Date`, and the body's
+   arithmetic then fails in R.** `#: <T: numeric> fn(a: T, b: T) -> T` called as `add_them(d1, d2)`
+   is accepted, while the direct `d1 + d2` is correctly rejected with `` `+` is not defined between
+   `Date` and `Date` `` — so a one-line helper launders a real error. This is the
+   `declares_arithmetic` relaxation: a class that declares *any* arithmetic method satisfies
+   `Numeric` wholesale, which does not follow — `Date` declares `+.Date` for `Date + integer` and has
+   no `Date + Date`. **This is the traits / third-constraint-kind tripwire, now tripped a fifth
+   time**, and it is the mechanism behind their missed "adding two dates via a helper" bug. A
+   constraint meaning "supports this operator with these operands" replaces both this relaxation and
+   the operand tie. Do not patch it again; design it.
+   Also: `sort`/`head`/`rev` on dates report ``found `T[]` ``, leaking an unbound type variable.
+3. **FP — `x[i, j]` on an unannotated parameter is an error**, and it was 5 of the 8 findings on their
    untouched project. It contradicts `reference.md`, which says `[` on an unannotated parameter
    yields `Unknown` precisely "because refusing here would flag ordinary code". It fires only when the
    receiver is still an inference variable (annotating `matrix` or `@trust Any` both pass), and it is
    internally inconsistent: `p[1:2, ]` is accepted, `p[1, , drop = FALSE]` is not.
-3. **FP — `c(d1, d2)` errors with ``expected `integer`, found `Date` ``**, and so does `c(d1)` alone.
+4. **FP — `c(d1, d2)` errors with ``expected `integer`, found `Date` ``**, and so does `c(d1)` alone.
    R returns a `Date` vector. The message is nonsense to a reader: nothing in the expression is an
    integer.
-4. **FP — `vapply(x, f, numeric(1))` errors whenever the callback is not statically `double`.** R
+5. **FP — `vapply(x, f, numeric(1))` errors whenever the callback is not statically `double`.** R
    accepts a wider template; they confirmed with `roughly run` that
    `vapply(1:3, function(i) i, numeric(1))` works.
-5. **`Date` does not survive real code.** Survives `d + 1L`, `d2 - d1`, `d1 < d2`, `format`,
+6. **`Date` does not survive real code.** Survives `d + 1L`, `d2 - d1`, `d1 < d2`, `format`,
    `seq.Date` and `while` cursors; **lost to `Unknown`** through `dates[i]`, `dates[mask]`,
    `for (d in dates)` and `Reduce`; **wrong** through `min`/`max`; **an error** through `c()`. The
    same bug is caught in one place and missed in another — `cursor + cursor` after a `while` loop is
    flagged, the identical `d + d` inside `for (d in dates)` is not. No doc describes this boundary.
-6. **`#: @type TradeDate {Date}` disables all Date arithmetic** — `settle - trade` is rejected — which
+7. **`#: @type TradeDate {Date}` disables all Date arithmetic** — `settle - trade` is rejected — which
    kills the guide's own recipe for domain types over dates. The working route is a project
    `.Rtypes` declaring `-.SettleDate`, which the guide never mentions (and a stub cannot see an
    inline `@type`, the gap already recorded below). Also **`Date[]` is inexpressible**, and
    `Days + Days` yields `double`, so a units tag dies on arithmetic.
-7. **Strict mode's own advice does not work.** The message says "add a type annotation" and **no
+8. **Strict mode's own advice does not work.** The message says "add a type annotation" and **no
    annotation form silences it** — `#:`, `@if-unknown`, `@trust` and `#: Any` all still report, the
    last contradicting `reference.md` directly. Only `# roughly: allow(strict)` works.
-8. **`&` and `|` are unmodelled**, so `TRUE & FALSE` is `Unknown` and every logical mask kills
+9. **`&` and `|` are unmodelled**, so `TRUE & FALSE` is `Unknown` and every logical mask kills
    downstream checking. The reference documents `&&`/`||` with no counterpart, and the only mention
    of `&` is a parenthetical inside the NSE discussion.
-9. **Formatter — `m[i, , drop = FALSE]` becomes `m[i,, drop = FALSE]`**, removing the space that makes
+10. **Formatter — `m[i, , drop = FALSE]` becomes `m[i,, drop = FALSE]`**, removing the space that makes
    the empty dimension slot visible, in exactly the code where miscounting slots is the bug. It is
    idempotent, so deliberate, and undocumented.
-10. **Misleading message — any `X[Y]` annotation reports "only one compact annotation fits in a `#:`
+11. **Misleading message — any `X[Y]` annotation reports "only one compact annotation fits in a `#:`
     block — separate the annotations with a blank line" when there is only one annotation.**
 
 What they praised: **every date expression R rejects or warns on was caught across 21 probes, with
