@@ -113,7 +113,10 @@ fn exit_code(result: Result<Outcome, CommandError>) -> ExitCode {
 }
 
 #[derive(Parser)]
-#[command(version, after_help = experimental_features_help())]
+// `name` is set explicitly: clap defaults to the Cargo package name, which is
+// `ry-lang` because the registry name `ry` was taken — but the command the user
+// typed, and the one every diagnostic and doc page names, is `ry`.
+#[command(name = "ry", version, after_help = experimental_features_help())]
 struct Cli {
     #[command(subcommand)]
     command: Command,
