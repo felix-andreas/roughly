@@ -32,19 +32,23 @@ Their own top three, in their order:
    recover most of the value at no false-positive cost: such a name is a typo, not a package export.
    Also undocumented where a user would look — `diagnostics.md`'s `unresolved` row implies the check
    always fires, and the only mention of the tolerance is oblique, inside a `testthat` rationale.
-2. **A required/optional annotation mismatch is reported at every CALL SITE instead of at the
-   annotation.** `#: fn(settings: DbSettings)` on `function(settings = db_settings)` makes correct R
-   (`db_pool()`) an error in another file, with no mention of the annotation that caused it — "my
-   first reaction was that the tool can't read default arguments, and I nearly stopped there". The
-   asymmetry proves the information is there: the *reverse* mismatch (annotation says `[optional]`,
-   formal has no default) is reported **at the function** with a good message. The remedy — the
-   `[name]:` bracket form — is in the reference and **not in the guide**, which is the page
-   getting-started sends readers to.
-3. **A parameter's type is not seeded from its default value**, so field-typo detection dies at a
-   default argument: `f <- function(s = settings) s$hsot` is missed while both `settings$hsot` and a
-   local alias `s <- settings; s$hsot` are caught. The guide's own headline pitch (`config$tax_rate`)
-   is exactly this shape on real code. Default-value expressions are already typechecked, so the
-   type exists — it just does not reach the parameter when the caller omits the argument.
+2. **The required/optional annotation mismatch FIXED.** Optionality now comes from the formals — a
+   formal with a default is optional in R and no annotation can change that — so the exported
+   signature takes it from the code and the annotation's disagreement is reported once at the
+   definition, naming the fix (`write [currency]`). Callers of correct R are clean. The `[name]`
+   bracket form is now in the guide as well as the reference.
+3. **A parameter's type is not seeded from its default value** — `f <- function(s = settings) s$hsot`
+   is missed while `settings$hsot` and a local alias are both caught. **Analysed, and the obvious fix
+   is a false-positive generator, so it needs the design rather than a patch.** Binding the parameter
+   to its default's type makes every caller passing anything else wrong, and reporting the field
+   against the default's shape breaks the commonest idiom of all: `function(x = list()) x$name`, where
+   the default is an empty accumulator and callers supply the real record — R answers `NULL` there, so
+   an error would be plain wrong. The honest model is that such a parameter is
+   `default's type | whatever callers pass`, which is still open, so a field access on it should be at
+   most `T | NULL` (the same rule the accumulator fix established for unions) rather than an error.
+   Recovering the user's case needs to know the argument is never supplied anywhere — whole-program
+   information the checker does not have. Leave it missed rather than trade it for the class of false
+   positive this round spent its time removing.
 
 Also from them: `$` on an unannotated parameter constrains nothing, so the parameter accepts
 anything; `unresolved` silently changes severity when `strict` is on; R6 is invisible (correctly
