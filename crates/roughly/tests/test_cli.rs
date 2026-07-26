@@ -569,6 +569,57 @@ fn check_without_r_files_reports_nothing_and_exits_clean() {
 }
 
 #[test]
+fn testthat_files_share_one_namespace_with_their_helpers() {
+    // testthat sources everything in `tests/testthat/` into one environment,
+    // `helper-*.R` first. Analysing them separately reported the helper as
+    // unused *and* every use of it as unresolved — two findings per helper on a
+    // correct package.
+    let directory = project(&[
+        (
+            "DESCRIPTION",
+            "Package: tth\nVersion: 0.1\nSuggests: testthat\n",
+        ),
+        ("R/add.R", "add_one <- function(n) n + 1L\n"),
+        (
+            "tests/testthat/helper-input.R",
+            "make_input <- function() list(n = 1L)\n",
+        ),
+        (
+            "tests/testthat/test-add.R",
+            "test_that(\"adds\", {\n  expect_equal(add_one(make_input()$n), 2L)\n})\n",
+        ),
+    ]);
+    let output = roughly(directory.path(), &["check"]);
+    assert!(
+        stdout(&output).contains("no problems"),
+        "a helper shared with a test file is not a finding: {}",
+        stdout(&output)
+    );
+
+    // A real typo must still be reported, with the helper suggested.
+    let directory = project(&[
+        (
+            "DESCRIPTION",
+            "Package: tth\nVersion: 0.1\nSuggests: testthat\n",
+        ),
+        (
+            "tests/testthat/helper-input.R",
+            "make_input <- function() list(n = 1L)\n",
+        ),
+        (
+            "tests/testthat/test-add.R",
+            "test_that(\"adds\", {\n  expect_equal(make_inpt(), 1L)\n})\n",
+        ),
+    ]);
+    let output = roughly(directory.path(), &["check"]);
+    assert!(
+        stderr(&output).contains("Did you mean `make_input`?"),
+        "expected the typo and its suggestion: {}",
+        stderr(&output)
+    );
+}
+
+#[test]
 fn a_configured_exclude_does_not_lose_the_vendored_directory_skip() {
     // `renv/activate.R` alone is a thousand generated lines, so vendored
     // directories are always skipped. A project that also configures its own

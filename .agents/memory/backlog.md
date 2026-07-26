@@ -70,16 +70,19 @@ five opt-in lints are unusable on a package with an S3 class and a testthat suit
    as the Shiny user's #1**, which settles its priority. Their sharper framing: *your own package is
    the one export set you do know*, so a `library()` naming the project under check should not buy
    any tolerance at all.
-3. **`tests/testthat/helper-*.R` produces two false positives per helper** — `unused` at the
-   definition and `unresolved` at every use. That is testthat's documented loading mechanism, and it
-   was the *entire* finding list on their first run. `tests/testthat/` is not mentioned anywhere in
-   the docs.
+3. **`tests/testthat/helper-*.R` FIXED.** Files directly under `tests/testthat/` now share one
+   namespace, as testthat's own loading does (helpers first, then tests) — so a shared fixture is
+   neither `unused` at its definition nor `unresolved` at its uses, while a real typo in a test still
+   reports with the helper suggested. Documented in "where Roughly looks" and on the limitations
+   page.
 4. **`shadows-namespace` fires on locals inside `test_that()` and calls them "Top-level binding".**
-   The same assignment inside `function() {...}` or `local({...})` is correctly ignored, so a braced
-   **call argument** is being treated as top level. `graphics` exports `lines`, `text`, `title`,
-   `grid`, `legend`, `axis`, `box`, `points` and `rect`, so ordinary variable names collide: 6
-   warnings from 3 names. The wording is its own bug — they re-read `linter.md` convinced they had
-   misunderstood the lint.
+   Diagnosed but deliberately not patched yet: naming is *right* that the binding lives in the file's
+   frame, because R braces are not a scope and the checker cannot know `test_that` makes an
+   environment. What the lint needs is **syntactic** nesting — "written as a direct statement of the
+   file" — which the binding model does not currently distinguish from "belongs to the file's frame".
+   Adding that must not disturb the unused rules, where `TopLevel` means package-visible; both shadow
+   lints are default-off, so this waits for the model change rather than a special case. The wording
+   is part of the bug: a local two levels deep should never be called a top-level binding.
 5. **`unused-parameter` flags every user-defined S3 generic and its methods.**
    `speak <- function(x, ...) UseMethod("speak")` reports "parameter `x` is never used" with
    `UseMethod("speak")` three characters away. The existing carve-out only recognizes methods whose

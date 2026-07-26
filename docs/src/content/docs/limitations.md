@@ -96,8 +96,9 @@ ordinary call would reject correct code.
 not as you type. The formatter deliberately leaves them alone; most of an `.Rmd` is prose it has no
 business rewriting.
 
-`source()` calls are not followed. Package files under `R/` share one namespace; every other file
-is analysed on its own. See [where Roughly looks](/getting-started#where-roughly-looks).
+`source()` calls are not followed. Package files under `R/` share one namespace, and so do the files
+directly under `tests/testthat/` (testthat sources them into one environment, helpers first); every
+other file is analysed on its own. See [where Roughly looks](/getting-started#where-roughly-looks).
 
 ## Turning it on for an existing project
 

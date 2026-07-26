@@ -150,7 +150,10 @@ calls are not followed.
 Files directly under a `R/` directory are **package source files**: they share
 one namespace, so any one of them may call a function or reference a `#: @type`
 name declared in another, and their top-level definitions are treated as
-package-visible rather than unused. Every other `.R` file — a driver script at
+package-visible rather than unused. Files directly under `tests/testthat/` share
+a namespace the same way, because testthat sources them into one environment —
+`helper-*.R` first, then the tests — which is how a fixture is shared between
+test files. Every other `.R` file — a driver script at
 the project root, anything under `scripts/` or `inst/` — is a **script**: it is
 analysed on its own, top to bottom, and its unused top-level bindings are
 reported.

@@ -208,6 +208,7 @@ pub fn check(
         );
 
         let r_path = root.join("R");
+        let testthat_path = root.join("tests").join("testthat");
         let mut used_tokens = BTreeSet::new();
         let mut checked: Vec<(PathBuf, String)> = Vec::with_capacity(paths.len());
         // Which of the project's files the command actually asked about.
@@ -259,7 +260,7 @@ pub fn check(
         let mut project = Vec::with_capacity(checked.len());
         for index in ordered {
             let (path, source) = &checked[index];
-            let kind = if path.starts_with(&r_path) {
+            let kind = if shares_a_namespace(path, &r_path, &testthat_path) {
                 DocumentKind::Package
             } else {
                 DocumentKind::Script
@@ -565,6 +566,17 @@ pub(crate) fn exclude_matcher(
 /// `renv`-using project would otherwise see reported. A path named explicitly
 /// on the command line still wins — this only scopes the directory walk.
 const VENDORED_DIRECTORIES: [&str; 5] = ["renv", "packrat", "revdep", ".Rproj.user", ".Rcheck"];
+
+/// Whether a file shares one namespace with its siblings rather than being
+/// analysed alone. Two directories do: `R/`, whose files are all sourced into
+/// the package environment, and `tests/testthat/`, whose files testthat sources
+/// into one environment as well — `helper-*.R` first, then the test files, which
+/// is the documented way to share a fixture. Analysing those separately reported
+/// every helper as unused *and* every use of one as unresolved, two findings per
+/// helper on a package that is perfectly correct.
+fn shares_a_namespace(path: &Path, r_path: &Path, testthat_path: &Path) -> bool {
+    path.starts_with(r_path) || path.parent().is_some_and(|parent| parent == testthat_path)
+}
 
 pub(crate) fn collect_r_files(
     target: &Path,
