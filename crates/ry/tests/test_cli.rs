@@ -42,6 +42,13 @@ fn project(files: &[(&str, &str)]) -> tempfile::TempDir {
 // `(` token on line 2), so the rendered 1-based position is line 2, column 6.
 const SYNTAX_ERROR_SOURCE: &str = "print(1)\ny <- (\n";
 
+/// How the graphical reporter heads one finding: its diagnostic code, a blank
+/// line, then the message behind a severity marker. Stderr is a pipe under
+/// test, so the ASCII theme is in force — `x` for an error, `!` for a warning.
+fn heading(code: &str, marker: char, message: &str) -> String {
+    format!("{code}\n\n  {marker} {message}")
+}
+
 //
 // CHECK
 //
@@ -61,16 +68,52 @@ fn check_renders_one_based_positions() {
 
     assert_eq!(exit_code(&output), 1, "stderr: {stderr}");
     assert!(
-        stderr.contains("bad.R:2:6"),
-        "expected a 1-based `--> path:line:column` header, got: {stderr}"
+        stderr.contains("[bad.R:2:6]"),
+        "expected a 1-based `path:line:column` snippet header, got: {stderr}"
     );
     assert!(
         stderr.contains("2 | y <- ("),
         "expected a 1-based gutter line number, got: {stderr}"
     );
+}
+
+// The snippet is a window on the finding, not a printout of the file: the
+// line it sits on, and one line either side to place it.
+#[test]
+fn check_snippet_shows_only_the_lines_around_the_finding() {
+    let directory = project(&[("bad.R", "one <- 1\nprint(one)\nprint(one)\ny <- (\n")]);
+    let output = ry(directory.path(), &["check", "bad.R"]);
+    let stderr = stderr(&output);
+
     assert!(
-        !stderr.contains("print(1)"),
-        "expected only the diagnostic's own line in the snippet, got: {stderr}"
+        stderr.contains("4 | y <- (") && stderr.contains("3 | print(one)"),
+        "expected the finding's line and the one above it, got: {stderr}"
+    );
+    assert!(
+        !stderr.contains("one <- 1"),
+        "expected no line further away than that, got: {stderr}"
+    );
+}
+
+// A range that runs over many lines is drawn on its first line, with its
+// reach stated: printing every line of a range that covers a whole item
+// buries the finding in the item that contains it.
+#[test]
+fn check_clamps_a_long_multi_line_range() {
+    let directory = project(&[(
+        "long.R",
+        "# typing: on\nx <- 1L + \"alpha\nbeta\ngamma\ndelta\"\nprint(x)\n",
+    )]);
+    let output = ry(directory.path(), &["check", "long.R"]);
+    let rendered = stderr(&output);
+
+    assert!(
+        rendered.contains("the range continues for 3 more lines"),
+        "expected the range's reach to be stated, got: {rendered}"
+    );
+    assert!(
+        !rendered.contains("gamma"),
+        "expected the snippet to stop after the range's first line, got: {rendered}"
     );
 }
 
@@ -82,9 +125,13 @@ fn check_does_not_repeat_the_message_under_the_caret() {
 
     let message = stderr
         .lines()
-        .next()
-        .and_then(|line| line.strip_prefix("error[syntax-error]: "))
-        .unwrap_or_else(|| panic!("expected an `error[syntax-error]:` line first, got: {stderr}"));
+        .nth(2)
+        .and_then(|line| line.strip_prefix("  x "))
+        .unwrap_or_else(|| panic!("expected an error message under its code first, got: {stderr}"));
+    assert!(
+        stderr.starts_with("syntax-error\n"),
+        "expected the diagnostic code to head the report, got: {stderr}"
+    );
     assert_eq!(
         stderr.matches(message).count(),
         1,
@@ -103,7 +150,7 @@ fn check_counts_warnings_as_findings() {
     let stderr = stderr(&output);
 
     assert!(
-        stderr.contains("warning[unused]:"),
+        stderr.contains(&heading("unused", '!', "`x` is assigned but never used.")),
         "expected a code-carrying warning diagnostic, got: {stderr}"
     );
     assert_eq!(exit_code(&output), 1, "warnings must exit 1: {stderr}");
@@ -117,7 +164,7 @@ fn check_json_output_is_one_based_and_parses() {
 
     assert_eq!(exit_code(&output), 1, "stderr: {}", stderr(&output));
     assert!(
-        !stderr(&output).contains("-->"),
+        !stderr(&output).contains("[bad.R:"),
         "expected no human rendering in json mode, got: {}",
         stderr(&output)
     );
@@ -176,9 +223,15 @@ fn check_related_notes_render_on_both_surfaces() {
     assert_eq!(exit_code(&human), 1, "stderr: {}", stderr(&human));
     let rendered = stderr(&human);
     assert!(
-        rendered.contains("= note: the later binding is here. -->")
-            && rendered.contains("= note: the earlier binding is here. -->"),
+        rendered.contains("> the later binding is here.")
+            && rendered.contains("> the earlier binding is here."),
         "expected one note per overwrite warning, got: {rendered}"
+    );
+    // Each note is drawn from the file it points into, not from the file
+    // being reported, so both siblings appear with their own snippet.
+    assert!(
+        rendered.contains("[R/a.R:1:1]") && rendered.contains("[R/b.R:1:1]"),
+        "expected each note to carry its own snippet, got: {rendered}"
     );
 
     let json = ry(project(files).path(), &["check", "--output", "json", "."]);
@@ -235,13 +288,17 @@ fn check_validates_namespace_imports_against_stubs() {
     let rendered = stderr(&output);
     assert_eq!(exit_code(&output), 1, "stderr: {rendered}");
     assert!(
-        rendered.contains("error[unresolved]")
-            && rendered
-                .contains("`medain` is not exported by `stats`, so this package will not load."),
+        rendered.contains(&heading(
+            "unresolved",
+            'x',
+            "`medain` is not exported by `stats`, so this package will not load.",
+        )),
         "an import R refuses to load is an error, not advice: {rendered}"
     );
+    // A name is backticked when it is the subject of a finding; the plain
+    // spelling may still show up in the snippet's context lines.
     assert!(
-        !rendered.contains("mutate") && !rendered.contains("`sd`"),
+        !rendered.contains("`mutate`") && !rendered.contains("`sd`"),
         "unknown namespaces and real exports must stay quiet: {rendered}"
     );
     assert!(
@@ -371,10 +428,16 @@ fn check_invalid_config_exits_two() {
 
     let check = ry(directory.path(), &["check", "clean.R"]);
     assert_eq!(exit_code(&check), 2, "stderr: {}", stderr(&check));
+    let rendered = stderr(&check);
     assert!(
-        stderr(&check).contains("invalid config"),
-        "expected the config error to be reported, got: {}",
-        stderr(&check)
+        rendered.contains("invalid config for `check.typing`"),
+        "expected the offending setting to be named, got: {rendered}"
+    );
+    // A configuration failure is drawn like any other finding: the offending
+    // line of the config file, under the position it sits at.
+    assert!(
+        rendered.contains("ry.toml:2:10") && rendered.contains("2 | typing = 1"),
+        "expected the config error to be shown in place, got: {rendered}"
     );
 
     let fmt = ry(directory.path(), &["fmt", "--check", "clean.R"]);
@@ -723,7 +786,7 @@ fn check_reports_character_columns_and_aligns_the_caret() {
     );
     let caret_line = rendered
         .lines()
-        .find(|line| line.trim_start().starts_with('^'))
+        .find(|line| line.contains('^'))
         .expect("a caret line");
     let source_line = rendered
         .lines()
@@ -731,7 +794,8 @@ fn check_reports_character_columns_and_aligns_the_caret() {
         .expect("the snippet line");
     // Both positions are measured in terminal cells, which is the whole point:
     // comparing byte offsets would pass on a broken renderer and fail on a
-    // correct one, since only the snippet line carries multibyte text.
+    // correct one, since only the snippet line carries multibyte text. The
+    // gutter is the same width on both lines, so whole-line offsets compare.
     let cells_before = |line: &str, index: usize| {
         unicode_width::UnicodeWidthStr::width(line.get(..index).unwrap_or_default())
     };
@@ -1089,7 +1153,11 @@ fn typing_on_and_strict_directives_opt_single_files_in() {
     let report = stderr(&output);
     assert!(report.contains("opted_in.R"), "report:\n{report}");
     assert!(
-        report.contains("error[unresolved]: I could not resolve `not_defined`"),
+        report.contains(&heading(
+            "unresolved",
+            'x',
+            "I could not resolve `not_defined`",
+        )),
         "strict escalates the unresolved reference to an error:\n{report}"
     );
     assert!(!report.contains("plain.R"), "report:\n{report}");

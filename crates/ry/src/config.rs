@@ -7,6 +7,7 @@
 //! repository that has adopted the new name is never overridden by an old file
 //! left behind further up the tree.
 
+use miette::{Diagnostic, LabeledSpan, NamedSource, SourceCode, SourceSpan};
 use semantics::lints::{LintConfig, NameStyle};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -96,12 +97,10 @@ impl Config {
     pub fn from_path(path: impl AsRef<Path>) -> Result<Config, ConfigError> {
         let path = path.as_ref();
         match std::fs::read_to_string(path) {
-            Ok(text) => Config::from_toml_str(&text)
-                .map(|mut config| {
-                    config.source_directory = path.parent().map(Path::to_path_buf);
-                    config
-                })
-                .map_err(|error| error.with_path(path)),
+            Ok(text) => Config::parse(&text, Some(path)).map(|mut config| {
+                config.source_directory = path.parent().map(Path::to_path_buf);
+                config
+            }),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Config::default()),
             Err(error) => Err(ConfigError::Io {
                 path: path.to_path_buf(),
@@ -111,17 +110,25 @@ impl Config {
     }
 
     pub fn from_toml_str(text: &str) -> Result<Config, ConfigError> {
+        Config::parse(text, None)
+    }
+
+    /// The one parse. `path` names the file a failure is reported against —
+    /// `None` for text that came from somewhere other than a file on disk.
+    fn parse(text: &str, path: Option<&Path>) -> Result<Config, ConfigError> {
         let deserializer = toml::de::Deserializer::new(text);
         let mut unknown_keys = Vec::new();
-        match serde_ignored::deserialize::<_, _, ConfigToml>(deserializer, |path| {
-            unknown_keys.push(path.to_string())
+        match serde_ignored::deserialize::<_, _, ConfigToml>(deserializer, |key| {
+            unknown_keys.push(key.to_string())
         }) {
             Ok(config) => {
                 let mut config = config.to_config();
                 config.unknown_keys = unknown_keys;
                 Ok(config)
             }
-            Err(error) => Err(ConfigError::Invalid(ConfigParseError::new(&error, text))),
+            Err(error) => Err(ConfigError::Invalid(ConfigParseError::new(
+                &error, text, path,
+            ))),
         }
     }
 }
@@ -159,71 +166,102 @@ fn find_config_file(target: &Path) -> Result<Option<PathBuf>, ConfigError> {
     Ok(None)
 }
 
+/// The underlying I/O failures render as the report's cause rather than as
+/// part of the message, so the reason a file could not be read is not welded
+/// into the sentence that says which file it was.
 #[derive(Error, Debug)]
 pub enum ConfigError {
-    #[error("failed to read config file {path}: {source}", path = .path.display())]
+    #[error("failed to read config file {path}", path = .path.display())]
     Io { path: PathBuf, source: io::Error },
-    #[error("failed to resolve {path} while searching for a config file: {source}", path = .path.display())]
+    #[error("failed to resolve {path} while searching for a config file", path = .path.display())]
     Resolve { path: PathBuf, source: io::Error },
     #[error(transparent)]
     Invalid(ConfigParseError),
 }
 
 impl ConfigError {
-    fn with_path(mut self, path: &Path) -> ConfigError {
-        if let ConfigError::Invalid(error) = &mut self {
-            error.path = Some(path.to_path_buf());
-        }
-        self
-    }
-
     /// The 1-based line and column of a parse or deserialize failure inside
-    /// the config text, when the underlying toml error carries a span.
+    /// the config text, when the underlying toml error carries a span. What
+    /// the language server anchors its published diagnostic at; the CLI draws
+    /// the same span as a snippet instead.
     pub fn parse_location(&self) -> Option<(usize, usize)> {
         match self {
-            ConfigError::Invalid(error) => error.location,
+            ConfigError::Invalid(error) => error
+                .span
+                .map(|span| line_and_column(error.source.inner(), span.offset())),
+            ConfigError::Io { .. } | ConfigError::Resolve { .. } => None,
+        }
+    }
+
+    /// The config file a failure sits in, as it should be shown to a reader.
+    /// The I/O variants already name their path in the message; a parse
+    /// failure keeps it on the source its snippet is drawn from.
+    pub fn file(&self) -> Option<&str> {
+        match self {
+            ConfigError::Invalid(error) => Some(error.source.name()),
             ConfigError::Io { .. } | ConfigError::Resolve { .. } => None,
         }
     }
 }
 
-/// A malformed config file: the toml parse or deserialize failure, with
-/// its source span resolved to a 1-based line and column so the message can
-/// point at the offending key or value.
+impl Diagnostic for ConfigError {
+    fn code(&self) -> Option<Box<dyn fmt::Display + '_>> {
+        Some(Box::new("config"))
+    }
+
+    fn source_code(&self) -> Option<&dyn SourceCode> {
+        match self {
+            ConfigError::Invalid(error) => Some(&error.source),
+            ConfigError::Io { .. } | ConfigError::Resolve { .. } => None,
+        }
+    }
+
+    fn labels(&self) -> Option<Box<dyn Iterator<Item = LabeledSpan> + '_>> {
+        let ConfigError::Invalid(error) = self else {
+            return None;
+        };
+        // A failure toml reports no span for is still shown against the file:
+        // an empty label at its start names it in the snippet header.
+        let span = error.span.unwrap_or_else(|| SourceSpan::from(0..0));
+        Some(Box::new(std::iter::once(
+            LabeledSpan::new_primary_with_span(None, span),
+        )))
+    }
+}
+
+/// A malformed config file: the toml parse or deserialize failure, kept with
+/// the text it happened in so a host can point at the offending key or value
+/// rather than describe where it was.
 #[derive(Debug)]
 pub struct ConfigParseError {
-    path: Option<PathBuf>,
-    location: Option<(usize, usize)>,
-    key: Option<String>,
+    source: NamedSource<String>,
+    span: Option<SourceSpan>,
     message: String,
 }
 
 impl ConfigParseError {
-    fn new(error: &toml::de::Error, text: &str) -> ConfigParseError {
+    fn new(error: &toml::de::Error, text: &str, path: Option<&Path>) -> ConfigParseError {
+        let name = path.map_or_else(
+            || CONFIG_FILE_NAME.to_owned(),
+            |path| path.display().to_string(),
+        );
         ConfigParseError {
-            path: None,
-            location: error.span().map(|span| line_and_column(text, span.start)),
-            key: error
-                .span()
-                .and_then(|span| offending_key(text, span.start)),
+            source: NamedSource::new(name, text.to_owned()),
+            span: error.span().map(SourceSpan::from),
             message: error.message().to_owned(),
         }
     }
 }
 
 /// The dotted key whose value sits at `offset` — the `[table]` header above it
-/// joined with the `key =` on its own line. A line/column pair alone makes the
-/// reader open the file to find out which setting they got wrong, and the
-/// dotted name is what the documentation calls it.
+/// joined with the `key =` on its own line.
 fn offending_key(text: &str, offset: usize) -> Option<String> {
     let before = text.get(..offset)?;
     let line_start = before.rfind('\n').map_or(0, |index| index + 1);
-    let key = before
-        .get(line_start..)?
-        .split('=')
-        .next()?
-        .trim()
-        .trim_matches('"');
+    // The `=` is what makes it a key: a failure inside a table header or a
+    // bare value has no setting to name, and the snippet points at it anyway.
+    let (key, _) = before.get(line_start..)?.split_once('=')?;
+    let key = key.trim().trim_matches('"');
     if key.is_empty() {
         return None;
     }
@@ -244,14 +282,13 @@ fn offending_key(text: &str, offset: usize) -> Option<String> {
 impl fmt::Display for ConfigParseError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(formatter, "invalid config")?;
-        if let Some(path) = &self.path {
-            write!(formatter, " in {}", path.display())?;
-        }
-        if let Some(key) = &self.key {
+        // The dotted key is what the documentation calls the setting, so it
+        // belongs in the sentence; where it sits is the snippet's job.
+        if let Some(key) = self
+            .span
+            .and_then(|span| offending_key(self.source.inner(), span.offset()))
+        {
             write!(formatter, " for `{key}`")?;
-        }
-        if let Some((line, column)) = self.location {
-            write!(formatter, " at line {line}, column {column}")?;
         }
         write!(formatter, ": {}", self.message)
     }
@@ -554,11 +591,16 @@ mod tests {
         assert_eq!(config.source_directory.as_deref(), Some(directory.path()));
     }
 
+    // The message names the setting; where it sits is carried as a span, for
+    // the CLI to draw as a snippet and the language server to publish.
     #[test]
     fn wrong_value_type_is_rejected_with_location() {
-        let message = parse_error("[check]\nstrict = \"yes\"\n");
+        let error = Config::from_toml_str("[check]\nstrict = \"yes\"\n")
+            .expect_err("expected the config to be rejected");
+        let message = error.to_string();
         assert!(message.contains("expected a boolean"), "{message}");
-        assert!(message.contains("at line 2"), "{message}");
+        assert!(message.contains("`check.strict`"), "{message}");
+        assert_eq!(error.parse_location(), Some((2, 10)));
     }
 
     #[test]
@@ -566,11 +608,16 @@ mod tests {
         let directory = tempfile::tempdir().expect("temp dir");
         let config_path = directory.path().join(CONFIG_FILE_NAME);
         std::fs::write(&config_path, "[check]\ntyping = 1\n").expect("write config");
-        let message = Config::from_path(&config_path)
-            .expect_err("expected the config to be rejected")
-            .to_string();
-        assert!(message.contains("ry.toml"), "{message}");
-        assert!(message.contains("at line 2"), "{message}");
+        let error =
+            Config::from_path(&config_path).expect_err("expected the config to be rejected");
+        assert_eq!(error.parse_location(), Some((2, 10)));
+
+        let mut rendered = String::new();
+        miette::GraphicalReportHandler::new_themed(miette::GraphicalTheme::none())
+            .render_report(&mut rendered, &error)
+            .expect("the report renders");
+        assert!(rendered.contains("ry.toml:2:10"), "{rendered}");
+        assert!(rendered.contains("typing = 1"), "{rendered}");
     }
 
     #[test]

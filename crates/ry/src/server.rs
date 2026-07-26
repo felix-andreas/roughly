@@ -418,7 +418,7 @@ impl Worker {
             supports_snippets,
             workspace_root,
             config,
-            pending_config_error: pending_config_error.map(|error| error.to_string()),
+            pending_config_error: pending_config_error.as_ref().map(config_message),
             db,
             files: HashMap::new(),
             open_documents: HashSet::new(),
@@ -1208,7 +1208,10 @@ impl Worker {
                         self.publish_config_diagnostics(None);
                     }
                     Err(error) => {
-                        self.report_error(&format!("{error}; keeping the previous configuration"));
+                        let message = config_message(&error);
+                        self.report_error(&format!(
+                            "{message}; keeping the previous configuration"
+                        ));
                         self.publish_config_diagnostics(Some(&error));
                     }
                 }
@@ -1571,6 +1574,16 @@ impl Worker {
                 }
             ),
         });
+    }
+}
+
+/// A configuration failure as a client message. The CLI draws the offending
+/// line of the file; a popup has no room for a snippet, so it names the file
+/// the published finding is anchored in.
+fn config_message(error: &ConfigError) -> String {
+    match error.file() {
+        Some(file) => format!("{file}: {error}"),
+        None => error.to_string(),
     }
 }
 

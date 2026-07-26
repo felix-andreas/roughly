@@ -24,7 +24,7 @@ const TYPING_BURST: usize = 10;
 pub fn analysis_stats(target: Option<&Path>) -> Result<(), CommandError> {
     let target = target.unwrap_or(Path::new("."));
     let mut config = Config::discover(target).map_err(|error| {
-        crate::cli::error(&format!("{error}"));
+        crate::cli::report(&error);
         CommandError
     })?;
     crate::cli::warn_unknown_config_keys(&config);

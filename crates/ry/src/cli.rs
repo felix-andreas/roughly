@@ -8,40 +8,46 @@ use crate::namespace;
 use crate::position::LineIndex;
 use console::style;
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
-use semantics::diagnostics::{Diagnostic, Severity};
+use miette::{
+    GraphicalReportHandler, GraphicalTheme, LabeledSpan, MietteError, MietteSpanContents,
+    Severity as ReportSeverity, SourceCode, SourceSpan, SpanContents,
+};
+use semantics::diagnostics::{Diagnostic, RelatedLocation, Severity};
 use semantics::{DocumentKind, ProjectFiles, RootDatabase, SourceFile};
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
+use syntax::TextRange;
 
-#[derive(Debug, Clone, Copy)]
-pub enum LogLevel {
-    Info,
-    Warn,
-    Error,
-}
-
-pub fn log(level: LogLevel, message: &str) {
-    eprintln!(
-        "{}{}",
-        match level {
-            LogLevel::Info => style(""),
-            LogLevel::Warn => style("warning: ").yellow().bold(),
-            LogLevel::Error => style("error: ").red().bold(),
-        },
-        style(message).bold(),
-    );
-}
-
+/// A run summary — what was checked, what was formatted. Not a finding, so it
+/// is a plain line rather than a report.
 pub fn info(message: &str) {
-    log(LogLevel::Info, message);
+    eprintln!("{}", style(message).bold());
 }
 
 pub fn warn(message: &str) {
-    log(LogLevel::Warn, message);
+    report(&Report {
+        severity: ReportSeverity::Warning,
+        message,
+        ..Report::default()
+    });
 }
 
 pub fn error(message: &str) {
-    log(LogLevel::Error, message);
+    report(&Report {
+        message,
+        ..Report::default()
+    });
+}
+
+/// An error over an underlying failure — an I/O or parse error — which renders
+/// as the report's cause rather than as a bare line after it.
+pub fn error_because(message: &str, cause: &(dyn std::error::Error + 'static)) {
+    report(&Report {
+        message,
+        cause: Some(cause),
+        ..Report::default()
+    });
 }
 
 /// Result of a CLI command, mapped by `main` onto the documented exit codes:
@@ -93,14 +99,13 @@ pub fn check(
         let config = match config::Config::discover(file) {
             Ok(config) => config,
             Err(err) => {
-                error(&err.to_string());
+                report(&err);
                 return Err(CommandError);
             }
         };
         warn_unknown_config_keys(&config);
         let target = std::fs::canonicalize(file).map_err(|err| {
-            error(&format!("failed to resolve: {}", file.display()));
-            eprintln!("{err}");
+            error_because(&format!("failed to resolve: {}", file.display()), &err);
             CommandError
         })?;
         let root = project_root_for_target(&target);
@@ -140,8 +145,10 @@ pub fn check(
             }
             Err((path, err)) => {
                 n_failures += 1;
-                error(&format!("failed to read override stub: {}", path.display()));
-                eprintln!("{err}");
+                error_because(
+                    &format!("failed to read override stub: {}", path.display()),
+                    &err,
+                );
             }
         }
 
@@ -163,7 +170,7 @@ pub fn check(
                 let start = stub_index.line_start(problem.line as u32);
                 let end = start + stub_index.line_length(problem.line as u32, stub_text);
                 let diagnostic = Diagnostic {
-                    range: syntax::TextRange::new(start.into(), end.into()),
+                    range: TextRange::new(start.into(), end.into()),
                     severity: Severity::Error,
                     code: "stub",
                     message: problem.message,
@@ -171,7 +178,7 @@ pub fn check(
                 };
                 match output {
                     OutputFormat::Human => {
-                        render_human_diagnostic(stub_path, stub_text, &stub_index, &diagnostic, &[])
+                        render_human_diagnostic(stub_path, stub_text, &diagnostic, &[])
                     }
                     OutputFormat::Json => {
                         render_json_diagnostic(stub_path, stub_text, &stub_index, &diagnostic, &[])
@@ -221,8 +228,7 @@ pub fn check(
                 Ok(source) => analysable_source(&path, source),
                 Err(err) => {
                     n_failures += 1;
-                    error(&format!("failed to read: {}", path.display()));
-                    eprintln!("{err}");
+                    error_because(&format!("failed to read: {}", path.display()), &err);
                     continue;
                 }
             };
@@ -338,10 +344,9 @@ pub fn check(
                     .expect("check worker thread should spawn");
             }
         });
-        type FileFindings = Vec<(Diagnostic, Vec<RelatedNote>)>;
-        let mut per_file: Vec<FileFindings> = (0..checked.len()).map(|_| Vec::new()).collect();
+        let mut per_file: Vec<Vec<Diagnostic>> = (0..checked.len()).map(|_| Vec::new()).collect();
         std::thread::scope(|scope| {
-            let mut pending: Vec<(usize, &mut FileFindings)> =
+            let mut pending: Vec<(usize, &mut Vec<Diagnostic>)> =
                 per_file.iter_mut().enumerate().collect();
             let chunk_size = pending.len().div_ceil(workers.max(1)).max(1);
             let mut chunks = Vec::new();
@@ -353,7 +358,6 @@ pub fn check(
                 let db = db.clone();
                 let checked = &checked;
                 let files = &files;
-                let path_by_file = &path_by_file;
                 let config = &config;
                 let worker = std::thread::Builder::new()
                     .stack_size(crate::ANALYSIS_STACK_SIZE)
@@ -363,54 +367,41 @@ pub fn check(
                             let file =
                                 files[index].expect("every checked file was fed to the project");
                             let rendered = document_diagnostics(&db, file, config);
-                            let rendered = apply_suppressions(rendered, source);
-                            for diagnostic in rendered {
-                                // Related ranges live in other documents; they
-                                // render from their own document's text.
-                                let related: Vec<RelatedNote> = diagnostic
-                                    .related
-                                    .iter()
-                                    .filter_map(|related| {
-                                        let related_path = path_by_file.get(&related.file)?;
-                                        let related_index = LineIndex::new(related.file.text(&db));
-                                        let related_text = related.file.text(&db);
-                                        let start = related_index
-                                            .line_column_chars(related.range.start(), related_text);
-                                        let end = related_index
-                                            .line_column_chars(related.range.end(), related_text);
-                                        Some(RelatedNote {
-                                            path: (*related_path).clone(),
-                                            line: start.line,
-                                            column: start.column,
-                                            end_line: end.line,
-                                            end_column: end.column,
-                                            message: related.message,
-                                        })
-                                    })
-                                    .collect();
-                                slot.push((diagnostic, related));
-                            }
+                            *slot = apply_suppressions(rendered, source);
                         }
                     });
                 worker.expect("check worker thread should spawn");
             }
         });
+        // A related range routinely lives in another of the project's files,
+        // so a note is resolved against the document it points into rather
+        // than the one being reported.
+        let resolve_note = |related: &RelatedLocation| {
+            Some(RelatedNote {
+                path: path_by_file.get(&related.file)?.as_path(),
+                source: related.file.text(&db),
+                range: related.range,
+                message: related.message,
+            })
+        };
         for (index, (path, source)) in checked.iter().enumerate() {
             if !reported.get(index).copied().unwrap_or(false) {
                 continue;
             }
             let line_index = LineIndex::new(source);
-            for (diagnostic, related) in &per_file[index] {
+            for diagnostic in &per_file[index] {
                 if min_severity == MinSeverity::Error && diagnostic.severity != Severity::Error {
                     continue;
                 }
                 n_diagnostics += 1;
+                let related: Vec<RelatedNote> =
+                    diagnostic.related.iter().filter_map(resolve_note).collect();
                 match output {
                     OutputFormat::Human => {
-                        render_human_diagnostic(path, source, &line_index, diagnostic, related)
+                        render_human_diagnostic(path, source, diagnostic, &related)
                     }
                     OutputFormat::Json => {
-                        render_json_diagnostic(path, source, &line_index, diagnostic, related)
+                        render_json_diagnostic(path, source, &line_index, diagnostic, &related)
                     }
                 }
             }
@@ -451,13 +442,9 @@ pub fn check(
                 }
                 n_diagnostics += 1;
                 match output {
-                    OutputFormat::Human => render_human_diagnostic(
-                        &namespace_path,
-                        namespace_source,
-                        &index,
-                        &diagnostic,
-                        &[],
-                    ),
+                    OutputFormat::Human => {
+                        render_human_diagnostic(&namespace_path, namespace_source, &diagnostic, &[])
+                    }
                     OutputFormat::Json => render_json_diagnostic(
                         &namespace_path,
                         namespace_source,
@@ -692,138 +679,100 @@ pub(crate) fn discover_project_stubs(
     Ok(sources)
 }
 
-/// One companion location of a diagnostic, resolved for rendering.
-struct RelatedNote {
-    path: PathBuf,
-    line: u32,
-    column: u32,
-    /// The note's end position, so a machine consumer can annotate the same
-    /// span it annotates for the finding itself. The human renderer only
-    /// needs the start.
-    end_line: u32,
-    end_column: u32,
+/// One companion location of a diagnostic, resolved to the file it lives in.
+/// A related range routinely sits in another document — the sibling binding an
+/// overwrite warning points at — so each note carries its own text to render
+/// from.
+struct RelatedNote<'a> {
+    path: &'a Path,
+    source: &'a str,
+    range: TextRange,
     message: &'static str,
 }
 
-/// Renders one diagnostic rustc-style on stderr: the message, a
-/// `--> path:line:column` header, the source line(s), a caret underline, and
-/// one `note:` line per related location. Rendered lines and columns are
-/// 1-based byte positions.
+/// Renders one diagnostic on stderr with miette's graphical reporter: the
+/// code, the message, the source snippet with the range underlined, and one
+/// nested report per related location, drawn from that location's own file.
 fn render_human_diagnostic(
     path: &Path,
     source: &str,
-    index: &LineIndex,
     diagnostic: &Diagnostic,
     related: &[RelatedNote],
 ) {
-    // The header names the code — it is what a suppression comment must
-    // spell (`# ry: allow(unused)`), so the human output teaches it.
-    let header = match diagnostic.severity {
-        Severity::Warning => style(format!("warning[{}]: ", diagnostic.code))
-            .yellow()
-            .bold(),
-        Severity::Error => style(format!("error[{}]: ", diagnostic.code)).red().bold(),
-    };
-    eprintln!("{header}{}", style(&diagnostic.message).bold());
-
-    let start = index.line_column_chars(diagnostic.range.start(), source);
-    let end = index.line_column_chars(diagnostic.range.end(), source);
-    let gutter_width = (end.line as usize + 1).to_string().len();
-    // Paths render relative to the working directory when they are under it.
-    let display_path = std::env::current_dir()
-        .ok()
-        .and_then(|cwd| path.strip_prefix(&cwd).ok())
-        .unwrap_or(path);
-    eprintln!(
-        "{}{} {}:{}:{}",
-        " ".repeat(gutter_width),
-        style("-->").bold().blue(),
-        display_path.display(),
-        start.line + 1,
-        start.column + 1
-    );
-
-    // A multi-line span shows its first line with the underline running to
-    // that line's end, plus a trailing-lines note — printing every spanned
-    // line with a dangling caret buried the finding on long items.
-    let first_line_start = index.line_start(start.line) as usize;
-    let first_line_text = &source
-        [first_line_start..first_line_start + index.line_length(start.line, source) as usize];
-    eprintln!(
-        "{} {}",
-        style(format!(
-            "{:<width$}|",
-            start.line + 1,
-            width = gutter_width + 1
-        ))
-        .blue()
-        .bold(),
-        first_line_text
-    );
-    let trailing_lines = (end.line - start.line) as usize;
-    // Caret art is measured in terminal cells, not characters: a column tells
-    // the reader where to look in their editor, but the underline has to sit
-    // beneath the glyphs, and a CJK character or an emoji occupies two cells.
-    let byte_column = index.line_column(diagnostic.range.start()).column as usize;
-    let caret_indent = display_width(&first_line_text[..byte_column]);
-    let underlined = if trailing_lines == 0 {
-        let byte_end = index.line_column(diagnostic.range.end()).column as usize;
-        &first_line_text[byte_column..byte_end.max(byte_column)]
-    } else {
-        &first_line_text[byte_column..]
-    };
-    let caret_width = display_width(underlined).max(1);
-    eprintln!(
-        "{}{}  {}",
-        " ".repeat(gutter_width + 1),
-        " ".repeat(caret_indent),
-        {
-            let carets = style("^".repeat(caret_width)).bold();
-            match diagnostic.severity {
-                Severity::Warning => carets.yellow(),
-                Severity::Error => carets.red(),
-            }
-        }
-    );
-    if trailing_lines > 0 {
-        eprintln!(
-            "{} {}",
-            style(format!("{:<width$}|", "", width = gutter_width + 1))
-                .blue()
-                .bold(),
-            style(format!(
-                "... the range continues for {trailing_lines} more line{}",
-                if trailing_lines == 1 { "" } else { "s" }
-            ))
-            .dim(),
-        );
-    }
-    for note in related {
-        eprintln!(
-            "{}{} {} {} {} {}:{}:{}",
-            " ".repeat(gutter_width),
-            style("=").bold().blue(),
-            style("note:").bold(),
-            note.message,
-            style("-->").bold().blue(),
-            note.path.display(),
-            note.line + 1,
-            note.column + 1,
-        );
-    }
+    report(&Report {
+        // The code heads the report — it is what a suppression comment must
+        // spell (`# ry: allow(unused)`), so the human output teaches it.
+        code: Some(diagnostic.code),
+        severity: match diagnostic.severity {
+            Severity::Warning => ReportSeverity::Warning,
+            Severity::Error => ReportSeverity::Error,
+        },
+        message: &diagnostic.message,
+        snippet: Some(Snippet {
+            source: NamedText::new(path, source),
+            label: primary_label(source, diagnostic.range),
+        }),
+        related: related
+            .iter()
+            .map(|note| Report {
+                // A companion location is context for the finding above it,
+                // never a finding of its own: advice severity is what keeps a
+                // reader from counting it as a second problem.
+                severity: ReportSeverity::Advice,
+                message: note.message,
+                snippet: Some(Snippet {
+                    source: NamedText::new(note.path, note.source),
+                    label: primary_label(note.source, note.range),
+                }),
+                ..Report::default()
+            })
+            .collect(),
+        ..Report::default()
+    });
+    // Findings arrive in runs; a blank line between them keeps two adjacent
+    // snippets from reading as one.
     eprintln!();
+}
+
+/// The label under the finding: its own range, clamped to the first line when
+/// the range covers more lines than a snippet should show. Drawing every line
+/// of a range that spans a whole function buries the finding in the item that
+/// contains it.
+fn primary_label(source: &str, range: TextRange) -> LabeledSpan {
+    const MAX_UNDERLINED_LINES: usize = 3;
+
+    let start = usize::from(range.start());
+    let mut end = usize::from(range.end()).min(source.len());
+    // An empty range — a parser error at a position rather than over a token —
+    // has nothing to underline, so it takes the character it points at. At end
+    // of file there is none, and the header position alone has to carry it.
+    if end == start {
+        end = source
+            .get(start..)
+            .and_then(|rest| rest.chars().next())
+            .map_or(start, |character| start + character.len_utf8());
+    }
+    let spanned = source.get(start..end).unwrap_or_default();
+    let lines = spanned.lines().count();
+    if lines <= MAX_UNDERLINED_LINES {
+        return LabeledSpan::new_primary_with_span(None, start..end);
+    }
+    let first_line_end = spanned
+        .find('\n')
+        .map_or(end, |newline| start + newline)
+        .min(end);
+    LabeledSpan::new_primary_with_span(
+        Some(format!(
+            "the range continues for {} more lines",
+            lines.saturating_sub(1)
+        )),
+        start..first_line_end,
+    )
 }
 
 /// Renders one diagnostic as a JSON Lines record on stdout for CI use.
 /// Positions are 1-based like the human renderer; the field names are a
 /// documented contract.
-/// A string's width in terminal cells: the unit caret art has to be measured
-/// in, since a CJK character or an emoji occupies two cells while a combining
-/// mark occupies none.
-fn display_width(text: &str) -> usize {
-    unicode_width::UnicodeWidthStr::width(text)
-}
-
 fn render_json_diagnostic(
     path: &Path,
     source: &str,
@@ -840,12 +789,15 @@ fn render_json_diagnostic(
     let related: Vec<serde_json::Value> = related
         .iter()
         .map(|note| {
+            let index = LineIndex::new(note.source);
+            let start = index.line_column_chars(note.range.start(), note.source);
+            let end = index.line_column_chars(note.range.end(), note.source);
             serde_json::json!({
                 "path": note.path.display().to_string(),
-                "line": note.line + 1,
-                "column": note.column + 1,
-                "endLine": note.end_line + 1,
-                "endColumn": note.end_column + 1,
+                "line": start.line + 1,
+                "column": start.column + 1,
+                "endLine": end.line + 1,
+                "endColumn": end.column + 1,
                 "message": note.message,
             })
         })
@@ -862,6 +814,179 @@ fn render_json_diagnostic(
         "related": related,
     });
     println!("{record}");
+}
+
+/// Everything the CLI reports, in one shape: a finding with its snippet, a
+/// companion note under one, or a bare failure with no source at all. A
+/// configuration error and a type error are drawn by the same reporter, so
+/// they can never look like output from two different tools.
+#[derive(Debug)]
+struct Report<'a> {
+    severity: ReportSeverity,
+    /// The diagnostic code, for the findings that carry one.
+    code: Option<&'a str>,
+    message: &'a str,
+    /// The underlying failure, drawn as the report's cause.
+    cause: Option<&'a (dyn std::error::Error + 'static)>,
+    snippet: Option<Snippet<'a>>,
+    related: Vec<Report<'a>>,
+}
+
+/// The source excerpt a report points at, and the range it underlines.
+#[derive(Debug)]
+struct Snippet<'a> {
+    source: NamedText<'a>,
+    label: LabeledSpan,
+}
+
+impl<'a> Default for Report<'a> {
+    fn default() -> Report<'a> {
+        Report {
+            severity: ReportSeverity::Error,
+            code: None,
+            message: "",
+            cause: None,
+            snippet: None,
+            related: Vec::new(),
+        }
+    }
+}
+
+impl std::fmt::Display for Report<'_> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.message)
+    }
+}
+
+impl std::error::Error for Report<'_> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.cause
+    }
+}
+
+impl miette::Diagnostic for Report<'_> {
+    fn code(&self) -> Option<Box<dyn std::fmt::Display + '_>> {
+        self.code
+            .map(|code| Box::new(code) as Box<dyn std::fmt::Display>)
+    }
+
+    fn severity(&self) -> Option<ReportSeverity> {
+        Some(self.severity)
+    }
+
+    fn source_code(&self) -> Option<&dyn SourceCode> {
+        self.snippet
+            .as_ref()
+            .map(|snippet| &snippet.source as &dyn SourceCode)
+    }
+
+    fn labels(&self) -> Option<Box<dyn Iterator<Item = LabeledSpan> + '_>> {
+        let snippet = self.snippet.as_ref()?;
+        Some(Box::new(std::iter::once(snippet.label.clone())))
+    }
+
+    fn related(&self) -> Option<Box<dyn Iterator<Item = &dyn miette::Diagnostic> + '_>> {
+        if self.related.is_empty() {
+            return None;
+        }
+        Some(Box::new(
+            self.related
+                .iter()
+                .map(|note| note as &dyn miette::Diagnostic),
+        ))
+    }
+}
+
+/// Draws one report on stderr. The look follows the destination: colour and
+/// box drawing on an attended terminal, monochrome unicode when colour is
+/// refused, plain ASCII into a pipe or a file — a CI log and a captured
+/// expectation both want the ASCII.
+pub fn report(diagnostic: &dyn miette::Diagnostic) {
+    static HANDLER: LazyLock<GraphicalReportHandler> = LazyLock::new(|| {
+        let theme = if console::colors_enabled_stderr() {
+            GraphicalTheme::unicode()
+        } else if console::user_attended_stderr() {
+            GraphicalTheme::unicode_nocolor()
+        } else {
+            GraphicalTheme::none()
+        };
+        let handler = GraphicalReportHandler::new_themed(theme)
+            // A companion location reads as part of the finding above it, so
+            // it is drawn nested under that finding rather than as a report
+            // of its own with its own severity banner.
+            .with_show_related_as_nested(true);
+        match console::user_attended_stderr() {
+            true => handler.with_width(console::Term::stderr().size().1 as usize),
+            false => handler,
+        }
+    });
+
+    let mut rendered = String::new();
+    match HANDLER.render_report(&mut rendered, diagnostic) {
+        Ok(()) => eprint!("{rendered}"),
+        // Formatting into a `String` cannot fail; the fallback is here so a
+        // reporter bug degrades the finding rather than swallowing it.
+        Err(_) => eprintln!("{diagnostic}"),
+    }
+}
+
+/// A borrowed file behind a snippet, named for the snippet header.
+/// [`miette::NamedSource`] owns its text, which would copy the whole file into
+/// every finding reported against it.
+#[derive(Debug)]
+struct NamedText<'a> {
+    name: String,
+    text: &'a str,
+}
+
+impl<'a> NamedText<'a> {
+    /// Names the file the way the reader named it: relative to the working
+    /// directory when it lies below it, as given otherwise.
+    fn new(path: &Path, text: &'a str) -> NamedText<'a> {
+        static WORKING_DIRECTORY: LazyLock<Option<PathBuf>> =
+            LazyLock::new(|| std::env::current_dir().ok());
+        let name = WORKING_DIRECTORY
+            .as_deref()
+            .and_then(|directory| path.strip_prefix(directory).ok())
+            .unwrap_or(path);
+        NamedText {
+            name: name.display().to_string(),
+            text,
+        }
+    }
+
+    /// The zero-based column of a byte offset, counted in characters. A
+    /// column is what a person counts and an editor shows, so non-ASCII text
+    /// earlier on the line must not shift it — and it has to agree with the
+    /// column the JSON records carry for the very same finding.
+    fn character_column(&self, offset: usize) -> usize {
+        let Some(before) = self.text.get(..offset) else {
+            return 0;
+        };
+        let line_start = before.rfind('\n').map_or(0, |newline| newline + 1);
+        before.get(line_start..).unwrap_or_default().chars().count()
+    }
+}
+
+impl SourceCode for NamedText<'_> {
+    fn read_span<'a>(
+        &'a self,
+        span: &SourceSpan,
+        context_lines_before: usize,
+        context_lines_after: usize,
+    ) -> Result<Box<dyn SpanContents<'a> + 'a>, MietteError> {
+        let contents = self
+            .text
+            .read_span(span, context_lines_before, context_lines_after)?;
+        Ok(Box::new(MietteSpanContents::new_named(
+            self.name.clone(),
+            contents.data(),
+            *contents.span(),
+            contents.line(),
+            self.character_column(contents.span().offset()),
+            contents.line_count(),
+        )))
+    }
 }
 
 /// The project root a target is analysed in: the NEAREST ancestor carrying a
@@ -920,7 +1045,7 @@ pub fn fmt(
         .iter()
         .map(|file| {
             let config = config::Config::discover(file).map_err(|err| {
-                error(&err.to_string());
+                report(&err);
                 CommandError
             })?;
             warn_unknown_config_keys(&config);
@@ -956,8 +1081,7 @@ pub fn fmt(
                 Ok(text) => text,
                 Err(err) => {
                     n_errors += 1;
-                    error(&format!("failed to format: {}", path.display()));
-                    eprintln!("{err}");
+                    error_because(&format!("failed to format: {}", path.display()), &err);
                     continue;
                 }
             };
@@ -967,8 +1091,7 @@ pub fn fmt(
                 Ok(new) => new,
                 Err(err) => {
                     n_errors += 1;
-                    error(&format!("failed to format: {}", path.display()));
-                    eprintln!("{err}");
+                    error_because(&format!("failed to format: {}", path.display()), &err);
                     continue;
                 }
             };
@@ -984,8 +1107,10 @@ pub fn fmt(
                     eprintln!("Would reformat: {}", style(path.display()).bold());
                 } else if let Err(err) = std::fs::write(&path, &new) {
                     n_errors += 1;
-                    error(&format!("failed to write to file: {}", path.display()));
-                    eprintln!("{err}");
+                    error_because(
+                        &format!("failed to write to file: {}", path.display()),
+                        &err,
+                    );
                 }
             }
         }

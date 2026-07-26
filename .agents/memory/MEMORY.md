@@ -45,7 +45,7 @@ Companion documents in this folder (kept separate only because they are larger i
   language-server, check and formatter showcases in `docs/src/pages/index.astro` hold generated
   markup in the frontmatter (`ideCode`, `analysisCode`, `analysisOutput`, `formatterCode`): hovers,
   completions, references, rename edits and inlay hints come from driving `roughly server` over
-  LSP, and the diagnostics and diffs from `roughly check` / `roughly fmt --diff`. Columns, caret
+  LSP, and the diagnostics and diffs from `roughly check` / `roughly fmt --diff`. Columns, underline
   widths and gutter widths are the ones the tools report, so **re-capture rather than hand-edit** —
   an edited sample silently becomes a fake screenshot of a real product. Astro strips
   whitespace-only element content, so that markup must be rendered through `set:html`.
@@ -134,6 +134,15 @@ Companion documents in this folder (kept separate only because they are larger i
 - **A type is a DAG, so walk it with a memo, never as a tree.** Interning means one subtree is reached by every path that mentions it, so a record whose fields all return that record is revisited once per field per level — exponential in depth, with no cap able to help, because the cap bounds depth and the cost is in paths. `substitute_rigid` memoises per node for one top-level call (sound: the substitution is fixed for that call, so a node's answer cannot depend on how it was reached); it went from 278M calls to under 2M on one R file. Any new recursive walk over `Ty` needs the same treatment.
 - **Two measurement traps that have each produced a confident wrong answer here.** First: a probe counter printing to stderr **through a pipe** loses its output when `timeout` kills the process, so "no output" reads identically to "never called" — redirect to a file, and make the probe fire once on entry so absence and silence are distinguishable. Second: **never A/B two binaries in separate blocks.** Sequential blocks on this machine produced an apparent 2x win that interleaving showed to be zero, and a cold first run produced an apparent 12% win that was 2%. Alternate the binaries run-by-run and discard nothing.
 - **Salsa:** hot tracked queries returning maps/vecs use `returns(ref)` — `returns(clone)` deep-clones per call (measured ~8s of corpus render). Input setters need the `salsa::Setter` trait in scope. Never run the stats instruments batched in one process — resident/peak RSS numbers pollute each other; the protocol is one process per instrument.
+- **CLI reporting is miette's, and it has two sharp edges.** Every user-facing message the CLI prints
+  — findings, companion notes, configuration failures — is one `Report` drawn by one
+  `GraphicalReportHandler` (`crates/ry/src/cli.rs`; the decision record explains why). Trap one:
+  miette counts the snippet header's column in **bytes**, so the borrowed-source `read_span` re-counts
+  it in characters — remove that and the human header silently disagrees with the JSON record for the
+  same finding. Trap two: miette draws every line a range covers, so a range over three lines is
+  clamped to its first line with the reach stated in the label. Snippet sources are borrowed
+  (`NamedText`), never `miette::NamedSource`, which owns its text and would copy the whole file into
+  every finding reported against it.
 - **Formatter (rowan attachment differs from tree-sitter's):** trailing comments attach INSIDE expression nodes — every closer-placement / after-comment decision must be TOKEN-level (`last_token_before`), never element-level; line math uses `significant_range` (some nodes swallow trailing trivia); `]]` closes with two `]` tokens and the FIRST is the placement anchor; `# fmt: skip` recognizes three comment attachments. The formatter refuses only on R-grammar errors — annotation-grammar errors carry `SyntaxError.in_annotation` and the block renders verbatim; never re-derive that split from positions. Raw strings (`r"(...)"`) reproduce byte-for-byte.
 - **Parser error doctrine:** a lexer `ERROR_TOKEN` is already precisely diagnosed — the parser consumes it silently as a placeholder atom (`primary()`), and a statement that contained one suppresses its own boundary report (`statement_had_lexer_error`); one mistake must never fan out into a report storm (the fuzz harness pins errors ≤ linear in tokens, plus non-empty messages and in-bounds ranges). The golden error suite (`crates/syntax/tests/errors`, by area) covers every distinct message template; when adding a parser error path, add its case in the same change.
 - **Fixtures:** consecutive `#:` lines STITCH into one annotation region, and mixing `@type` with a compact form invalidates the whole block — separate regions need a blank line. The `group__case` id is the test identity; ids must be unique per suite.
