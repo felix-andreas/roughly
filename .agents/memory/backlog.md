@@ -103,6 +103,64 @@ formatter and JSON output as production-ready, and the annotation-adjacency mess
 roxygen2 and giving the fix. They also confirmed the `expect_error` decision was right and that the
 "testing that something is rejected" subsection worked first try.
 
+### From the Quarto/Rmd analyst (656 lines across two literate documents, 10 planted mistakes)
+
+Their verdict: **"today, no"** — they would hit the ggplot2 errors within an hour and be fully off by
+end of day, *never knowing the default checks were not running*. **"With #1, #2, #3 fixed,
+permanently yes, including CI. That gap is three bugs, not a redesign."**
+
+1. **`library()` of any package without a shipped stub silently kills unresolved-name checking,
+   project-wide.** `tidyverse`, `knitr`, `readr`, `tidyr`, `stringr`, `tibble`, `purrr`, `lubridate`,
+   `scales`, `glue`, `janitor` all disable it; only the four stubbed namespaces keep it on, and
+   `require()` counts too. Not file-scoped: two files where one attaches tidyverse gives
+   `no problems`, and deleting that file makes the *other* file's typo appear. **This is the THIRD
+   independent report of this hole** (the Shiny user's #1 and the package author's #2) — it is now
+   the top-priority item in the whole backlog. A clean run is indistinguishable from "not checked".
+   Their note: the two-line `stubs/<pkg>.Rtypes` remedy both silences the namespace warning *and*
+   restores checking, but it is only described on the contributor-facing stubs page.
+2. **`typing = true` reports errors on ordinary ggplot2 `+` chains** — it added exactly 7 findings to
+   their project, **all 7 false positives and 0 real**. Two shapes: `df %>% ggplot(aes(...)) +
+   geom_col()` (the `|>` spelling is clean, `%>%` is not) and `theme_minimal(base_size) + theme(...)`,
+   a house theme. The message is ``expected a numeric value (`integer` or `double`), found `gg` `` —
+   and they had no idea what `gg` is. This directly contradicts `limitations.md`'s promise that a gap
+   means checks are *skipped*, never that wrong answers are produced, and `type-mismatch` is not
+   configurable, so their only escape is turning typing off entirely. Likely cause: the shipped
+   corpus declares `+.ggplot` but nothing for `gg + gg`, so a theme pair and an opaque-`%>%` left
+   operand fall through to the numeric rules.
+3. **Inline `` `r expr` `` in prose is invisible — neither a use nor checked.** A value assigned in a
+   chunk and displayed only via inline code is reported `unused`, and a typo'd function inside inline
+   code is not reported at all. It hit three of their headline numbers. Their reaction is the
+   dangerous part: they would believe the warning, delete the binding, and break the report. The
+   literate conversion only recognizes fenced chunks; inline spans are prose to it.
+4. **`source()` is not followed, so a helpers file is pure noise in both directions** — all ten
+   helper functions reported `unused`, and every *correct* call to them reported `unresolved`,
+   indistinguishable from their planted typo. It also killed the wrong-arity catch, which works well
+   within a file.
+5. **Reported columns are byte offsets, not characters, so the caret visibly misaligns** on any line
+   containing `é`, `—` or `–` — char column 31 reported as 42, same in the JSON. `getting-started.mdx`
+   promises every reported line *and column* points at the original file; lines do, columns do not.
+6. **5 of 10 planted bugs caught, and all 5 were cosmetic** (`=`, `T`/`F`, trailing comma). Missed:
+   two column typos, two function-name typos, one wrong arity. Unknown *functions* inside `mutate`
+   and `filter` are swallowed along with the column names.
+7. **`roughly fmt --diff report.qmd` fails with `no R files found` and exit 2**, which breaks
+   per-file pre-commit hooks — a deliberately skipped file should not be a usage error.
+8. An unclosed chunk reports their English prose as an unresolved variable rather than the missing
+   fence. And `strict = true` silently escalates `unresolved` from warning to error (12 on their
+   project) — the second user to be surprised by that.
+
+What they praised, and it is worth recording because it was the part they expected to be broken:
+**the literate handling itself is the strongest part of the tool.** Line numbers exact across all 545
+lines of `.qmd`/`.Rmd`, ASCII columns exact, prose ignored, every chunk-header form parsed (including
+`#| fig-cap: "A caption with = signs"` not fooling the `=` lint), `{python}`/`{sql}`/`{bash}`/`{ojs}`
+and bare fences all correctly skipped, CRLF and Sweave and no-YAML all mapped correctly, suppression
+comments working inside chunks. Also **zero false positives on 50 lines of idiomatic tidyverse** —
+bare column names through the whole verb set, `case_when`, `across(where(is.numeric), ~ .x * 2)`,
+tidyselect helpers, joins and `aes()` — which was their biggest fear going in.
+`getting-started.mdx`'s "where Roughly looks" section is "the best thing in the docs". The guide
+loses them where its showcase uses `list(...)`: swapping it for `read.csv()` makes the identical
+mistake report nothing, and the page calls that "the whole pitch" with no caveat at the point of
+contact.
+
 ## Open — documentation review findings
 
 Four independent reviews read the docs cold (a first-hour newcomer, an information architect, an
