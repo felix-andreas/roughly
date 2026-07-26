@@ -38,8 +38,9 @@ marked ⚠️ are planned but not yet available.
   - Hover — the inferred type or full signature of any name (multi-line for long signatures),
     with where the name is defined (a `path:line:column` link for locals and package globals; the
     origin package for standard-library names with an overload count where one applies, plus the
-    declaration's `file:line:column` inside the stub corpus); the
-    top-level `debug = true` config adds internal lowering/naming/parsing sections
+    declaration's `file:line:column` inside the stub corpus); starting the server with
+    `roughly server --debug` (or `ROUGHLY_DEBUG=1`) adds internal lowering/naming/parsing
+    sections — a switch for working on Roughly itself, deliberately not a `roughly.toml` key
   - Completion for local and global variables
   - Completion for standard-library names, with their typed signatures as detail
   - Function completions insert a call snippet (`name(│)`, or `name()│` for zero-argument

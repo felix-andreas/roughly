@@ -45,8 +45,12 @@ types flow through bindings, calls, operators, and indexing:
 ```r
 add <- function(a, b) a + b   # inferred: <T: numeric> fn(a: T, b: T) -> T
 add(1L, "x")
-# error[type-mismatch] expected a numeric value (`integer` or `double`), found `character`
+# error[type-mismatch]: expected `integer`, found `character`
 ```
+
+The message names `integer` rather than "a number" because `1L` got there first: `a`
+and `b` share one type variable, the first argument fixed it to `integer`, and the
+second no longer has a choice.
 
 Two things are worth noticing in that example, because they are the heart of the
 system:
@@ -144,8 +148,8 @@ mutable slots the way R actually treats them:
 x <- 1L
 if (flag) x <- "two"
 x + 1L
-# error[type-mismatch]: `x` is `integer | character` here, and `+` rejects the
-# `character` member
+# error[type-mismatch]: expected a numeric value (`integer` or `double`),
+#                       found `integer | character`
 ```
 
 A union value must be acceptable in *every* shape it can take. Operators and field
@@ -368,7 +372,7 @@ shuffle <- function(x) sample(x)
 
 shuffle(c(1L, 2L))    # integer[]
 shuffle(c("a", "b"))  # character[]
-shuffle(list(1L))     # error: a list is not an atomic vector
+shuffle(list(1L))     # error[type-mismatch]: expected `T[]`, found `list{integer}`
 ```
 
 A parameter that picks up both bounds — a generic vector element used

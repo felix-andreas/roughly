@@ -72,7 +72,7 @@ You can configure Roughly as an external formatter in RStudio:
 
 ## Usage
 
-The CLI has three commands:
+Three commands cover everyday use:
 
 ```bash
 # Format R files (rewrites in place)
@@ -91,32 +91,27 @@ roughly check --min-severity error  # only errors render and affect the exit cod
 roughly server
 ```
 
-`roughly check` runs the linter by default. To also surface **type errors** and **unused-variable**
-warnings, opt in through `roughly.toml`:
+Two more embed a real R session, for when you want to *run* the code rather than analyse it.
+They locate R at runtime (`R_HOME`, or `R` on your `PATH`) — everything above needs no R at all:
+
+```bash
+roughly repl               # an interactive R console
+roughly run script.R       # run a file; a top-level error exits non-zero
+```
+
+`roughly debug` holds development commands and is not part of the stable surface.
+
+`roughly check` runs the linter and reports **unused bindings** with no configuration at all.
+**Type errors** are the one thing you opt into, through `roughly.toml`:
 
 ```toml
 [check]
 typing = true   # report type errors
-unused = true   # report unused local variables
+unused = false  # on by default — set this to silence unused-binding warnings
 ```
 
 Type *inference* itself is always on and powers editor features like hover and inlay hints — the
 settings above only control which diagnostics `roughly check` reports.
-
-### Machine-readable output
-
-`roughly check --output json` writes one JSON object per diagnostic to stdout ([JSON
-Lines](https://jsonlines.org)); progress and error messages stay on stderr, so stdout is pure JSON:
-
-```json
-{"path":"R/utils.R","line":2,"column":3,"endLine":2,"endColumn":7,"severity":"error","code":"syntax-error","message":"Syntax Error: unexpected \"<- (\""}
-```
-
-`line`/`column`/`endLine`/`endColumn` are 1-based, `severity` is `"error"` or `"warning"`, and
-`code` is the diagnostic's stable code. `related` lists the locations a diagnostic points at beyond
-its own range — for example, each "overwrites an earlier top-level binding" warning names the
-sibling binding site — as `{path, line, column, endLine, endColumn, message}` objects (empty when a
-diagnostic stands alone). These field names are a contract — safe to build CI on.
 
 ### Exit codes
 
@@ -136,7 +131,7 @@ A warnings-only `check` run exits 1 by default; pass `--min-severity error` to g
 else, so the stream stays parseable while human-readable progress goes to stderr:
 
 ```json
-{"path":"R/config.R","line":20,"column":14,"endLine":20,"endColumn":24,"severity":"error","code":"type-mismatch","message":"expected `integer`, found `character`","related":[]}
+{"code":"type-mismatch","column":1,"endColumn":2,"endLine":2,"line":2,"message":"this call passes 2 positional arguments, but the function only takes 1","path":"/home/you/project/R/config.R","related":[],"severity":"error"}
 ```
 
 | Field | Meaning |
@@ -150,7 +145,7 @@ else, so the stream stays parseable while human-readable progress goes to stderr
 | `related` | Other locations the finding refers to — the same five position and message fields, one object each. Empty for most findings; a `duplicate` names both sites |
 
 The summary line `check` prints at the end goes to stdout too, but only in human mode — a JSON run
-emits nothing but diagnostics.
+emits nothing but diagnostics. These field names are a contract, safe to build CI on.
 
 ## Next steps
 

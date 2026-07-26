@@ -132,13 +132,16 @@ confined to that thread).
   loader-problem diagnostics, semantic tokens, and type-name goto for stubs;
   import validation for NAMESPACE — without ever entering the database.
 
-## Differential correctness
+## Correctness and performance instruments
 
-Until the legacy stack's final deletion, the differential suites in
-`legacy/differential` are the regression net: the typing fixture suites and
-the per-position IDE sweep run through **both stacks** and compare semantic
-classes, targets, and ranges (never prose — wording is free to improve), with
-committed allowlists for adjudicated oracle defects. The real-file corpus
-arms (semantic, formatter) are running instruments. The perf and memory
-witnesses (`test_stats`) assert the measured budgets — wall, resident set,
-and resolve-step linearity — as CI-checkable thresholds.
+The fixture suites are the correctness contract; see the [testing
+page](/testing). The cross-implementation parity program that once compared
+every finding against the frozen legacy stack is complete and retired — the
+new stack's fixtures stand on their own, and no change needs the old
+implementation's agreement.
+
+What remains in `legacy/differential` is the benchmark harness. Its perf and
+memory witnesses (`test_stats`) assert measured budgets — wall time, resident
+set, and resolve-step linearity — against a real-file corpus, so a regression
+in any of the three fails a test rather than being noticed later. The corpus
+is fetched on demand, so these run locally rather than in CI.

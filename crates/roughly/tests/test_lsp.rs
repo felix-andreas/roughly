@@ -9,13 +9,13 @@ use async_lsp::lsp_types::request::{RegisterCapability, WorkspaceDiagnosticRefre
 use async_lsp::lsp_types::{
     ClientCapabilities, DiagnosticClientCapabilities, DidChangeTextDocumentParams,
     DidOpenTextDocumentParams, DocumentDiagnosticParams, DocumentDiagnosticReport,
-    DocumentDiagnosticReportResult, DocumentFormattingParams, FormattingOptions,
-    GeneralClientCapabilities, GotoDefinitionParams, GotoDefinitionResponse, HoverContents,
-    HoverParams, InitializeParams, InitializeResult, InitializedParams, PartialResultParams,
-    Position, PositionEncodingKind, PublishDiagnosticsParams, ShowMessageParams,
-    TextDocumentClientCapabilities, TextDocumentContentChangeEvent, TextDocumentIdentifier,
-    TextDocumentItem, TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier,
-    WorkDoneProgressParams, WorkspaceFolder,
+    DocumentDiagnosticReportResult, DocumentFormattingParams, DocumentRangeFormattingParams,
+    FormattingOptions, GeneralClientCapabilities, GotoDefinitionParams, GotoDefinitionResponse,
+    HoverContents, HoverParams, InitializeParams, InitializeResult, InitializedParams,
+    PartialResultParams, Position, PositionEncodingKind, PublishDiagnosticsParams,
+    ShowMessageParams, TextDocumentClientCapabilities, TextDocumentContentChangeEvent,
+    TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, Url,
+    VersionedTextDocumentIdentifier, WorkDoneProgressParams, WorkspaceFolder,
 };
 use async_lsp::panic::{CatchUnwind, CatchUnwindLayer};
 use async_lsp::router::Router;
@@ -649,6 +649,50 @@ async fn formatting() {
     assert_eq!(edits.len(), 1);
     assert_eq!(edits[0].new_text, "x <- 1\n");
     assert_eq!(edits[0].range.start, Position::new(0, 0));
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn range_formatting_snaps_to_whole_statements() {
+    let mut context = setup_test(&[]).await;
+    let uri = context.open("R/fmt.R", "x<-1\ny<-2\nz<-3\n").await;
+    let _ = recv_diagnostics(&mut context.diagnostics_receiver, &uri, TIMEOUT).await;
+    // A selection covering part of the middle line only: the edit must cover
+    // that whole statement and leave its neighbours alone.
+    let edits = context
+        .server
+        .range_formatting(DocumentRangeFormattingParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            range: Range::new(Position::new(1, 1), Position::new(1, 2)),
+            options: FormattingOptions::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("range formatting failed")
+        .expect("expected range formatting edits");
+    assert_eq!(edits.len(), 1);
+    assert_eq!(edits[0].new_text, "y <- 2");
+    assert_eq!(edits[0].range.start, Position::new(1, 0));
+    assert_eq!(edits[0].range.end, Position::new(1, 4));
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn range_formatting_ignores_a_selection_holding_no_statement() {
+    let mut context = setup_test(&[]).await;
+    let uri = context.open("R/fmt.R", "x <- 1\n\n\ny <- 2\n").await;
+    let _ = recv_diagnostics(&mut context.diagnostics_receiver, &uri, TIMEOUT).await;
+    let edits = context
+        .server
+        .range_formatting(DocumentRangeFormattingParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            range: Range::new(Position::new(1, 0), Position::new(2, 0)),
+            options: FormattingOptions::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("range formatting failed");
+    assert!(edits.is_none(), "{edits:?}");
     context.shutdown().await;
 }
 

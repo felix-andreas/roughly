@@ -3,7 +3,7 @@ title: Testing
 description: The fixture-testing contract and suite structure
 ---
 
-This crate prefers fixture tests for source-driven behavior because they are:
+This project prefers fixture tests for source-driven behavior because they are:
 
 - easy for a human to read in diffs
 - easy to extend into many cases quickly
@@ -11,8 +11,9 @@ This crate prefers fixture tests for source-driven behavior because they are:
 
 Fixture suites should describe the desired semantics as exhaustively as practical. Do not shape the
 matrix around what the current implementation already happens to pass. If the suite is still
-migrating toward the desired contract, record the missing coverage explicitly in the relevant
-README instead of treating current gaps as intentional.
+migrating toward the desired contract, record the missing coverage explicitly — in
+`.agents/memory/backlog.md`, or as a case pinned to the wrong-but-current output with a comment
+saying so — instead of treating current gaps as intentional.
 
 Use ordinary Rust tests only when the behavior is awkward to express as a rendered fixture.
 
@@ -192,10 +193,9 @@ Rules:
   rejected rather than silently shadowing one another
 - what the expectation *shows* is the suite runner's contract (schemes, diagnostics, tree dumps,
   hover output, …); suite-specific behavior belongs in the runner, not in fixture syntax
-- the runner only loads files with the `.test` extension, so suite-local `README.md` files are
-  ignored by the runner
-- some suites keep a local `README.md` with the suite's rendered-output contract and coverage
-  matrix; keep those in sync with fixture changes in the same session
+- the runner only loads files with the `.test` extension, so a suite directory may hold notes
+  (a `README.md` describing its rendered-output contract, say) without the runner treating them
+  as cases
 
 ## Focused runs
 
@@ -207,8 +207,8 @@ FIXTURE_FILTER=group__case cargo test -p format --test test_format_fixtures -- -
 FIXTURE_FILTER=group__case cargo test -p ide --test test_ide_fixtures -- --nocapture
 ```
 
-The default crate test commands while iterating are `cargo test -p semantics` (analysis behavior)
-and `cargo test -p differential` (cross-stack agreement).
+The default crate test command while iterating is `cargo test -p semantics` (analysis behavior);
+`just gate` runs the whole battery plus clippy and a formatting check before a change lands.
 
 ## Blessing expectations
 

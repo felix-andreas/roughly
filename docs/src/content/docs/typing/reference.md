@@ -228,7 +228,7 @@ Manifests follow how R itself exposes each namespace:
   attaches the package (a `library()`-family call) or declares it a dependency, exactly as
   in R
 - a conditional namespace's manifest activates together with its stubs (see
-  [Conditional stub namespaces](#conditional-stub-namespaces-datatable-and-dplyr)); while the
+  [Conditional stub namespaces](#conditional-stub-namespaces-datatable-dplyr-ggplot2-and-testthat)); while the
   namespace is inactive its manifest names stay unknown, bare and qualified alike
 - A read satisfied only by an import still counts as a use for liveness, and strict mode
   attributes its `Unknown` exactly like any other undetermined reference.
@@ -480,7 +480,8 @@ Trusted coercions can hide real mistakes and should be used only when the progra
 - `NOMINAL_TYPE` must be a nominal type reference declared with `@type`
 - `NOMINAL_TYPE` may be either a bare nominal name such as `Person` or a generic nominal application such as `Person<integer>`
 - aliases, structural types, unions, function types, and other non-nominal type forms are not allowed after `@new`
-- generic nominal types must be fully applied, so if `Person<T>` is declared then `@new Person` is an error
+- a generic nominal may be written unapplied: `@new Person` on a `Person<T>` infers the type
+  arguments from the representation check, so a value of `list{value: 1L}` mints a `Person<integer>`
 - the annotated value must be compatible with that nominal type's underlying representation type
 - if the annotation succeeds, the annotated binding or expression is then treated as having type `NOMINAL_TYPE`
 - if the annotated value already has type `NOMINAL_TYPE`, the annotation is allowed and has no further effect
@@ -864,7 +865,10 @@ Using a type parameter as a vector element restricts it: `T` in `T[]` carries th
 bound** and can only instantiate to one of the six atomic types (`logical`, `integer`, `double`,
 `complex`, `character`, `raw`). This is what makes element-preserving signatures expressible —
 `sort : <T> fn(x: T[]) -> T[]` types `sort(c("b", "a"))` as `character[]` and `sort(c(1L))` as
-`integer[]`, while `sort(list(1))` is a type error because a list is not an atomic element type.
+`integer[]`, while a list argument cannot bind `T` at all, because a list is not an atomic element
+type. (`sort(list(1))` itself is nonetheless accepted as `Any`: the shipped `sort` ends its
+[overload set](#overload-sets) with an `Any` fallback, which the first-match rule then picks. A
+single-candidate `<T> fn(x: T[])` rejects it.)
 
 - a scalar argument coerces into a generic vector parameter and binds the element (`<T> fn(x: T[])`
   called with `2.5` binds `T := double`)
@@ -896,9 +900,10 @@ Examples:
 The same generic application syntax is used by `@new` when introducing a value of a generic nominal type.
 
 - `#: @new Person<integer>` is valid when `Person<T>` is declared with `@type`
-- `#: @new Person` is an error when `Person<T>` is generic and therefore requires type arguments
+- `#: @new Person` is also valid on a generic `Person<T>`: the arguments come from the
+  representation check, which is the one place an unapplied generic is allowed
 
-Type argument counts must match the declared parameter count exactly.
+Everywhere else, type argument counts must match the declared parameter count exactly.
 
 In `@type NAME<T, U, ...> {TYPE}` and `@alias NAME<T, U, ...> {TYPE}`, the declared type parameters are in scope only within `TYPE`. A type parameter shadows a project-global type of the same name, and it is not a generic: applying type arguments to it (`Wrap<integer>` where `Wrap` is a parameter) is an annotation error rather than a reference to the shadowed global.
 
@@ -1096,9 +1101,8 @@ Examples:
 - `fn(count: integer | NULL) -> character | logical | NULL`
 - `(fn() -> integer) | NULL` — an optional callback: a function returning `integer`, or `NULL`
 
-Not allowed:
-
-- `NULL | NULL` — a union of only `NULL` members is rejected as invalid type syntax (write `NULL`)
+A union whose members all collapse to one type is that type: `NULL | NULL` is accepted and means
+`NULL`, by the same singleton rule as every other duplicate member below.
 
 #### Union normalization
 
@@ -2438,10 +2442,12 @@ The class is a real type: it flows through chains (`DT[a > 1][, .(m = mean(b)), 
 Column-level knowledge (element types, membership checks, `:=` evolution) is deliberately out of
 scope for now.
 
-#### Conditional stub namespaces: data.table and dplyr
+#### Conditional stub namespaces: data.table, dplyr, ggplot2 and testthat
 
-Shipped stubs for `data.table` (the `data.table` nominal, `fread`, the `set*()` family) and
-`dplyr` (the `@masked` verb set, joins, the tidy-select helpers and verb vocabulary) exist but do
+Shipped stubs for `data.table` (the `data.table` nominal, `fread`, the `set*()` family),
+`dplyr` (the `@masked` verb set, joins, the tidy-select helpers and verb vocabulary), `ggplot2`
+(the `ggplot`/`gg` nominals, `+.ggplot`, the geom and scale vocabulary, `@masked` `aes`) and
+`testthat` (the expectation and `test_that` vocabulary) exist but do
 **not** join the resolution universe by default — R does not attach these packages by default
 either, and their names must not steal typo warnings in projects that never use them. A
 conditional namespace activates when the project declares the package — a `DESCRIPTION`

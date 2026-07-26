@@ -89,7 +89,7 @@ Type *inference* always runs — it powers editor features such as hover types, 
 Unknown keys — a misspelled key, or a key from a newer roughly version — are **not** errors: the tool warns visibly (a CLI warning; an editor notification), ignores the key, and honors the rest of the file, so a config written against a newer version still starts an older tool. A value of the wrong **type** on a known key remains a hard error. The error message names the file and points at the offending line and column, for example:
 
 ```
-invalid config in /path/to/roughly.toml at line 2, column 10: expected a boolean for `typing`
+invalid config in /path/to/roughly.toml for `check.typing` at line 2, column 10: invalid type: string "yes", expected a boolean
 ```
 
 Where the error surfaces:

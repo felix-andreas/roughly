@@ -1,6 +1,6 @@
 ---
 title: Structure
-description: The file structure of the syntax, semantics, ide, format, and roughly crates
+description: The file structure of the syntax, semantics, ide, format, roughly, and repl crates
 ---
 
 This document is the authoritative file structure for Roughly's code. The
@@ -16,6 +16,9 @@ keep their own (frozen) layout and are not documented here.
   including the annotation type grammar and statement-anchored recovery
 - `kind.rs` — `SyntaxKind`: every token and node kind, with display names
 - `ast.rs` — typed AST views (`Option`-returning accessors over the raw tree)
+- `literate.rs` — `.Rmd`/`.qmd`/`.Rnw` documents as the R program their chunks
+  contain, converted length-preservingly (every non-R character becomes a
+  space) so offsets need no translation
 - `reparse.rs` — statement-splice incremental reparse (an optimization; parse
   correctness never depends on it)
 - `testing.rs` — the fixture harness (`.test` format, `ROUGHLY_BLESS`,
@@ -23,8 +26,9 @@ keep their own (frozen) layout and are not documented here.
 
 ## `semantics` crate (`src/semantics.rs` is the root)
 
-- `semantics.rs` — the salsa database, inputs (`SourceFile`, `ProjectFiles`,
-  typing-mode directives), the item tree with insertion-stable identities,
+- `semantics.rs` — the salsa database, two of its four inputs (`SourceFile`
+  and `ProjectFiles`; `PackageMetadata` and `StubSources` live with their own
+  modules), the item tree with insertion-stable identities,
   per-item syntax anchoring, the package interface (`global_scheme` fixpoint),
   and item-span queries
 - `hir.rs` — per-item HIR: expressions with item-relative ranges, lowering
@@ -42,7 +46,11 @@ keep their own (frozen) layout and are not documented here.
 - `stubs.rs` — the `.Rtypes` corpus: parsing, the assembled library
   (schemes, nominals, masked verbs, namespace exports), and loader-problem
   reporting
+- `metadata.rs` — the `PackageMetadata` input: NAMESPACE and DESCRIPTION
+  parsing, import and dependency resolution
 - `lints.rs` — the style lints and their configuration types
+- `testing.rs` — the semantic pipeline's invariant battery, shared by the
+  fuzz harness and the coverage-guided targets
 - `diagnostics.rs` — the diagnostics edge (parse-stage and full per-file
   sets, strict rendering) and the one user-facing `TypeRenderer`
 
@@ -72,3 +80,14 @@ The preserving formatter over the syntax tree, plus its configuration types.
 - `namespace.rs` — NAMESPACE import parsing and validation
 - `position.rs` — the line index: byte offsets ↔ line/column in bytes or
   UTF-16 code units
+- `stats.rs` — the performance diagnosis behind `roughly debug stats`
+- `repl_completer.rs` — completion for the interactive console
+
+## `repl` crate (`src/repl.rs` is the root)
+
+Backs `roughly repl` and `roughly run` by locating and loading the system R at
+runtime, so the rest of the workspace builds and analyses R with no R present.
+
+- `repl.rs` — the session: evaluation, the read-eval-print loop, exit codes
+- `libr.rs` — the runtime binding to R's shared library (no build-time link)
+- `console.rs` — the terminal front end

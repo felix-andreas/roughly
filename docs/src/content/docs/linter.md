@@ -87,7 +87,7 @@ calculate_mean <- function(dataSet) {
   # ...
 }
 
-# Trailing comma (warning)
+# Trailing comma (error)
 result <- sum(1, 2, 3,)
 ```
 

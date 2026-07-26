@@ -8,7 +8,7 @@ codebase.
 
 ## Project layout
 
-Roughly is a Rust workspace. The shipping language tool is five crates:
+Roughly is a Rust workspace. The shipping language tool is six crates:
 
 - **`crates/syntax`** — the hand-written lexer and recursive-descent parser, producing lossless
   [rowan](https://crates.io/crates/rowan) syntax trees; `#:` type annotations are first-class
@@ -18,17 +18,19 @@ Roughly is a Rust workspace. The shipping language tool is five crates:
 - **`crates/format`** — the non-invasive formatter (depends only on `syntax`).
 - **`crates/ide`** — editor features as pure reads over `semantics`: hover, navigation, rename,
   completion, signature help, inlay hints, symbols, code actions.
-- **`crates/roughly`** — the product binary: the CLI (`check`, `fmt`) and the LSP server.
+- **`crates/roughly`** — the product binary: the CLI (`check`, `fmt`, `server`, `repl`, `run`) and
+  the LSP server.
+- **`crates/repl`** — the interactive R console behind `roughly repl` and `roughly run`, embedding
+  the system R by locating and loading it at runtime.
 
 The workspace also contains the **frozen legacy stack** (`legacy/analysis-legacy`,
 `legacy/engine-legacy`, `legacy/roughly-legacy`, plus its `legacy/fixtures` harness): the previous
-implementation, kept in-tree as the cross-implementation oracle and benchmark baseline for
-`legacy/differential`, which runs every fixture suite through both stacks and compares findings. Do
-not extend the legacy stack, and never share or abstract code between the two stacks — data files
-may be duplicated freely instead.
+implementation, kept in-tree only as the benchmark baseline for `legacy/differential`. The parity
+program that once ran every fixture through both stacks is complete and retired. Do not extend the
+legacy stack, and never share or abstract code between the two stacks — data files may be
+duplicated freely instead.
 
-**`crates/repl`** backs `roughly repl`, an interactive R console that embeds the system R
-**without any build-time link dependency**: the R shared library is located (`R_HOME`, or
+The console embeds R **without any build-time link dependency**: the R shared library is located (`R_HOME`, or
 `R RHOME` from `PATH`) and loaded at runtime, so the whole workspace builds and its unit tests run
 on machines with no R at all. Only *running* the console needs R; it runs on Unix (through the
 `ptr_R_ReadConsole` hook globals) and on Windows (through the `Rstart` callback struct). Its
@@ -48,12 +50,12 @@ The repo-root `justfile` names every day-to-day action; `just` (with no argument
 The ones that matter most:
 
 ```sh
-just gate                # the per-slice gate: battery + clippy -D warnings + fmt check
-just battery             # every suite of both stacks (the differential arms included)
+just gate                # the full per-slice gate: battery, clippy -D warnings, fmt check
+just battery             # the workspace test battery (excludes rofy and zed_roughly)
 just fixture <group__case>          # one focused fixture case
 just bless -p semantics --test ...  # re-bless fixture expectations (review the diff!)
-just fuzz-differential   # the seeded cross-stack fuzz arm (FUZZ_ITERS scales)
-just corpus-differential # the real-file corpus instrument (fetch the corpus first)
+just fuzz-deep           # the long-running seeded fuzz pass (FUZZ_ITERS scales)
+just fuzz-run <target>   # one coverage-guided fuzz target
 just stats <path>        # the workspace performance diagnosis
 ```
 
@@ -63,10 +65,9 @@ The raw commands, for environments without `just`:
 cargo build                                   # the product crate (workspace default member)
 cargo test                                    # the product crate's suites
 cargo test --workspace --exclude rofy --exclude zed_roughly
-                                              # everything: all five crates, the differential,
-                                              # and the frozen legacy stack
+                                              # everything: all six crates, the benchmark
+                                              # harness, and the frozen legacy stack
 cargo test -p semantics                       # the analysis core's fixture + fuzz suites
-cargo test -p differential                    # the cross-stack differential gate
 cargo test -p format --test test_format_fixtures
 ```
 
@@ -117,15 +118,11 @@ test_format_docs` instead.
 - Press ▷ to run the launch config (F5).
 - In the [Extension Development Host](https://code.visualstudio.com/api/get-started/your-first-extension#:~:text=Then%2C%20inside%20the%20editor%2C%20press%20F5.%20This%20will%20compile%20and%20run%20the%20extension%20in%20a%20new%20Extension%20Development%20Host%20window.) instance of VSCode, open a document with a `.R` extension.
 
-### Words of warning
+### If the language server never spawns
 
-The `launch.json` contains a setting:
-
-```json
-"autoAttachChildProcesses": true,
-```
-
-For me this led to the issue that the language server wasn't spawned because I had `CodeLLDB` from `nixpkgs` installed.
+`launch.json` sets `"autoAttachChildProcesses": true`. Some debugger extensions — `CodeLLDB`
+installed from `nixpkgs` is a known case — intercept the child process and the server never
+starts. Disable the extension or turn that setting off.
 
 ## Formatting: why the code is imperative
 

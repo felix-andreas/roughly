@@ -4,10 +4,10 @@ description: The standard-library stub format (.Rtypes declaration files) that t
 ---
 
 :::note[Status]
-The standard-library stub format ships. The corpus is ~560 typed declarations across nine
+The standard-library stub format ships. The corpus is ~930 typed declarations across eleven
 declaration-only `.Rtypes` stub files in the repository's top-level `types/` directory (`base`,
 `stats`, `utils`, `methods`, `graphics`, `grDevices`, `datasets`, plus the conditional
-`data.table`, `dplyr` and `testthat`), alongside generated `.exports` [manifests](#export-manifests) covering
+`data.table`, `dplyr`, `ggplot2` and `testthat`), alongside generated `.exports` [manifests](#export-manifests) covering
 every namespace R ships (the attached ones, the `::`-only ones such as `tools` and `parallel`,
 and the conditional packages), all loaded and bound into the checker as a **set-once input** that
 never invalidates a package edit (see [Incremental hygiene](#incremental-hygiene)). Project
@@ -190,7 +190,7 @@ more, every real export outside that subset would warn as unresolved — the che
 namespace's `.Rtypes` file is paired with a `types/<namespace>.exports` file listing every name the
 namespace really exports, one per line, generated from a live R session by
 `scripts/export-manifests.R` (the header records the R version; rerun the script against a newer R
-to refresh all eight).
+to refresh all eighteen).
 
 Manifest names are known globals with the weakest possible claim:
 
@@ -218,7 +218,7 @@ The manifests mirror how R exposes each namespace, in three tiers:
   `tcltk`): `pkg::` reads validate in every project — `tools::file_ext(path)` needs no
   `library(tools)`, exactly as in R — while bare reads resolve only once the project attaches
   or declares the package
-- **conditional** (`data.table`, `dplyr`): manifest and stubs activate together
+- **conditional** (`data.table`, `dplyr`, `ggplot2`, `testthat`): manifest and stubs activate together
   ([Conditional namespaces](#conditional-namespaces)); inactive packages' names warn, bare and
   qualified alike
 
@@ -292,8 +292,8 @@ override winning a name's type never un-exports it from its declaring namespace.
 - Every shipped `.Rtypes` file is harvested into the one flat map, folded in file order — a later
   *source* redeclaring a name replaces its whole entry (the same rule that governs project
   overrides), while repeated declarations *within* one source build the name's overload set. The
-  six default-attached namespaces (`base`, `stats`, `utils`, `methods`, `graphics`, `grDevices`)
-  are thus attached to the base scope together; conditional namespaces join the fold only when
+  seven default-attached namespaces (`base`, `stats`, `utils`, `methods`, `graphics`, `grDevices`,
+  `datasets`) are thus attached to the base scope together; conditional namespaces join the fold only when
   active.
 - The flat map is seeded into the per-document inference template, so every stub name resolves as a
   bare global regardless of which shipped file declared it. A name's first scheme becomes its plain
@@ -306,8 +306,8 @@ override winning a name's type never un-exports it from its declaring namespace.
 
 ### Conditional namespaces
 
-Some shipped stubs describe packages R does **not** attach by default — today `data.table`, `dplyr`
-and `testthat`. Folding them in unconditionally would let `fread`, `mutate` or `expect_equal` resolve
+Some shipped stubs describe packages R does **not** attach by default — today `data.table`, `dplyr`,
+`ggplot2` and `testthat`. Folding them in unconditionally would let `fread`, `mutate` or `expect_equal` resolve
 (and steal a typo warning) in projects that never use them, so a conditional namespace joins the
 assembly only when the project uses the package:
 
@@ -355,7 +355,7 @@ interner — the same isolation the `.Rtypes` stub-buffer path keeps.
 
 ### Incremental hygiene
 
-In the [query engine](/architecture#incremental-analysis-the-query-engine) the stub library is a
+In the [query engine](/architecture#the-semantics-database) the stub library is a
 **set-once input**: it is established once and its revision never advances, so it can never invalidate
 a query that reads it. That is the entire isolation property — a stub never triggers recomputation
 because it never changes — and it is automatic, not something a separate check must enforce.

@@ -2125,6 +2125,90 @@ impl LanguageServer for ServerState {
         })
     }
 
+    /// Format the selection, snapped outwards to whole top-level statements
+    /// and whole lines. R's top-level statements are laid out independently —
+    /// each starts at column zero and nothing above it changes its
+    /// indentation — so formatting that slice alone gives exactly what
+    /// formatting the whole file would have given for those lines.
+    fn range_formatting(
+        &mut self,
+        params: lsp_types::DocumentRangeFormattingParams,
+    ) -> BoxFuture<'static, Result<Option<Vec<lsp_types::TextEdit>>, Self::Error>> {
+        self.read(move |worker| {
+            let Some(path) = worker.document_path(&params.text_document.uri) else {
+                return Ok(None);
+            };
+            let Some(&file) = worker.files.get(&path) else {
+                return Ok(None);
+            };
+            let text = worker.text(file);
+            let selection = TextRange::new(
+                worker.to_offset(&text, params.range.start),
+                worker.to_offset(&text, params.range.end),
+            );
+
+            let root = syntax::parse(&text).syntax_node();
+            let mut covered: Option<TextRange> = None;
+            for node in root.children() {
+                let node_range = node.text_range();
+                // An empty selection (a bare cursor) still picks the statement
+                // it sits in, so "format selection" with nothing selected
+                // formats the statement under the caret rather than nothing.
+                let intersects = node_range.start() < selection.end()
+                    && selection.start() < node_range.end()
+                    || node_range.contains(selection.start());
+                if !intersects {
+                    continue;
+                }
+                covered = Some(match covered {
+                    Some(current) => current.cover(node_range),
+                    None => node_range,
+                });
+            }
+            // A selection holding no statement (blank lines, comments only)
+            // has nothing to lay out.
+            let Some(covered) = covered else {
+                return Ok(None);
+            };
+
+            let start = text[..usize::from(covered.start())]
+                .rfind('\n')
+                .map_or(0, |index| index + 1);
+            let end = text[usize::from(covered.end())..]
+                .find('\n')
+                .map_or(text.len(), |index| usize::from(covered.end()) + index);
+            let slice = &text[start..end];
+
+            match format::format(slice, worker.config.format) {
+                Ok(formatted) => {
+                    // The replaced span stops before the line terminator, so
+                    // the formatter's trailing newline would add a blank line.
+                    let formatted = formatted.trim_end_matches('\n').to_owned();
+                    if formatted == slice {
+                        return Ok(Some(Vec::new()));
+                    }
+                    let range = worker.to_range(
+                        &text,
+                        TextRange::new(
+                            TextSize::try_from(start).unwrap_or_default(),
+                            TextSize::try_from(end).unwrap_or_default(),
+                        ),
+                    );
+                    Ok(Some(vec![lsp_types::TextEdit {
+                        range,
+                        new_text: formatted,
+                    }]))
+                }
+                // A refusal (syntax errors) surfaces as "no edits", exactly as
+                // whole-document formatting does.
+                Err(error) => {
+                    tracing::error!("range formatting failed: {error:?}");
+                    Ok(None)
+                }
+            }
+        })
+    }
+
     fn document_symbol(
         &mut self,
         params: lsp_types::DocumentSymbolParams,
