@@ -1506,8 +1506,19 @@ call site:
   contract than the calls it might make. Go-to-definition on the name points at the **first**
   declaration, where the set begins
 
-Only a plain or namespace-qualified stub name can be overloaded. A local or package binding that
-shadows the name disables its overload set — the binding wins everywhere, calls included.
+**Only a declaration file can overload a name**, and that boundary is deliberate. Overloading is the
+one place this type system departs from Hindley-Milner: a name with several signatures has no single
+most general type, so a call has to be *resolved by search* rather than inferred, which costs both
+the principal-type guarantee and the speed that comes with plain unification. That price is worth
+paying for a fixed, curated corpus describing a standard library nobody designed with types in mind —
+`min` and `abs` have no principal scheme — and it is not worth paying across a whole codebase. So a
+`#:` annotation on your own function declares exactly one signature, and always will; if you want one
+name to accept several shapes, give the parameter a [union type](#union-types) or take the shapes
+apart into separate functions.
+
+A local or package binding that shadows a stub name disables its overload set — the binding wins
+everywhere, calls included. Project [override stubs](/stdlib-stubs#override-precedence) may declare
+sets, since a `.Rtypes` file is a declaration file for foreign code wherever it lives.
 
 ### Indexing
 

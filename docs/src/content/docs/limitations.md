@@ -100,6 +100,21 @@ A project's own `%op%` is deliberately left opaque: it may be an NSE wrapper who
 quoted rather than evaluated (magrittr's `%>%` is the canonical case), and checking that as an
 ordinary call would reject correct code.
 
+## One signature per function
+
+A `#:` annotation declares exactly one signature, and there is no way to give your own function
+several. The standard-library declarations do have them — `sum` is `integer` in and `integer` out but
+`double` in and `double` out — and that is a deliberate asymmetry rather than something to be
+extended later.
+
+A name with several signatures has no single most general type, so a call to it has to be resolved by
+trying candidates instead of inferred outright. That costs the guarantee that makes this checker fast
+and its answers stable. It is worth paying for a small curated corpus that has to describe a standard
+library nobody designed with types in mind, and it is not worth paying across your codebase. Where
+you would reach for an overload, a [union](/typing/reference#union-types) parameter usually says the
+same thing — `fn(x: integer | character) -> character` — and two functions with distinct names always
+do.
+
 ## Where Roughly runs
 
 `roughly check` reads `.R` files and the R chunks of `.Rmd`, `.qmd` and `.Rnw` documents. The

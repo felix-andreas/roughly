@@ -244,9 +244,21 @@ Worth revisiting only for the stronger form TypeScript's `@ts-expect-error` has:
 *itself* reports when the expected finding does not appear, turning "ignore this" into "assert a
 finding here". That is a feature, not a special case, and it would apply to every code.
 
+## The type system is Hindley-Milner, and stays fast to check (user directive)
+
+**Only admit features that are fast to check — which means HM.** The bar for any proposed addition to the type system is: does it keep inference to unification over the existing constraint mechanism, decidable and linear-ish, with no search and no global solving? If not, it does not go in, however useful it looks. Soundness and speed are not traded for expressiveness.
+
+What this rules out, so nobody re-derives it: **type classes / traits** (declined, not deferred — see the tripwire note in `typing-design.md`), **general subtyping** (subtype inference is a different, slower algorithm than unification; a declared *coercion* at a named boundary is HM and is the shape any variance work must take), and any construct requiring backtracking search over a program-wide constraint set.
+
+**The sanctioned exception is declaration files.** A `.Rtypes` stub may do things a user's own annotated code may not — today that means ad-hoc overloading. The exception is bounded on purpose: the cost of a non-principal feature is proportional to how much code it applies to, and a stub surface is a fixed, curated corpus the project itself maintains, not user code. It is also where the need is real: R's base library was never designed with types, so no principal scheme describes `min` or `abs`, and a gradual checker that cannot describe the standard library is not usable at all. A user's `#:` annotation stays pure HM, which is what keeps the *user-facing* promise ("your code, checked, fast") honest.
+
 ## Overload sets — bounded ordered probes
 
-Functions whose result type depends on the argument type get **ordered overload sets** (stub surface first; repeating a name within one `.Rtypes` source appends a candidate; a later source replaces a name's whole set). Call sites try schemes in declaration order using the existing probe-then-rollback machinery; first compatible match wins. Principal-type purity is knowingly relaxed *at overload sites only* (declaration order is semantic — the TS/mypy model). Traits/typeclasses remain the possible long-term subsumer; overloads are the pragmatic bridge and must not block a later trait design.
+Functions whose result type depends on the argument type get **ordered overload sets** (stub surface first; repeating a name within one `.Rtypes` source appends a candidate; a later source replaces a name's whole set). Call sites try schemes in declaration order using the existing probe-then-rollback machinery; first compatible match wins. Principal-type purity is knowingly relaxed *at overload sites only* (declaration order is semantic — the TS/mypy model).
+
+**Scope is the point, and it is enforced, not conventional:** only a plain or namespace-qualified name whose declarations come from a `.Rtypes` source can be overloaded (`GlobalEnv::overloads` reads the stub library and returns `None` the moment a script or package binding shadows the name). A project's own R code cannot declare an overload set, and should not gain the ability — see the HM record above. Project override stubs *can*, because a `.Rtypes` file is a declaration file for foreign code either way.
+
+**Overloads are the escape hatch, not the mechanism, and the corpus is the pressure gauge.** Of the 35 sets the corpus declares, about a dozen are atomic-family promotion (`abs`, `min`, `sum`, the `cum*` family — a numeric constraint in disguise), about a dozen are shape dispatch (`head`, `rev`, `Filter`, `lapply` — a stand-in for shape-mirroring returns, which also explains why `abs` needs one candidate per shape *and* per family), nine are S3 operator method tables (`+.Date`, `Arith.difftime` — dispatch, which needs a multi-entry table under any design and would survive untouched), and two are genuinely two-form functions. So two thirds are workarounds for two absent features, both of which are HM-compatible and both in `backlog.md`. Watch that ratio: a rising count of promotion/shape sets is the signal to build those two features, never to design traits.
 
 Three call-site rules keep selection sound (implemented in `try_overloaded_call`):
 

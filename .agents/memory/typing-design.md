@@ -2,7 +2,7 @@
 
 Forward-looking design space for Roughly's type system: questions that are **not yet decided** and the options on the table, with the current stopgap and why. This is distinct from `decisions.md` (the log of what has been *settled*) — entries here are live deliberations. When one is resolved, move the decision + rationale to `decisions.md` and delete it here. The settled contract is always `docs/src/content/docs/typing/reference.md`; nothing here is contract until it lands there.
 
-*(Resolved and moved to `decisions.md` §Beta-semantics: generic vector element types → atomic-element constraint on the existing constraint mechanism; ad-hoc overloading → ordered overload sets with probe-then-rollback, traits deferred; multi-member unions → join/annotation-only, never bound into unification variables; R variable model → mutable slots with union-at-join reads.)*
+*(Resolved and moved to `decisions.md` §Beta-semantics: generic vector element types → atomic-element constraint on the existing constraint mechanism; ad-hoc overloading → ordered overload sets with probe-then-rollback, confined to declaration files, traits declined; multi-member unions → join/annotation-only, never bound into unification variables; R variable model → mutable slots with union-at-join reads.)*
 
 ## 1. Tags / discriminated unions via a Roughly stdlib
 
@@ -20,9 +20,13 @@ Forward-looking design space for Roughly's type system: questions that are **not
 
 **Question.** How to type S3 generics (`print`, `summary`, `plot`, `format`, `predict`, …) where the result depends on the class of the first argument.
 
-**Options.** Per-class overload sets on the generic's stub (cheap once overloads land — `print : fn(x: data.frame) -> data.frame` etc.); a real class-hierarchy model with `UseMethod` awareness (heavier, needed for user-defined S3 classes); or leave generics `Any` until traits.
+**Options.** Per-class overload sets on the generic's stub (`print : fn(x: data.frame) -> data.frame`
+etc.) — available now, and the sanctioned form since it lives in a declaration file; or a class-
+hierarchy model with `UseMethod` awareness (heavier, and the only thing that reaches user-defined S3
+classes). Traits are no longer an option (§4).
 
-**Current stopgap:** S3 generics are `Any`/missing in the corpus. Revisit once overload sets are in use — overloads may cover the stdlib need without a dispatch model.
+**Current stopgap:** S3 generics are `Any`/missing in the corpus. The operator method tables that DO
+ship (`+.Date`, `Arith.difftime`) show the shape a per-class answer takes.
 
 ## 3. data.frame / matrix modeling
 
@@ -30,11 +34,26 @@ Forward-looking design space for Roughly's type system: questions that are **not
 
 **Notes.** Beta ships `data.frame` as an opaque nominal (via `@type` in `.Rtypes`) — honest but shallow. Column typing likely wants row-polymorphic records over an opaque carrier; matrix wants an element type without dimension tracking first. Both interact with `[`/`[[` semantics and with the `x[i, j]` lowering. Design after the beta semantics settle.
 
-## 4. Traits / typeclasses
+## 4. Traits / typeclasses — CLOSED, declined
 
-**Question.** A general capability mechanism (numeric, atomic-element, comparable, `+`-overloadable/S3) that could subsume the ad-hoc constraint kinds and overload sets.
+**Question (settled).** A general capability mechanism (numeric, atomic-element, comparable,
+`+`-overloadable/S3) that could subsume the ad-hoc constraint kinds and overload sets.
 
-**Notes.** Two base constraint kinds (numeric, atomic-element; plus their meet, scalar-numeric) and stub overload sets exist; if a third *independent* constraint kind or user-facing overloading pressure appears, that is the tripwire to design traits properly instead of accreting. Keep overload sets and constraints shaped so a trait system can absorb them (constraints already quantify in schemes; overloads are per-name lists). Two candidate pressures were examined and deliberately did NOT trip the wire (decisions.md): a "comparable" kind for two-flexible comparisons (nearly vacuous — R compares across atomic families), and intersection constraints for union-commitment conflicts (first-use commitment + annotation is the spec). The wire stays armed.
+**Answer: no, and the tripwire is disarmed** — the type system admits only what is fast to check,
+which means Hindley-Milner, and declaration files carry the one sanctioned exception (the record is
+in `decisions.md`, §"The type system is Hindley-Milner, and stays fast to check"). Traits are the
+textbook *correct* way to put ad-hoc polymorphism into HM — that is exactly what type classes were
+invented for, and it is why overloading is not HM — but correct is not the bar here; checkable at
+editor speed, with no vocabulary for a user to learn, is. Do not reopen this because a third
+constraint kind appears: add the constraint, or accept the imprecision.
+
+Historical note, so the reasoning is not lost: three pressures were examined against the old
+tripwire and none of them tripped it — a "comparable" kind for two-flexible comparisons (nearly
+vacuous, since R compares across atomic families), intersection constraints for union-commitment
+conflicts (first-use commitment plus an annotation is the spec), and the `T[]` element type (which
+became the atomic-element constraint on the existing mechanism). The pattern across all three is the
+useful one: what looked like it needed traits was better served by one more constraint on machinery
+that already existed.
 
 ## 5. Variadic inference bridging
 
