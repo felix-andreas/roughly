@@ -55,27 +55,53 @@ Type errors are opt-in through `[check] typing` in
 [`ry.toml`](/reference/configuration); the codes themselves are listed in
 [Diagnostic codes](/reference/diagnostic-codes).
 
+Each finding is headed by its [diagnostic code](/reference/diagnostic-codes), then the message, then
+the source it was found in. A companion location — the sibling binding an overwrite warning points at
+— is drawn nested under the finding, from its own file.
+
 ```console
 $ ry check
-warning[duplicate]: Top-level binding `value` is overwritten by a later top-level binding in this package.
- --> R/main.R:1:1
-1 | value <- 1
-    ^^^^^
- = note: the later binding is here. --> /home/you/demo/R/main.R:2:1
+duplicate
 
-warning[duplicate]: Top-level binding `value` overwrites an earlier top-level binding in this package.
- --> R/main.R:2:1
-2 | value <- 2
-    ^^^^^
- = note: the earlier binding is here. --> /home/you/demo/R/main.R:1:1
+  ! Top-level binding `value` is overwritten by a later top-level binding in this package.
+   --[R/main.R:1:1]
+ 1 | value <- 1
+   | ^^^^^
+ 2 | value <- 2
+  `->   > the later binding is here.
+         --[R/main.R:2:1]
+       1 | value <- 1
+       2 | value <- 2
+         | ^^^^^
+       3 | result <- undefined_thing(3)
 
-warning[unresolved]: I could not resolve `undefined_thing` in this package, its imports, or builtins.
- --> R/main.R:3:11
-3 | result <- undefined_thing(3)
-              ^^^^^^^^^^^^^^^
+duplicate
+
+  ! Top-level binding `value` overwrites an earlier top-level binding in this package.
+   --[R/main.R:2:1]
+ 1 | value <- 1
+ 2 | value <- 2
+   | ^^^^^
+ 3 | result <- undefined_thing(3)
+  `->   > the earlier binding is here.
+         --[R/main.R:1:1]
+       1 | value <- 1
+         | ^^^^^
+       2 | value <- 2
+
+unresolved
+
+  ! I could not resolve `undefined_thing` in this package, its imports, or builtins.
+   --[R/main.R:3:11]
+ 2 | value <- 2
+ 3 | result <- undefined_thing(3)
+   |           ^^^^^^^^^^^^^^^
 
 3 problems in 2 files
 ```
+
+Colour and rules follow the destination: a terminal gets unicode and colour (`NO_COLOR` turns the
+colour off), a pipe or a file gets the plain ASCII shown above.
 
 ## fmt
 

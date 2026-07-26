@@ -77,6 +77,25 @@ fn check_renders_one_based_positions() {
     );
 }
 
+// A snippet is a window on the source, not a box: the gutter runs unbroken
+// down every row, the range is underlined with carets, and no rule closes the
+// snippet off — a run of findings would otherwise carry one per finding.
+#[test]
+fn check_draws_the_snippet_as_a_window() {
+    let directory = project(&[("bad.R", SYNTAX_ERROR_SOURCE)]);
+    let output = ry(directory.path(), &["check", "bad.R"]);
+    let stderr = stderr(&output);
+
+    assert!(
+        stderr.contains("   --[bad.R:2:6]\n 1 | print(1)\n 2 | y <- (\n   |      ^\n"),
+        "expected an unbroken gutter and a caret underline, got: {stderr}"
+    );
+    assert!(
+        !stderr.contains("`----"),
+        "expected no closing rule under the snippet, got: {stderr}"
+    );
+}
+
 // The snippet is a window on the finding, not a printout of the file: the
 // line it sits on, and one line either side to place it.
 #[test]

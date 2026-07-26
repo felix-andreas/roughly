@@ -354,8 +354,8 @@ body violates its annotation reports the body error *and* keeps checking every c
 declared signature; otherwise a caller's mistake would stay hidden until the body was fixed.
 
 Unused (dead-store) analysis follows from the same reaching sets when the `unused` check is
-enabled: an assignment whose written value no read can observe on any path warns
-``warning[unused] `x` is assigned but never used.`` on the assigned name — not on the whole
+enabled: an assignment whose written value no read can observe on any path reports the `unused`
+warning ``x` is assigned but never used.` on the assigned name — not on the whole
 assignment, since the value being computed is not what is dead. Package-visible top-level
 assignments, parameters, `for` variables, and `.`/`_`-prefixed names are not reported.
 
@@ -1793,7 +1793,7 @@ the method, so the result stays precise per operand pairing: differencing two `D
 `difftime`, offsetting one by a count is a `Date`.
 
 A class that declares an operator but accepts no candidate for the operands at hand reports
-``error[type-mismatch] `+` is not defined between `Date` and `Date` `` rather than falling back to
+the `type-mismatch` error ``+` is not defined between `Date` and `Date`` rather than falling back to
 the numeric rules — R rejects that expression too. A class that declares nothing falls through to
 the rules below unchanged, so an opaque nominal is still a type error under arithmetic.
 
@@ -2546,9 +2546,9 @@ make_point <- function(x, y) {
 norm2 <- function(p) sqrt(p$x^2 + p$y^2)
 
 norm2("nope")
-# error[type-mismatch]: expected `Point`, found `character`
+# type-mismatch: expected `Point`, found `character`
 make_point(1)
-# error[type-mismatch]: this call supplies 1 argument, but the function requires 2
+# type-mismatch: this call supplies 1 argument, but the function requires 2
 #                       — a required argument is missing
 ```
 

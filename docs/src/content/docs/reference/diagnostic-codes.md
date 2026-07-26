@@ -8,20 +8,23 @@ Every finding ry reports carries a stable code. This page lists them all.
 ## How to read a finding
 
 ```text
-warning[unresolved]: I could not resolve `validte_url` in this package, its imports, or builtins. Did you mean `validate_url`?
- --> R/a.R:2:22
-2 | check <- function(x) validte_url(x)
-                         ^^^^^^^^^^^
+unresolved
+
+  ! I could not resolve `validte_url` in this package, its imports, or builtins. Did you mean `validate_url`?
+   --[R/a.R:2:22]
+ 1 | validate_url <- function(x) TRUE
+ 2 | check <- function(x) validte_url(x)
+   |                      ^^^^^^^^^^^
 ```
 
 | Part | Meaning |
 | --- | --- |
-| `warning` | Severity — `warning` or `error`. `--min-severity error` reports only errors and exits on them alone |
-| `[unresolved]` | The diagnostic code. Stable across message rewordings: it is what you name in a suppression comment, in `ry.toml`, and what `--output json` reports as `code` |
+| `unresolved` | The diagnostic code, heading the finding. Stable across message rewordings: it is what you name in a suppression comment, in `ry.toml`, and what `--output json` reports as `code` |
+| `!` | Severity — `!` for a warning, `x` for an error. `--min-severity error` reports only errors and exits on them alone |
 | `R/a.R:2:22` | File, line, and character column of where the finding starts |
 | `^^^^` | The exact source range the finding is about — the name, the token, or the expression, not the whole statement |
 
-Some findings add a related location on a following line, as `= note:` — `duplicate` uses it to point at the other definition. See [the CLI reference](/reference/cli) for the JSON shape.
+Some findings add a related location, drawn nested under the finding from its own file — `duplicate` uses it to point at the other definition. See [the CLI reference](/reference/cli) for the JSON shape.
 
 ## Suppressing a finding
 

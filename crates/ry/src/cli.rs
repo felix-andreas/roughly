@@ -898,37 +898,89 @@ impl miette::Diagnostic for Report<'_> {
 }
 
 /// Draws one report on stderr. The look follows the destination: colour and
-/// box drawing on an attended terminal, monochrome unicode when colour is
+/// unicode rules on an attended terminal, monochrome unicode when colour is
 /// refused, plain ASCII into a pipe or a file — a CI log and a captured
 /// expectation both want the ASCII.
 pub fn report(diagnostic: &dyn miette::Diagnostic) {
-    static HANDLER: LazyLock<GraphicalReportHandler> = LazyLock::new(|| {
-        let theme = if console::colors_enabled_stderr() {
-            GraphicalTheme::unicode()
-        } else if console::user_attended_stderr() {
-            GraphicalTheme::unicode_nocolor()
-        } else {
-            GraphicalTheme::none()
-        };
-        let handler = GraphicalReportHandler::new_themed(theme)
-            // A companion location reads as part of the finding above it, so
-            // it is drawn nested under that finding rather than as a report
-            // of its own with its own severity banner.
-            .with_show_related_as_nested(true);
-        match console::user_attended_stderr() {
-            true => handler.with_width(console::Term::stderr().size().1 as usize),
-            false => handler,
-        }
-    });
-
+    let reporter = &*REPORTER;
     let mut rendered = String::new();
-    match HANDLER.render_report(&mut rendered, diagnostic) {
-        Ok(()) => eprint!("{rendered}"),
+    if reporter
+        .handler
+        .render_report(&mut rendered, diagnostic)
+        .is_err()
+    {
         // Formatting into a `String` cannot fail; the fallback is here so a
         // reporter bug degrades the finding rather than swallowing it.
-        Err(_) => eprintln!("{diagnostic}"),
+        eprintln!("{diagnostic}");
+        return;
     }
+    let mut kept = String::with_capacity(rendered.len());
+    for line in rendered.lines() {
+        if closes_a_snippet(line, &reporter.closing_rule) {
+            continue;
+        }
+        kept.push_str(line);
+        kept.push('\n');
+    }
+    eprint!("{kept}");
 }
+
+/// The graphical reporter, built once, and the closing rule its theme draws.
+struct Reporter {
+    handler: GraphicalReportHandler,
+    closing_rule: String,
+}
+
+static REPORTER: LazyLock<Reporter> = LazyLock::new(|| {
+    let mut theme = if console::colors_enabled_stderr() {
+        GraphicalTheme::unicode()
+    } else if console::user_attended_stderr() {
+        GraphicalTheme::unicode_nocolor()
+    } else {
+        GraphicalTheme::none()
+    };
+    // A snippet is a window on the source, not a box: the gutter runs
+    // unbroken down every row of it, and the header opens with a plain rule
+    // rather than a corner that promises a frame nothing closes.
+    theme.characters.vbar_break = theme.characters.vbar;
+    theme.characters.ltop = theme.characters.hbar;
+    // Carets, not a rule, under the reported range — the underline is the one
+    // part of the drawing a reader is meant to look at.
+    theme.characters.underline = '^';
+
+    let closing_rule = format!(
+        "{}{}",
+        theme.characters.lbot,
+        theme.characters.hbar.to_string().repeat(CLOSING_RULE_WIDTH)
+    );
+    let handler = GraphicalReportHandler::new_themed(theme)
+        // A companion location reads as part of the finding above it, so it
+        // is drawn nested under that finding rather than as a report of its
+        // own with its own severity banner.
+        .with_show_related_as_nested(true);
+    let handler = match console::user_attended_stderr() {
+        true => handler.with_width(console::Term::stderr().size().1 as usize),
+        false => handler,
+    };
+    Reporter {
+        handler,
+        closing_rule,
+    }
+});
+
+/// Whether `line` is the rule miette closes every snippet with. It is drawn
+/// from the same two characters as the cause-chain arrows, so it cannot be
+/// themed away, and a run of findings reads better without one under each.
+/// Only a line that is nothing *but* the rule counts — a nested report indents
+/// its own (in the parent's colour), and R source may spell anything at all.
+fn closes_a_snippet(line: &str, closing_rule: &str) -> bool {
+    line.trim_end()
+        .strip_suffix(closing_rule)
+        .is_some_and(|before| console::strip_ansi_codes(before).trim().is_empty())
+}
+
+/// How many horizontal bars miette's snippet-closing rule carries.
+const CLOSING_RULE_WIDTH: usize = 4;
 
 /// A borrowed file behind a snippet, named for the snippet header.
 /// [`miette::NamedSource`] owns its text, which would copy the whole file into

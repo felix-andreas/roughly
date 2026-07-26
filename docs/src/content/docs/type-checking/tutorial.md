@@ -38,10 +38,13 @@ apply_discount(100, "0.2")
 ```
 
 ```text
-error[type-mismatch]: expected `double`, found `character`
- --> t.R:6:21
-6 | apply_discount(100, "0.2")
-                        ^^^^^
+type-mismatch
+
+  x expected `double`, found `character`
+   --[t.R:6:21]
+ 5 | 
+ 6 | apply_discount(100, "0.2")
+   |                     ^^^^^
 ```
 
 Found without running anything, and pointing at the argument rather than at the line that would have
@@ -58,10 +61,14 @@ apply_discount <- function(price, rate) {
 ```
 
 ```text
-error[type-mismatch]: expected `character`, found `double`
- --> a.R:3:3
-3 |   price * rate
-      ^^^^^^^^^^^^
+type-mismatch
+
+  x expected `character`, found `double`
+   --[a.R:3:3]
+ 2 | apply_discount <- function(price, rate) {
+ 3 |   price * rate
+   |   ^^^^^^^^^^^^
+ 4 | }
 ```
 
 ## 2. Inference
@@ -77,10 +84,13 @@ apply_discount(100, "0.2")
 ```
 
 ```text
-error[type-mismatch]: expected `double`, found `character`
- --> t.R:5:21
-5 | apply_discount(100, "0.2")
-                        ^^^^^
+type-mismatch
+
+  x expected `double`, found `character`
+   --[t.R:5:21]
+ 4 | 
+ 5 | apply_discount(100, "0.2")
+   |                     ^^^^^
 ```
 
 The same error. `*` is arithmetic, so `price` and `rate` are numbers — the checker worked that out
@@ -128,10 +138,14 @@ retry_count <- function(config) {
 ```
 
 ```text
-error[type-mismatch]: expected a list, found `list{retries: integer} | NULL`
- --> a.R:3:3
-3 |   config$retries
-      ^^^^^^^^^^^^^^
+type-mismatch
+
+  x expected a list, found `list{retries: integer} | NULL`
+   --[a.R:3:3]
+ 2 | retry_count <- function(config) {
+ 3 |   config$retries
+   |   ^^^^^^^^^^^^^^
+ 4 | }
 ```
 
 The `|` makes a union: `config` is *either* that list *or* `NULL`. You cannot reach into it until
@@ -166,7 +180,13 @@ to_fahrenheit <- function(t) t
 ```
 
 ```text
-error[type-mismatch]: expected `Fahrenheit`, found `Celsius`
+type-mismatch
+
+  x expected `Fahrenheit`, found `Celsius`
+   --[a.R:6:30]
+ 5 | #: fn(t: Celsius) -> Fahrenheit
+ 6 | to_fahrenheit <- function(t) t
+   |                              ^
 ```
 
 `@type` makes a name that is its own type, distinct from everything else even when the
@@ -210,10 +230,14 @@ summarise <- function(frame) {
 ```
 
 ```text
-error[strict]: strict mode: this expression has an undetermined type (`Unknown`)
- --> a.R:2:3
-2 |   frame$amount
-      ^^^^^^^^^^^^
+strict
+
+  x strict mode: this expression has an undetermined type (`Unknown`)
+   --[a.R:2:3]
+ 1 | summarise <- function(frame) {
+ 2 |   frame$amount
+   |   ^^^^^^^^^^^^
+ 3 | }
 ```
 
 Data-frame columns have no types yet, so that expression was never really checked, and without

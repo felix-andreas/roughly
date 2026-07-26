@@ -37,9 +37,9 @@ This file starts from the type-checker work; earlier history lives in the git lo
   the CLI prints — findings, companion locations, and configuration failures alike — goes through
   one graphical reporter: the diagnostic code heads the report, the source snippet is drawn with
   the reported range underlined, and a companion location is drawn nested under the finding from
-  its own file. A malformed `ry.toml` is shown in place rather than described. Colour and box
-  drawing follow the destination (a terminal gets unicode and colour, `NO_COLOR` and pipes get
-  plain ASCII). The `--output json` records are unchanged.
+  its own file. A malformed `ry.toml` is shown in place rather than described. Colour and rules
+  follow the destination (a terminal gets unicode and colour, `NO_COLOR` and pipes get plain
+  ASCII). The `--output json` records are unchanged.
 - Analysis runs on a single in-house red–green memoized query engine with latest-edit-wins
   cancellation; per-edit output is verified byte-identical to a from-scratch rebuild.
 - The R grammar tracks the published `tree-sitter-r` 1.3.0.
