@@ -567,71 +567,62 @@ Do this before deleting:
 - **Then drop `--exclude rofy` everywhere it appears** in the same change, and say so in
   `MEMORY.md` — the exclusion outliving the crate would be worse than either.
 
-## Open — naming: the `ry` toolchain and its file extensions
+## Open — rename the language and toolchain to `ry`
 
-**Decided by the user:** the typed dialect's source extension is **`.ry`**, and its sources live in a
-**`Ry/`** directory beside `R/` (`typedr-design.md` is the dialect design; note it still spells the
-extension `.Rt`, which this supersedes — the R-family convention argument was released deliberately).
+**Decided by the user: the language is `ry`, and the rename applies everywhere.** Documentation will
+be hosted at **ry-lang.org** (the user is acquiring the domain), which docs and README may reference.
+Spelling: lowercase `ry` in prose and identifiers; the source directory is `Ry/`, capitalised to sit
+beside `R/`.
 
-**Recommended and not yet settled:** rename the CLI binary from `roughly` to **`ry`** — two characters
-for a command run in a loop, and `ry` reads as "R-y". Keep **Roughly as the project name**; a project
-name differing from its binary is ordinary (ripgrep/`rg`). **Not `ryc`:** the `-c` suffix means
-*compiler* (`rustc`, `tsc`, `javac`), and this tool's product is analysis — it emits no code, and
-rust-analyzer is deliberately not `rustc`. If the dialect ships, compiling is `ry build`, a subcommand.
-`ry` is taken on crates.io by an unrelated crate, which blocks `cargo install ry` but not the binary
-name — the crate can stay `roughly` with `[[bin]] name = "ry"`.
+This also settles the extension question rather than merely surviving it: `.ry` now names the
+*language*, not a tool that might later be renamed, which was the one weakness in choosing it.
 
-**Extension family**, if the rename lands:
-
-| File | Now | Proposed |
+| Surface | From | To |
 |---|---|---|
-| Typed dialect source | — | `Ry/model.ry` |
-| Type declarations for a namespace | `types/base.Rtypes` | `types/base.ry.stub` |
-| Generated export manifest | `types/base.exports` | `types/base.ry.exports` |
-| Project config | `roughly.toml` | `ry.toml` |
+| Language and project name | Roughly | ry |
+| Binary, crate, lib | `roughly` | `ry` |
+| Dialect source | — | `Ry/model.ry` |
+| Type declarations | `types/base.Rtypes` | `types/base.ry.stub` |
+| Export manifests | `types/base.exports` | `types/base.ry.exports` |
+| Config | `roughly.toml` | `ry.toml` |
 | Suppression comment | `# roughly: allow(...)` | `# ry: allow(...)` |
+| Environment variables | `ROUGHLY_*` (7 of them) | `RY_*` |
+| Docs site | — | ry-lang.org |
 
-Why the stub extension has that shape, so it is not re-litigated:
+**Sequence the work by blast radius, not by directory.** Three tiers, and conflating them is how a
+rename breaks people:
 
-- **Compound, tool first, what-it-is last.** `base.ry.stub` is never matched by a `*.ry` glob, so it
-  can never be compiled or formatted as dialect source — which is correct, because a stub file has no
-  code in it at all. This is the `.js.flow` precedent (tool last so host tooling ignores it), the
-  opposite of `.d.ts` (host last so host tooling picks it up). Reversing to `base.stub.ry` would buy
-  free editor support and cost an exclusion in every tool that walks `Ry/`.
-- **Singular `.stub`, not `.stubs`.** Every per-module declaration file is named for what the file
-  *is*, not how many things it lists: `.d.ts`, `.h`, `.pyi`, `.mli`. Plural extensions belong to
-  free-standing lists (`.gitattributes`, `.gitmodules`) — which is also why `.exports` stays plural,
-  since that file is a flat list of names and nothing else. The asymmetry between `.stub` and
-  `.exports` is precision, not sloppiness.
-- **`stub` is already the product's word for the file** — it is the name of the diagnostic code, whose
-  text reads "reported against the stub". A `.stub` extension matches it exactly.
-- **Qualifying with `ry` fixes what `.Rtypes` loses once `.ry` exists.** "Types" stops distinguishing
-  anything when source files also carry types inline; "stub" names the property that still separates
-  them, which is having no implementation.
+1. **Free** — prose and internal identifiers. Measured surface: 35 files under `crates/`, 60 under
+   `docs/`, 49 under `legacy/`, 11 under `editors/`, 2 in `scripts/`, one CI workflow, and five root
+   files (`README.md`, `CHANGELOG.md`, `AGENTS.md`, `NOTES.md`, `Cargo.toml`). One sweep, one commit.
+   `NOTES.md` is human-maintained — leave it alone.
+2. **Breaks users, fixable with an alias** — the config filename, the suppression prefix, the seven
+   `ROUGHLY_*` variables, and the VS Code settings keys (`roughly.path`, `roughly.args`,
+   `roughly.experimentalFeatures`). Accept the new spelling and keep the old one working
+   indefinitely. **The suppression comment is the only one that lives inside users' source files**, so
+   it is the one whose cost compounds with adoption — every day it stays unaliased is more files that
+   would break.
+3. **Breaks users and cannot be aliased — the user's call, not the agent's.** The crates.io crate name
+   (`ry` is taken by an unrelated crate, so publishing needs a different name or a request to the
+   owner); the VS Code Marketplace extension identifier, which does **not** redirect — republishing
+   under a new id starts installs and ratings from zero; and the GitHub repository name, which *does*
+   redirect, so that one is comparatively safe. Do not decide these unilaterally.
 
-Work, and the traps:
+Traps specific to this rename:
 
-- **The extension matcher must change shape, not just its string.** Three sites match
-  `extension == "Rtypes"` (`crates/roughly/src/server.rs` twice, `crates/roughly/src/cli.rs` once).
-  `Path::extension()` returns only the component after the *last* dot, so `base.ry.stub` yields
-  `"stub"` — the fix is a filename suffix test (`ends_with(".ry.stub")`). **The trap is matching
-  `extension == "stub"`**, which would swallow any other tool's `.stub` file and hand back exactly the
-  generic-word collision the `ry` qualifier exists to prevent.
-- **Two things checked and confirmed harmless:** the shipped corpus maps namespace to file explicitly
-  in code (`stubs::shipped_stub_sources`), and project override filenames are arbitrary — so no
-  namespace is ever parsed out of a filename stem, and the extra dot breaks nothing there.
-- **The suppression comment is the only surface inside user source files**, so it is the one whose
-  migration cost grows with every adopter: renaming it either breaks every file containing one or
-  means carrying both prefixes. Accept `# ry: allow(...)` and keep `# roughly: allow(...)` working as
-  a permanent alias. Same treatment for `roughly.toml`, though that is one file per project rather than
-  one occurrence per suppression. Deciding early is much cheaper than deciding late.
-- Also user-visible and needing migration: the VS Code settings keys (`roughly.path`, `roughly.args`,
-  `roughly.experimentalFeatures`), every `roughly` invocation across the docs site, and the extension
-  identifier itself.
-- **Open:** whether project overrides stay one file per package under `stubs/` or collapse into a
-  single `ry.stub` at the project root beside `ry.toml`. Nothing blocks the single file — those
-  filenames carry no meaning — but per-package mirrors how the shipped corpus is organised and keeps a
-  project with several dependencies separable. Decidable later; it does not disturb the extension.
+- **The language id `roughly-type`** in the VS Code extension is what makes `#:` annotation
+  highlighting work, and it is referenced from both the extension's grammar and the server's semantic
+  tokens. Rename both halves together or highlighting silently stops.
+- **`ROUGHLY_BLESS` appears in developer muscle memory and in the testing docs**, so alias it rather
+  than only renaming it, or every contributor's fixture workflow breaks at once.
+- **Do not rename `legacy/`'s crates as part of this.** They are frozen; churning them buys nothing
+  and the eventual deletion sweep removes the directory whole. Prose mentions inside them can stay.
+
+**README, per the user:** make the joke that the better the project gets, the shorter its name gets.
+The supporting fact is verified — the legacy stack parsed R with `tree-sitter` and `tree-sitter-r`
+(still in `legacy/*/Cargo.toml`), while the current stack has its own hand-written lexer and parser in
+`crates/syntax`, which is what makes the precise syntax diagnostics possible (a missing comma, a
+disallowed trailing comma) that a general-purpose grammar cannot produce.
 
 ## Post-beta (explicitly out of scope for now)
 

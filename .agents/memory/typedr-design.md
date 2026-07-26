@@ -139,8 +139,8 @@ means a redundant build writes nothing at all.
 ## 5. Naming — decided elsewhere
 
 Source files are **`.ry`**, in a **`Ry/`** directory beside `R/`; type declarations
-are **`base.ry.stub`**. `backlog.md` §"naming: the `ry` toolchain and its file
-extensions" carries the decisions, the rejected alternatives, and the migration
+are **`base.ry.stub`**. `backlog.md` §"rename the language and toolchain to `ry`"
+carries the decisions, the rejected alternatives, and the migration
 work, including the compound-extension matcher trap. Two consequences that belong
 to *this* design rather than to the naming decision:
 
