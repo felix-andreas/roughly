@@ -419,8 +419,9 @@ below, ranked by how often a real user hits it.
   a range now — a function serves an interface when it accepts every call shape the interface
   promises — so extra optional parameters are fine while requiring too many, or refusing an
   argument the interface sends, still fail. `lapply(list(mean, sd), function(g) g(1:3))` is
-  `list[double]`. **`lapply` still drops names**, so "named list in, named list out" remains
-  inexpressible.
+  `list[double]`. `lapply` keeps its input's names too (`list[named: T]` declared as its narrower
+  first candidate), which is what forced the overload tiebreak to become plain first-match — see
+  `decisions.md`.
 - **Everything from a `data.frame` is `Unknown`, and `Unknown` satisfies every annotation** — so on
   data-frame-heavy code annotations look protective and are not. This is the design consequence that
   decides the tool's value for analysis users; it needs at minimum a way to *see* that a check was
@@ -482,6 +483,7 @@ below, ranked by how often a real user hits it.
 
 - (Design forks all DECIDED — two-flexible comparison stays unconstrained without a third constraint kind, union compatibility commits flexibles at first use in program order, NAMESPACE bare-resolution stays ungated; decisions.md has the three records.)
 - Overload candidates when touched: `is`, `extends`, `grep(value =)`, `cor` (vector vs matrix — needs matrix nominals). `Date`/`POSIXct` arithmetic refuses loudly today — revisit if real code makes it noisy.
+- **A list operation over a RECORD still loses the field types.** `rev`/`unique`/`head`/`tail`/`Filter` now declare a `list[named: T]` candidate ahead of the plain list one, so a name survives and a field read is `T | NULL` instead of a missing-field error — but a fixed-shape input coerces to a name-keyed list on the way in, so the exact field types are gone and the read stays nullable. Only a shape-mirroring return ("the same record") fixes it, and the type language has no way for a stub to say that; `rev` is the case where the claim would be exactly right (it reorders and drops nothing), while `head`/`tail`/`Filter` genuinely may drop a name and are correctly nullable. Same family as the data.frame row-type and matrix-shape designs.
 
 ## Open — editor & polish
 
@@ -514,6 +516,10 @@ below, ranked by how often a real user hits it.
 - CRAN stub auto-generation via R introspection, R-version-keyed corpora, stubtest validation (R-dependent). (NAMESPACE/DESCRIPTION awareness moved to Open — semantics by user ask.)
 
 ## Shipped ledger (one line each; rationale in `decisions.md`, contracts in the docs site)
+
+- **Shape-preserving stubs actually preserve the shape:** `Filter` returned `list[T]` for every input, so `Filter(f, c(1, 2, 3)) + 1` — R selects with `[`, which keeps the atomic type — was a hard type error; it now declares the atomic, named-list and plain-list forms in that order. `rev`/`unique`/`head`/`tail` gained the named-list candidate too, so a name read off a reordered or sliced list is no longer a missing-field error (see the residual record in §Open).
+
+- **Overload sets now read like the corpus is written, and `lapply` keeps its input's names:** the "all fits are guesses → last candidate wins" tiebreak is gone (a general `Any` fallback is already a *fact*, which was the only case it protected), so declaration order means first-match everywhere and a narrower candidate can be declared first — which is what let `lapply` gain `fn(x: list[named: T], ...) -> list[named: U]` without handing a value use of the name the narrow contract. The all-fail diagnostic no longer buries the answer behind "I tried all N signatures": when every candidate fails identically, or one candidate got strictly further into the argument list than the rest, that candidate's own finding is reported at its own argument's range. Signature help stopped requiring a commitment, so an incomplete call (`lapply(|)` — no candidate matches yet) lists the set instead of showing nothing, with the committed candidate rendered instantiated for the call site.
 
 - **`roughly check` stack overflow fixed:** the check fan-out's scoped worker threads ran on default 2 MiB stacks while cross-file interface resolution recurses per dependency edge — a ~500-file definition chain aborted the whole command (`analysis-stats` survived only because the command thread carries `ANALYSIS_STACK_SIZE`). All three scoped spawns in `cli.rs` now use `ANALYSIS_STACK_SIZE`; verified on the 5,000-file synthetic tree (SIGABRT → clean exit-1 with findings).
 

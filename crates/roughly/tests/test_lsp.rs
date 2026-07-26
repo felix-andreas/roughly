@@ -1904,7 +1904,10 @@ async fn signature_help_sends_label_with_parameter_offsets() {
         .await
         .expect("signature_help request failed")
         .expect("signature help expected inside the call");
-    let signature = &help.signatures[0];
+    // `lapply` is an overload set, so the list carries every declared
+    // candidate; the offsets under test are the active one's.
+    let active = help.active_signature.expect("an active signature") as usize;
+    let signature = &help.signatures[active];
     let parameters = signature
         .parameters
         .as_ref()
@@ -1923,7 +1926,7 @@ async fn signature_help_sends_label_with_parameter_offsets() {
         .collect();
     assert_eq!(
         parameter_texts,
-        ["x: list[T] | T[]", "f: fn(T) -> U", "...: Any"]
+        ["x: list[named: T]", "f: fn(T) -> U", "...: Any"]
     );
     assert_eq!(help.active_parameter, Some(0));
 
@@ -1945,7 +1948,8 @@ async fn signature_help_falls_back_to_substring_parameter_labels() {
         .await
         .expect("signature_help request failed")
         .expect("signature help expected inside the call");
-    let signature = &help.signatures[0];
+    let active = help.active_signature.expect("an active signature") as usize;
+    let signature = &help.signatures[active];
     let parameters = signature
         .parameters
         .as_ref()
@@ -1961,7 +1965,7 @@ async fn signature_help_falls_back_to_substring_parameter_labels() {
         .collect();
     assert_eq!(
         parameter_texts,
-        ["x: list[T] | T[]", "f: fn(T) -> U", "...: Any"]
+        ["x: list[named: T]", "f: fn(T) -> U", "...: Any"]
     );
 
     context.shutdown().await;

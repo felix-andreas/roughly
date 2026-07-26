@@ -677,7 +677,7 @@ Examples:
 
 An array-like list `list[T]` represents a list whose elements all share a common element type `T`. Array-like lists do not have fixed positional semantics and do not require element names to be statically known. They are normally introduced via annotations or by coercion from tuple-like, record-like, or map-like shapes when all values are compatible with `T`.
 
-When a fixed-shape list flows into `list[T]` and `T` is still an open inference variable — the shape of every `lapply(x, f)` call — `T` takes the **join** of the elements rather than unifying with each in turn. Otherwise the first element would pin `T` and every later one would be a mismatch, so `lapply(list(1L, "a"), f)` would fail while `for` over the same list is specified to bind `integer | character`. A `T` that is already concrete keeps the all-must-fit rule.
+When a fixed-shape list flows into `list[T]` and `T` is still an open inference variable — the shape of every `lapply(x, f)` call — `T` takes the **join** of the elements rather than unifying with each in turn. Otherwise the first element would pin `T` and every later one would be a mismatch, so `lapply(list(1L, "a"), f)` would fail while `for` over the same list is specified to bind `integer | character`. A `T` that is already concrete keeps the all-must-fit rule. Coercion into map-like `list[named: T]` joins the same way.
 
 #### Map-like lists
 
@@ -1466,23 +1466,28 @@ call site:
 - when an argument's type is still an undetermined inference variable (an unannotated parameter of an
   enclosing function, for example), a candidate may fit only *because* unification narrowed that
   variable — a guess, not a fact. Every candidate is still tried, and one that fits while leaving the
-  caller's undetermined types exactly as they were beats one that does not: the first such candidate
-  wins. When every fitting candidate would cost the caller something, nothing discriminates and the
-  **last** fitting declaration — by corpus convention the most general — is used, so a wrapper like
-  `function(x) sum(x)` keeps its parameter unconstrained. A single fitting candidate is never a guess:
-  it is the only signature that accepts the call, so it is selected and its narrowing stands
+  caller's undetermined types exactly as they were beats one that does not, whatever their
+  declaration order; among fits of the same kind the first declared wins. A wrapper like
+  `function(x) sum(x)` keeps its parameter unconstrained this way: a candidate whose parameter is
+  `Any` accepts without binding anything, which makes the general fallback a fact and puts it ahead of
+  the narrower candidates above it. A single fitting candidate is never a guess: it is the only
+  signature that accepts the call, so it is selected and its narrowing stands
   (`f(function(v) v, 1L)` selects the candidate whose second parameter is `integer`, even though the
   lambda's parameter type was open)
 - the [whole-number literal rule](#function-calls) does not steer selection: candidates are first
   tried against the arguments' true types (`sum(1, 2)` selects the `double` candidate, matching what
   R computes), and only if no candidate accepts them is the set retried with the literal-as-integer
   courtesy — so a name whose only fitting candidate wants `integer` still accepts `foo(1)`
-- when no candidate accepts the arguments, the call is a type error naming the overloaded callee and
-  how many signatures were tried, with the first candidate's failure as the concrete hint
+- when no candidate accepts the arguments, the call is a type error. It names the overloaded callee
+  and how many signatures were tried — with the first candidate's failure as the concrete hint —
+  *when the candidates disagree about what is wrong*, because then no single candidate's complaint is
+  the answer. When they all reject the call for the identical reason, or when one candidate got
+  strictly further into the argument list than every other (making it the signature the call meant),
+  that candidate's own finding is reported instead, at its own argument's range
 - every non-call use of an overloaded name (passing it as a value, hover) sees the **last**
-  declaration — by corpus convention the most general one, the same candidate a call with nothing to
-  discriminate on falls back to, so a value-use never carries a narrower contract than the calls it
-  might make
+  declaration — by corpus convention the most general one, so a value-use never carries a narrower
+  contract than the calls it might make. Go-to-definition on the name points at the **first**
+  declaration, where the set begins
 
 Only a plain or namespace-qualified stub name can be overloaded. A local or package binding that
 shadows the name disables its overload set — the binding wins everywhere, calls included.

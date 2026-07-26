@@ -128,17 +128,21 @@ sum : fn([na.rm]: logical, ...: Any) -> Any
 
 A call to the name commits the **first candidate that accepts the arguments** (so `sum(1L, 2L)` is
 `integer` and `sum(1.5, 2.5)` is `double`); the call-site selection rules — probe isolation, the
-unresolved-argument fallback to the last candidate, the two-round literal courtesy, and the no-match
-error — are specified in the Typing Reference under
-[Overload sets](/typing/reference#overload-sets). Non-call uses of the name (passing it as a
-value) see the first candidate, so the corpus orders each set most-specific first and ends it with
-the most general candidate — conventionally an `Any` fallback, which also keeps mixtures the
-candidates cannot express (`sum(TRUE, 1L)`) from erroring. A project override that redeclares a name
-**replaces its whole set**; an override that wants overloads declares all of them itself.
+fact-over-guess rule for arguments whose type is still undetermined, the two-round literal courtesy,
+and the no-match error — are specified in the Typing Reference under
+[Overload sets](/typing/reference#overload-sets). **Order each set most-specific first and end it
+with the most general candidate** — conventionally an `Any` fallback, which keeps mixtures the
+candidates cannot express (`sum(TRUE, 1L)`) from erroring, and which a non-call use of the name
+(passing it as a value) resolves to, so a value never carries a narrower contract than the calls the
+same name accepts. A project override that redeclares a name **replaces its whole set**; an override
+that wants overloads declares all of them itself.
 
-The editor shows the whole set: signature help on a call lists every declared candidate with the
-committed one active, and hover on the name shows the committed candidate's signature (the primary
-declaration when the name is not being called) plus a `(+N overloads)` note.
+The editor shows the whole set: signature help on a call lists every declared candidate — the
+committed one active and rendered with that call site's types filled in, the rest with their declared
+type parameters. An incomplete call matches no candidate yet and still lists the set, which is when it
+helps most. Hover on the name shows the signature of the committed candidate, or of the last
+declaration when the name is not being called, plus a `(+N overloads)` note; go-to-definition points
+at the first declaration.
 
 Three rules govern the current corpus:
 
@@ -149,6 +153,15 @@ Three rules govern the current corpus:
   `<T> fn(x: T[]) -> T[]` — the element parameter is constrained to atomic types — usually as the
   first candidates of an overload set whose list form threads `list[T]` and whose `Any` fallback
   covers the rest.
+  - **A function that hands back the shape it was given declares each shape, narrowest first.** R's
+    selection and reordering operations go through `[`, which preserves both the atomic type and the
+    names, so the declaration says so: `Filter` takes `T[]`, then `list[named: T]`, then `list[T]`,
+    each returning its own shape — one `list[T]` return for all three would make `Filter(f, c(1, 2)) + 1`
+    a type error on code R runs. `lapply`, `rev`, `unique`, `head` and `tail` carry the same
+    `list[named: T]` candidate ahead of their plain list one, so a named list in is a named list out.
+    A *fixed-shape* input still coerces to a name-keyed list on the way in, so a field read off the
+    result is `T | NULL`: the operation may drop a name, and the exact field types are not carried
+    through.
 - **Type-preserving reductions get overload sets.** The reductions whose result's atomic type follows
   R's coercion order rather than one input's (`sum`/`min`/`max`/`range`/`pmin`/`pmax`,
   `cumsum`/`cummax`/`cummin`, `abs` with its integer/double split) declare one candidate per atomic
@@ -259,17 +272,20 @@ The gaps below remain; each caps how precise the affected declarations can be:
 |-----|---------|------------------|
 | Trailing-dot parameter names | `stop(call. =)`, `warning(immediate. =)` | parameter names currently allow interior dots only |
 | Named-into-rest absorption | `data.frame(x = 1)`, `Sys.setenv(VAR = "v")`, `par(mfrow = ...)` | the checker never routes a named argument into `...`, so arbitrary-named-argument sinks must stay `Any` values |
-| Extra-optional-tolerant function compatibility | `lapply(words, nchar)` breaks if `nchar` declares its optional formals | function compatibility requires matching parameter counts, so callback-idiom stubs must stay single-parameter |
 | `Never` type | `stop`, `q` | without it, a `NULL` return claim would poison `x <- if (ok) v else stop(...)` joins, so these stay `Any` |
+| Shape-mirroring returns | `rev(opts)$timeout` on a fixed-shape `opts` | a declaration cannot say "the same record back", so a selection or reordering returns a name-keyed `list[named: T]` and a field read off it is `T | NULL` rather than the field's own type |
 | Nullable results under member-wise operators | `names`, `dim`, `nrow` | `T | NULL` returns false-positive on `1:nrow(df)` / `for (nm in names(x))` until flow narrowing or NULL-tolerant joins exist, so these return `Any` |
 
-Two former rows of this table have closed: the type-preserving reductions declare
+Three former rows of this table have closed. The type-preserving reductions declare
 [overload sets](#overloads-and-generics), and the element-preserving functions (`rev`, `sort`,
 `unique`, `head`, `tail`, `sample`, `rep`, the set operations) declare generic `T[]` signatures —
 the `T[]` suffix carries the atomic-element bound specified in the Typing Reference under
-[Type parameters](/typing/reference#type-parameters-and-generic-application). Shape-mirroring
-functions whose *atomic changes* with the input (`nchar`, `toupper` returning the input's shape)
-remain scalar-claim.
+[Type parameters](/typing/reference#type-parameters-and-generic-application). Function compatibility
+also stopped demanding a matching parameter count: a function serves a callback interface when it
+accepts every call shape the interface promises, so spare *optional* formals are fine and a
+callback-idiom stub can declare its real signature (`lapply(words, nchar)` works with `nchar`'s
+display formals declared). Shape-mirroring functions whose *atomic* changes with the input (`nchar`,
+`toupper` returning the input's shape) remain scalar-claim.
 
 ## Loading and namespacing
 
@@ -400,9 +416,11 @@ return. The recurring compromises are named once in the `base.Rtypes` header and
 - **scalar-claim** — an elementwise (vectorized) function declares its scalar result form
   (`character`, not `character[]`): a scalar claim coerces into every vector position and can never
   false-positive downstream, while a vector claim would break `if (grepl(...))`.
-- **type-preserving** — the result's atomic type follows the input's (`sum`, `sort`, `rev`); the
-  reductions declare [overload sets](#overloads-and-generics), and shape-mirroring names still
-  return `Any` (never a falsely-precise `double`) until the `T[]` generic design lands.
+- **type-preserving** — the result's type follows the input's (`sum`, `sort`, `rev`). Element-preserving
+  vector functions declare `<T> fn(x: T[]) -> T[]`; reductions whose result follows R's coercion order
+  declare one [overload candidate](#overloads-and-generics) per atomic family. Each set ends with an
+  `Any` fallback, which is also what a call selects when an argument's type is still undetermined —
+  a fallback taking `Any` binds nothing, so it never narrows the caller.
 - **NULL-hybrid** — the result is `T`-or-`NULL` depending on the runtime value (`names`, `dim`,
   `nrow`); returns `Any` (see the gaps table).
 - **named-formals** — declare the named formals whose *types* are worth checking (`paste`'s

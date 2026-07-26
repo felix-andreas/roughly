@@ -3852,8 +3852,12 @@ impl<'db> Checker<'db, '_> {
         // candidate was probed first would reject calls R accepts. So the
         // caller's open variables are recorded up front, every candidate is
         // probed, and a fit that left them all untouched beats one that did
-        // not. When every fit is a guess nothing discriminates, and the most
-        // general declaration — last, by corpus convention — wins.
+        // not. Among fits of the same kind declaration order decides, which is
+        // the plain first-match rule: the corpus orders every set
+        // most-specific-first and ends it with a general fallback, and a
+        // fallback taking `Any` accepts without binding, so it is a fact and
+        // already outranks any guess above it — `function(x) sum(x)` keeps its
+        // parameter open without needing a last-wins tiebreak.
         let mut caller_variables = FxHashSet::default();
         for argument in &call_arguments {
             if let Some(ty) = argument.ty {
@@ -3879,7 +3883,10 @@ impl<'db> Checker<'db, '_> {
             &[false]
         };
 
-        let mut first_error: Option<TypeError<'db>> = None;
+        // Every candidate's own first failure, in declaration order, from the
+        // strict round only: the courtesy round is a leniency, so a candidate
+        // it also rejects was already rejected on the honest reading.
+        let mut candidate_errors: Vec<TypeError<'db>> = Vec::new();
         let mut fits: Vec<(usize, bool)> = Vec::new();
         let mut fitting_courtesy = false;
         for &courtesy in rounds {
@@ -3903,8 +3910,10 @@ impl<'db> Checker<'db, '_> {
                     }
                     Err(outcome) => {
                         self.table.rollback(snapshot);
-                        if first_error.is_none() {
-                            first_error = outcome.into_iter().next();
+                        if let Some(error) = outcome.into_iter().next()
+                            && !courtesy
+                        {
+                            candidate_errors.push(error);
                         }
                     }
                 }
@@ -3918,7 +3927,7 @@ impl<'db> Checker<'db, '_> {
         // as a guess. The winner is re-probed because probing rolls back: the
         // table is in its pre-probe state again and matching is a pure
         // function of it, so the fit repeats — and this time it commits.
-        if let Some(&(index, _)) = fits.iter().find(|(_, free)| *free).or(fits.last())
+        if let Some(&(index, _)) = fits.iter().find(|(_, free)| *free).or(fits.first())
             && let Some(scheme) = schemes.get(index)
         {
             let snapshot = self.table.snapshot();
@@ -3932,14 +3941,67 @@ impl<'db> Checker<'db, '_> {
             }
         }
 
-        self.errors.push(TypeError {
-            range,
-            kind: TypeErrorKind::NoMatchingOverload {
-                name,
-                candidates: schemes.len(),
-                first: first_error.map(Box::new),
+        // Naming the set ("no overload matches — I tried all N signatures") is
+        // what the reader needs when the call could plausibly have meant any of
+        // several different shapes and those shapes disagree about what is
+        // wrong: `pick("word")` against `fn(integer)` and `fn(double)` is
+        // rejected at the same argument by both, for different reasons, and
+        // neither reason is *the* answer.
+        //
+        // Two shapes of failure have one answer, which the wrapper would bury —
+        // along with the argument's own range, since the wrapper blames the
+        // whole call:
+        //   - every candidate rejected the call for the very same reason;
+        //   - one candidate got strictly further into the call than any other,
+        //     which makes it the signature the caller meant. A two-parameter
+        //     callback passed to `lapply` is rejected at the callback by the
+        //     candidate that accepted the sequence, and at the sequence by the
+        //     candidate that wanted a named list; the first one is the finding.
+        //
+        // How far a candidate got is the index of the first argument it blamed;
+        // a whole-call verdict (wrong arity, a name no formal declares) blames
+        // no argument and got nowhere.
+        let blamed: Vec<Option<usize>> = candidate_errors
+            .iter()
+            .map(|error| {
+                call_arguments
+                    .iter()
+                    .position(|argument| argument.range == error.range)
+            })
+            .collect();
+        let single_answer = if candidate_errors.len() != schemes.len() {
+            None
+        } else if candidate_errors
+            .windows(2)
+            .all(|pair| pair.first() == pair.last())
+        {
+            candidate_errors.first()
+        } else if let Some(deepest) = blamed.iter().copied().flatten().max()
+            && blamed
+                .iter()
+                .filter(|blame| **blame == Some(deepest))
+                .count()
+                == 1
+        {
+            blamed
+                .iter()
+                .position(|blame| *blame == Some(deepest))
+                .and_then(|index| candidate_errors.get(index))
+        } else {
+            None
+        };
+        let error = match single_answer {
+            Some(error) => error.clone(),
+            None => TypeError {
+                range,
+                kind: TypeErrorKind::NoMatchingOverload {
+                    name,
+                    candidates: schemes.len(),
+                    first: candidate_errors.first().cloned().map(Box::new),
+                },
             },
-        });
+        };
+        self.errors.push(error);
         self.recorded.insert(callee, self.unknown());
         // A capture-discovery re-pass overwrites recorded state in place; a
         // call that committed on the first pass but fails on the re-pass

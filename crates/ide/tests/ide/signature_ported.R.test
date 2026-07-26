@@ -36,31 +36,37 @@ completion (1): TRUE
 hint @104: character
 
 #---- lapply_open_scheme
+# No candidate matches yet, so the set still lists and the call stays `Unknown`.
 result <- lapply($0)
 #++++
-hover 10..18: list[T]
+hover 91..99: Unknown
 definition: none
 references: none
 rename: none
-signature: fn(x: list[T] | T[], f: fn(T) -> U, ...: Any) -> list[U]
+signature: <T, U> fn(x: list[named: T], f: fn(T) -> U, ...: Any) -> list[named: U] (active)
+parameters: [x: list[named: T]] | f: fn(T) -> U | ...: Any
+signature: <T, U> fn(x: list[T] | T[], f: fn(T) -> U, ...: Any) -> list[U]
 parameters: [x: list[T] | T[]] | f: fn(T) -> U | ...: Any
 completion (128+): break, else, FALSE, for, function, if, in, Inf
 
 #---- lapply_resolved_instantiation
+# The committed candidate reads instantiated; the alternatives keep their binders.
 result <- lapply(list(1L, 2L),$0 function(item) item)
 #++++
-hover 10..51: list[integer]
+hover 93..134: list[integer]
 definition: none
 references: none
 rename: none
-signature: fn(x: list[integer] | integer[], f: fn(integer) -> integer, ...: Any) -> list[integer]
+signature: <T, U> fn(x: list[named: T], f: fn(T) -> U, ...: Any) -> list[named: U]
+parameters: x: list[named: T] | [f: fn(T) -> U] | ...: Any
+signature: fn(x: list[integer] | integer[], f: fn(integer) -> integer, ...: Any) -> list[integer] (active)
 parameters: x: list[integer] | integer[] | [f: fn(integer) -> integer] | ...: Any
 action: Add inferred type annotation for `result`
-  edit 0..0 -> "#: list[integer]\n"
+  edit 83..83 -> "#: list[integer]\n"
 action: Add inferred type annotations for the whole file
-  edit 0..0 -> "#: list[integer]\n"
+  edit 83..83 -> "#: list[integer]\n"
 completion (128+): break, else, FALSE, for, function, if, in, Inf
-hint @6: list[integer]
+hint @89: list[integer]
 
 #---- user_generic_open_call
 pick <- function(x, y) x

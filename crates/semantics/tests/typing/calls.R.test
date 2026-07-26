@@ -224,6 +224,46 @@ f <- function() {
 #++++
 f: fn() -> list[integer]
 
+#---- lapply_keeps_its_input_names
+# "named list in, named list out" — and a plain list or a vector still comes back
+# unnamed.
+f <- function() lapply(list(a = 1L, b = 2L), function(v) v + 1L)
+g <- function() lapply(list(1L, 2L), function(v) v + 1L)
+h <- function() lapply(c(1L, 2L), function(v) v + 1L)
+#++++
+f: fn() -> list[named: integer]
+g: fn() -> list[integer]
+h: fn() -> list[integer]
+
+#---- filter_hands_back_the_shape_it_was_given
+# `Filter` selects with `[`, so an atomic vector stays an atomic vector — typing
+# it as a list would reject the arithmetic below, which R runs happily.
+f <- function() Filter(function(v) v > 1, c(1, 2, 3)) + 1
+g <- function() Filter(function(v) v > 1, list(a = 1, b = 2))
+h <- function() Filter(function(v) v > 1, list(1, 2))
+#++++
+f: fn() -> double[]
+g: fn() -> list[named: double]
+h: fn() -> list[double]
+
+#---- selecting_and_reordering_a_list_keeps_its_names
+# A field read on the result is the point: without the names these are
+# missing-field errors against code R runs. The read is `T | NULL` because the
+# result is a name-keyed list whose key set is not statically known — selecting
+# (`head`, `Filter`) really can drop a name. A record-in/record-out claim would
+# be exact for `rev` alone, and the type language cannot state it for a stub.
+opts <- list(a = 1, b = 2)
+reversed <- rev(opts)$a
+deduplicated <- unique(opts)$b
+first <- utils::head(opts, 1L)$a
+last <- utils::tail(opts, 1L)$b
+#++++
+opts: list{a: double, b: double}
+reversed: double | NULL
+deduplicated: double | NULL
+first: double | NULL
+last: double | NULL
+
 #---- lapply_forwards_extra_arguments
 f <- function() {
   words <- c("alpha", "beta")

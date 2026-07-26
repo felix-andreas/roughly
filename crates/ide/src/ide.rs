@@ -557,38 +557,65 @@ pub fn signature_help(db: &dyn Db, file: SourceFile, offset: TextSize) -> Option
         .collect();
     calls.sort_by_key(|(range, id)| (range.len(), range.start(), id.0));
 
-    let (callee, function, arguments) = calls.iter().find_map(|(_, id)| {
+    let (callee, function, overloads, arguments) = calls.iter().find_map(|(_, id)| {
         let ExpressionKind::Call { callee, arguments } = &hir.expression(*id).kind else {
             return None;
         };
-        let callee_ty = *check.expression_types.get(callee)?;
-        match callee_ty.kind(db) {
-            TyKind::Function(function) => Some((*callee, function.clone(), arguments)),
-            _ => None,
-        }
+        let function =
+            check
+                .expression_types
+                .get(callee)
+                .and_then(|callee_ty| match callee_ty.kind(db) {
+                    TyKind::Function(function) => Some(function.clone()),
+                    _ => None,
+                });
+        let overloads = callee_name(&hir, *callee)
+            .and_then(|name| semantics::stubs::stubs(db)?.schemes.get(&name).cloned())
+            .filter(|schemes| schemes.len() > 1);
+        (function.is_some() || overloads.is_some())
+            .then_some((*callee, function, overloads, arguments))
     })?;
-    let function = &function;
 
-    // A call that committed one candidate of a stub overload set lists the
-    // whole declared set with the committed candidate active — the single
-    // checked callee type would otherwise show one signature and hide the
-    // alternatives the name actually offers.
-    if let Some(&selected) = check.selected_overloads.get(&callee)
-        && let Some(name) = callee_name(&hir, callee)
-        && let Some(schemes) = semantics::stubs::stubs(db)
-            .and_then(|library| library.schemes.get(&name))
-            .filter(|schemes| schemes.len() > 1)
-    {
-        let signatures: Vec<SignatureData> = schemes
+    // A call to an overloaded stub name lists the whole declared set with the
+    // committed candidate active — the one checked callee type would otherwise
+    // show a single signature and hide the alternatives the name offers. The
+    // list does not wait for a commitment: an incomplete call matches no
+    // candidate at all, and that is exactly when a reader needs to see the
+    // shapes on offer.
+    if let Some(schemes) = overloads {
+        let mut signatures: Vec<SignatureData> = schemes
             .iter()
             .map(|scheme| overload_signature(db, scheme, arguments, &hir, position.relative))
             .collect();
+        let selected = check.selected_overloads.get(&callee).copied().unwrap_or(0);
+        // The committed candidate is shown with this call site's types filled
+        // in (`fn(x: list[integer] | integer[], ...)`, not `<T> fn(x: list[T] |
+        // T[], ...)`): the checked callee type is that candidate instantiated,
+        // and a reader comparing the alternatives wants the one in force to
+        // read as their own call.
+        if let Some(function) = &function
+            && let Some(entry) = signatures.get_mut(selected)
+        {
+            let mut renderer = TypeRenderer::default();
+            let (label, parameters) = render_signature(db, &mut renderer, String::new(), function);
+            entry.active_parameter = active_parameter(
+                db,
+                function,
+                parameters.len(),
+                arguments,
+                &hir,
+                position.relative,
+            );
+            entry.label = label;
+            entry.parameters = parameters;
+        }
         return Some(SignatureHelp {
             active_signature: selected.min(signatures.len().saturating_sub(1)),
             signatures,
         });
     }
 
+    let function = &function?;
     let mut renderer = TypeRenderer::default();
     let (label, parameters) = render_signature(db, &mut renderer, String::new(), function);
     let active_parameter = active_parameter(
