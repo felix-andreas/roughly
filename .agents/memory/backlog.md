@@ -69,12 +69,19 @@ captured from the binary, ending where the reference begins — and `stdlib-stub
 internal RFC. Also landed: the diagnostics reference (all fourteen codes, tables built by running
 the tool), a CI workflow, and `limitations.md`.
 
-**Still missing, in value order:** a **"why a type checker for R"** explanation page (where the
-intrigue lives), a dedicated **adoption how-to** (the ladder is on the limitations page but deserves
-its own), and a **comparison** page (Air, Jarl, lintr, styler, languageserver, checkmate — it must
-concede formatting and lint breadth openly, because one that wins everything reads as marketing).
+**Comparison page DONE** (`comparison.md`): a capability table plus a "where you should use
+something else" section that hands formatting to Air and rule breadth to Jarl and lintr outright,
+and states the alpha/one-maintainer position. Every claim about another project was verified from
+that project's own documentation, and no benchmark number appears that was not measured here —
+second-hand numbers about competitors are the fastest way to lose the argument.
 
-**Positioning.** The headline leads with the formatter and linter — the two things Roughly loses at
+**Still missing:** a **"why a type checker for R"** explanation page (where the intrigue lives) and
+a dedicated **adoption how-to** (the ladder is on the limitations page but deserves its own).
+
+**Positioning (partly addressed — the comparison page landed and the primacy claim is now
+defensible: "the only one that infers types" rather than "the first one", since two unmaintained
+annotation-only attempts exist and a hostile reader finds them in one search).** The headline leads
+with the formatter and linter — the two things Roughly loses at
 today (Posit's Air is bundled in Positron; Jarl ships 71 rules with `--fix` and an LSP, 140× faster
 than lintr) — and buries the one thing nobody else has. Measured facts the docs never state: 854
 files / 166k lines in 3.6s, and lintr 38.2s vs 0.47s on dplyr. Research confirms **no one has ever

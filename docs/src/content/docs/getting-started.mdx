@@ -1,6 +1,6 @@
 ---
 title: Getting Started
-description: What Roughly does for your R code — catch type errors before you run, get a real IDE, and keep one consistent style
+description: Modern developer tooling for R — a real editor experience, a type checker, and one consistent style, in a single binary
 ---
 
 R will happily run this function. It will even work — until the day `raw` is
@@ -32,10 +32,14 @@ error[type-mismatch]: expected a numeric value (`integer` or `double`), found `i
       ^^^^^
 ```
 
-That is the pitch in one example: **Roughly is a static type checker for R** — the
-first one — wrapped in a fast, all-in-one toolchain written in Rust. It reads the
-R you already have, infers what your code means, and tells you where it cannot
-mean what you wrote.
+**Roughly is modern developer tooling for R.** One binary, written in Rust: an
+editor experience that actually understands your project, a type checker that
+reads the R you already have, a formatter, and a linter. It needs no R
+installation and no changes to your code.
+
+What ties it together is the part the example above shows: Roughly works out
+what your code *means*. Hover, completion, go-to-definition, rename and the
+type errors are all built on that one piece of knowledge.
 
 ## Catch bugs before you run
 
