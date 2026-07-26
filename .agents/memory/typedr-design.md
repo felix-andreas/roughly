@@ -1,261 +1,256 @@
-# Kinds and exhaustive dispatch in R
+# Inline type syntax for R (a compiled dialect)
 
-Status: proposal. §4 is ready to build and valuable on its own. §5 needs the
-questions in §6 answered first.
+Status: proposal, nothing implemented. This document covers one thing — putting
+types where the code is instead of in comments — plus the file-extension decision
+and a survey of what owning a syntax would make possible later.
 
-## 1. The gap
+## 1. What is proposed
 
-R's way of saying "this value is one of several kinds" is the `class` attribute,
-and its way of handling one is a chain of `inherits` tests:
+Today a type is written in a `#:` comment above the thing it describes:
 
 ```r
-area <- function(shape) {
-  if (inherits(shape, "Circle")) pi * shape$r^2
-  else if (inherits(shape, "Square")) shape$s^2
+#: fn(region: character, amount: double) -> double
+fee_for <- function(region, amount) { ... }
+```
+
+The proposal is a source language where it is written at the position it
+describes, compiled to plain R:
+
+```
+fee_for <- function(region: character, amount: double) -> double { ... }
+```
+
+The `#:` form is not deprecated by this and stays the only carrier for ordinary
+`.R` files. It is also the compile target (§4).
+
+## 2. Why the comment carrier costs something
+
+Comments were chosen so that annotated code stays ordinary R, and that was the
+right trade. But the choice has four consequences, and they are the motivation
+for this proposal — not "types look nicer inline".
+
+**Every parameter name is written twice.** `function(region, amount)` already
+names the parameters; the annotation names them again. Rename one and both must
+change. The expanded form doubles it again, one `@param` line per parameter.
+Duplication that a tool could eliminate is the ordinary reason to move a
+declaration next to what it declares.
+
+**Attachment rules exist only because the type is somewhere else.** A `#:`
+comment binds to the statement below it, so the binding can be broken: an
+intervening plain `#` comment detaches it, and interleaving with roxygen's `#'`
+lines — the first thing a package author tries — does too. That was a real
+complaint from an adoption review. None of these rules would exist if the type
+were in the parameter list, because there would be nothing to attach.
+
+**Some positions cannot be annotated at all.** A `#:` comment attaches to
+statements, and a lambda inside a call argument is not a statement:
+
+```r
+out <- lapply(xs, function(v) v + 1L)     # `v` has no annotatable position
+```
+
+Verified: writing `#: fn(character) -> character` beside that lambda is **silently
+ignored** — a deliberately contradictory type produced no diagnostic. So this is
+not only a gap but a quiet one. (Independently: an annotation in a position that
+cannot attach should be reported rather than dropped. Worth fixing in the comment
+carrier regardless of this proposal.)
+
+**Annotating a local is noisy.** It works — a `#: integer` line above a local
+assignment is checked, verified — but it costs a whole line for one word:
+
+```r
+count: integer <- 0L        # proposed
+```
+
+Note what is *not* on this list: capability. Everything expressible inline is
+expressible in a comment, apart from the lambda case. This proposal is about the
+notation being in the right place, and §7 is where new capability would come from.
+
+## 3. The syntax
+
+Three positions, all reusing the existing type notation verbatim — same type
+names, same generics (`<T: numeric>`), same shapes. No second type language.
+
+```
+fee_for <- function(region: character, amount: double) -> double {
+  if (region == "north") amount * 0.07 else amount * 0.05
 }
+
+count: integer <- 0L
+
+lapply(xs, function(v: integer) v + 1L)
 ```
 
-Add a third kind and `area` returns `NULL` for it. The `NULL` travels and fails
-somewhere else — the failure this tool exists to prevent. Nothing in R reports it.
+Parameter types after `:`, return type after `->`, binding types after `:`. The
+optional-parameter and generic forms carry over unchanged from the comment
+notation, because they are the same grammar.
 
-## 2. Values already get kinds
+This is not a large parser change. The lexer already tokenizes the full type
+notation inside `#:` regions and the annotation parser already builds real syntax
+nodes from it. The dialect enables those nodes in three expression positions; it
+does not invent a notation.
 
-This much works today, unchanged:
+## 4. Compiling to R
+
+**The output is annotated R.** Each inline type is emitted as the `#:` comment
+that means the same thing, so the generated file independently type-checks under
+today's contract:
 
 ```r
-#: @type Circle {list{r: double}}
-#: @type Square {list{s: double}}
-#: @alias Shape {Circle | Square}
-
-#: @new Circle
-circle <- structure(list(r = 2), class = "Circle")
-
-#: fn(shape: Shape) -> double
-area <- function(shape) 1
-area(circle)          # accepted
+#: fn(region: character, amount: double) -> double
+fee_for <- function(region, amount) { ... }
 ```
 
-`@new` mints the nominal type; the `class` attribute makes the value a real S3
-object at run time. So the missing pieces are narrower than they look: the checker
-cannot **narrow** a kind inside a branch (§4), and cannot tell you a branch is
-**missing** (§5). Minting is solved.
+Two reasons for that target rather than deleting the types. It gives a complete
+correctness test almost for free — checking the source and checking its output
+must produce the same findings, with positions mapped — and the generated file
+stays self-describing for anyone reading it without the original. §2's complaints
+about the comment form do not apply to generated output: duplication and
+attachment are the compiler's problem there, not a human's.
 
-## 3. The type never comes from the class attribute
+**Positions are mapped, not preserved.** Emitting a `#:` line above a statement
+shifts everything below it, so one-to-one line identity is impossible. The
+compiler keeps a line map and every diagnostic reports a position in the file the
+author wrote. Generated files never carry findings of their own.
 
-The tempting shortcut is to read `class = "Circle"` as a declaration of type.
-Three reasons not to, and together they answer whether a separate attribute like
-`tag` would give better control.
+**Generated files are committed.** R packaging needs real sources under `R/`, and
+a reviewer needs to see what ships. Each generated file carries a header naming
+its source and a hash of it, so a hand edit or a stale file is detected rather
+than silently merged; `roughly build --check` fails on either, the same shape as
+`roughly fmt --check`. Output is deterministic because it renders through the
+existing formatter.
 
-**It would reverse a settled contract.** `reference.md` states that "`@new` is the
-ONLY nominal introduction: a checked annotation on a structural value is a type
-error even when the value matches the representation". A second, weaker minting
-path — matching by representation, silently producing a plain record when the
-representation does not fit — is exactly the duplicated-source-of-truth case the
-design bar says to stop for. `decisions.md` records this hole being found and
-closed once already.
+**The editor never writes.** The language server analyses typed sources directly
+and publishes findings on them; generation happens only in `roughly build` and in
+a single `roughly build --watch` process the user starts. Two editors open on one
+project would otherwise be two processes writing one path. This costs nothing in
+the editor, because a typed source shadows its generated twin — the twin is
+excluded from analysis when the source exists, so each definition is seen once.
 
-**It would reject correct code.** R class vectors are usually longer than one
-entry, and taking the first is a guess rather than a gap:
+## 5. The file extension
 
-```r
-class(dplyr::group_by(df, a))   # "grouped_df" "tbl_df" "tbl" "data.frame"
-```
+**`.Rt`.**
 
-Minting from the first entry types that value as `grouped_df`, which then fails at
-any parameter annotated `data.frame` — code that is accepted today, and correct.
-The project's rule for a construct it cannot model is refusal to `Unknown`, never
-a guess; asserting an exact nominal identity for a value the checker knows is also
-three other things is a guess.
+R's family puts the `R` first and follows it with a short lowercase mnemonic:
+`.Rmd`, `.Rnw`, `.Rd`, `.Rout`, `.Rproj`, `.Rprofile`, `.Rbuildignore`. `.Rt`
+follows that pattern, sorts beside `.R` in a listing, and is unclaimed by R's own
+tooling (checked against the `tools` package and R's `share` tree). The prefix
+also already means "R-family, not R itself" — `.Rmd` is markdown — so it carries
+no false promise that R can execute the file.
 
-**It is where the control comes from.** Because a kind is minted only where the
-checker sees `@new`, a `class` attribute it did not mint confers nothing: a value
-arriving from another package with `class = "Circle"` is not this project's
-`Circle`. That is the property a private `tag` attribute was meant to buy, and it
-is already available — so the extra attribute would cost the thing that makes
-kinds worth having. A `tag`ged value is not an S3 object: `print.Circle` would not
-dispatch, `inherits()` would not see it, and every package that branches on class
-would see a bare list. Reusing `class` keeps the runtime carrier idiomatic while
-the *type* stays closed.
+Rejected:
 
-So: **the class attribute is the runtime carrier, and the annotation is the
-type.** They are set together at one site and never inferred from each other.
+- **`.tR`** reverses the convention; nothing in R's ecosystem front-loads a
+  qualifier. It reads as a typo of `.R`, and on a case-insensitive filesystem it
+  is the same file as `.tr`, which signals nothing.
+- **`.TypedR`** is self-documenting but no language ships its full name as an
+  extension — TypeScript is `.ts`, PureScript is `.purs` — because the cost is
+  paid every time it is typed, and mixed case mid-extension invites mistakes.
+- **`.ty`** is taken by an existing typed-R project (§8) and is not R-family.
+- **`.Rty`** also follows the convention and is more explicit; it is the runner-up
+  if `.Rt` proves too terse in practice.
 
-*(Rejected middle option, recorded so it is not re-proposed: an opt-in marker
-inside the class vector, `class = c("Circle", "roughly_kind")`. It gives
-closed-world detection while staying S3, but writes tool-specific strings into
-user data and forfeits idiomatic output.)*
+**Stub files stay `.Rtypes`.** The convention elsewhere is host extension plus a
+marker (`.d.ts`, `.pyi`, `.rbi`), which would suggest `.Ri` and would make a tidier
+family, but renaming a shipped, documented surface for symmetry is not worth it.
+`.Rt` and `.Rtypes` already read as siblings.
 
-## 4. Step one: `inherits()` narrows
+**The source directory needs one packaging detail.** Typed sources cannot live in
+`R/` — that is where their output goes — so they need a sibling directory, and R
+package layout already claims `src/` for compiled code. Whatever it is called, it
+must be listed in `.Rbuildignore`: `R CMD check` emits a NOTE for non-standard
+top-level directories, and the typed sources should not ship in the tarball
+anyway, since the generated R is what R runs.
 
-The narrowing machinery today covers `is.null` and the `is.*` family. Extending it
-to `inherits` makes this check, with the else branch knowing `shape` is a `Square`:
+## 6. What it costs, and where to start
 
-```r
-if (inherits(shape, "Circle")) pi * shape$r^2 else shape$s^2
-```
+A `.Rt` file is not R. Until it is compiled, roxygen2 will not document it,
+`devtools::load_all()` will not load it, RStudio will not highlight it, and CRAN
+will not accept it. Every contributor who touches a typed source needs this tool
+installed.
 
-**It narrows by name, not by reading attributes.** The tested string is matched
-against the *member names* of the subject's union. Nothing inspects a runtime
-class, so §3's argument is untouched.
+The risk is not that a build step is unfamiliar — `R CMD build` is one, and
+roxygen2 is code generation that most modern packages already run. It is that the
+*source of truth* stops being R, for collaborators and for CRAN.
 
-**Two cases must be handled rather than fall through.** If the tested name is an
-`@alias` for a union covering every member, the test is statically true and
-narrows nothing. If it names something no member can be — a typo, or an unrelated
-class — the kept set is empty; today the refinement is silently dropped and the
-branch body is checked against the unnarrowed union, which is a wrong answer with
-no diagnostic. It should report that no member of the union can have that class.
+**One corner escapes almost all of it: standalone scripts.** `roughly run
+script.Rt` can type-check, compile in memory and execute through the R runtime the
+REPL already embeds — no generated file, no packaging, no collaborator toolchain,
+nothing committed. That is where a dialect is cheapest to try and cheapest to
+abandon, and it answers the adoption question with evidence instead of prediction:
+if a typed script is pleasant enough that people want it for packages too, the
+packaging half has earned its cost.
 
-**Cost, stated accurately.** This is not a table row. Guard recognition currently
-requires exactly one unnamed argument that is a bare name (`check.rs`, the
-`[argument] = arguments.as_slice()` gate), and the discriminating payload here is
-the *second* argument's literal, so both the recognition shape and the guard kind
-change. Two `inherits` forms must be refused rather than misread:
-`inherits(x, "S", which = TRUE)` returns an integer, and `inherits(x, c("A","B"))`
-tests a vector.
+## 7. What owning a syntax would make possible later
 
-**Why it is worth doing alone:** `inherits` guards are everywhere in R, written by
-people who will never declare a kind.
+This section is a survey, not a plan. The useful way to rank these is by **what
+they need at run time**, because that is what determines the cost.
 
-## 5. Step two: exhaustive dispatch
+**Nothing — pure erasure.** Inline types (§3) are the whole of this category. The
+compiled R is what the author would have written by hand, plus comments. This is
+why inline typing is the right first step: it has no semantic surface to get
+wrong.
 
-The shipping form is a call, because R already has everything needed:
+**A list — a construction the compiler writes.** Record and tuple constructors
+with checked construction sites; the type system already has both shapes
+structurally, and the reference already anticipates named constructors for them.
+Compiles to `list(...)`. A constructor that is syntax rather than a callable
+function is also the only way to make construction non-bypassable, which no
+comment-carrier design can offer.
 
-```r
-switch_class(shape,
-  Circle = pi * shape$r^2,
-  Square = shape$s^2
-)
-```
+**A representation decision — tagged unions.** Declaring that a value is one of
+several kinds, with dispatch that reports the case you forgot. This is the feature
+with the most obvious value and the one that most needs a deliberate design,
+because the runtime representation is a real choice with no default: a dedicated
+field the compiler owns (`list(.tag = "...", ...)`) is controllable and closed,
+whereas leaning on R's legacy class attribute inherits an open, mutable,
+inheritance-shaped mechanism this type system does not model. Do not treat the
+legacy option as the obvious one. Nothing here should be designed until inline
+typing has shipped and the dialect has users.
 
-**Implementation.** The body must forward `...` into `switch` rather than
-materialise it — `list(...)` forces every branch, which would evaluate all of them
-for their side effects:
-
-```r
-switch_class <- function(.value, ...) {
-  switch(class(.value)[1], ..., stop("unhandled class: ", class(.value)[1]))
-}
-```
-
-The `stop()` default is not decoration: R's `switch` returns `NULL` invisibly when
-nothing matches, which is the failure mode §1 is about. The first formal must not
-be named `x` (or anything a class might be called): R matches a *branch* named `x`
-to the formal, so `switch_class(z, x = ...)` would silently pass the branch as the
-subject. A dotted name is R's own convention for this.
-
-**Name.** Both short candidates are taken in the audience's own libraries:
-`purrr::when` exists (a predicate-based functional `if` — different construct,
-same name) and `dplyr` occupies `case_when`/`case_match`. `match` and `switch` are
-base R. A collision is not merely confusing: whichever package attaches second
-masks the other, and this project's own `shadows-namespace` lint reports it.
-`switch_class` collides with nothing, says what it dispatches on, and evokes the
-`switch` it compiles to. If a dialect ever adds a keyword, `when` can be the sugar
-then — a keyword cannot be masked.
-
-**The call's type is the union of the branch types**, matching the rule already
-documented for `switch`. Not `Any`: a construct whose result is compatible with
-everything and invisible to strict mode would be less typed than the `switch` it
-replaces, which would defeat the purpose.
-
-**Four diagnostics**, and the second matters more day to day than the first:
-
-- a member of the subject's union that no branch covers;
-- a branch naming something that is not a member — the misspelled-branch case,
-  which otherwise reaches `stop()` at run time;
-- two branches naming the same member;
-- a subject with no union to check — an unannotated parameter, `Any`, or
-  `Unknown`. Exhaustiveness cannot be decided there, so it is a strict-mode
-  origin rather than silence. This is the limitation that made generic dispatch
-  underdeliver (`decisions.md`), and it applies here for the same reason: R code
-  is most dynamic exactly where dispatch matters most.
-
-**Recognition is declarative, not a hardcoded name.** The corpus already carries
-this class of fact as a declaration attribute — `@masked` marks a data-masking
-function, and the checker reads it from the stub rather than knowing dplyr's verb
-names:
-
-```
-switch_class : @exhaustive fn(.value: Any, ...: Any) -> Any
-```
-
-`@exhaustive` means "the named arguments are branches over the first argument's
-union". It also determines the call's type per the rule above, so the declared
-return position is unused and must be written `Any`. One general rule, names as
-data, and a project can declare its own dispatcher the same way.
-
-**What this cannot do** is restrict construction: nothing stops a caller building
-the list by hand and skipping `@new`. That is not a small hole — it is what makes
-exhaustiveness advisory rather than guaranteed. It is the same class of hole as
-`Any` and as every unmodelled construct that becomes `Unknown`, and it is the
-price of staying inside R.
-
-## 6. Open questions
-
-- Whether `inherits` narrowing should also handle the `all.equal`-style negative
-  (`!inherits(...)`) on the false edge — the existing guard machinery has both
-  edges, so this is probably free, but it is untested.
-- What a class vector longer than one entry should do at an `@new` site: accept
-  silently, or report under strict mode that the extra entries mean something the
-  checker does not model. Silence is what manufactures false confidence.
-- Whether a branch that opts out of exhaustiveness is worth having, or whether
-  opting out means writing `switch` directly.
-- Whether the compiled or hand-written `stop()` default should type as `Never`
-  rather than `Any`. The reference notes `Never` is unimplemented and `stop`
-  returns `Any` as a stand-in; that makes a hand-written `switch` with a `stop`
-  default type as `Any` today, which is worth fixing independently.
-- How editing the union alias interacts with the interface firewall: an alias is a
-  project-wide declaration, so widening it re-checks every dispatch in the
-  workspace. Acceptable, but it should be measured rather than assumed.
-- If the union comes from a stub, a package upgrade can change exhaustiveness
-  verdicts. Every language with exhaustive matching across a library boundary has
-  this; the usual answer is a default branch.
-
-## 7. Whether this needs a dialect
-
-It does not. §4 and §5 are comment annotations plus one library function, so files
-stay ordinary `.R`: no build step, no rewrite, every other R tool unaffected.
-
-A separate language would add types in the code rather than in comments
-(ergonomics, not capability), checked record and tuple construction, and
-construction that cannot be bypassed. Against that, a typed file is not R until it
-is compiled, so roxygen2, `devtools::load_all()`, RStudio and CRAN all see nothing
-until then, and every contributor who touches the typed source needs this tool
-installed. The risk is not that a build step is unfamiliar — `R CMD build` is one,
-and roxygen2 is code generation that most modern packages already run. It is that
-the *source of truth* stops being R, for collaborators and for CRAN.
-
-One corner escapes most of that: **standalone scripts**. `roughly run script.Rt`
-can type-check, compile in memory and execute through the R runtime the REPL
-already embeds — no generated file, no packaging, no collaborator toolchain. If a
-dialect ships at all, that is where it is cheapest.
-
-Two notes for whoever revisits it. The extension should be `.Rt`: every extension
-in R's family puts the `R` first (`.Rmd`, `.Rnw`, `.Rd`, `.Rout`), and `.Rt` is
-unclaimed by R's own tooling, while `.tR` reverses the convention and reads as a
-typo. And branch syntax cannot use `->`: in R that is right-assignment, so
-`Circle -> pi * r^2` parses as `pi * r^2 <- Circle`.
+**A code transformation — anything that changes evaluation.** Block scope is the
+example worth knowing: R's braces are not a scope, so a dialect could give them
+one, but the compiled output would no longer resemble the input and every debugging
+story gets harder. This category is where a dialect stops being a frontend and
+becomes a language. Approach with suspicion.
 
 ## 8. Prior art
 
 **`we-data-ch/typr`** is a typed language for R, written in Rust, transpiling to
-R, extension `.ty`. It is a sibling language rather than a superset — `fn`
-replaces `function`, statements end in semicolons, booleans are lowercase — so an
-existing R file cannot adopt it by adding anything; it must be rewritten. That
-spends the property this project treats as its core asset: useful answers about R
-nobody has modified.
+R, extension `.ty`. It is a sibling language rather than a superset: `fn` replaces
+`function`, statements end in semicolons, booleans are lowercase. An existing R
+file therefore cannot adopt it by adding anything — it must be rewritten. That is
+the opposite of the position taken here, where every valid R file is intended to
+be a valid typed file with the types being the only additions.
 
-Its type reasoning runs on Prolog, which is a required install, and it emits an
-`adt.pl` carrying the reasoning. That is expressive, and bought with unbounded
-search plus an external build dependency. Whether it could be made to answer at
-editor latency is not something this survey can judge — its documentation site
-could not be read, and its own README calls the project an early prototype — but
-the shape of the bet is the opposite of the fast-to-check rule in `decisions.md`,
-and it is useful to have a public example of that road.
+Its type reasoning runs on Prolog, a required install alongside R, with the
+reasoning emitted to an `adt.pl`. Whether that could answer at editor latency is
+not something this survey can judge — its documentation site could not be read and
+its own README calls the project an early prototype — but the shape of the bet is
+the opposite of the fast-to-check rule in `decisions.md`, and it is useful to have
+a public example of that road.
 
 Worth copying: it leads with package-authoring experience rather than with types.
 
-**Other work.** R packages that check types at run time (`typed`, `checkmate`,
-`dgkf/typewriter`) show the notation is welcome and confirm the gap — none can say
-anything before the line executes. The paper *Towards a Type System for R*
-(ICOOOLPS 2019) surveys which R idioms resist static description; read it before
-§5.
+**The compiles-to-host lineage** — TypeScript to JavaScript, Sorbet's `.rbi` for
+Ruby, Python's stub files — converged on the same split this project already has:
+declarations in a separate file for foreign code, annotations inline for your own.
+Inline typing is the second half of that pattern, which `.Rtypes` already
+implements for the first.
+
+## 9. Open questions
+
+- Whether the return-type marker should be `->`. It is unambiguous in a function
+  header, but `->` is R's right-assignment operator, so a shared lexer must not
+  treat it as one in that position. If that proves awkward, `:` before the body is
+  the alternative.
+- Whether a typed file may also contain `#:` comments. Leaning no — one carrier
+  per file means the attachment rules never apply.
+- What the source directory is called, and whether the choice should be
+  configurable.
+- Whether the script path (§6) ships before any packaging support, which would
+  mean no `roughly build` in the first version at all.
+- Whether inline types should be permitted on a function's `...`, which the
+  comment notation types as a rest parameter today.
+- Whether the formatter treats a typed file as a first-class input from day one,
+  or whether formatting is only defined on generated output at first.
