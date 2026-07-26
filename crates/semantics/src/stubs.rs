@@ -639,6 +639,7 @@ mod tests {
                 .map(|namespace| (*namespace).to_owned())
                 .collect(),
             Default::default(),
+            None,
         );
         let sources = StubSources::new(&db, shipped_stub_sources(), Vec::new());
         let library = stub_library(&db, sources);
@@ -728,6 +729,7 @@ mod tests {
             Vec::new(),
             Default::default(),
             ["parallel".to_owned()].into(),
+            None,
         );
         assert!(crate::package_scheme_exists(&active, "mclapply"));
     }
@@ -760,6 +762,7 @@ mod tests {
             Vec::new(),
             ["data.table".to_owned()].into(),
             Default::default(),
+            None,
         );
         assert!(crate::package_scheme_exists(&active, "setkey"));
     }
@@ -799,6 +802,7 @@ mod tests {
             Vec::new(),
             ["data.table".to_owned()].into(),
             Default::default(),
+            None,
         );
         let library = stub_library(&db, sources);
         assert!(library.schemes.contains_key("fread"));
@@ -814,6 +818,7 @@ mod tests {
             Vec::new(),
             Default::default(),
             Default::default(),
+            None,
         );
         let file = SourceFile::new(
             &db,

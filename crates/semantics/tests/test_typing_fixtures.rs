@@ -52,6 +52,7 @@ fn render_with_metadata(source: &str) -> String {
         semantics::metadata::normalized_imports(&imports),
         semantics::metadata::parse_description_dependencies(&description_source),
         Default::default(),
+        semantics::metadata::parse_description_package(&description_source),
     );
     let file = SourceFile::new(&db, source.to_owned(), DocumentKind::Package);
     ProjectFiles::new(&db, vec![file]);

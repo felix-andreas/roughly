@@ -704,6 +704,26 @@ fn check_reports_an_export_the_package_does_not_define() {
     );
 }
 
+// `usethis` writes `library(yourpkg)` into `tests/testthat.R`, so this shape is
+// in every testthat package. Attaching a package with no shipped stub normally
+// tolerates every otherwise-unresolved bare read, and applying that to the
+// project itself would silence unresolved detection across the whole package.
+#[test]
+fn check_still_reports_unresolved_names_when_a_test_file_attaches_the_package() {
+    let directory = project(&[
+        ("DESCRIPTION", "Package: tallyr\n"),
+        ("tests/testthat.R", "library(testthat)\nlibrary(tallyr)\n"),
+        ("R/a.R", "tally_up <- function(x) zzframboz(x)\n"),
+    ]);
+    let output = roughly(directory.path(), &["check", "."]);
+    let rendered = stderr(&output);
+    assert_eq!(exit_code(&output), 1, "stderr: {rendered}");
+    assert!(
+        rendered.contains("I could not resolve `zzframboz`"),
+        "the project's own package must buy no tolerance: {rendered}"
+    );
+}
+
 #[test]
 fn check_roots_a_nested_package_at_its_own_description() {
     // An ancestor `roughly.toml` must not swallow a package in a

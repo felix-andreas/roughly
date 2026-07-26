@@ -21,17 +21,17 @@ Their verdict: three real bugs found and welcomed, but "a clean run on a Shiny p
 less than the docs imply" — they finished with exit code 0 and five real bugs still in the code.
 Their own top three, in their order:
 
-1. **One `library(pkg)` anywhere in the project disables nearly all bare-name resolution, including
-   typos of in-scope locals and parameters.** Their repro: a file containing only `library(shiny)`
-   makes `repositry` — a one-letter typo of a **parameter in lexical scope on the same line** — stop
-   being reported, along with every other bare unresolved name. On the real app, three planted typos
-   (`renderTabel`, `showNotifcation`, `repositry`) all survived a `no problems` run. The blanket
-   tolerance itself is the right call (the package's export set is unknowable) — but **the near-miss
-   carve-out that already survives tolerance covers only top-level project symbols**, not locals and
-   parameters. Extending it to a name one edit away from a binding in the enclosing function should
-   recover most of the value at no false-positive cost: such a name is a typo, not a package export.
-   Also undocumented where a user would look — `diagnostics.md`'s `unresolved` row implies the check
-   always fires, and the only mention of the tolerance is oblique, inside a `testthat` rationale.
+1. **One `library(pkg)` anywhere in the project disabled nearly all bare-name resolution, including
+   typos of in-scope locals and parameters. FIXED.** Their repro: a file containing only
+   `library(shiny)` made `repositry` — a one-letter typo of a **parameter in lexical scope on the same
+   line** — stop being reported, along with every other bare unresolved name; three planted typos
+   survived a `no problems` run on the real app. The blanket tolerance itself is right (an unstubbed
+   package's export set is unknowable), so the fix narrowed it in two ways: the near-miss carve-out
+   now covers locals and parameters of the enclosing item as well as top-level project symbols (a
+   name one edit away from a binding of your own is a typo, not somebody else's export), and a
+   `library()` naming the project itself buys no tolerance at all (the package author's #2). Both are
+   now documented on the `unresolved` row of `diagnostics.md`, in the reference's resolution rules,
+   and on the limitations page.
 2. **The required/optional annotation mismatch FIXED.** Optionality now comes from the formals — a
    formal with a default is optional in R and no annotation can change that — so the exported
    signature takes it from the code and the annotation's disagreement is reported once at the
@@ -69,11 +69,11 @@ five opt-in lints are unusable on a package with an S3 class and a testthat suit
    does work (4 annotation lines took strict from 34 to 9), but they had to hand-declare a type the
    checker was already handed as a `list()` literal. This is the single highest-leverage fix in the
    round, and the doc claim is one this project wrote without verifying — fix the code to match it.
-2. **`library(yourpkg)` in `tests/testthat.R` disables unresolved detection project-wide.**
-   `usethis` generates that file, so every testthat package has it. **Independently the same finding
-   as the Shiny user's #1**, which settles its priority. Their sharper framing: *your own package is
-   the one export set you do know*, so a `library()` naming the project under check should not buy
-   any tolerance at all.
+2. **`library(yourpkg)` in `tests/testthat.R` FIXED.** The project's own name — `DESCRIPTION`'s
+   `Package` field, now carried on the metadata input — earns no tolerance: its export set is not
+   unknowable, those exports being the project's own definitions. `usethis` generates that file, so
+   this was switching off unresolved detection in every testthat package. The Shiny user's #1 (the
+   near-miss carve-out reaching locals and parameters) is the other half and is also fixed.
 3. **`tests/testthat/helper-*.R` FIXED.** Files directly under `tests/testthat/` now share one
    namespace, as testthat's own loading does (helpers first, then tests) — so a shared fixture is
    neither `unused` at its definition nor `unresolved` at its uses, while a real typo in a test still

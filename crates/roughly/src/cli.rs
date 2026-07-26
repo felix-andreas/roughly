@@ -205,6 +205,9 @@ pub fn check(
             semantics::metadata::normalized_imports(&namespace_imports),
             dependencies,
             BTreeSet::new(),
+            description_source
+                .as_deref()
+                .and_then(semantics::metadata::parse_description_package),
         );
 
         let r_path = root.join("R");

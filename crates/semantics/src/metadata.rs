@@ -11,7 +11,8 @@
 //! - a whole-namespace `import(pkg)` makes `pkg`'s stub exports known bare
 //!   reads; when no stubs describe `pkg`, its export set is unknowable, so
 //!   every otherwise-unresolved bare read is tolerated rather than guessed
-//!   (zero false positives over typo detection);
+//!   (zero false positives over typo detection) — except for the project's
+//!   own package, whose exports are the definitions already in view;
 //! - a `pkg::name` read of a namespace the stub corpus does not know is
 //!   tolerated when `pkg` is a declared dependency instead of warning about
 //!   an unknown namespace;
@@ -45,6 +46,11 @@ pub struct PackageMetadata {
     /// since only packages carry `DESCRIPTION`/`NAMESPACE` files.
     #[returns(ref)]
     pub attached: BTreeSet<String>,
+    /// The project's own name, from `DESCRIPTION`'s `Package` field. Attaching
+    /// or importing it is not a reason to tolerate unresolved names: its export
+    /// set is the one the checker already sees.
+    #[returns(ref)]
+    pub package: Option<String>,
 }
 
 /// Whether a bare read of `name` is satisfied by the package's declared
@@ -82,16 +88,26 @@ pub fn imported_by_name(db: &dyn Db, name: &str) -> bool {
 /// not absolute, though — see `project_definition_suggestion`, because an
 /// unknown library cannot explain a near-miss of a name the project itself
 /// defines.
+///
+/// The project's **own** package earns nothing here, even though no stub
+/// describes it: `library(yourpkg)` is what `usethis` writes into
+/// `tests/testthat.R`, so every testthat package would otherwise lose
+/// unresolved detection entirely — and it is the one export set the checker
+/// already has, since those exports are the project's own definitions.
 pub fn imports_every_name(db: &dyn Db) -> bool {
     let Some(metadata) = PackageMetadata::try_get(db) else {
         return false;
     };
-    let unknown = |namespace: &String| crate::stubs::namespace_known(db, namespace) != Some(true);
+    let own = metadata.package(db).as_deref();
+    let unknowable = |namespace: &String| {
+        Some(namespace.as_str()) != own
+            && crate::stubs::namespace_known(db, namespace) != Some(true)
+    };
     metadata
         .imports(db)
         .iter()
-        .any(|(namespace, imported)| imported.is_none() && unknown(namespace))
-        || metadata.attached(db).iter().any(unknown)
+        .any(|(namespace, imported)| imported.is_none() && unknowable(namespace))
+        || metadata.attached(db).iter().any(unknowable)
 }
 
 /// Whether `package` is part of the package's declared universe: a
@@ -345,6 +361,16 @@ pub fn parse_description_dependencies(source: &str) -> BTreeSet<String> {
         }
     }
     dependencies
+}
+
+/// The project's own package name, from a DESCRIPTION source's `Package`
+/// field.
+pub fn parse_description_package(source: &str) -> Option<String> {
+    dcf_fields(source)
+        .into_iter()
+        .find(|(field, _)| *field == "Package")
+        .map(|(_, name)| name)
+        .filter(|name| !name.is_empty())
 }
 
 /// The `Collate` field's file names in declared order — the package's source

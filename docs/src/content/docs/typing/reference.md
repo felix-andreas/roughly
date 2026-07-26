@@ -198,6 +198,11 @@ with neither file) behaves as if both were empty.
   otherwise-unresolved bare read is tolerated. This is what keeps a script that opens with
   `library(ggplot2)` from reporting one warning per plotting call. The tolerance is project-wide,
   because R's search path is, and it lifts as soon as stubs for `pkg` exist.
+- Attaching or importing **the project's own package** — the name in `DESCRIPTION`'s `Package`
+  field — earns no tolerance, even though no stubs describe it. Its export set is not unknowable:
+  those exports are the project's own definitions, which the checker already sees. Without this
+  rule the `library(yourpkg)` that `usethis` writes into `tests/testthat.R` would switch off
+  unresolved-name detection for the whole package.
 - A `pkg::name` read of a namespace the stub corpus does not know warns about an unknown
   namespace **unless** `pkg` is part of the package's declared universe: a `DESCRIPTION`
   dependency (`Depends`, `Imports`, `Suggests`, or `Enhances`) or the source namespace of any

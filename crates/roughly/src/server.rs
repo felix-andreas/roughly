@@ -334,6 +334,7 @@ struct WorkspaceMetadata {
     imports: Vec<(String, Option<String>)>,
     dependencies: std::collections::BTreeSet<String>,
     collate: Vec<String>,
+    package: Option<String>,
 }
 
 impl Worker {
@@ -505,10 +506,15 @@ impl Worker {
             .as_deref()
             .map(semantics::metadata::parse_description_collate)
             .unwrap_or_default();
+        let package = description_text
+            .as_deref()
+            .ok()
+            .and_then(semantics::metadata::parse_description_package);
         WorkspaceMetadata {
             imports,
             dependencies,
             collate,
+            package,
         }
     }
 
@@ -520,6 +526,7 @@ impl Worker {
             metadata.imports,
             metadata.dependencies,
             self.attached_union(),
+            metadata.package,
         );
     }
 
@@ -575,6 +582,7 @@ impl Worker {
                     current.imports,
                     current.dependencies,
                     union,
+                    current.package,
                 );
             }
         }
@@ -597,18 +605,21 @@ impl Worker {
                 current.imports,
                 current.dependencies,
                 self.attached_union(),
+                current.package,
             );
             self.refresh_all_diagnostics();
             return;
         };
         let facts_changed = metadata.imports(&self.db) != &current.imports
-            || metadata.dependencies(&self.db) != &current.dependencies;
+            || metadata.dependencies(&self.db) != &current.dependencies
+            || metadata.package(&self.db) != &current.package;
         if facts_changed {
             use salsa::Setter;
             metadata.set_imports(&mut self.db).to(current.imports);
             metadata
                 .set_dependencies(&mut self.db)
                 .to(current.dependencies);
+            metadata.set_package(&mut self.db).to(current.package);
         }
         if facts_changed || collate_changed {
             self.refresh_all_diagnostics();

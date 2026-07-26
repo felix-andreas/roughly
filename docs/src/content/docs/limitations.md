@@ -81,10 +81,12 @@ unresolved. The ecosystem's standard escape hatch works — a top-level
 Roughly ships no stub for means any bare name *could* be one of its exports, so otherwise-unresolved
 bare names are tolerated rather than reported — project-wide, not just in that file. This is what
 keeps the tool usable on real code, but it means a clean run says less than it looks like it does.
-Two things narrow the hole: a near miss of a name your own project binds — a top-level definition, or
-a local or parameter in scope — is reported anyway, because `library(shiny)` cannot explain
-`repositry` next to a `repository` parameter; and writing a two-line `stubs/<pkg>.Rtypes` for the
-package restores full checking, as well as silencing the unknown-namespace warning. `strict = true`
+Three things narrow the hole. A near miss of a name your own project binds — a top-level definition,
+or a local or parameter in scope — is reported anyway, because `library(shiny)` cannot explain
+`repositry` next to a `repository` parameter. A `library()` naming **your own package** buys nothing
+at all, so the `library(yourpkg)` in `tests/testthat.R` does not weaken anything. And writing a
+two-line `stubs/<pkg>.Rtypes` for the package restores full checking, as well as silencing the
+unknown-namespace warning. `strict = true`
 also makes the tolerated reads visible.
 
 A project's own `%op%` is deliberately left opaque: it may be an NSE wrapper whose right operand is

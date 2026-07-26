@@ -48,6 +48,24 @@ make <- function(d) toJSON(d)
 #++++
 make: <T> fn(d: T) -> Unknown
 
+#---- attaching_the_project_itself_buys_no_tolerance
+# `usethis` writes `library(yourpkg)` into `tests/testthat.R`, so this shape is
+# in every testthat package. Your own exports are the definitions the checker
+# already sees, so the unknowable-export-set tolerance does not apply.
+#description Package: tallyr
+library(tallyr)
+f <- function(x) zzframboz(x)
+#++++
+f: <T> fn(x: T) -> Unknown
+291..300 warning[unresolved] I could not resolve `zzframboz` in this package, its imports, or builtins.
+
+#---- attaching_a_different_unstubbed_package_still_tolerates
+#description Package: tallyr
+library(jsonlite)
+f <- function(x) zzframboz(x)
+#++++
+f: <T> fn(x: T) -> Unknown
+
 #---- a_blanket_tolerance_still_reports_a_typo_of_the_project_s_own_name
 library(testthat)
 validate_url <- function(url) nchar(url) > 0L

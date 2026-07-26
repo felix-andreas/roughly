@@ -117,6 +117,7 @@ pub fn analysis_stats(target: Option<&Path>) -> Result<(), CommandError> {
             .map(semantics::metadata::parse_description_dependencies)
             .unwrap_or_default(),
         std::collections::BTreeSet::new(),
+        None,
     );
     let mut records: Vec<FileRecord> = Vec::with_capacity(entries.len());
     let mut package_count = 0usize;
