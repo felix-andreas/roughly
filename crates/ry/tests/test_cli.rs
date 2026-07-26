@@ -1,4 +1,4 @@
-//! End-to-end tests for the `roughly` binary: diagnostic rendering, JSON
+//! End-to-end tests for the `ry` binary: diagnostic rendering, JSON
 //! output, and the documented exit-code contract (0 clean, 1 findings, 2
 //! usage/configuration/IO errors).
 
@@ -6,12 +6,12 @@ use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
 
-fn roughly(directory: &Path, arguments: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_roughly"))
+fn ry(directory: &Path, arguments: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_ry"))
         .args(arguments)
         .current_dir(directory)
         .output()
-        .expect("failed to run the roughly binary")
+        .expect("failed to run the ry binary")
 }
 
 fn exit_code(output: &Output) -> i32 {
@@ -49,14 +49,14 @@ const SYNTAX_ERROR_SOURCE: &str = "print(1)\ny <- (\n";
 #[test]
 fn check_clean_file_exits_zero() {
     let directory = project(&[("clean.R", "x <- 1\nprint(x)\n")]);
-    let output = roughly(directory.path(), &["check", "clean.R"]);
+    let output = ry(directory.path(), &["check", "clean.R"]);
     assert_eq!(exit_code(&output), 0, "stderr: {}", stderr(&output));
 }
 
 #[test]
 fn check_renders_one_based_positions() {
     let directory = project(&[("bad.R", SYNTAX_ERROR_SOURCE)]);
-    let output = roughly(directory.path(), &["check", "bad.R"]);
+    let output = ry(directory.path(), &["check", "bad.R"]);
     let stderr = stderr(&output);
 
     assert_eq!(exit_code(&output), 1, "stderr: {stderr}");
@@ -77,7 +77,7 @@ fn check_renders_one_based_positions() {
 #[test]
 fn check_does_not_repeat_the_message_under_the_caret() {
     let directory = project(&[("bad.R", SYNTAX_ERROR_SOURCE)]);
-    let output = roughly(directory.path(), &["check", "bad.R"]);
+    let output = ry(directory.path(), &["check", "bad.R"]);
     let stderr = stderr(&output);
 
     let message = stderr
@@ -99,7 +99,7 @@ fn check_does_not_repeat_the_message_under_the_caret() {
 #[test]
 fn check_counts_warnings_as_findings() {
     let directory = project(&[("warn.R", "x = 1\n")]);
-    let output = roughly(directory.path(), &["check", "warn.R"]);
+    let output = ry(directory.path(), &["check", "warn.R"]);
     let stderr = stderr(&output);
 
     assert!(
@@ -112,7 +112,7 @@ fn check_counts_warnings_as_findings() {
 #[test]
 fn check_json_output_is_one_based_and_parses() {
     let directory = project(&[("bad.R", SYNTAX_ERROR_SOURCE)]);
-    let output = roughly(directory.path(), &["check", "--output", "json", "bad.R"]);
+    let output = ry(directory.path(), &["check", "--output", "json", "bad.R"]);
     let stdout = stdout(&output);
 
     assert_eq!(exit_code(&output), 1, "stderr: {}", stderr(&output));
@@ -158,7 +158,7 @@ fn check_json_output_is_one_based_and_parses() {
 #[test]
 fn check_json_output_maps_warning_severity() {
     let directory = project(&[("warn.R", "x = 1\nprint(x)\n")]);
-    let output = roughly(directory.path(), &["check", "--output", "json", "warn.R"]);
+    let output = ry(directory.path(), &["check", "--output", "json", "warn.R"]);
 
     assert_eq!(exit_code(&output), 1);
     let record: serde_json::Value =
@@ -172,7 +172,7 @@ fn check_json_output_maps_warning_severity() {
 fn check_related_notes_render_on_both_surfaces() {
     let files = &[("R/a.R", "shared <- 1\n"), ("R/b.R", "shared <- 2\n")];
 
-    let human = roughly(project(files).path(), &["check", "."]);
+    let human = ry(project(files).path(), &["check", "."]);
     assert_eq!(exit_code(&human), 1, "stderr: {}", stderr(&human));
     let rendered = stderr(&human);
     assert!(
@@ -181,7 +181,7 @@ fn check_related_notes_render_on_both_surfaces() {
         "expected one note per overwrite warning, got: {rendered}"
     );
 
-    let json = roughly(project(files).path(), &["check", "--output", "json", "."]);
+    let json = ry(project(files).path(), &["check", "--output", "json", "."]);
     assert_eq!(exit_code(&json), 1, "stderr: {}", stderr(&json));
     let records: Vec<serde_json::Value> = stdout(&json)
         .lines()
@@ -231,7 +231,7 @@ fn check_validates_namespace_imports_against_stubs() {
             "import(stats)\nimportFrom(stats, sd, medain)\nimportFrom(dplyr, mutate)\n",
         ),
     ]);
-    let output = roughly(directory.path(), &["check", "."]);
+    let output = ry(directory.path(), &["check", "."]);
     let rendered = stderr(&output);
     assert_eq!(exit_code(&output), 1, "stderr: {rendered}");
     assert!(
@@ -260,7 +260,7 @@ fn check_flags_unused_imports_when_opted_in() {
         ("NAMESPACE", "importFrom(stats, sd, median)\n"),
     ];
 
-    let default_run = roughly(project(files).path(), &["check", "."]);
+    let default_run = ry(project(files).path(), &["check", "."]);
     assert_eq!(
         exit_code(&default_run),
         0,
@@ -271,9 +271,9 @@ fn check_flags_unused_imports_when_opted_in() {
     let opted_in = project(&[
         files[0],
         files[1],
-        ("roughly.toml", "[lint]\nunused-import = \"warn\"\n"),
+        ("ry.toml", "[lint]\nunused-import = \"warn\"\n"),
     ]);
-    let output = roughly(opted_in.path(), &["check", "."]);
+    let output = ry(opted_in.path(), &["check", "."]);
     let rendered = stderr(&output);
     assert_eq!(exit_code(&output), 1, "stderr: {rendered}");
     assert!(
@@ -294,7 +294,7 @@ fn check_flags_unused_imports_when_opted_in() {
 fn check_flags_builtin_shadows_when_opted_in() {
     let files: &[(&str, &str)] = &[("R/main.R", "mean <- function(x) x\nsd <- 1\n")];
 
-    let default_run = roughly(project(files).path(), &["check", "."]);
+    let default_run = ry(project(files).path(), &["check", "."]);
     assert_eq!(
         exit_code(&default_run),
         0,
@@ -305,11 +305,11 @@ fn check_flags_builtin_shadows_when_opted_in() {
     let opted_in = project(&[
         files[0],
         (
-            "roughly.toml",
+            "ry.toml",
             "[lint]\nshadows-builtin = \"warn\"\nshadows-namespace = \"warn\"\n",
         ),
     ]);
-    let output = roughly(opted_in.path(), &["check", "."]);
+    let output = ry(opted_in.path(), &["check", "."]);
     let rendered = stderr(&output);
     assert_eq!(exit_code(&output), 1, "stderr: {rendered}");
     assert!(
@@ -325,7 +325,7 @@ fn check_flags_builtin_shadows_when_opted_in() {
 #[test]
 fn check_min_severity_error_ignores_warnings() {
     let directory = project(&[("warn.R", "x = 1\n")]);
-    let filtered = roughly(
+    let filtered = ry(
         directory.path(),
         &["check", "--min-severity", "error", "warn.R"],
     );
@@ -346,9 +346,9 @@ fn check_min_severity_error_ignores_warnings() {
 fn check_unknown_config_key_warns_but_starts() {
     let directory = project(&[
         ("clean.R", "x <- 1\nprint(x)\n"),
-        ("roughly.toml", "[check]\nstric = true\n"),
+        ("ry.toml", "[check]\nstric = true\n"),
     ]);
-    let output = roughly(directory.path(), &["check", "clean.R"]);
+    let output = ry(directory.path(), &["check", "clean.R"]);
     assert_eq!(
         exit_code(&output),
         0,
@@ -366,10 +366,10 @@ fn check_unknown_config_key_warns_but_starts() {
 fn check_invalid_config_exits_two() {
     let directory = project(&[
         ("clean.R", "x <- 1\n"),
-        ("roughly.toml", "[check]\ntyping = 1\n"),
+        ("ry.toml", "[check]\ntyping = 1\n"),
     ]);
 
-    let check = roughly(directory.path(), &["check", "clean.R"]);
+    let check = ry(directory.path(), &["check", "clean.R"]);
     assert_eq!(exit_code(&check), 2, "stderr: {}", stderr(&check));
     assert!(
         stderr(&check).contains("invalid config"),
@@ -377,14 +377,14 @@ fn check_invalid_config_exits_two() {
         stderr(&check)
     );
 
-    let fmt = roughly(directory.path(), &["fmt", "--check", "clean.R"]);
+    let fmt = ry(directory.path(), &["fmt", "--check", "clean.R"]);
     assert_eq!(exit_code(&fmt), 2, "stderr: {}", stderr(&fmt));
 }
 
 #[test]
 fn check_missing_target_exits_two() {
     let directory = project(&[]);
-    let output = roughly(directory.path(), &["check", "does-not-exist.R"]);
+    let output = ry(directory.path(), &["check", "does-not-exist.R"]);
     assert_eq!(exit_code(&output), 2, "stderr: {}", stderr(&output));
 }
 
@@ -397,7 +397,7 @@ fn check_reports_dropped_override_stub_declarations() {
         ("clean.R", "x <- 1\n"),
         ("stubs/project.Rtypes", "size : Frobnicate\n"),
     ]);
-    let output = roughly(directory.path(), &["check", "clean.R"]);
+    let output = ry(directory.path(), &["check", "clean.R"]);
     let stderr = stderr(&output);
     assert_eq!(
         exit_code(&output),
@@ -423,7 +423,7 @@ fn check_loads_valid_override_stubs_silently() {
             "my_helper : fn(x: double) -> double\n",
         ),
     ]);
-    let output = roughly(directory.path(), &["check", "clean.R"]);
+    let output = ry(directory.path(), &["check", "clean.R"]);
     assert_eq!(exit_code(&output), 0, "stderr: {}", stderr(&output));
 }
 
@@ -438,9 +438,9 @@ fn check_reports_no_matching_overload() {
             "stubs/project.Rtypes",
             "pick : fn(x: integer) -> integer\npick : fn(x: double) -> double\n",
         ),
-        ("roughly.toml", "[check]\ntyping = true\n"),
+        ("ry.toml", "[check]\ntyping = true\n"),
     ]);
-    let output = roughly(directory.path(), &["check", "."]);
+    let output = ry(directory.path(), &["check", "."]);
     let rendered = stderr(&output);
     assert_eq!(exit_code(&output), 1, "stderr: {rendered}");
     assert!(
@@ -459,9 +459,9 @@ fn check_override_stub_types_apply() {
             "stubs/project.Rtypes",
             "my_helper : fn(x: double) -> double\n",
         ),
-        ("roughly.toml", "[check]\ntyping = true\n"),
+        ("ry.toml", "[check]\ntyping = true\n"),
     ]);
-    let output = roughly(directory.path(), &["check", "."]);
+    let output = ry(directory.path(), &["check", "."]);
     let rendered = stderr(&output);
     assert_eq!(exit_code(&output), 1, "stderr: {rendered}");
     assert!(
@@ -473,7 +473,7 @@ fn check_override_stub_types_apply() {
 #[test]
 fn check_namespace_imports_resolve_bare_reads() {
     let unimported = project(&[("R/main.R", "f <- function(x) rbindlist(x)\n")]);
-    let output = roughly(unimported.path(), &["check", "."]);
+    let output = ry(unimported.path(), &["check", "."]);
     let rendered = stderr(&output);
     assert_eq!(exit_code(&output), 1, "stderr: {rendered}");
     assert!(
@@ -485,7 +485,7 @@ fn check_namespace_imports_resolve_bare_reads() {
         ("R/main.R", "f <- function(x) rbindlist(x)\n"),
         ("NAMESPACE", "importFrom(data.table, rbindlist)\n"),
     ]);
-    let output = roughly(imported.path(), &["check", "."]);
+    let output = ry(imported.path(), &["check", "."]);
     let rendered = stderr(&output);
     assert_eq!(exit_code(&output), 0, "stderr: {rendered}");
 }
@@ -496,7 +496,7 @@ fn check_description_dependencies_quiet_namespace_reads() {
         ("R/main.R", "f <- function(d) dplyr::mutate(d)\n"),
         ("DESCRIPTION", "Package: demo\nImports: dplyr\n"),
     ]);
-    let output = roughly(declared.path(), &["check", "."]);
+    let output = ry(declared.path(), &["check", "."]);
     let rendered = stderr(&output);
     assert_eq!(exit_code(&output), 0, "stderr: {rendered}");
 }
@@ -512,10 +512,10 @@ fn check_collate_order_decides_the_package_winner() {
         ("R/a.R", "value <- 1L\n"),
         ("R/b.R", "value <- \"word\"\n"),
         ("R/use.R", "f <- function() value + 1L\n"),
-        ("roughly.toml", "[check]\ntyping = true\n"),
+        ("ry.toml", "[check]\ntyping = true\n"),
     ];
     let path_ordered = project(base);
-    let output = roughly(
+    let output = ry(
         path_ordered.path(),
         &["check", ".", "--min-severity", "error"],
     );
@@ -529,7 +529,7 @@ fn check_collate_order_decides_the_package_winner() {
     let mut with_collate = base.to_vec();
     with_collate.push(("DESCRIPTION", "Package: demo\nCollate: 'b.R' 'a.R'\n"));
     let collated = project(&with_collate);
-    let output = roughly(collated.path(), &["check", ".", "--min-severity", "error"]);
+    let output = ry(collated.path(), &["check", ".", "--min-severity", "error"]);
     let rendered = stderr(&output);
     assert_eq!(exit_code(&output), 0, "stderr: {rendered}");
 }
@@ -540,7 +540,7 @@ fn analysis_stats_reports_phases_and_probe() {
         ("R/a.R", "value <- 1L\nf <- function() value + 1L\n"),
         ("R/b.R", "g <- function(x) f() + x\n"),
     ]);
-    let output = roughly(directory.path(), &["debug", "analysis-stats", "."]);
+    let output = ry(directory.path(), &["debug", "analysis-stats", "."]);
     let rendered = stdout(&output);
     assert_eq!(exit_code(&output), 0, "stderr: {}", stderr(&output));
     for section in [
@@ -559,7 +559,7 @@ fn analysis_stats_reports_phases_and_probe() {
 #[test]
 fn check_without_r_files_reports_nothing_and_exits_clean() {
     let directory = project(&[]);
-    let output = roughly(directory.path(), &["check"]);
+    let output = ry(directory.path(), &["check"]);
     // A tree with no R in it yet is not a usage error: failing here would fail
     // a pipeline over a stage that simply has nothing to check.
     assert_eq!(exit_code(&output), 0, "stderr: {}", stderr(&output));
@@ -591,7 +591,7 @@ fn testthat_files_share_one_namespace_with_their_helpers() {
             "test_that(\"adds\", {\n  expect_equal(add_one(make_input()$n), 2L)\n})\n",
         ),
     ]);
-    let output = roughly(directory.path(), &["check"]);
+    let output = ry(directory.path(), &["check"]);
     assert!(
         stdout(&output).contains("no problems"),
         "a helper shared with a test file is not a finding: {}",
@@ -613,7 +613,7 @@ fn testthat_files_share_one_namespace_with_their_helpers() {
             "test_that(\"adds\", {\n  expect_equal(make_inpt(), 1L)\n})\n",
         ),
     ]);
-    let output = roughly(directory.path(), &["check"]);
+    let output = ry(directory.path(), &["check"]);
     assert!(
         stderr(&output).contains("Did you mean `make_input`?"),
         "expected the typo and its suggestion: {}",
@@ -638,9 +638,9 @@ fn a_configured_exclude_does_not_lose_the_vendored_directory_skip() {
         "[check]\nexclude = [\"nothing-here/\"]\n",
     ] {
         let mut files = vendored.to_vec();
-        files.push(("roughly.toml", exclude));
+        files.push(("ry.toml", exclude));
         let directory = project(&files);
-        let output = roughly(directory.path(), &["check"]);
+        let output = ry(directory.path(), &["check"]);
         assert!(
             stdout(&output).contains("in 1 file"),
             "exclude {exclude:?} walked a vendored directory: {}",
@@ -655,7 +655,7 @@ fn check_answer_is_independent_of_how_the_paths_are_named() {
     // reference must resolve however the command spells the paths, or
     // `check R/` and `check $(git diff --name-only)` cannot gate a pipeline.
     let directory = project(&[
-        ("roughly.toml", "[check]\ntyping = true\n"),
+        ("ry.toml", "[check]\ntyping = true\n"),
         (
             "R/types.R",
             "#: @alias Config {list{id: character}}\nNULL\n",
@@ -671,7 +671,7 @@ fn check_answer_is_independent_of_how_the_paths_are_named() {
         vec!["check", "R/build.R"],
         vec!["check", "R/build.R", "R/types.R"],
     ] {
-        let output = roughly(directory.path(), &arguments);
+        let output = ry(directory.path(), &arguments);
         assert_eq!(
             exit_code(&output),
             0,
@@ -695,7 +695,7 @@ fn check_reports_an_export_the_package_does_not_define() {
             "add_one <- function(x) x + 1L\nget_thing <- function() 1L\n",
         ),
     ]);
-    let output = roughly(directory.path(), &["check", "."]);
+    let output = ry(directory.path(), &["check", "."]);
     let rendered = stderr(&output);
     assert!(
         rendered.contains(
@@ -715,7 +715,7 @@ fn check_reports_character_columns_and_aligns_the_caret() {
         "accents.R",
         "x <- \"résumé — café\" ; y = 2L\nprint(x)\nprint(y)\n",
     )]);
-    let output = roughly(directory.path(), &["check", "accents.R"]);
+    let output = ry(directory.path(), &["check", "accents.R"]);
     let rendered = stderr(&output);
     assert!(
         rendered.contains("accents.R:1:26"),
@@ -745,7 +745,7 @@ fn check_reports_character_columns_and_aligns_the_caret() {
         "the caret must sit under the `=`: {rendered}"
     );
 
-    let json = roughly(
+    let json = ry(
         directory.path(),
         &["check", "--output", "json", "accents.R"],
     );
@@ -770,9 +770,9 @@ fn check_sees_a_generic_declared_in_another_package_file() {
         ),
         ("R/dog.R", "speak.dog <- function(x, ...) \"woof\"\n"),
         ("R/cat.R", "meow.cat <- function(count) \"meow\"\n"),
-        ("roughly.toml", "[lint]\nunused-parameter = \"warn\"\n"),
+        ("ry.toml", "[lint]\nunused-parameter = \"warn\"\n"),
     ]);
-    let output = roughly(directory.path(), &["check", "."]);
+    let output = ry(directory.path(), &["check", "."]);
     let rendered = stderr(&output);
     assert!(
         !rendered.contains("speak.dog"),
@@ -795,7 +795,7 @@ fn check_still_reports_unresolved_names_when_a_test_file_attaches_the_package() 
         ("tests/testthat.R", "library(testthat)\nlibrary(tallyr)\n"),
         ("R/a.R", "tally_up <- function(x) zzframboz(x)\n"),
     ]);
-    let output = roughly(directory.path(), &["check", "."]);
+    let output = ry(directory.path(), &["check", "."]);
     let rendered = stderr(&output);
     assert_eq!(exit_code(&output), 1, "stderr: {rendered}");
     assert!(
@@ -806,15 +806,15 @@ fn check_still_reports_unresolved_names_when_a_test_file_attaches_the_package() 
 
 #[test]
 fn check_roots_a_nested_package_at_its_own_description() {
-    // An ancestor `roughly.toml` must not swallow a package in a
+    // An ancestor `ry.toml` must not swallow a package in a
     // subdirectory: that package's own DESCRIPTION is nearer, so its `R/`
     // files are package source and their top-level bindings are not unused.
     let directory = project(&[
-        ("roughly.toml", "[check]\ntyping = true\n"),
+        ("ry.toml", "[check]\ntyping = true\n"),
         ("pkg/DESCRIPTION", "Package: inner\n"),
         ("pkg/R/a.R", "helper <- function() 1L\n"),
     ]);
-    let output = roughly(directory.path(), &["check", "pkg"]);
+    let output = ry(directory.path(), &["check", "pkg"]);
     let rendered = stderr(&output);
     assert_eq!(exit_code(&output), 0, "stderr: {rendered}");
     assert!(
@@ -826,11 +826,11 @@ fn check_roots_a_nested_package_at_its_own_description() {
 #[test]
 fn check_reports_only_the_paths_it_was_given() {
     let directory = project(&[
-        ("roughly.toml", "[check]\ntyping = true\n"),
+        ("ry.toml", "[check]\ntyping = true\n"),
         ("R/inside.R", "package_bad <- 1L + \"x\"\n"),
         ("driver.R", "script_bad <- 2L + \"y\"\n"),
     ]);
-    let output = roughly(directory.path(), &["check", "R"]);
+    let output = ry(directory.path(), &["check", "R"]);
     let rendered = stderr(&output);
     assert!(
         rendered.contains("R/inside.R") && !rendered.contains("driver.R"),
@@ -841,13 +841,13 @@ fn check_reports_only_the_paths_it_was_given() {
 #[test]
 fn check_analyses_r_chunks_in_a_literate_document() {
     let directory = project(&[
-        ("roughly.toml", "[check]\ntyping = true\n"),
+        ("ry.toml", "[check]\ntyping = true\n"),
         (
             "report.Rmd",
             "# Title\n\nProse about it.\n\n```{r}\ncount <- 10L\n```\n\n```{r}\nprint(count + \"text\")\n```\n\n```{python}\nx = 1\n```\n",
         ),
     ]);
-    let output = roughly(directory.path(), &["check", "."]);
+    let output = ry(directory.path(), &["check", "."]);
     let rendered = stderr(&output);
     assert_eq!(exit_code(&output), 1, "stderr: {rendered}");
     assert!(
@@ -855,7 +855,7 @@ fn check_analyses_r_chunks_in_a_literate_document() {
         "the chunk error is located in the original document: {rendered}"
     );
     // The formatter must leave a literate document alone.
-    let formatted = roughly(directory.path(), &["fmt", "--check", "."]);
+    let formatted = ry(directory.path(), &["fmt", "--check", "."]);
     assert!(
         !stdout(&formatted).contains("1 file"),
         "fmt must not pick up literate documents: {}",
@@ -866,12 +866,12 @@ fn check_analyses_r_chunks_in_a_literate_document() {
 #[test]
 fn check_exclude_scopes_the_directory_walk() {
     let directory = project(&[
-        ("roughly.toml", "[check]\nexclude = [\"scripts/\"]\n"),
+        ("ry.toml", "[check]\nexclude = [\"scripts/\"]\n"),
         ("top.R", "top_unused <- 1\n"),
         ("scripts/skipped.R", "script_unused <- 2\n"),
         ("scripts/deep/also.R", "deep_unused <- 3\n"),
     ]);
-    let output = roughly(directory.path(), &["check", "."]);
+    let output = ry(directory.path(), &["check", "."]);
     let rendered = stderr(&output);
     assert_eq!(exit_code(&output), 1, "stderr: {rendered}");
     assert!(
@@ -888,13 +888,13 @@ fn check_exclude_scopes_the_directory_walk() {
 fn check_exclude_negation_reincludes() {
     let directory = project(&[
         (
-            "roughly.toml",
+            "ry.toml",
             "[check]\nexclude = [\"scripts/*\", \"!scripts/keep\"]\n",
         ),
         ("scripts/skipped.R", "script_unused <- 2\n"),
         ("scripts/keep/kept.R", "kept_unused <- 3\n"),
     ]);
-    let output = roughly(directory.path(), &["check", "."]);
+    let output = ry(directory.path(), &["check", "."]);
     let rendered = stderr(&output);
     assert_eq!(exit_code(&output), 1, "stderr: {rendered}");
     assert!(
@@ -906,10 +906,10 @@ fn check_exclude_negation_reincludes() {
 #[test]
 fn check_explicit_file_bypasses_exclude() {
     let directory = project(&[
-        ("roughly.toml", "[check]\nexclude = [\"scripts/\"]\n"),
+        ("ry.toml", "[check]\nexclude = [\"scripts/\"]\n"),
         ("scripts/named.R", "named_unused <- 2\n"),
     ]);
-    let output = roughly(directory.path(), &["check", "scripts/named.R"]);
+    let output = ry(directory.path(), &["check", "scripts/named.R"]);
     let rendered = stderr(&output);
     assert_eq!(exit_code(&output), 1, "stderr: {rendered}");
     assert!(
@@ -921,10 +921,10 @@ fn check_explicit_file_bypasses_exclude() {
 #[test]
 fn check_invalid_exclude_pattern_exits_two() {
     let directory = project(&[
-        ("roughly.toml", "[check]\nexclude = [\"scripts/[\"]\n"),
+        ("ry.toml", "[check]\nexclude = [\"scripts/[\"]\n"),
         ("top.R", "x <- 1\n"),
     ]);
-    let output = roughly(directory.path(), &["check", "."]);
+    let output = ry(directory.path(), &["check", "."]);
     assert_eq!(exit_code(&output), 2, "stderr: {}", stderr(&output));
     assert!(
         stderr(&output).contains("invalid `[check] exclude` pattern"),
@@ -939,9 +939,9 @@ fn check_invalid_exclude_pattern_exits_two() {
 fn check_suppression_comments_drop_findings() {
     let directory = project(&[(
         "warn.R",
-        "x = 1 # roughly: allow(assignment-operator, unused)\n\ny = 2\n",
+        "x = 1 # ry: allow(assignment-operator, unused)\n\ny = 2\n",
     )]);
-    let output = roughly(directory.path(), &["check", "warn.R"]);
+    let output = ry(directory.path(), &["check", "warn.R"]);
     let rendered = stderr(&output);
     assert_eq!(exit_code(&output), 1, "stderr: {rendered}");
     assert!(
@@ -961,7 +961,7 @@ fn check_suppression_comments_drop_findings() {
 #[test]
 fn fmt_check_lists_dirty_files_and_writes_nothing() {
     let directory = project(&[("dirty.R", "x<-1\n"), ("clean.R", "y <- 2\n")]);
-    let output = roughly(directory.path(), &["fmt", "--check"]);
+    let output = ry(directory.path(), &["fmt", "--check"]);
     let stderr = stderr(&output);
 
     assert_eq!(exit_code(&output), 1, "stderr: {stderr}");
@@ -980,7 +980,7 @@ fn fmt_check_lists_dirty_files_and_writes_nothing() {
 #[test]
 fn fmt_check_clean_exits_zero_with_summary() {
     let directory = project(&[("clean.R", "x <- 1\n")]);
-    let output = roughly(directory.path(), &["fmt", "--check", "clean.R"]);
+    let output = ry(directory.path(), &["fmt", "--check", "clean.R"]);
     let stderr = stderr(&output);
 
     assert_eq!(exit_code(&output), 0, "stderr: {stderr}");
@@ -993,7 +993,7 @@ fn fmt_check_clean_exits_zero_with_summary() {
 #[test]
 fn fmt_rewrites_in_place_and_exits_zero() {
     let directory = project(&[("dirty.R", "x<-1\n")]);
-    let output = roughly(directory.path(), &["fmt", "dirty.R"]);
+    let output = ry(directory.path(), &["fmt", "dirty.R"]);
 
     assert_eq!(exit_code(&output), 0, "stderr: {}", stderr(&output));
     let content = fs::read_to_string(directory.path().join("dirty.R")).expect("read dirty.R");
@@ -1011,7 +1011,7 @@ fn fmt_on_a_deliberately_skipped_file_exits_clean() {
         vec!["fmt", "--check", "report.Rmd"],
         vec!["fmt", "report.Rmd"],
     ] {
-        let output = roughly(directory.path(), &arguments);
+        let output = ry(directory.path(), &arguments);
         assert_eq!(
             exit_code(&output),
             0,
@@ -1031,7 +1031,7 @@ fn fmt_on_a_deliberately_skipped_file_exits_clean() {
 #[test]
 fn fmt_syntax_error_exits_two() {
     let directory = project(&[("bad.R", SYNTAX_ERROR_SOURCE)]);
-    let output = roughly(directory.path(), &["fmt", "bad.R"]);
+    let output = ry(directory.path(), &["fmt", "bad.R"]);
 
     assert_eq!(exit_code(&output), 2, "stderr: {}", stderr(&output));
     assert!(
@@ -1048,7 +1048,7 @@ fn fmt_syntax_error_exits_two() {
 #[test]
 fn usage_error_exits_two() {
     let directory = project(&[]);
-    let output = roughly(directory.path(), &["bogus-subcommand"]);
+    let output = ry(directory.path(), &["bogus-subcommand"]);
     assert_eq!(exit_code(&output), 2, "stderr: {}", stderr(&output));
 }
 
@@ -1064,9 +1064,9 @@ fn typing_off_directive_silences_one_file() {
     let directory = project(&[
         ("R/opted_out.R", "# typing: off\nbad <- 1L + \"a\"\n"),
         ("R/plain.R", "also_bad <- 1L + \"a\"\n"),
-        ("roughly.toml", "[check]\ntyping = true\n"),
+        ("ry.toml", "[check]\ntyping = true\n"),
     ]);
-    let output = roughly(directory.path(), &["check"]);
+    let output = ry(directory.path(), &["check"]);
     assert_eq!(exit_code(&output), 1);
     let report = stderr(&output);
     assert!(report.contains("plain.R"), "report:\n{report}");
@@ -1082,9 +1082,9 @@ fn typing_on_and_strict_directives_opt_single_files_in() {
         ("R/opted_in.R", "# typing: on\nbad <- 1L + \"a\"\n"),
         ("R/strict_file.R", "# typing: strict\nx <- not_defined()\n"),
         ("R/plain.R", "quiet <- 1L + \"a\"\n"),
-        ("roughly.toml", "[check]\ntyping = false\n"),
+        ("ry.toml", "[check]\ntyping = false\n"),
     ]);
-    let output = roughly(directory.path(), &["check"]);
+    let output = ry(directory.path(), &["check"]);
     assert_eq!(exit_code(&output), 1);
     let report = stderr(&output);
     assert!(report.contains("opted_in.R"), "report:\n{report}");
@@ -1099,7 +1099,7 @@ fn typing_on_and_strict_directives_opt_single_files_in() {
 #[test]
 fn unknown_typing_directive_value_is_reported() {
     let directory = project(&[("R/a.R", "# typing: strcit\nx <- 1L\n")]);
-    let output = roughly(directory.path(), &["check"]);
+    let output = ry(directory.path(), &["check"]);
     assert_eq!(exit_code(&output), 1);
     assert!(
         stderr(&output).contains("Unknown typing directive `strcit`"),
@@ -1120,9 +1120,9 @@ fn data_masked_column_references_do_not_warn() {
             "summarize_sales <- function(dt) {\n  dt[region == \"west\", .(total = sum(amount)), by = product]\n  dt[, revenue := price * quantity]\n  with(dt, mean(score_col))\n}\n",
         ),
         ("R/plain.R", "pick <- function(m) m[not_a_column]\n"),
-        ("roughly.toml", "[check]\ntyping = true\n"),
+        ("ry.toml", "[check]\ntyping = true\n"),
     ]);
-    let output = roughly(directory.path(), &["check"]);
+    let output = ry(directory.path(), &["check"]);
     assert_eq!(exit_code(&output), 1);
     let report = stderr(&output);
     assert!(
@@ -1152,9 +1152,9 @@ fn global_variables_declarations_suppress_unresolved_warnings() {
             "R/use.R",
             "f <- function() generated_col + another_col + genuinely_undefined\n",
         ),
-        ("roughly.toml", "[check]\ntyping = true\n"),
+        ("ry.toml", "[check]\ntyping = true\n"),
     ]);
-    let output = roughly(directory.path(), &["check"]);
+    let output = ry(directory.path(), &["check"]);
     assert_eq!(exit_code(&output), 1);
     let report = stderr(&output);
     assert!(report.contains("genuinely_undefined"), "report:\n{report}");
@@ -1181,9 +1181,9 @@ fn masked_stub_verbs_mask_rest_absorbed_arguments() {
             "R/pipeline.R",
             "report <- function(df) {\n  filtered <- dplyr::filter(df, amount > 100)\n  mutate(filtered, doubled = amount * 2)\n}\ncontrol <- function() {\n  filter <- function(x) x\n  filter(shadowed_undefined)\n}\n",
         ),
-        ("roughly.toml", "[check]\ntyping = true\n"),
+        ("ry.toml", "[check]\ntyping = true\n"),
     ]);
-    let output = roughly(directory.path(), &["check"]);
+    let output = ry(directory.path(), &["check"]);
     assert_eq!(exit_code(&output), 1);
     let report = stderr(&output);
     assert!(report.contains("shadowed_undefined"), "report:\n{report}");

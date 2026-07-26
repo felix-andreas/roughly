@@ -4,7 +4,7 @@
 # coverage, so these explore where they cannot. Needs nightly + cargo-fuzz;
 # see the fuzzing section of docs/src/content/docs/contributing/testing.md.
 [package]
-name = "roughly-fuzz"
+name = "ry-fuzz"
 version = "0.0.0"
 publish = false
 edition = "2024"

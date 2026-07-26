@@ -1,6 +1,6 @@
 //! The final diagnostic set for one file: every class the analysis computes,
 //! gated by config exactly the same way for the language server's publish
-//! path and `roughly check`, so the two surfaces can never drift.
+//! path and `ry check`, so the two surfaces can never drift.
 
 use crate::config::{CheckConfig, Config};
 use semantics::diagnostics::{Diagnostic, Severity, file_diagnostics, strict_diagnostics};
@@ -57,13 +57,22 @@ pub fn effective_typing(db: &dyn Db, file: SourceFile, check: &CheckConfig) -> (
     }
 }
 
-/// Applies `# roughly: allow(code, ...)` suppression comments: a diagnostic
+/// The suppression comment's prefixes, in precedence order. `roughly:` is the
+/// project's former name and stays valid forever: a suppression lives inside a
+/// user's source file, so retiring the old spelling would silently un-suppress
+/// diagnostics in code nobody edited.
+const SUPPRESSION_PREFIXES: [&str; 2] = ["ry:", "roughly:"];
+
+/// Applies `# ry: allow(code, ...)` suppression comments: a diagnostic
 /// is dropped when a suppression naming its code (or `all`) sits on the
 /// diagnostic's own line (a trailing comment) or on the line directly above
 /// it. Applied at assembly, after severity decisions, so a suppressed
 /// escalated error is dropped like any other diagnostic.
 pub fn apply_suppressions(diagnostics: Vec<Diagnostic>, source: &str) -> Vec<Diagnostic> {
-    if !source.contains("roughly:") {
+    if !SUPPRESSION_PREFIXES
+        .iter()
+        .any(|prefix| source.contains(prefix))
+    {
         return diagnostics;
     }
     let mut allowed_by_line: Vec<(usize, Vec<String>)> = Vec::new();
@@ -72,7 +81,10 @@ pub fn apply_suppressions(diagnostics: Vec<Diagnostic>, source: &str) -> Vec<Dia
             continue;
         };
         let comment = line[comment_start..].trim_start_matches('#').trim();
-        let Some(rest) = comment.strip_prefix("roughly:") else {
+        let Some(rest) = SUPPRESSION_PREFIXES
+            .iter()
+            .find_map(|prefix| comment.strip_prefix(prefix))
+        else {
             continue;
         };
         let Some(arguments) = rest
@@ -129,7 +141,7 @@ mod tests {
 
     #[test]
     fn trailing_and_line_above_suppressions_apply() {
-        let source = "x <- T # roughly: allow(boolean-shorthand)\n# roughly: allow(unused)\ny <- 1\nz <- 1\n";
+        let source = "x <- T # ry: allow(boolean-shorthand)\n# ry: allow(unused)\ny <- 1\nz <- 1\n";
         let kept = apply_suppressions(
             vec![
                 diagnostic(5, "boolean-shorthand"),
@@ -144,7 +156,7 @@ mod tests {
 
     #[test]
     fn all_wildcard_suppresses_every_code() {
-        let source = "x = T # roughly: allow(all)\n";
+        let source = "x = T # ry: allow(all)\n";
         let kept = apply_suppressions(
             vec![
                 diagnostic(0, "assignment-operator"),

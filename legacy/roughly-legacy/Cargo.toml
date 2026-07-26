@@ -15,7 +15,7 @@ keywords = ["r", "language-server", "lsp", "formatter", "linter"]
 categories = ["development-tools", "command-line-utilities"]
 
 # Frozen legacy stack: the Phase 3 cutover moved the `roughly` lib and bin names to the new
-# `crates/roughly`; this crate keeps building under the `-legacy` names as oracle + benchmark.
+# `crates/ry`; this crate keeps building under the `-legacy` names as oracle + benchmark.
 [lib]
 name = "roughly_legacy"
 path = "src/lib.rs"

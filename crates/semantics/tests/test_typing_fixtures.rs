@@ -1,7 +1,7 @@
 //! Typing fixture suite: each case runs the full semantic pipeline on one
 //! package file (shipped stubs installed) and renders every named top-level
 //! definition's exported scheme followed by the file's diagnostics.
-//! `ROUGHLY_BLESS=1` accepts new output; `FIXTURE_FILTER=group__case` runs one
+//! `RY_BLESS=1` accepts new output; `FIXTURE_FILTER=group__case` runs one
 //! case.
 
 use semantics::diagnostics::{Severity, TypeRenderer, file_diagnostics, strict_diagnostics};

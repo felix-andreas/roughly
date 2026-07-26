@@ -1,6 +1,11 @@
-//! `roughly.toml` discovery and parsing. Both the language server (from the
+//! `ry.toml` discovery and parsing. Both the language server (from the
 //! client's workspace root) and the CLI (from each target argument) resolve
 //! configuration through the one nearest-ancestor search here.
+//!
+//! `roughly.toml` is still accepted under the project's former name. Both are
+//! looked for in the SAME directory before walking to the parent, so a
+//! repository that has adopted the new name is never overridden by an old file
+//! left behind further up the tree.
 
 use semantics::lints::{LintConfig, NameStyle};
 use serde::Deserialize;
@@ -8,14 +13,23 @@ use std::path::{Path, PathBuf};
 use std::{fmt, io};
 use thiserror::Error;
 
-pub const CONFIG_FILE_NAME: &str = "roughly.toml";
+pub const CONFIG_FILE_NAME: &str = "ry.toml";
+
+/// The pre-rename spelling, still honoured so existing projects keep working.
+/// Checked after [`CONFIG_FILE_NAME`] within each directory, so the current
+/// name wins a tie.
+pub const LEGACY_CONFIG_FILE_NAME: &str = "roughly.toml";
+
+/// Every file name that marks a project root and carries configuration, in
+/// precedence order.
+pub const CONFIG_FILE_NAMES: [&str; 2] = [CONFIG_FILE_NAME, LEGACY_CONFIG_FILE_NAME];
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Config {
     pub format: format::Config,
     pub lint: LintConfig,
     pub check: CheckConfig,
-    /// The directory containing the loaded `roughly.toml` — the anchor for
+    /// The directory containing the loaded config file — the anchor for
     /// relative patterns like `[check] exclude`. `None` for the built-in
     /// default configuration.
     pub source_directory: Option<PathBuf>,
@@ -59,7 +73,7 @@ impl Default for CheckConfig {
 }
 
 impl Config {
-    /// Loads the `roughly.toml` governing `target`: the nearest one found in
+    /// Loads the config file governing `target`: the nearest one found in
     /// the target's directory (its parent, when `target` is a file) or the
     /// directory's ancestors, falling back to the default configuration when
     /// none exists.
@@ -114,7 +128,7 @@ impl Config {
 
 /// The nearest-ancestor search both `discover` and `discover_path` walk: the
 /// target's own directory (its parent when the target is a file), then each
-/// ancestor, for a `roughly.toml`.
+/// ancestor, for a `ry.toml` — or a `roughly.toml` under the former name.
 fn find_config_file(target: &Path) -> Result<Option<PathBuf>, ConfigError> {
     // A relative path is made absolute first: its lexical parent chain ends
     // at the empty path, so walking it directly would never reach the real
@@ -134,9 +148,11 @@ fn find_config_file(target: &Path) -> Result<Option<PathBuf>, ConfigError> {
         target.parent()
     };
     while let Some(current) = directory {
-        let candidate = current.join(CONFIG_FILE_NAME);
-        if candidate.is_file() {
-            return Ok(Some(candidate));
+        for name in CONFIG_FILE_NAMES {
+            let candidate = current.join(name);
+            if candidate.is_file() {
+                return Ok(Some(candidate));
+            }
         }
         directory = current.parent();
     }
@@ -171,7 +187,7 @@ impl ConfigError {
     }
 }
 
-/// A malformed `roughly.toml`: the toml parse or deserialize failure, with
+/// A malformed config file: the toml parse or deserialize failure, with
 /// its source span resolved to a 1-based line and column so the message can
 /// point at the offending key or value.
 #[derive(Debug)]
@@ -481,7 +497,7 @@ mod tests {
         let message = Config::from_path(&config_path)
             .expect_err("expected the config to be rejected")
             .to_string();
-        assert!(message.contains("roughly.toml"), "{message}");
+        assert!(message.contains("ry.toml"), "{message}");
         assert!(message.contains("at line 2"), "{message}");
     }
 

@@ -1,4 +1,4 @@
-//! `roughly debug analysis-stats`: a workspace performance diagnosis. Runs
+//! `ry debug analysis-stats`: a workspace performance diagnosis. Runs
 //! the full analysis pipeline over a workspace through the same queries the
 //! language server uses and prints where the time goes — per-phase totals,
 //! the slowest files, and an incremental typing probe — plus where the memory

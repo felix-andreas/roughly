@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "legacy/*", "editors/zed"]
-default-members = ["crates/roughly"]
+default-members = ["crates/ry"]
 
 # The release pipeline cross-links the macOS binaries with zig, which has no
 # Apple SDK: any dependency that emits `-framework ...` fails the link. The
@@ -13,7 +13,7 @@ iana-time-zone = { path = "patches/iana-time-zone" }
 [workspace.package]
 version = "0.3.0-alpha"
 license = "UPL-1.0"
-repository = "https://github.com/felix-andreas/roughly"
+repository = "https://github.com/felix-andreas/ry"
 
 [workspace.dependencies]
 clap = { version = "4.5.40", features = ["derive"] }

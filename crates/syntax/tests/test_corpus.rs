@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 fn corpus_round_trip() {
     let Some(root) = corpus_dir() else {
         eprintln!(
-            "corpus_round_trip: no corpus found (set ROUGHLY_CORPUS_DIR or run \
+            "corpus_round_trip: no corpus found (set RY_CORPUS_DIR or run \
              scripts/fetch-corpus.rs); skipping"
         );
         return;
@@ -354,11 +354,11 @@ fn allowlisted_paths() -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Resolve the corpus root: `ROUGHLY_CORPUS_DIR` if set, else `<workspace>/corpus`
+/// Resolve the corpus root: `RY_CORPUS_DIR` if set, else `<workspace>/corpus`
 /// (this crate is `<workspace>/crates/syntax`). `None` when the directory is
 /// absent, so the tests can skip.
 fn corpus_dir() -> Option<PathBuf> {
-    if let Ok(dir) = std::env::var("ROUGHLY_CORPUS_DIR") {
+    if let Some(dir) = syntax::testing::env_var("CORPUS_DIR") {
         let path = PathBuf::from(dir);
         return path.is_dir().then_some(path);
     }

@@ -1448,40 +1448,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "roughly"
-version = "0.3.0-alpha"
-dependencies = [
- "async-lsp",
- "clap",
- "console",
- "dirs",
- "format",
- "futures",
- "ide",
- "ignore",
- "indoc",
- "portable-pty",
- "repl",
- "salsa",
- "semantics",
- "serde",
- "serde_ignored",
- "serde_json",
- "similar",
- "syntax",
- "tempfile",
- "thiserror 2.0.17",
- "tokio",
- "tokio-util",
- "toml",
- "tower",
- "tracing",
- "tracing-subscriber",
- "tracing-tree",
- "unicode-width",
-]
-
-[[package]]
 name = "roughly-legacy"
 version = "0.3.0-alpha"
 dependencies = [
@@ -1573,6 +1539,40 @@ name = "rustversion"
 version = "1.0.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
+
+[[package]]
+name = "ry-lang"
+version = "0.3.0-alpha"
+dependencies = [
+ "async-lsp",
+ "clap",
+ "console",
+ "dirs",
+ "format",
+ "futures",
+ "ide",
+ "ignore",
+ "indoc",
+ "portable-pty",
+ "repl",
+ "salsa",
+ "semantics",
+ "serde",
+ "serde_ignored",
+ "serde_json",
+ "similar",
+ "syntax",
+ "tempfile",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-util",
+ "toml",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "tracing-tree",
+ "unicode-width",
+]
 
 [[package]]
 name = "ryu"
@@ -2757,7 +2757,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "zed_roughly"
+name = "zed_ry"
 version = "0.0.1"
 dependencies = [
  "zed_extension_api",

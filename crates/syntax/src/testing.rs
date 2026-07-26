@@ -4,7 +4,7 @@
 //! group, `#---- <case>` opens a case, the case source runs until a `#++++`
 //! line, and the expectation body runs until the next directive line (or end of
 //! file). Case identity is `group__case` and must be unique across a whole
-//! suite. `FIXTURE_FILTER=group__case` runs one case; `ROUGHLY_BLESS=1`
+//! suite. `FIXTURE_FILTER=group__case` runs one case; `RY_BLESS=1`
 //! rewrites expectation bodies in place from the rendered output.
 
 use std::collections::HashSet;
@@ -45,6 +45,15 @@ pub fn parse_fixture_files(suite_dir: &Path) -> Vec<FixtureFile> {
 
 /// Run every `.test` fixture under `suite_dir` through `render`, comparing (or
 /// blessing) expectations. Panics with a readable report on mismatch.
+/// Reads an environment variable under its `RY_` name, falling back to the
+/// pre-rename `ROUGHLY_` spelling. Both are honoured so a developer's existing
+/// shell aliases and CI scripts keep working after the rename.
+pub fn env_var(suffix: &str) -> Option<String> {
+    std::env::var(format!("RY_{suffix}"))
+        .or_else(|_| std::env::var(format!("ROUGHLY_{suffix}")))
+        .ok()
+}
+
 pub fn run_fixture_suite(suite_dir: &Path, render: &dyn Fn(&str) -> String) {
     let mut files = Vec::new();
     collect_fixture_files(suite_dir, &mut files);
@@ -56,7 +65,7 @@ pub fn run_fixture_suite(suite_dir: &Path, render: &dyn Fn(&str) -> String) {
     );
 
     let filter = std::env::var("FIXTURE_FILTER").ok();
-    let bless = std::env::var("ROUGHLY_BLESS").is_ok_and(|value| value == "1");
+    let bless = env_var("BLESS").is_some_and(|value| value == "1");
     let mut seen_ids = HashSet::new();
     let mut failures = Vec::new();
 
@@ -111,7 +120,7 @@ pub fn run_fixture_suite(suite_dir: &Path, render: &dyn Fn(&str) -> String) {
 
     assert!(
         failures.is_empty(),
-        "{} fixture failure(s):\n\n{}\n(set ROUGHLY_BLESS=1 to accept the new output)",
+        "{} fixture failure(s):\n\n{}\n(set RY_BLESS=1 to accept the new output)",
         failures.len(),
         failures.join("\n")
     );

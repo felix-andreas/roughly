@@ -1,4 +1,4 @@
-//! The `roughly` product surface on the greenfield stack: the CLI (`check`,
+//! The `ry` product surface on the greenfield stack: the CLI (`check`,
 //! `fmt`, `server`, `debug`) and the language server, over the `semantics`,
 //! `ide`, and `format` crates.
 

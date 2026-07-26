@@ -104,7 +104,7 @@ pub fn namespace_exports(db: &dyn Db, package: &str, name: &str) -> bool {
 /// `types/` directory — top-level so the R type declarations are the first
 /// thing a repository visitor finds (the typeshed precedent). NOT `stubs/`:
 /// that name is the project-override convention, and a workspace-root
-/// `stubs/` in this repo would be loaded as overrides when roughly analyzes
+/// `stubs/` in this repo would be loaded as overrides when ry analyzes
 /// its own sources.
 pub fn shipped_stub_sources() -> Vec<(String, String)> {
     [
@@ -411,7 +411,7 @@ pub fn stubs<'db>(db: &'db dyn Db) -> Option<&'db StubLibrary<'db>> {
 }
 
 /// One declaration the stub loader would drop: its zero-based line and the
-/// reason. The editor's `.Rtypes` buffer diagnostics and `roughly check`'s
+/// reason. The editor's `.Rtypes` buffer diagnostics and `ry check`'s
 /// override report both render from this list, so the wording stays
 /// identical everywhere.
 #[derive(Debug, Clone, PartialEq, Eq)]

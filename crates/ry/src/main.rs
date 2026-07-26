@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use roughly::cli::{self, CommandError, Outcome, OutputFormat};
+use ry::cli::{self, CommandError, Outcome, OutputFormat};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use tracing_subscriber::prelude::*;
@@ -35,7 +35,7 @@ fn main() -> ExitCode {
             keybindings: (*keybindings).into(),
             file: file.clone(),
             batch: false,
-            completer: Some(Box::new(roughly::repl_completer::AnalysisCompleter::new())),
+            completer: Some(Box::new(ry::repl_completer::AnalysisCompleter::new())),
         }),
         Command::Run { file } => Some(repl::RunOptions {
             keybindings: repl::Keybindings::Emacs,
@@ -85,7 +85,7 @@ fn main() -> ExitCode {
         Command::Debug(debug) => match debug {
             Debug::Ast { path } => exit_code(cli::ast(&path).map(|()| Outcome::Clean)),
             Debug::AnalysisStats { path } => {
-                exit_code(roughly::stats::analysis_stats(path.as_deref()).map(|()| Outcome::Clean))
+                exit_code(ry::stats::analysis_stats(path.as_deref()).map(|()| Outcome::Clean))
             }
         },
         Command::Repl { .. } | Command::Run { .. } => {
@@ -93,8 +93,8 @@ fn main() -> ExitCode {
         }
     };
     std::thread::Builder::new()
-        .name("roughly-command".to_owned())
-        .stack_size(roughly::ANALYSIS_STACK_SIZE)
+        .name("ry-command".to_owned())
+        .stack_size(ry::ANALYSIS_STACK_SIZE)
         .spawn(command)
         .expect("command thread should spawn")
         .join()
@@ -128,7 +128,7 @@ struct Cli {
 }
 
 fn experimental_features_help() -> String {
-    let features = roughly::config::ExperimentalFeatures::KNOWN
+    let features = ry::config::ExperimentalFeatures::KNOWN
         .iter()
         .map(|feature| format!("            {} — {}", feature.name, feature.description))
         .collect::<Vec<_>>()
@@ -144,10 +144,10 @@ enum Command {
     /// Lint and type-check the given files or directories
     ///
     /// Analysis covers the whole project the paths belong to — the directory
-    /// holding `roughly.toml` or `DESCRIPTION` — so cross-file names resolve
+    /// holding `ry.toml` or `DESCRIPTION` — so cross-file names resolve
     /// the same however the paths are named; only reporting is scoped to what
     /// was named. Exit status: 0 clean, 1 findings, 2 usage or I/O failure.
-    /// Type errors are opt-in via `[check] typing` in `roughly.toml`.
+    /// Type errors are opt-in via `[check] typing` in `ry.toml`.
     Check {
         /// R files to check
         files: Option<Vec<PathBuf>>,

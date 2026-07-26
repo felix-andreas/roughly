@@ -1,5 +1,5 @@
 [package]
-name = "roughly"
+name = "ry-lang"
 edition = "2024"
 rust-version = "1.88"
 version.workspace = true
@@ -10,11 +10,11 @@ keywords = ["r", "language-server", "lsp", "formatter", "linter"]
 categories = ["development-tools", "command-line-utilities"]
 
 [lib]
-name = "roughly"
-path = "src/roughly.rs"
+name = "ry"
+path = "src/ry.rs"
 
 [[bin]]
-name = "roughly"
+name = "ry"
 path = "src/main.rs"
 
 [dependencies]

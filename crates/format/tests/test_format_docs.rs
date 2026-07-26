@@ -2,7 +2,7 @@
 //! `tests/formatter.template.md`: every ```r example is run through the
 //! shipping formatter and the result rendered into
 //! `docs/src/content/docs/reference/formatting-rules.md`, so the page can never drift from
-//! actual behavior. `ROUGHLY_BLESS=1` rewrites the page; otherwise the test
+//! actual behavior. `RY_BLESS=1` rewrites the page; otherwise the test
 //! fails when it is out of date.
 
 use format::{Config, format};
@@ -15,8 +15,7 @@ fn documentation_examples() {
         fs::read_to_string("tests/formatter.template.md").expect("read the docs template");
 
     let code_blocks = Regex::new(r"(?m)```r\n([\s\S]*?)```").expect("valid regex");
-    const BEFORE: &str =
-        "R CODE IN THIS FILE IS FORMATTED AND SAVED TO docs/src/content/docs/reference/formatting-rules.md";
+    const BEFORE: &str = "R CODE IN THIS FILE IS FORMATTED AND SAVED TO docs/src/content/docs/reference/formatting-rules.md";
     const AFTER: &str = "THIS FILE IS GENERATED AUTOMATICALLY.\
 MAKE CHANGES TO crates/format/tests/formatter.template.md INSTEAD";
 
@@ -49,7 +48,7 @@ MAKE CHANGES TO crates/format/tests/formatter.template.md INSTEAD";
         .replace(BEFORE, AFTER);
 
     let path = "../../docs/src/content/docs/reference/formatting-rules.md";
-    if matches!(std::env::var("ROUGHLY_BLESS").as_deref(), Ok("1")) {
+    if syntax::testing::env_var("BLESS").as_deref() == Some("1") {
         // The docs tree is absent under a sandboxed build where the source
         // tree is read-only; there is nothing to rewrite then.
         if fs::metadata(path).is_ok() {
@@ -63,7 +62,7 @@ MAKE CHANGES TO crates/format/tests/formatter.template.md INSTEAD";
     if let Ok(existing) = fs::read_to_string(path) {
         assert_eq!(
             existing, formatted,
-            "docs/src/content/docs/reference/formatting-rules.md is out of date; rerun with ROUGHLY_BLESS=1"
+            "docs/src/content/docs/reference/formatting-rules.md is out of date; rerun with RY_BLESS=1"
         );
     }
 }

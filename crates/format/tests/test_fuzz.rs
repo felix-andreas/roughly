@@ -328,7 +328,8 @@ fn run_seed_mutations(budget: usize) {
 fn corpus_sample(count: usize) -> Option<Vec<String>> {
     let root = {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let candidate = std::env::var("ROUGHLY_CORPUS_DIR")
+        let candidate = syntax::testing::env_var("CORPUS_DIR")
+            .ok_or(std::env::VarError::NotPresent)
             .map(PathBuf::from)
             .unwrap_or_else(|_| manifest.join("../../corpus"));
         candidate.is_dir().then_some(candidate)?

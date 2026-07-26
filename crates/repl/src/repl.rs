@@ -70,7 +70,7 @@ pub struct RunOptions {
     /// A script fed to R before any prompt.
     pub file: Option<std::path::PathBuf>,
     /// End the session when the script is consumed instead of prompting
-    /// (`roughly run`): a top-level error quits with a failing status, so the
+    /// (`ry run`): a top-level error quits with a failing status, so the
     /// process exit code reflects the script's outcome.
     pub batch: bool,
     /// Tab-completion source for the interactive editor.

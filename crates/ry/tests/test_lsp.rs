@@ -1,4 +1,4 @@
-//! Behavioral tests for the language server, driving the real `roughly
+//! Behavioral tests for the language server, driving the real `ry
 //! server` binary over LSP stdio: capability negotiation, document sync,
 //! push/pull diagnostics, position encodings, and the feature endpoints.
 
@@ -73,7 +73,7 @@ fn build_test_client(
 }
 
 fn spawn_server(server_cwd: &Path, envs: &[(&str, &str)], args: &[&str]) -> tokio::process::Child {
-    tokio::process::Command::new(env!("CARGO_BIN_EXE_roughly"))
+    tokio::process::Command::new(env!("CARGO_BIN_EXE_ry"))
         .arg("server")
         .args(args)
         .current_dir(server_cwd)
@@ -83,7 +83,7 @@ fn spawn_server(server_cwd: &Path, envs: &[(&str, &str)], args: &[&str]) -> toki
         .stderr(Stdio::inherit())
         .kill_on_drop(true)
         .spawn()
-        .expect("failed to spawn roughly server")
+        .expect("failed to spawn ry server")
 }
 
 /// The push channel plus a stash: deferred semantic publishes for different
@@ -354,7 +354,7 @@ async fn initialize_reports_capabilities() {
             .server_info
             .as_ref()
             .map(|info| info.name.as_str()),
-        Some("roughly")
+        Some("ry")
     );
     context.shutdown().await;
 }
@@ -722,7 +722,7 @@ async fn pull_diagnostics_report_known_diagnostics() {
         .server
         .document_diagnostic(DocumentDiagnosticParams {
             text_document: TextDocumentIdentifier { uri: uri.clone() },
-            identifier: Some("roughly".into()),
+            identifier: Some("ry".into()),
             previous_result_id: None,
             work_done_progress_params: WorkDoneProgressParams::default(),
             partial_result_params: PartialResultParams::default(),
@@ -743,7 +743,7 @@ async fn pull_diagnostics_unchanged_on_repeat() {
     let uri = context.open("R/warn.R", "x = 1\n").await;
     let params = DocumentDiagnosticParams {
         text_document: TextDocumentIdentifier { uri: uri.clone() },
-        identifier: Some("roughly".into()),
+        identifier: Some("ry".into()),
         previous_result_id: None,
         work_done_progress_params: WorkDoneProgressParams::default(),
         partial_result_params: PartialResultParams::default(),
@@ -808,7 +808,7 @@ async fn workspace_root_comes_from_the_client_not_the_process_cwd() {
 
 #[tokio::test]
 async fn malformed_config_falls_back_to_defaults_and_reports() {
-    let mut context = setup_test(&[("roughly.toml", "[check]\ntyping = 1\n")]).await;
+    let mut context = setup_test(&[("ry.toml", "[check]\ntyping = 1\n")]).await;
     let message = tokio::time::timeout(TIMEOUT, context.messages_receiver.recv())
         .await
         .expect("timed out waiting for the config error message")
@@ -905,7 +905,7 @@ impl TestContext {
         self.server
             .document_diagnostic(DocumentDiagnosticParams {
                 text_document: TextDocumentIdentifier { uri: uri.clone() },
-                identifier: Some("roughly".into()),
+                identifier: Some("ry".into()),
                 previous_result_id,
                 work_done_progress_params: WorkDoneProgressParams::default(),
                 partial_result_params: PartialResultParams::default(),
@@ -1543,7 +1543,7 @@ async fn document_symbols_include_type_definitions() {
 
 #[tokio::test]
 async fn config_indent_width() {
-    let mut context = setup_test(&[("roughly.toml", "[format]\nindent-width = 4\n")]).await;
+    let mut context = setup_test(&[("ry.toml", "[format]\nindent-width = 4\n")]).await;
     let file_uri = context
         .open("R/indent.R", "f <- function(x) {\nx + 1\n}\n")
         .await;
@@ -1572,7 +1572,7 @@ async fn config_indent_width() {
 
 #[tokio::test]
 async fn config_reload_on_change() {
-    let mut context = setup_test(&[("roughly.toml", "[format]\nindent-width = 2\n")]).await;
+    let mut context = setup_test(&[("ry.toml", "[format]\nindent-width = 2\n")]).await;
     let file_uri = context
         .open("R/reload.R", "f <- function(x) {\nx + 1\n}\n")
         .await;
@@ -1603,11 +1603,11 @@ async fn config_reload_on_change() {
     );
 
     std::fs::write(
-        context.workspace_dir.join("roughly.toml"),
+        context.workspace_dir.join("ry.toml"),
         "[format]\nindent-width = 4\n",
     )
     .expect("update config");
-    context.notify_watched_file_changed("roughly.toml", FileChangeType::CHANGED);
+    context.notify_watched_file_changed("ry.toml", FileChangeType::CHANGED);
 
     let reloaded = formatted(&mut context).await;
     assert!(
@@ -2154,7 +2154,7 @@ async fn ancestor_config_governs_a_workspace_without_its_own() {
     // discovery walks ancestors from the announced workspace.
     let temp_dir = tempfile::tempdir().expect("temp dir");
     std::fs::write(
-        temp_dir.path().join("roughly.toml"),
+        temp_dir.path().join("ry.toml"),
         "[format]\nindent-width = 7\n",
     )
     .expect("write ancestor config");
@@ -2229,7 +2229,7 @@ async fn ancestor_config_governs_a_workspace_without_its_own() {
 
 #[tokio::test]
 async fn config_reload_refreshes_push_diagnostics() {
-    let mut context = setup_test(&[("roughly.toml", "[check]\nunused = false\n")]).await;
+    let mut context = setup_test(&[("ry.toml", "[check]\nunused = false\n")]).await;
     let file_uri = context
         .open("R/dead.R", "f <- function() {\n  dead <- 1\n  2\n}\n")
         .await;
@@ -2241,11 +2241,11 @@ async fn config_reload_refreshes_push_diagnostics() {
     );
 
     std::fs::write(
-        context.workspace_dir.join("roughly.toml"),
+        context.workspace_dir.join("ry.toml"),
         "[check]\nunused = true\n",
     )
     .expect("update config");
-    context.notify_watched_file_changed("roughly.toml", FileChangeType::CHANGED);
+    context.notify_watched_file_changed("ry.toml", FileChangeType::CHANGED);
 
     let refreshed = recv_diagnostics(&mut context.diagnostics_receiver, &file_uri, TIMEOUT).await;
     assert!(
@@ -2263,15 +2263,15 @@ async fn config_reload_refreshes_push_diagnostics() {
 #[tokio::test]
 async fn config_reload_requests_refresh_for_pull_clients() {
     let mut context =
-        setup_test_with_pull_and_refresh(&[("roughly.toml", "[check]\nunused = false\n")]).await;
+        setup_test_with_pull_and_refresh(&[("ry.toml", "[check]\nunused = false\n")]).await;
     let _uri = context.open("R/dead.R", "f <- function() 1\n").await;
 
     std::fs::write(
-        context.workspace_dir.join("roughly.toml"),
+        context.workspace_dir.join("ry.toml"),
         "[check]\nunused = true\n",
     )
     .expect("update config");
-    context.notify_watched_file_changed("roughly.toml", FileChangeType::CHANGED);
+    context.notify_watched_file_changed("ry.toml", FileChangeType::CHANGED);
 
     tokio::time::timeout(TIMEOUT, context.refresh_receiver.recv())
         .await
@@ -2283,18 +2283,18 @@ async fn config_reload_requests_refresh_for_pull_clients() {
 
 #[tokio::test]
 async fn config_reload_failure_keeps_previous_config_and_reports() {
-    let mut context = setup_test(&[("roughly.toml", "[format]\nindent-width = 4\n")]).await;
+    let mut context = setup_test(&[("ry.toml", "[format]\nindent-width = 4\n")]).await;
     let file_uri = context
         .open("R/keep.R", "f <- function(x) {\nx + 1\n}\n")
         .await;
     drain_diagnostics(&mut context.diagnostics_receiver).await;
 
     std::fs::write(
-        context.workspace_dir.join("roughly.toml"),
+        context.workspace_dir.join("ry.toml"),
         "[check]\ntyping = 1\n",
     )
     .expect("write broken config");
-    context.notify_watched_file_changed("roughly.toml", FileChangeType::CHANGED);
+    context.notify_watched_file_changed("ry.toml", FileChangeType::CHANGED);
 
     let message = tokio::time::timeout(TIMEOUT, context.messages_receiver.recv())
         .await
@@ -2332,8 +2332,8 @@ async fn config_reload_failure_keeps_previous_config_and_reports() {
 
 #[tokio::test]
 async fn malformed_config_publishes_a_diagnostic_on_the_config_file() {
-    let mut context = setup_test(&[("roughly.toml", "[check]\ntyping = 1\n")]).await;
-    let config_uri = context.workspace_uri("roughly.toml");
+    let mut context = setup_test(&[("ry.toml", "[check]\ntyping = 1\n")]).await;
+    let config_uri = context.workspace_uri("ry.toml");
     let published =
         recv_first_diagnostics(&mut context.diagnostics_receiver, &config_uri, TIMEOUT).await;
     assert_eq!(
@@ -2689,7 +2689,7 @@ async fn cancelled_pull_is_retryable_and_recovers() {
         .server
         .document_diagnostic(DocumentDiagnosticParams {
             text_document: TextDocumentIdentifier { uri: uri.clone() },
-            identifier: Some("roughly".into()),
+            identifier: Some("ry".into()),
             previous_result_id: None,
             work_done_progress_params: WorkDoneProgressParams::default(),
             partial_result_params: PartialResultParams::default(),

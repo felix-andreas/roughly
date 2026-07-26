@@ -1,15 +1,15 @@
-//! End-to-end tests for `roughly repl`, driving the real binary through a
+//! End-to-end tests for `ry repl`, driving the real binary through a
 //! pseudo-terminal: type input, watch R evaluate. They need a local R
 //! installation, so they SKIP (loudly, but green) where none exists — CI has
 //! no R, and by decision these run locally before REPL-touching changes:
 //!
 //! ```sh
-//! cargo test -p roughly --test test_repl_e2e -- --nocapture
+//! cargo test -p ry-lang --test test_repl_e2e -- --nocapture
 //! ```
 //!
 //! Runs wherever the console itself runs (Unix ptys and Windows ConPTY,
 //! through the same `portable-pty` seam); on platforms with no embedding
-//! recipe `roughly repl` refuses at startup, so an R on `PATH` would only
+//! recipe `ry repl` refuses at startup, so an R on `PATH` would only
 //! produce false failures there.
 
 #![cfg(any(unix, windows))]
@@ -59,7 +59,7 @@ impl ReplSession {
                 pixel_height: 0,
             })
             .expect("openpty");
-        let mut command = CommandBuilder::new(env!("CARGO_BIN_EXE_roughly"));
+        let mut command = CommandBuilder::new(env!("CARGO_BIN_EXE_ry"));
         command.arg("repl");
         let child = pair.slave.spawn_command(command).expect("spawn repl");
         let mut reader = pair.master.try_clone_reader().expect("pty reader");
@@ -288,7 +288,7 @@ fn ctrl_c_interrupts_evaluation() {
     session.quit();
 }
 
-// Batch mode (`roughly run`) needs no terminal: plain process spawns.
+// Batch mode (`ry run`) needs no terminal: plain process spawns.
 
 #[test]
 fn run_executes_a_file_and_exits_zero() {
@@ -298,7 +298,7 @@ fn run_executes_a_file_and_exits_zero() {
     let directory = tempfile::tempdir().expect("temp dir");
     let script = directory.path().join("ok.R");
     std::fs::write(&script, "x <- 40 + 2\nprint(x)\n").expect("write script");
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_roughly"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_ry"))
         .arg("run")
         .arg(&script)
         .output()
@@ -321,7 +321,7 @@ fn run_error_exits_nonzero() {
     let directory = tempfile::tempdir().expect("temp dir");
     let script = directory.path().join("bad.R");
     std::fs::write(&script, "stop(\"boom\")\nprint(\"unreached\")\n").expect("write script");
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_roughly"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_ry"))
         .arg("run")
         .arg(&script)
         .output()

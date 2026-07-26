@@ -340,7 +340,7 @@ impl RApi {
         write_console_ex: WriteConsoleEx,
     ) -> Result<(), ReplError> {
         unsafe { std::env::set_var("R_HOME", &self.r_home) };
-        let program = CString::new("roughly").expect("static argv string has no NUL");
+        let program = CString::new("ry").expect("static argv string has no NUL");
         let mut argv = [program.as_ptr() as *mut c_char];
 
         let rhome = CString::new(self.r_home.to_string_lossy().into_owned())
@@ -575,7 +575,7 @@ mod tests {
         // The test must pass on machines with and without R: force the
         // env-var path with a directory that cannot exist.
         let previous = std::env::var_os("R_HOME");
-        unsafe { std::env::set_var("R_HOME", "/nonexistent/roughly-test-r-home") };
+        unsafe { std::env::set_var("R_HOME", "/nonexistent/ry-test-r-home") };
         let error = discover_r_home().expect_err("a bogus R_HOME must fail");
         assert!(error.0.contains("does not exist"), "{}", error.0);
         match previous {
@@ -613,8 +613,7 @@ mod tests {
     }
 
     fn tempfile_like_dir() -> PathBuf {
-        let directory =
-            std::env::temp_dir().join(format!("roughly-repl-test-{}", std::process::id(),));
+        let directory = std::env::temp_dir().join(format!("ry-repl-test-{}", std::process::id(),));
         std::fs::create_dir_all(&directory).expect("create temp dir");
         directory
     }

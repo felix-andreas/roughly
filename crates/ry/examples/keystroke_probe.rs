@@ -1,7 +1,7 @@
 //! Keystroke-incrementality probe: after a cold prime, what does one edit
 //! cost, and which whole-project queries re-execute for it?
 //!
-//! Usage: `cargo run --release -p roughly --example keystroke_probe
+//! Usage: `cargo run --release -p ry-lang --example keystroke_probe
 //! <package-dir>...`
 //!
 //! Two edit shapes per probed file, mirroring the language server's settled

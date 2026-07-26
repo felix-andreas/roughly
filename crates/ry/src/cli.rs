@@ -524,7 +524,7 @@ pub(crate) fn analysable_source(path: &Path, text: String) -> String {
 pub(crate) fn warn_unknown_config_keys(config: &config::Config) {
     for key in &config.unknown_keys {
         warn(&format!(
-            "ignoring unknown config key `{key}` — check the spelling, or update roughly"
+            "ignoring unknown config key `{key}` — check the spelling, or update ry"
         ));
     }
 }
@@ -711,7 +711,7 @@ fn render_human_diagnostic(
     related: &[RelatedNote],
 ) {
     // The header names the code — it is what a suppression comment must
-    // spell (`# roughly: allow(unused)`), so the human output teaches it.
+    // spell (`# ry: allow(unused)`), so the human output teaches it.
     let header = match diagnostic.severity {
         Severity::Warning => style(format!("warning[{}]: ", diagnostic.code))
             .yellow()
@@ -859,10 +859,10 @@ fn render_json_diagnostic(
 }
 
 /// The project root a target is analysed in: the NEAREST ancestor carrying a
-/// `roughly.toml` or a `DESCRIPTION`, else the target's own directory. This is
+/// config file or a `DESCRIPTION`, else the target's own directory. This is
 /// what makes the answer independent of how the command names its paths.
 ///
-/// Nearest wins whichever marker it is, so a `roughly.toml` at a repository
+/// Nearest wins whichever marker it is, so a `ry.toml` at a repository
 /// root does not swallow a package in a subdirectory — that package's own
 /// `DESCRIPTION` is closer, and its `R/` must still be package source. The
 /// ancestor config still *configures* it; only the root is decided here.
@@ -873,7 +873,11 @@ fn project_root_for_target(target: &Path) -> PathBuf {
         target.parent()
     };
     while let Some(directory) = current {
-        if directory.join("roughly.toml").is_file() || directory.join("DESCRIPTION").is_file() {
+        if crate::config::CONFIG_FILE_NAMES
+            .iter()
+            .any(|name| directory.join(name).is_file())
+            || directory.join("DESCRIPTION").is_file()
+        {
             return directory.to_path_buf();
         }
         current = directory.parent();

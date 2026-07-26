@@ -51,7 +51,7 @@ async fn run_async(experimental_features: ExperimentalFeatures, debug: bool) {
             runtime: runtime.clone(),
         };
         std::thread::Builder::new()
-            .name("roughly-analysis".to_owned())
+            .name("ry-analysis".to_owned())
             .stack_size(crate::ANALYSIS_STACK_SIZE)
             .spawn(move || run_worker(seed, receiver))
             .expect("analysis worker thread should spawn");
@@ -134,9 +134,9 @@ enum Job {
 struct WorkerSeed {
     client: ClientSocket,
     experimental_features: ExperimentalFeatures,
-    /// The developer switch (`roughly server --debug`, or `ROUGHLY_DEBUG=1`):
+    /// The developer switch (`ry server --debug`, or `ROUGHLY_DEBUG=1`):
     /// surfaces internal analysis facts such as the hover debug sections.
-    /// Deliberately NOT a `roughly.toml` key — the config file is user-facing
+    /// Deliberately NOT a `ry.toml` key — the config file is user-facing
     /// contract, and this is an aid for people working on Roughly itself.
     debug: bool,
     cancel: CancelHandle,
@@ -778,7 +778,7 @@ impl Worker {
             .replace('%', "%25")
             .replace('/', "%2F")
             .replace('\\', "%5C");
-        self.workspace_root.join(".roughly-virtual").join(encoded)
+        self.workspace_root.join(".ry-virtual").join(encoded)
     }
 
     fn document_uri(&self, path: &Path) -> lsp_types::Url {
@@ -1420,7 +1420,7 @@ impl Worker {
                 diagnostic.code.to_owned(),
             )),
             code_description: None,
-            source: Some("roughly".into()),
+            source: Some("ry".into()),
             message: diagnostic.message,
             related_information: (!related_information.is_empty()).then_some(related_information),
             tags,
@@ -1464,7 +1464,7 @@ impl Worker {
             .collect()
     }
 
-    /// A malformed `roughly.toml` is published as a diagnostic on the config
+    /// A malformed config file is published as a diagnostic on the config
     /// file itself; `None` clears it.
     fn publish_config_diagnostics(&self, error: Option<&ConfigError>) {
         let config_path = self.workspace_root.join(CONFIG_FILE_NAME);
@@ -1484,7 +1484,7 @@ impl Worker {
                     severity: Some(lsp_types::DiagnosticSeverity::ERROR),
                     code: Some(lsp_types::NumberOrString::String("config".to_owned())),
                     code_description: None,
-                    source: Some("roughly".into()),
+                    source: Some("ry".into()),
                     message: error.to_string(),
                     related_information: None,
                     tags: None,
@@ -1542,12 +1542,25 @@ impl Worker {
             .map(|key| format!("`{key}`"))
             .collect::<Vec<_>>()
             .join(", ");
+        // Name the file that was actually loaded: a project may still be on
+        // the pre-rename `ry.toml`.
+        let file = self
+            .config
+            .source_directory
+            .as_deref()
+            .map(|directory| {
+                crate::config::CONFIG_FILE_NAMES
+                    .into_iter()
+                    .find(|name| directory.join(name).is_file())
+                    .unwrap_or(crate::config::CONFIG_FILE_NAME)
+            })
+            .unwrap_or(crate::config::CONFIG_FILE_NAME);
         let mut client = self.client.clone();
         let _ = client.show_message(lsp_types::ShowMessageParams {
             typ: lsp_types::MessageType::WARNING,
             message: format!(
-                "roughly.toml sets {keys}, which this version of roughly does not know — \
-                 ignoring {}. Check the spelling, or update roughly.",
+                "{file} sets {keys}, which this version of ry does not know — \
+                 ignoring {}. Check the spelling, or update ry.",
                 if self.config.unknown_keys.len() == 1 {
                     "it"
                 } else {
@@ -1581,7 +1594,7 @@ fn initialize_result(
             )),
             diagnostic_provider: Some(lsp_types::DiagnosticServerCapabilities::Options(
                 lsp_types::DiagnosticOptions {
-                    identifier: Some("roughly".to_owned()),
+                    identifier: Some("ry".to_owned()),
                     inter_file_dependencies: true,
                     workspace_diagnostics: false,
                     work_done_progress_options: Default::default(),
@@ -2872,7 +2885,7 @@ fn materialize_shipped_stubs(shipped: &[(String, String)]) -> Vec<Option<PathBuf
         return vec![None; shipped.len()];
     };
     let directory = cache
-        .join("roughly")
+        .join("ry")
         .join("stubs")
         .join(env!("CARGO_PKG_VERSION"));
     if let Err(error) = std::fs::create_dir_all(&directory) {

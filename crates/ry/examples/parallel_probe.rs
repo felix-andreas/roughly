@@ -1,7 +1,7 @@
 //! Cold-pass parallelism probe: where does the wall time go, and how much of
 //! it is serialized inside single project-wide salsa queries?
 //!
-//! Usage: `WORKERS=4 cargo run --release -p roughly --example parallel_probe
+//! Usage: `WORKERS=4 cargo run --release -p ry-lang --example parallel_probe
 //! <package-dir>...`
 //!
 //! Phases, each on a fresh database:

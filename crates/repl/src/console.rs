@@ -43,7 +43,7 @@ pub fn run(api: RApi, options: crate::RunOptions) -> Result<(), ReplError> {
     console.pending.extend(
         b"invisible(local({ e <- baseenv(); locked <- bindingIsLocked(\".Platform\", e); \
           if (locked) unlockBinding(\".Platform\", e); \
-          p <- get(\".Platform\", envir = e); p$GUI <- \"roughly\"; \
+          p <- get(\".Platform\", envir = e); p$GUI <- \"ry\"; \
           assign(\".Platform\", p, envir = e); \
           if (locked) lockBinding(\".Platform\", e) }))\n",
     );
@@ -106,7 +106,7 @@ struct Console {
     /// them over in buffer-sized chunks across successive calls.
     pending: VecDeque<u8>,
     /// Batch mode: once `pending` is exhausted the session ends (EOF)
-    /// instead of prompting — `roughly run`'s driver.
+    /// instead of prompting — `ry run`'s driver.
     batch: bool,
     completer: Option<SharedSessionCompleter>,
 }
@@ -180,7 +180,14 @@ fn history_file() -> Option<std::path::PathBuf> {
     // Per-platform data directory (XDG on Linux, Application Support on
     // macOS, roaming AppData on Windows). Persistence is best-effort: on
     // failure the editor falls back to in-memory history for the session.
-    let directory = dirs::data_dir()?.join("roughly");
+    let data = dirs::data_dir()?;
+    let directory = data.join("ry");
+    // The project's former name. Move the directory once rather than renaming
+    // the path outright, which would silently discard existing history.
+    let previous = data.join("roughly");
+    if !directory.exists() && previous.is_dir() {
+        let _ = std::fs::rename(&previous, &directory);
+    }
     std::fs::create_dir_all(&directory).ok()?;
     Some(directory.join("history.txt"))
 }
