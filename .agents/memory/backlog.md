@@ -62,14 +62,15 @@ provably a false positive. Clean run cost 5 edits on 500 lines; they would enabl
 tomorrow and would **not** enable `strict`, `shadows-namespace` or `unused-parameter` — "three of
 five opt-in lints are unusable on a package with an S3 class and a testthat suite".
 
-1. **`structure(list(...), class = "x")` erases the record type — and the docs say otherwise.**
-   `limitations.md` and `reference.md` both promise "a plain record; the class attribute is data";
-   it is actually `Unknown`. So the field typo the guide headlines is caught on a bare `list()` and
-   **silently dropped** once `class =` is added — the objects real packages are built from.
-   **31 of their 34 strict findings traced to this one call.** The documented `@type`/`@new` remedy
-   does work (4 annotation lines took strict from 34 to 9), but they had to hand-declare a type the
-   checker was already handed as a `list()` literal. This is the single highest-leverage fix in the
-   round, and the doc claim is one this project wrote without verifying — fix the code to match it.
+1. **`structure(list(...), class = "x")` erasing the record type FIXED.** It yielded `Unknown`,
+   against a documented promise of "a plain record; the class attribute is data", so the field typo
+   the guide headlines was caught on a bare `list()` and **silently dropped** once `class =` was
+   added — the objects real packages are built from. **31 of their 34 strict findings traced to this
+   one call.** `structure()` now returns its first argument's type, so the record survives.
+   Deliberately NOT changed: the class attribute still does not mint a nominal type — `@new` remains
+   the only nominal introduction, and reading `class[1]` instead would type a
+   `c("grouped_df", "tbl_df", "tbl", "data.frame")` value as `grouped_df` and then reject it at a
+   `data.frame` parameter. See `typedr-design.md` §3.
 2. **`library(yourpkg)` in `tests/testthat.R` FIXED.** The project's own name — `DESCRIPTION`'s
    `Package` field, now carried on the metadata input — earns no tolerance: its export set is not
    unknowable, those exports being the project's own definitions. `usethis` generates that file, so
