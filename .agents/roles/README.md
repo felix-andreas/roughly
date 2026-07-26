@@ -1,6 +1,6 @@
 # Agent roles
 
-This directory defines the **roles** used to drive Roughly's AI-led development as a small organization (a CEO/director orchestrating a CTO and an expert reviewer, each running their own subagents).
+This directory defines the **roles** used to drive ry's AI-led development as a small organization (a CEO/director orchestrating a CTO and an expert reviewer, each running their own subagents).
 
 Each `*.md` file is one role definition: its mandate, what it does and explicitly does **not** do, how it operates, and its relationship to the other roles.
 

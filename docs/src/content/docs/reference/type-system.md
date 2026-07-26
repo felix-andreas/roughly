@@ -1,9 +1,9 @@
 ---
 title: Type system
-description: The precise static-typing semantics contract for Roughly's R type checker
+description: The precise static-typing semantics contract for ry's R type checker
 ---
 
-This is the authoritative specification of Roughly's typing semantics — the precise contract the type checker implements. For a gentler, example-driven introduction, start with the [Type Checker guide](/type-checking/tutorial).
+This is the authoritative specification of ry's typing semantics — the precise contract the type checker implements. For a gentler, example-driven introduction, start with the [Type Checker guide](/type-checking/tutorial).
 
 This page is the single source of truth for the user-facing typing semantics: the type syntax, the inferred type shapes, the coercion rules, and the rendered type forms that appear in errors and hovers.
 
@@ -11,7 +11,7 @@ This page is the single source of truth for the user-facing typing semantics: th
 
 Typing annotations use preceding `#:` comments attached to the following binding or expression.
 
-This applies to all typing annotations in Roughly, not only function annotations.
+This applies to all typing annotations in ry, not only function annotations.
 
 Consecutive `#:` lines with no blank line between them are treated as a single annotation block.
 
@@ -197,10 +197,10 @@ with neither file) behaves as if both were empty.
   of `import(pkg)`, and follows the same rule: it attaches every export of `pkg` to the search
   path, so when nothing describes `pkg` its export set is unknowable and every
   otherwise-unresolved bare read is tolerated. The tolerance is project-wide, because R's search
-  path is, and it lifts as soon as Roughly knows the package's exports — which for a long list of
+  path is, and it lifts as soon as ry knows the package's exports — which for a long list of
   common packages it now does. An [export manifest](/contributing/authoring-stubs#export-manifests) is enough;
   types are not required. The tidyverse, `knitr`, `rlang`, `glue`, `jsonlite`, `R6` and the rest of
-  the shipped manifest set therefore keep unresolved-name detection *on*, while a package Roughly
+  the shipped manifest set therefore keep unresolved-name detection *on*, while a package ry
   has never heard of still switches it off — and a two-line `stubs/<pkg>.Rtypes` of your own turns
   it back on.
 - Attaching a **meta-package** activates the packages it attaches rather than exports:
@@ -1720,7 +1720,7 @@ caught. A nominal with no such method is *indeterminate* rather than an error: R
 strips attributes and returns something the checker cannot name, so the result is `Unknown` and a
 strict-mode origin.
 
-The method name's suffix is the **nominal's** name, not R's full class vector: Roughly's nominals
+The method name's suffix is the **nominal's** name, not R's full class vector: ry's nominals
 carry one name, so a class declared `@type ggplot` takes `+.ggplot` even though R registers the
 method as `+.gg`.
 
@@ -2376,7 +2376,7 @@ apply_renderer <- function(render_count, count) { render_count(count) }
 
 ## Object systems (S3, S4, R6)
 
-Roughly checks the parts of R's object systems that are **written down as declarations**, and
+ry checks the parts of R's object systems that are **written down as declarations**, and
 declines the parts that are **decided at run time from a value's class attribute**. The boundary is
 deliberate, not a to-do list, so this section states both what happens and why.
 
@@ -2433,7 +2433,7 @@ work the same way — declare `Arith.Point` and `p1 + p2` is checked.
 
 Not because of the inference algorithm. Nominal types, record projection and declaration-ordered
 overload sets are all part of the checker, and S3 *operator* dispatch already runs on top of them —
-dispatching on a class is a mechanism Roughly has. Three specific properties of run-time dispatch
+dispatching on a class is a mechanism ry has. Three specific properties of run-time dispatch
 keep the rest out:
 
 - **Dispatch needs a class the checker knows at the call site.** Inside an unannotated
@@ -2528,7 +2528,7 @@ switches in both directions:
 ### Data-masked evaluation (NSE)
 
 R evaluates some argument positions inside a data frame's own environment, where bare names are
-column references no lexical scope can see. Roughly recognizes these positions structurally and
+column references no lexical scope can see. ry recognizes these positions structurally and
 treats reads there that resolve to no binding as **column references**: silent `Unknown`, no
 could-not-resolve warning, no strict origin.
 
@@ -2589,7 +2589,7 @@ a native-pipe chain keeps its class end to end — `fread(path) |> mutate(r = a 
 `data.table` — while every column reference inside the verbs' `...` stays masked.
 
 A project `.Rtypes` stub can declare its own masking function with the `@masked` attribute —
-the way to teach Roughly a dplyr-style verb:
+the way to teach ry a dplyr-style verb:
 
 ```
 filter : @masked fn(.data: Any, ...: Any) -> Any

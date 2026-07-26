@@ -26,15 +26,15 @@ export default defineConfig({
 	},
 	integrations: [
 		starlight({
-			title: 'Roughly',
+			title: 'ry',
 			logo: {
 				src: './public/logo.svg',
 				replacesTitle: true,
 			},
 			favicon: '/favicon.svg',
 			social: [
-				{ label: "Visual Studio Marketplace", icon: "vscode", href: 'https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly' },
-				{ label: "GitHub", icon: "github", href: 'https://github.com/felix-andreas/roughly' },
+				{ label: "Visual Studio Marketplace", icon: "vscode", href: 'https://marketplace.visualstudio.com/items?itemName=felix-andreas.ry' },
+				{ label: "GitHub", icon: "github", href: 'https://github.com/felix-andreas/ry' },
 			],
 			// The installation page is deliberately absent: getting started closes with
 			// the two extension links and the one-line install, and the page itself is
@@ -44,7 +44,7 @@ export default defineConfig({
 					label: 'Introduction',
 					items: [
 						{ slug: 'getting-started' },
-						{ slug: 'why-roughly' },
+						{ slug: 'why-ry' },
 						{ slug: 'features' },
 					],
 				},
@@ -102,8 +102,8 @@ export default defineConfig({
 							link: '/getting-started',
 						},
 						{
-							label: 'Why Roughly',
-							link: '/why-roughly',
+							label: 'Why ry',
+							link: '/why-ry',
 						},
 						{
 							label: 'Features',
@@ -118,7 +118,7 @@ export default defineConfig({
 							link: '/reference/configuration',
 						},
 					],
-					footerText: `<div class="py-8 flex items-center justify-between"><div class="flex items-center gap-2"><img src="/logo.svg" width="12" /> Roughly © ${new Date().getFullYear()}</div><a href="https://felixandreas.me/legal-notice/" target="_blank" rel="noopener" class="no-underline text-gray-500">Legal Notice</a></div>`
+					footerText: `<div class="py-8 flex items-center justify-between"><div class="flex items-center gap-2"><img src="/logo.svg" width="12" /> ry © ${new Date().getFullYear()}</div><a href="https://felixandreas.me/legal-notice/" target="_blank" rel="noopener" class="no-underline text-gray-500">Legal Notice</a></div>`
 				})
 			],
 		}),

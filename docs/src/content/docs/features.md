@@ -1,6 +1,6 @@
 ---
 title: Features
-description: What Roughly gives you before you configure anything — and the one flag that changes the rest
+description: What ry gives you before you configure anything — and the one flag that changes the rest
 ---
 
 Everything below works with no configuration and no annotations. The last section needs one line of
@@ -12,7 +12,7 @@ R already has a language server, written in R. On a large project it becomes slo
 turn it off. The alternative is to stay inside RStudio or Positron, where the analysis is
 good but does not travel to any other editor.
 
-Roughly is a standard language server, so go-to-definition, find-references, completion and hover work
+ry is a standard language server, so go-to-definition, find-references, completion and hover work
 in VS Code, Zed, Neovim and Helix alike. It reads your whole project, so a name defined in one file
 completes in another:
 
@@ -28,7 +28,7 @@ normalise_re      # completes to normalise_region
 
 ## Syntax errors
 
-Roughly parses R with its own hand-written parser rather than calling R or reusing a grammar. That
+ry parses R with its own hand-written parser rather than calling R or reusing a grammar. That
 is what makes these messages possible. Forget a comma in a list:
 
 ```r
@@ -47,7 +47,7 @@ Error: unexpected symbol in:
   subtitle"
 ```
 
-Roughly reports what is missing, and points at the place it should go:
+ry reports what is missing, and points at the place it should go:
 
 ```text
 error[syntax-error]: missing `,` between these arguments
@@ -80,7 +80,7 @@ carries on, keeps the rest of the file analyzable, and can say which construct w
 
 ## Formatting
 
-`roughly fmt` fixes spacing, indentation and bracing:
+`ry fmt` fixes spacing, indentation and bracing:
 
 ```r
 x<-c(1,2,3)
@@ -151,7 +151,7 @@ that, and it has been running the whole time.
 One thing is still off by default: reporting the places where those types disagree.
 
 ```toml
-# roughly.toml
+# ry.toml
 [check]
 typing = true
 ```
@@ -179,7 +179,7 @@ One line of configuration, no annotations, no change to the code.
 
 Type checking a whole project sounds expensive, and this is where it would show. It does not, because
 analysis is incremental: an edit re-checks only what that edit could have affected, not the project.
-Roughly is tested against roughly 970,000 lines of real R — 69 CRAN packages plus R's base library.
+ry is tested against ry 970,000 lines of real R — 69 CRAN packages plus R's base library.
 
 - [Tutorial](/type-checking/tutorial) — put it on real code
 - [Concepts](/type-checking/concepts) — how it works out what it knows

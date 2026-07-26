@@ -1,4 +1,4 @@
-//! An interactive R console with Roughly's language smarts, embedding R
+//! An interactive R console with ry's language smarts, embedding R
 //! WITHOUT a build-time link dependency: the R shared library is located and
 //! `dlopen`ed at runtime, and every C-API symbol is resolved by name
 //! (`libr`). The design record lives in the repository's agent memory
@@ -6,7 +6,7 @@
 //!
 //! - R owns the calling thread and runs its REAL main loop
 //!   (`run_Rmainloop`); the console lives inside R's `ReadConsole` callback,
-//!   where a `reedline` editor collects input, Roughly's own parser decides
+//!   where a `reedline` editor collects input, ry's own parser decides
 //!   completeness (continuation prompts), and finished input is fed back to
 //!   R through the console buffer for R to parse, evaluate, and autoprint.
 //! - Interrupts flow through `R_interrupts_pending`: Ctrl-C during

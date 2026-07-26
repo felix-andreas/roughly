@@ -25,7 +25,7 @@ caught.
 
 ## When a package is not known
 
-Attaching a package Roughly has never heard of weakens the `unresolved` check across the project: any
+Attaching a package ry has never heard of weakens the `unresolved` check across the project: any
 bare name *could* be one of that package's exports, so unresolved names are tolerated rather than
 reported.
 
@@ -65,7 +65,7 @@ of a package, you can fix it locally without waiting for a release.
 Overriding a name does not remove it from its own namespace: `stats::sd` stays valid under an `sd`
 override.
 
-Nothing here fails silently. `roughly check` reports every declaration it had to drop — a line that does
+Nothing here fails silently. `ry check` reports every declaration it had to drop — a line that does
 not parse, or one naming a type that does not exist — as an error on that stub line, and your editor
 shows the same while the `.Rtypes` file is open.
 

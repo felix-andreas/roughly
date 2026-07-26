@@ -78,7 +78,7 @@ fn main() -> ExitCode {
         } => {
             // The flag wins; the env var is the ambient fallback for setups
             // where editing server arguments is awkward.
-            let debug = debug || matches!(std::env::var("ROUGHLY_DEBUG").as_deref(), Ok("1"));
+            let debug = debug || matches!(std::env::var("RY_DEBUG").as_deref(), Ok("1"));
             cli::server(experimental_features, debug);
             ExitCode::SUCCESS
         }
@@ -184,7 +184,7 @@ enum Command {
         #[clap(short, long, default_value_t = false)]
         verbose: bool,
         /// Surface internal analysis facts (hover debug sections) — a
-        /// developer aid for working on Roughly itself. `ROUGHLY_DEBUG=1`
+        /// developer aid for working on ry itself. `RY_DEBUG=1`
         /// is the environment equivalent; the flag takes precedence.
         #[clap(long, default_value_t = false)]
         debug: bool,

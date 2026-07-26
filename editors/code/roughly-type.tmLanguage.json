@@ -1,7 +1,7 @@
 {
 	"$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
-	"name": "Roughly type notation",
-	"scopeName": "source.roughly-type",
+	"name": "ry type notation",
+	"scopeName": "source.ry-type",
 	"patterns": [
 		{
 			"include": "#annotation-body"

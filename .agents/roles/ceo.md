@@ -2,7 +2,7 @@
 
 > Status: **dormant unless explicitly activated** (see [README](./README.md)). Activate by an explicit human instruction such as `/goal …` that assigns this orchestration role for the session.
 
-One-line mandate: **drive the entire Roughly repository to production-ready, rust-analyzer-quality — impeccable, whole-repo polish, not just passing features — and do not stop until it is genuinely achieved.**
+One-line mandate: **drive the entire ry repository to production-ready, rust-analyzer-quality — impeccable, whole-repo polish, not just passing features — and do not stop until it is genuinely achieved.**
 
 ## Identity
 

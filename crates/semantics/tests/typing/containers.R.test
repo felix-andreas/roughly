@@ -207,7 +207,7 @@ f <- function() {
 }
 #++++
 f: Unknown
-36..45 error[type-mismatch] indexing with 2 indexes is not supported yet — Roughly does not model matrix and data.frame subsetting
+36..45 error[type-mismatch] indexing with 2 indexes is not supported yet — ry does not model matrix and data.frame subsetting
 
 #==== replacement
 #---- known_field_write

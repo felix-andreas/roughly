@@ -5,7 +5,7 @@
 default:
     @just --list
 
-roughly *args:
+ry *args:
     @cargo run -q -- {{ args }}
 
 rofy *args:
@@ -19,12 +19,12 @@ test *args:
 gate: battery clippy fmt-check
 
 # The workspace test battery. `rofy` needs a local R installation and
-# `zed_roughly` a wasm toolchain, so this and CI exclude them.
+# `zed_ry` a wasm toolchain, so this and CI exclude them.
 battery *args:
-    cargo test --workspace --exclude rofy --exclude zed_roughly {{ args }}
+    cargo test --workspace --exclude rofy --exclude zed_ry {{ args }}
 
 clippy:
-    cargo clippy --workspace --exclude rofy --exclude zed_roughly --all-targets -- -D warnings
+    cargo clippy --workspace --exclude rofy --exclude zed_ry --all-targets -- -D warnings
 
 fmt-check:
     cargo fmt --all --check
@@ -39,11 +39,11 @@ fixture case binary="test_typing_fixtures" package="semantics":
 # Re-bless fixture expectations for the given test selection, e.g.
 #   just bless -p semantics --test test_typing_fixtures
 bless *args:
-    ROUGHLY_BLESS=1 cargo test {{ args }}
+    RY_BLESS=1 cargo test {{ args }}
 
 # Regenerate docs/formatter.md from the template through the shipping formatter.
 format-docs:
-    ROUGHLY_BLESS=1 cargo test -p format --test test_format_docs
+    RY_BLESS=1 cargo test -p format --test test_format_docs
 
 # The seeded deep fuzz run beyond the bounded passes already inside
 # `cargo test -p semantics`; `FUZZ_ITERS` scales the budget.
@@ -58,12 +58,12 @@ fuzz-run target="semantics" *args:
 
 # The workspace performance diagnosis (phase timings, memory, typing bursts).
 stats path=".":
-    cargo run -q -p roughly -- debug analysis-stats {{ path }}
+    cargo run -q -p ry -- debug analysis-stats {{ path }}
 
-# The REPL's end-to-end tests: drive `roughly repl` through a pty against the
+# The REPL's end-to-end tests: drive `ry repl` through a pty against the
 # system R. Local-only — they skip (green) on machines without R.
 repl-e2e:
-    cargo test -p roughly --test test_repl_e2e -- --nocapture
+    cargo test -p ry --test test_repl_e2e -- --nocapture
 
 docs:
     cd docs && bun dev
@@ -73,8 +73,8 @@ vsce *args:
 
 install-extension:
     mkdir -p release/dev
-    just build-extension pre-release --out ../../release/dev/roughly.vsix
-    code --install-extension release/dev/roughly.vsix
+    just build-extension pre-release --out ../../release/dev/ry.vsix
+    code --install-extension release/dev/ry.vsix
 
 #
 # BUILD
@@ -89,8 +89,8 @@ zigbuild $target *args:
 build-platform-vsix target vscode-target binary-name dir kind:
     rm -rf editors/code/bin
     mkdir -p editors/code/bin
-    cp {{ dir }}/roughly-{{ target }}/{{ binary-name }} editors/code/bin
-    just build-extension {{ kind }} --target {{ vscode-target }} --out ../../{{ dir }}/roughly-{{ vscode-target }}.vsix
+    cp {{ dir }}/ry-{{ target }}/{{ binary-name }} editors/code/bin
+    just build-extension {{ kind }} --target {{ vscode-target }} --out ../../{{ dir }}/ry-{{ vscode-target }}.vsix
 
 build-extension $kind *args:
     #!/usr/bin/env bash
@@ -170,16 +170,16 @@ release $version:
     # that emits `-framework ...` cannot link. Fail fast with a clear message
     # instead of deep inside the nix build (see patches/iana-time-zone).
     for package in core-foundation-sys core-foundation objc objc2 security-framework; do
-        if cargo tree --target aarch64-apple-darwin -p roughly -i $package > /dev/null 2>&1; then
+        if cargo tree --target aarch64-apple-darwin -p ry -i $package > /dev/null 2>&1; then
             echo "error: the macOS dependency graph pulls in '$package', which links an Apple framework;"
             echo "       zig cannot link Apple frameworks without an SDK. See patches/iana-time-zone."
             exit 1
         fi
     done
 
-    nix build .#roughly-linux-x86_64 -o release/nix/x86_64-unknown-linux-gnu
-    nix build .#roughly-macos-aarch64 -o release/nix/aarch64-apple-darwin
-    nix build .#roughly-windows-x86_64 -o release/nix/x86_64-pc-windows-gnu
+    nix build .#ry-linux-x86_64 -o release/nix/x86_64-unknown-linux-gnu
+    nix build .#ry-macos-aarch64 -o release/nix/aarch64-apple-darwin
+    nix build .#ry-windows-x86_64 -o release/nix/x86_64-pc-windows-gnu
 
     just package-tar x86_64-unknown-linux-gnu $dir
     just package-tar aarch64-apple-darwin $dir
@@ -187,11 +187,11 @@ release $version:
 
     # vscode extension (client only)
     rm -rf editors/code/bin
-    just build-extension $kind --out ../../$dir/roughly.vsix
+    just build-extension $kind --out ../../$dir/ry.vsix
 
-    just build-platform-vsix x86_64-unknown-linux-gnu linux-x64 roughly $dir $kind
-    just build-platform-vsix aarch64-apple-darwin darwin-arm64 roughly $dir $kind
-    just build-platform-vsix x86_64-pc-windows-gnu win32-x64 roughly.exe $dir $kind
+    just build-platform-vsix x86_64-unknown-linux-gnu linux-x64 ry $dir $kind
+    just build-platform-vsix aarch64-apple-darwin darwin-arm64 ry $dir $kind
+    just build-platform-vsix x86_64-pc-windows-gnu win32-x64 ry.exe $dir $kind
 
 publish-github $version:
     #!/usr/bin/env bash
@@ -206,24 +206,24 @@ publish-github $version:
     fi
     git push
     gh release create $version $prerelease_flag \
-    	"release/$version/roughly-x86_64-unknown-linux-gnu.tar.gz#Roughly CLI (linux-x64)" \
-    	"release/$version/roughly-aarch64-apple-darwin.tar.gz#Roughly CLI (darwin-arm64)" \
-    	"release/$version/roughly-x86_64-pc-windows-gnu.zip#Roughly CLI (win32-x64)" \
-    	"release/$version/roughly.vsix#VS Code extension (client only)" \
-    	"release/$version/roughly-linux-x64.vsix#VS Code extension (linux-x64)" \
-    	"release/$version/roughly-darwin-arm64.vsix#VS Code extension (darwin-arm64)" \
-    	"release/$version/roughly-win32-x64.vsix#VS Code extension (win32-x64)" \
+    	"release/$version/ry-x86_64-unknown-linux-gnu.tar.gz#ry CLI (linux-x64)" \
+    	"release/$version/ry-aarch64-apple-darwin.tar.gz#ry CLI (darwin-arm64)" \
+    	"release/$version/ry-x86_64-pc-windows-gnu.zip#ry CLI (win32-x64)" \
+    	"release/$version/ry.vsix#VS Code extension (client only)" \
+    	"release/$version/ry-linux-x64.vsix#VS Code extension (linux-x64)" \
+    	"release/$version/ry-darwin-arm64.vsix#VS Code extension (darwin-arm64)" \
+    	"release/$version/ry-win32-x64.vsix#VS Code extension (win32-x64)" \
     	--notes ""
 
 publish-github-update $version:
     gh release upload $version \
-        "release/$version/roughly-x86_64-unknown-linux-gnu.tar.gz#Roughly CLI (linux-x64)" \
-        "release/$version/roughly-aarch64-apple-darwin.tar.gz#Roughly CLI (darwin-arm64)" \
-        "release/$version/roughly-x86_64-pc-windows-gnu.zip#Roughly CLI (win32-x64)" \
-        "release/$version/roughly.vsix#VS Code extension (client only)" \
-        "release/$version/roughly-linux-x64.vsix#VS Code extension (linux-x64)" \
-        "release/$version/roughly-darwin-arm64.vsix#VS Code extension (darwin-arm64)" \
-        "release/$version/roughly-win32-x64.vsix#VS Code extension (win32-x64)" \
+        "release/$version/ry-x86_64-unknown-linux-gnu.tar.gz#ry CLI (linux-x64)" \
+        "release/$version/ry-aarch64-apple-darwin.tar.gz#ry CLI (darwin-arm64)" \
+        "release/$version/ry-x86_64-pc-windows-gnu.zip#ry CLI (win32-x64)" \
+        "release/$version/ry.vsix#VS Code extension (client only)" \
+        "release/$version/ry-linux-x64.vsix#VS Code extension (linux-x64)" \
+        "release/$version/ry-darwin-arm64.vsix#VS Code extension (darwin-arm64)" \
+        "release/$version/ry-win32-x64.vsix#VS Code extension (win32-x64)" \
         --clobber
 
 publish-marketplace $version:
@@ -232,24 +232,24 @@ publish-marketplace $version:
 
     release_flag=$(just vsce-release-flag $(just release-kind $version))
 
-    just vsce publish $release_flag --packagePath ../../release/$version/roughly-linux-x64.vsix
-    just vsce publish $release_flag --packagePath ../../release/$version/roughly-darwin-arm64.vsix
-    just vsce publish $release_flag --packagePath ../../release/$version/roughly-win32-x64.vsix
-    just vsce publish $release_flag --packagePath ../../release/$version/roughly.vsix
+    just vsce publish $release_flag --packagePath ../../release/$version/ry-linux-x64.vsix
+    just vsce publish $release_flag --packagePath ../../release/$version/ry-darwin-arm64.vsix
+    just vsce publish $release_flag --packagePath ../../release/$version/ry-win32-x64.vsix
+    just vsce publish $release_flag --packagePath ../../release/$version/ry.vsix
 
 #
 # UTILS
 #
 
 package-tar target dir:
-    mkdir -p {{ dir }}/roughly-{{ target }}
-    cp release/nix/{{ target }}/bin/roughly {{ dir }}/roughly-{{ target }}/roughly
-    tar -czf {{ dir }}/roughly-{{ target }}.tar.gz -C {{ dir }}/roughly-{{ target }} roughly
+    mkdir -p {{ dir }}/ry-{{ target }}
+    cp release/nix/{{ target }}/bin/ry {{ dir }}/ry-{{ target }}/ry
+    tar -czf {{ dir }}/ry-{{ target }}.tar.gz -C {{ dir }}/ry-{{ target }} ry
 
 package-zip target dir:
-    mkdir -p {{ dir }}/roughly-{{ target }}
-    cp release/nix/{{ target }}/bin/roughly.exe {{ dir }}/roughly-{{ target }}/roughly.exe
-    zip -j {{ dir }}/roughly-{{ target }}.zip {{ dir }}/roughly-{{ target }}/roughly.exe
+    mkdir -p {{ dir }}/ry-{{ target }}
+    cp release/nix/{{ target }}/bin/ry.exe {{ dir }}/ry-{{ target }}/ry.exe
+    zip -j {{ dir }}/ry-{{ target }}.zip {{ dir }}/ry-{{ target }}/ry.exe
 
 # use rlib repos to test formatting
 rlib-clone:

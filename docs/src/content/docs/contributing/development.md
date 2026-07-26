@@ -1,6 +1,6 @@
 ---
 title: Development
-description: How to contribute to Roughly
+description: How to contribute to ry
 ---
 
 This page helps you get from a clone to passing tests and explains a few non-obvious corners of the
@@ -8,7 +8,7 @@ codebase.
 
 ## Project layout
 
-Roughly is a Rust workspace. The shipping language tool is six crates:
+ry is a Rust workspace. The shipping language tool is six crates:
 
 - **`crates/syntax`** — the hand-written lexer and recursive-descent parser, producing lossless
   [rowan](https://crates.io/crates/rowan) syntax trees; `#:` type annotations are first-class
@@ -18,13 +18,13 @@ Roughly is a Rust workspace. The shipping language tool is six crates:
 - **`crates/format`** — the non-invasive formatter (depends only on `syntax`).
 - **`crates/ide`** — editor features as pure reads over `semantics`: hover, navigation, rename,
   completion, signature help, inlay hints, symbols, code actions.
-- **`crates/roughly`** — the product binary: the CLI (`check`, `fmt`, `server`, `repl`, `run`) and
+- **`crates/ry`** — the product binary: the CLI (`check`, `fmt`, `server`, `repl`, `run`) and
   the LSP server.
-- **`crates/repl`** — the interactive R console behind `roughly repl` and `roughly run`, embedding
+- **`crates/repl`** — the interactive R console behind `ry repl` and `ry run`, embedding
   the system R by locating and loading it at runtime.
 
 The workspace also contains the **frozen legacy stack** (`legacy/analysis-legacy`,
-`legacy/engine-legacy`, `legacy/roughly-legacy`, plus its `legacy/fixtures` harness): the previous
+`legacy/engine-legacy`, `legacy/ry-legacy`, plus its `legacy/fixtures` harness): the previous
 implementation, kept in-tree only as the benchmark baseline for `legacy/differential`. The parity
 program that once ran every fixture through both stacks is complete and retired. Do not extend the
 legacy stack, and never share or abstract code between the two stacks — data files may be
@@ -34,7 +34,7 @@ The console embeds R **without any build-time link dependency**: the R shared li
 `R RHOME` from `PATH`) and loaded at runtime, so the whole workspace builds and its unit tests run
 on machines with no R at all. Only *running* the console needs R; it runs on Unix (through the
 `ptr_R_ReadConsole` hook globals) and on Windows (through the `Rstart` callback struct). Its
-end-to-end tests (`cargo test -p roughly --test test_repl_e2e`) drive the real binary through a
+end-to-end tests (`cargo test -p ry-lang --test test_repl_e2e`) drive the real binary through a
 pseudo-terminal (a Unix pty or Windows ConPTY) and skip cleanly where no R exists — run them
 locally before touching the REPL. The predecessor
 experiment (`legacy/rofy`, which linked R at build time through `extendr`) stays frozen until the
@@ -51,7 +51,7 @@ The ones that matter most:
 
 ```sh
 just gate                # the full per-slice gate: battery, clippy -D warnings, fmt check
-just battery             # the workspace test battery (excludes rofy and zed_roughly)
+just battery             # the workspace test battery (excludes rofy and zed_ry)
 just fixture <group__case>          # one focused fixture case
 just bless -p semantics --test ...  # re-bless fixture expectations (review the diff!)
 just fuzz-deep           # the long-running seeded fuzz pass (FUZZ_ITERS scales)
@@ -64,7 +64,7 @@ The raw commands, for environments without `just`:
 ```sh
 cargo build                                   # the product crate (workspace default member)
 cargo test                                    # the product crate's suites
-cargo test --workspace --exclude rofy --exclude zed_roughly
+cargo test --workspace --exclude rofy --exclude zed_ry
                                               # everything: all six crates, the benchmark
                                               # harness, and the frozen legacy stack
 cargo test -p semantics                       # the analysis core's fixture + fuzz suites
@@ -75,7 +75,7 @@ Most behavior is verified with **fixture tests** — human-readable `.test` file
 output. Read [Testing](/contributing/testing) for the fixture contract before adding or changing tests. Two
 environment variables matter day to day:
 
-- `ROUGHLY_BLESS=1` rewrites the expected `#++++` blocks in place from the current output (review the
+- `RY_BLESS=1` rewrites the expected `#++++` blocks in place from the current output (review the
   diff before committing).
 - `FIXTURE_FILTER=group__case` runs a single fixture case.
 
@@ -86,28 +86,28 @@ The real-world corpus some suites and all measurement instruments use is fetched
 
 ## Debug mode
 
-`roughly server --debug` surfaces internal analysis facts in the editor — hovers gain a "Debug"
+`ry server --debug` surfaces internal analysis facts in the editor — hovers gain a "Debug"
 section with the Lowering, Naming, and Parsing views of the expression under the cursor.
-`ROUGHLY_DEBUG=1` in the server's environment is the equivalent for setups where editing the
+`RY_DEBUG=1` in the server's environment is the equivalent for setups where editing the
 server's arguments is awkward; the flag takes precedence. This is deliberately **not** a
-`roughly.toml` key: the config file is user-facing contract, and this switch is an aid for people
-working on Roughly itself.
+`ry.toml` key: the config file is user-facing contract, and this switch is an aid for people
+working on ry itself.
 
 ## Diagnosing a slow workspace
 
-`roughly debug analysis-stats [path]` runs the full analysis pipeline over a workspace through the
+`ry debug analysis-stats [path]` runs the full analysis pipeline over a workspace through the
 same queries the language server uses and reports where the time and memory go: per-phase wall time
 with resident-set growth (load, parse, lower + naming, typecheck, diagnostics), the slowest files
 by typecheck, and an incremental typing probe on representative files (keystroke latency, item
 rechecks and resolve steps per keystroke, and the raw re-parse floor). It forces `[check] typing`
 on — a diagnosis without the type checker measures nothing interesting — and says so when the
 configuration had it off. Build with `--release` when the absolute numbers matter; a debug build
-still shows honest ratios. `roughly debug ast <file>` prints a file's syntax tree.
+still shows honest ratios. `ry debug ast <file>` prints a file's syntax tree.
 
 To work on this documentation site, run `just docs` (a live preview) or `cd docs && npx astro build`.
 The formatter page (`docs/src/content/docs/reference/formatting-rules.md`) is generated — edit
 `crates/format/tests/formatter.template.md` and regenerate with
-`ROUGHLY_BLESS=1 cargo test -p format --test test_format_docs` instead.
+`RY_BLESS=1 cargo test -p format --test test_format_docs` instead.
 
 ## VS Code Extension Setup
 

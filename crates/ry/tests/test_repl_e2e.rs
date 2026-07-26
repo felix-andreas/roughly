@@ -209,7 +209,7 @@ fn evaluates_and_autoprints() {
         return;
     }
     let mut session = ReplSession::start();
-    session.expect("Roughly R console");
+    session.expect("ry R console");
     session.send("1 + 1\r");
     session.expect("[1] 2");
     session.quit();
@@ -221,7 +221,7 @@ fn multiline_input_continues_and_defines() {
         return;
     }
     let mut session = ReplSession::start();
-    session.expect("Roughly R console");
+    session.expect("ry R console");
     session.send("f <- function(x) {\r");
     session.send("x * 2\r");
     session.send("}\r");
@@ -236,7 +236,7 @@ fn errors_come_back_on_the_error_stream() {
         return;
     }
     let mut session = ReplSession::start();
-    session.expect("Roughly R console");
+    session.expect("ry R console");
     session.send("stop(\"boom\")\r");
     session.expect("boom");
     session.send("1 + 1\r");
@@ -250,7 +250,7 @@ fn tab_completes_with_analysis_signatures() {
         return;
     }
     let mut session = ReplSession::start();
-    session.expect("Roughly R console");
+    session.expect("ry R console");
     session.send("seq_l\t");
     // The completion menu renders the analysis-backed signature next to the
     // candidate — the stub corpus reaching the console. (Session-binding
@@ -274,7 +274,7 @@ fn ctrl_c_interrupts_evaluation() {
         return;
     }
     let mut session = ReplSession::start();
-    session.expect("Roughly R console");
+    session.expect("ry R console");
     session.send("Sys.sleep(60)\r");
     // The editor echoes the line once it has consumed it; give evaluation a
     // moment to actually start (terminal back in cooked mode) so Ctrl-C

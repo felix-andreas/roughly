@@ -8,8 +8,8 @@
 !language-configuration.json
 !r-annotation.tmLanguage.json
 !out/*.js
-!bin/roughly
-!bin/roughly.exe
+!bin/ry
+!bin/ry.exe
 !images/icon.png
 # allow js
 node_modules/**

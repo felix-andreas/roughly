@@ -1,5 +1,5 @@
 ---
-title: Why Roughly
+title: Why ry
 description: Why R needs one fast toolchain with a type checker at its core — and how far along this one is
 ---
 
@@ -14,7 +14,7 @@ on a fitted model works so well in RStudio.
 
 That is also its limit: a session knows only code that has already run, in the state it happens to be in.
 It cannot tell you about the branch you have not taken, the function nobody called, or the file you
-just opened. Roughly answers from the source alone, so the answers exist in a pull request, in CI, and
+just opened. ry answers from the source alone, so the answers exist in a pull request, in CI, and
 in a file you have never run:
 
 - a typo in a variable name
@@ -29,8 +29,8 @@ checking are views onto the same knowledge.
 
 The existing R language server does not keep up on large projects, so people turn it off.
 
-Roughly is written in Rust, and analysis is incremental: an edit re-checks only what that edit could
-have affected, not the project. It is tested against roughly 970,000 lines of real R — 69 CRAN
+ry is written in Rust, and analysis is incremental: an edit re-checks only what that edit could
+have affected, not the project. It is tested against ry 970,000 lines of real R — 69 CRAN
 packages plus R's own base library — and the check that an edit does not trigger more work than it
 should runs on every change.
 
@@ -46,7 +46,7 @@ program stops scaling long before the codebase does.
 
 R code is full of implicit type expectations, and nothing checks them until the code runs.
 
-Roughly's approach rests on **inference**: the checker works out types from how values are used,
+ry's approach rests on **inference**: the checker works out types from how values are used,
 instead of making you declare them.
 
 ```r
@@ -60,17 +60,17 @@ you can adopt it one file at a time.
 
 ## Project status
 
-Roughly is version `0.3.0-alpha`. It is not on CRAN, and it has one maintainer. What that means in
+ry is version `0.3.0-alpha`. It is not on CRAN, and it has one maintainer. What that means in
 practice:
 
-**Stable enough to build on.** The diagnostics, the `roughly.toml` keys, the diagnostic codes, and the
+**Stable enough to build on.** The diagnostics, the `ry.toml` keys, the diagnostic codes, and the
 JSON output are covered by tests that fail when they change. CI built on them will not break silently.
 
 **Still gaining capability.** The type system is where the movement is. A new release may report
 findings an older one did not — which is the point, but it means pinning a version is sensible if you
 gate a build on a clean run.
 
-**Where it runs.** `roughly check` reads `.R` files and the R chunks of `.Rmd`, `.qmd`, and `.Rnw`
+**Where it runs.** `ry check` reads `.R` files and the R chunks of `.Rmd`, `.qmd`, and `.Rnw`
 documents. The editor integration does not cover literate documents yet — you get them in `check` and
 in CI, but not as you type. The formatter deliberately leaves them alone, since most of an `.Rmd` is
 prose the formatter should not rewrite.

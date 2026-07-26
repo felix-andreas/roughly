@@ -567,62 +567,31 @@ Do this before deleting:
 - **Then drop `--exclude rofy` everywhere it appears** in the same change, and say so in
   `MEMORY.md` — the exclusion outliving the crate would be worse than either.
 
-## Open — rename the language and toolchain to `ry`
+## Open — rename to `ry`: what is left
 
-**Decided by the user: the language is `ry`, and the rename applies everywhere.** Documentation will
-be hosted at **ry-lang.org** (the user is acquiring the domain), which docs and README may reference.
-Spelling: lowercase `ry` in prose and identifiers; the source directory is `Ry/`, capitalised to sit
-beside `R/`.
+**Done.** The language is `ry`. The crate is `crates/ry`, published as `ry-lang` (plain `ry` is taken
+on crates.io) with both the library and binary named `ry`. Docs, editors, scripts, CI and the README
+carry the new name; documentation is pointed at ry-lang.org.
 
-This also settles the extension question rather than merely surviving it: `.ry` now names the
-*language*, not a tool that might later be renamed, which was the one weakness in choosing it.
+**Three surfaces keep their former spelling permanently**, because each lives where a rename breaks
+silently: `roughly.toml` is still read (both names are checked in one directory before walking up, so
+the new name wins a tie); `# roughly: allow(...)` still suppresses, which matters most because that
+one lives inside users' source files; and every `RY_*` variable falls back to its `ROUGHLY_*` name.
+The VS Code extension reads `ry.*` settings and falls back to `roughly.*`. The REPL history directory
+is moved once rather than renamed, so nobody loses their history.
 
-| Surface | From | To |
-|---|---|---|
-| Language and project name | Roughly | ry |
-| Binary, crate, lib | `roughly` | `ry` |
-| Dialect source | — | `Ry/model.ry` |
-| Type declarations | `types/base.Rtypes` | `types/base.ry.stub` |
-| Export manifests | `types/base.exports` | `types/base.ry.exports` |
-| Config | `roughly.toml` | `ry.toml` |
-| Suppression comment | `# roughly: allow(...)` | `# ry: allow(...)` |
-| Environment variables | `ROUGHLY_*` (7 of them) | `RY_*` |
-| Docs site | — | ry-lang.org |
+**Left for the user, because an agent should not decide them:**
 
-**Sequence the work by blast radius, not by directory.** Three tiers, and conflating them is how a
-rename breaks people:
-
-1. **Free** — prose and internal identifiers. Measured surface: 35 files under `crates/`, 60 under
-   `docs/`, 49 under `legacy/`, 11 under `editors/`, 2 in `scripts/`, one CI workflow, and five root
-   files (`README.md`, `CHANGELOG.md`, `AGENTS.md`, `NOTES.md`, `Cargo.toml`). One sweep, one commit.
-   `NOTES.md` is human-maintained — leave it alone.
-2. **Breaks users, fixable with an alias** — the config filename, the suppression prefix, the seven
-   `ROUGHLY_*` variables, and the VS Code settings keys (`roughly.path`, `roughly.args`,
-   `roughly.experimentalFeatures`). Accept the new spelling and keep the old one working
-   indefinitely. **The suppression comment is the only one that lives inside users' source files**, so
-   it is the one whose cost compounds with adoption — every day it stays unaliased is more files that
-   would break.
-3. **Breaks users and cannot be aliased — the user's call, not the agent's.** The crates.io crate name
-   (`ry` is taken by an unrelated crate, so publishing needs a different name or a request to the
-   owner); the VS Code Marketplace extension identifier, which does **not** redirect — republishing
-   under a new id starts installs and ratings from zero; and the GitHub repository name, which *does*
-   redirect, so that one is comparatively safe. Do not decide these unilaterally.
-
-Traps specific to this rename:
-
-- **The language id `roughly-type`** in the VS Code extension is what makes `#:` annotation
-  highlighting work, and it is referenced from both the extension's grammar and the server's semantic
-  tokens. Rename both halves together or highlighting silently stops.
-- **`ROUGHLY_BLESS` appears in developer muscle memory and in the testing docs**, so alias it rather
-  than only renaming it, or every contributor's fixture workflow breaks at once.
-- **Do not rename `legacy/`'s crates as part of this.** They are frozen; churning them buys nothing
-  and the eventual deletion sweep removes the directory whole. Prose mentions inside them can stay.
-
-**README, per the user:** make the joke that the better the project gets, the shorter its name gets.
-The supporting fact is verified — the legacy stack parsed R with `tree-sitter` and `tree-sitter-r`
-(still in `legacy/*/Cargo.toml`), while the current stack has its own hand-written lexer and parser in
-`crates/syntax`, which is what makes the precise syntax diagnostics possible (a missing comma, a
-disallowed trailing comma) that a general-purpose grammar cannot produce.
+- **The GitHub repository name.** Docs, badges and install commands now say `felix-andreas/ry`, so
+  they are wrong until the repository is renamed. GitHub redirects the old URLs, so this is safe to do
+  whenever — but it is currently the one inconsistency in the tree.
+- **The VS Code Marketplace identifier.** `package.json` now says `felix-andreas.ry`; the Marketplace
+  does **not** redirect an identifier, so publishing under it creates a new listing and starts
+  installs and ratings from zero. Revert that one field if keeping the listing matters more.
+- **Registering `ry-lang` on crates.io**, and `ry-lang.org`.
+- **The landing-page hero animation** (`docs/src/pages/index.astro`) still spells out "Roughly" in
+  particles — `ROUGHLY_LINES` is the ASCII art it draws. It is user-owned by standing instruction, so
+  it was left untouched deliberately; it needs the new name from whoever owns it.
 
 ## Post-beta (explicitly out of scope for now)
 

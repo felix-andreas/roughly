@@ -1,5 +1,5 @@
 //! Golden-tree fixture suite: each case renders the full lossless tree plus
-//! syntax errors. `ROUGHLY_BLESS=1` accepts new output; `FIXTURE_FILTER=id`
+//! syntax errors. `RY_BLESS=1` accepts new output; `FIXTURE_FILTER=id`
 //! runs one case.
 
 use std::path::Path;

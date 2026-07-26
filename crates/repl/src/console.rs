@@ -1,5 +1,5 @@
 //! The interactive console: a `reedline` editor living inside R's
-//! `ReadConsole` callback, with Roughly's lexer driving syntax highlighting
+//! `ReadConsole` callback, with ry's lexer driving syntax highlighting
 //! and input-completeness (continuation prompts).
 //!
 //! Control flow: `run` initializes embedded R with our console hooks and
@@ -70,7 +70,7 @@ pub fn run(api: RApi, options: crate::RunOptions) -> Result<(), ReplError> {
     api.initialize(read_console, write_console_ex)?;
     if interactive {
         eprintln!(
-            "Roughly R console — R at {} (q() or Ctrl-D quits)",
+            "ry R console — R at {} (q() or Ctrl-D quits)",
             api.r_home.display()
         );
     }
@@ -376,7 +376,7 @@ impl Prompt for RPrompt {
     }
 }
 
-/// Syntax highlighting straight from Roughly's lexer — the same tokens the
+/// Syntax highlighting straight from ry's lexer — the same tokens the
 /// whole language tool sees, no second grammar.
 struct LexerHighlighter;
 

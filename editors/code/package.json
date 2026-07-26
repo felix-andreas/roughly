@@ -1,18 +1,18 @@
 {
-	"name": "roughly",
-	"displayName": "Roughly",
+	"name": "ry",
+	"displayName": "ry",
 	"description": "R language support",
 	"author": "Felix Andreas",
 	"version": "0.3.0",
 	"publisher": "felix-andreas",
 	"license": "UPL-1.0",
-	"homepage": "https://roughly.felixandreas.me",
+	"homepage": "https://ry.felixandreas.me",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/felix-andreas/roughly"
+		"url": "https://github.com/felix-andreas/ry"
 	},
 	"bugs": {
-		"url": "https://github.com/felix-andreas/roughly/issues"
+		"url": "https://github.com/felix-andreas/ry/issues"
 	},
 	"icon": "images/icon.png",
 	"keywords": [
@@ -58,9 +58,9 @@
 	"contributes": {
 		"languages": [
 			{
-				"id": "roughly-type",
+				"id": "ry-type",
 				"aliases": [
-					"Roughly type notation"
+					"ry type notation"
 				]
 			},
 			{
@@ -83,51 +83,51 @@
 		],
 		"grammars": [
 			{
-				"scopeName": "roughly.type-annotation.injection",
+				"scopeName": "ry.type-annotation.injection",
 				"path": "./r-annotation.tmLanguage.json",
 				"injectTo": [
 					"source.r"
 				]
 			},
 			{
-				"language": "roughly-type",
-				"scopeName": "source.roughly-type",
-				"path": "./roughly-type.tmLanguage.json"
+				"language": "ry-type",
+				"scopeName": "source.ry-type",
+				"path": "./ry-type.tmLanguage.json"
 			}
 		],
 		"commands": [
 			{
-				"title": "Roughly: Restart Server",
-				"command": "roughly.restartServer"
+				"title": "ry: Restart Server",
+				"command": "ry.restartServer"
 			},
 			{
-				"title": "Roughly: Start Server",
-				"command": "roughly.startServer"
+				"title": "ry: Start Server",
+				"command": "ry.startServer"
 			},
 			{
-				"title": "Roughly: Stop Server",
-				"command": "roughly.stopServer"
+				"title": "ry: Stop Server",
+				"command": "ry.stopServer"
 			},
 			{
-				"title": "Roughly: Open Logs",
-				"command": "roughly.openLogs"
+				"title": "ry: Open Logs",
+				"command": "ry.openLogs"
 			}
 		],
 		"configuration": {
 			"type": "object",
-			"title": "Roughly",
+			"title": "ry",
 			"properties": {
-				"roughly.path": {
+				"ry.path": {
 					"scope": "resource",
 					"type": [
 						"null",
 						"string"
 					],
 					"format": "path",
-					"markdownDescription": "Location of the `roughly` executable, e.g., `\"/path/to/roughly\"`.",
+					"markdownDescription": "Location of the `ry` executable, e.g., `\"/path/to/ry\"`.",
 					"default": null
 				},
-				"roughly.args": {
+				"ry.args": {
 					"scope": "resource",
 					"type": [
 						"null",
@@ -136,10 +136,10 @@
 					"items": {
 						"type": "string"
 					},
-					"markdownDescription": "Arguments passed to the `roughly` executable.",
+					"markdownDescription": "Arguments passed to the `ry` executable.",
 					"default": null
 				},
-				"roughly.experimentalFeatures": {
+				"ry.experimentalFeatures": {
 					"scope": "resource",
 					"type": [
 						"null",

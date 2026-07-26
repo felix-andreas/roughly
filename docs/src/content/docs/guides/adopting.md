@@ -8,7 +8,7 @@ many. That is not a reason to avoid it. It is a reason to do it in four steps ra
 
 ## 1. Start with no configuration at all
 
-Code analysis needs no opt-in. Run `roughly check` with no `roughly.toml` and read what comes back —
+Code analysis needs no opt-in. Run `ry check` with no `ry.toml` and read what comes back —
 unresolved names, unused bindings, and duplicate definitions find real mistakes on day one, and none of
 them require you to understand the type system.
 
@@ -17,7 +17,7 @@ Fix those first. It is a short list on most projects, and it clears the noise be
 ## 2. Turn typing on
 
 ```toml
-# roughly.toml
+# ry.toml
 [check]
 typing = true
 ```

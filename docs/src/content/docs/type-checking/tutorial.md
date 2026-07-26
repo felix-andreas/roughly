@@ -1,14 +1,14 @@
 ---
 title: Tutorial
-description: Learn Roughly's type checker by putting it on real R, one step at a time
+description: Learn ry's type checker by putting it on real R, one step at a time
 ---
 
 This tutorial covers the type checker: writing an annotation, what inference gives you without one,
 unions and `NULL`, declaring your own domain types, generics, and strict mode. It assumes you can
-already run `roughly check` on a project.
+already run `ry check` on a project.
 
 :::note
-Type errors are opt-in. Add this to `roughly.toml`, or put `# typing: on` at the top of a file:
+Type errors are opt-in. Add this to `ry.toml`, or put `# typing: on` at the top of a file:
 
 ```toml
 [check]
@@ -86,7 +86,7 @@ error[type-mismatch]: expected `double`, found `character`
 The same error. `*` is arithmetic, so `price` and `rate` are numbers — the checker worked that out
 from the body. This is **inference**, and it is why most R needs no annotations at all.
 
-It is worth knowing what kind, because that decides how far you can trust it. Roughly uses
+It is worth knowing what kind, because that decides how far you can trust it. ry uses
 **Hindley–Milner** inference, the algorithm behind ML, Haskell and Elm. Two properties matter here:
 
 - It computes a **principal type** — the single most general type consistent with how a value is used.
@@ -194,7 +194,7 @@ A clean run means "I found no contradictions". It does not mean "I checked every
 reports every place a value became `Unknown`:
 
 ```toml
-# roughly.toml
+# ry.toml
 [check]
 typing = true
 strict = true

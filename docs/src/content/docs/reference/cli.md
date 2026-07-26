@@ -1,9 +1,9 @@
 ---
 title: CLI
-description: Every Roughly command, flag, exit code, and JSON field
+description: Every ry command, flag, exit code, and JSON field
 ---
 
-The complete command-line surface of the `roughly` binary.
+The complete command-line surface of the `ry` binary.
 
 ## Commands
 
@@ -18,7 +18,7 @@ The complete command-line surface of the `roughly` binary.
 | `debug` | **Not stable.** Development commands: `debug ast` dumps a syntax tree, `debug analysis-stats` reports where analysis time and memory go. Output shape can change at any time |
 
 `check`, `fmt`, and `server` need no R installation. `repl` and `run` locate and load the R on your
-machine; their walkthrough lives in [Roughly at the R console](/guides/r-console).
+machine; their walkthrough lives in [ry at the R console](/guides/r-console).
 
 Two aliases exist: `format` for `fmt`, and `lsp` for `server`.
 
@@ -26,7 +26,7 @@ Two aliases exist: `format` for `fmt`, and `lsp` for `server`.
 
 | Flag | Argument | Default | Effect |
 | ---- | -------- | ------- | ------ |
-| `-V`, `--version` | — | — | Prints `roughly 0.3.0-alpha` and exits 0 |
+| `-V`, `--version` | — | — | Prints `ry 0.3.0-alpha` and exits 0 |
 | `-h`, `--help` | — | — | Prints help and exits 0. Available on every command |
 | `--stdio` | — | — | Accepted and ignored. It exists so VS Code's default launch arguments do not error |
 | `--experimental-features` | `FEATURES` | none | Space-separated feature names, or `all`. Only `range_formatting` exists today, and only the language server reads it — the flag does nothing for `check`, `fmt`, `repl`, or `run`. An unknown name prints a warning on stderr and is ignored, not a usage error |
@@ -34,11 +34,11 @@ Two aliases exist: `format` for `fmt`, and `lsp` for `server`.
 ## check
 
 ```bash
-roughly check                       # the current directory
-roughly check R/ tests/             # named directories
-roughly check R/model.R             # one file
-roughly check --output json         # machine-readable, on stdout
-roughly check --min-severity error  # only errors report and gate
+ry check                       # the current directory
+ry check R/ tests/             # named directories
+ry check R/model.R             # one file
+ry check --output json         # machine-readable, on stdout
+ry check --min-severity error  # only errors report and gate
 ```
 
 | Flag | Argument | Default | Effect |
@@ -48,15 +48,15 @@ roughly check --min-severity error  # only errors report and gate
 | `--min-severity` | `warning` \| `error` | `warning` | Findings below the floor are neither reported nor counted toward the [exit code](#exit-codes) |
 
 Analysis always covers the whole project a named path belongs to — the nearest ancestor holding
-`roughly.toml` or `DESCRIPTION`, otherwise the target's own directory — so cross-file names resolve
+`ry.toml` or `DESCRIPTION`, otherwise the target's own directory — so cross-file names resolve
 identically however you spell the paths. Only reporting is scoped to what you named.
 
 Type errors are opt-in through `[check] typing` in
-[`roughly.toml`](/reference/configuration); the codes themselves are listed in
+[`ry.toml`](/reference/configuration); the codes themselves are listed in
 [Diagnostic codes](/reference/diagnostic-codes).
 
 ```console
-$ roughly check
+$ ry check
 warning[duplicate]: Top-level binding `value` is overwritten by a later top-level binding in this package.
  --> R/main.R:1:1
 1 | value <- 1
@@ -80,9 +80,9 @@ warning[unresolved]: I could not resolve `undefined_thing` in this package, its 
 ## fmt
 
 ```bash
-roughly fmt            # rewrite files in place
-roughly fmt --check    # list what would change, exit 1 (CI)
-roughly fmt --diff     # show the change without writing, exit 1
+ry fmt            # rewrite files in place
+ry fmt --check    # list what would change, exit 1 (CI)
+ry fmt --diff     # show the change without writing, exit 1
 ```
 
 | Flag | Argument | Default | Effect |
@@ -96,7 +96,7 @@ All `fmt` output — diffs, `Would reformat:` lines, and the summary — goes to
 applies are documented in [Formatting rules](/reference/formatting-rules).
 
 ```console
-$ roughly fmt --diff
+$ ry fmt --diff
 Diff in ./messy.R:
 1        |-f<-function(x,y){
 2        |-x+y
@@ -112,14 +112,14 @@ Speaks the Language Server Protocol over stdio; editors start it for you.
 
 | Flag | Argument | Default | Effect |
 | ---- | -------- | ------- | ------ |
-| `--debug` | — | off | Adds internal analysis facts to hover — a developer aid for working on Roughly itself. `ROUGHLY_DEBUG=1` is the environment equivalent; the flag wins |
+| `--debug` | — | off | Adds internal analysis facts to hover — a developer aid for working on ry itself. `RY_DEBUG=1` is the environment equivalent; the flag wins |
 | `--stdio` | — | — | Accepted and ignored (VS Code compatibility) |
 | `-v`, `--verbose` | — | off | Declared but not wired to anything yet |
 
 ## repl
 
 Starts an interactive R console backed by the R installed on your machine, with analysis-backed
-completion. See [Roughly at the R console](/guides/r-console).
+completion. See [ry at the R console](/guides/r-console).
 
 | Flag | Argument | Default | Effect |
 | ---- | -------- | ------- | ------ |
@@ -127,8 +127,8 @@ completion. See [Roughly at the R console](/guides/r-console).
 | `-f`, `--file` | `FILE` | none | Runs this R file before the first prompt, then keeps prompting |
 
 ```console
-$ roughly repl
-Roughly R console — R at <the R_HOME it found> (q() or Ctrl-D quits)
+$ ry repl
+ry R console — R at <the R_HOME it found> (q() or Ctrl-D quits)
 ```
 
 ## run
@@ -149,7 +149,7 @@ Runs one R file through the same embedded R and exits. The file argument is requ
 | ---- | ------- | ----- |
 | `0` | No findings after the `--min-severity` filter, and no I/O failure. Finding no R files at all is also clean | Default mode finished, however many files were rewritten; or `--check`/`--diff` found nothing to change; or there were no files to format |
 | `1` | At least one finding was counted. Warnings alone are enough at the default severity floor | `--check` or `--diff` was passed **and** at least one file would be reformatted |
-| `2` | A usage, configuration, or I/O failure: unparseable `roughly.toml`, a path that does not exist, an invalid `exclude` pattern, an unreadable source file or stub. This overrides code 1 | A file could not be read, parsed, or written back. This overrides code 1 |
+| `2` | A usage, configuration, or I/O failure: unparseable `ry.toml`, a path that does not exist, an invalid `exclude` pattern, an unreadable source file or stub. This overrides code 1 | A file could not be read, parsed, or written back. This overrides code 1 |
 
 The other commands:
 
@@ -160,12 +160,12 @@ The other commands:
 | `repl` | Session ended normally | — | R could not be found or loaded, or a `--file` script could not be read |
 | `debug ast` | The tree was printed. Parse errors are listed but do not change the code | — | The file could not be read |
 
-Any usage error — an unknown flag, a missing required argument, an invalid enum value, or `roughly`
+Any usage error — an unknown flag, a missing required argument, an invalid enum value, or `ry`
 with no command at all — exits `2`.
 
 ## JSON output
 
-`roughly check --output json` writes **JSON Lines** to stdout: one independent object per finding, no
+`ry check --output json` writes **JSON Lines** to stdout: one independent object per finding, no
 wrapping array, no summary object, nothing else on the stream. Keys are alphabetical.
 
 ```json
@@ -180,7 +180,7 @@ wrapping array, no summary object, nothing else on the stream. Keys are alphabet
 | `endLine` | integer | 1-based end line |
 | `endColumn` | integer | 1-based end column, exclusive, in characters |
 | `severity` | `"warning"` \| `"error"` | The only two levels the CLI emits |
-| `code` | string | The [diagnostic code](/reference/diagnostic-codes) — exactly what a `# roughly: allow(...)` comment spells |
+| `code` | string | The [diagnostic code](/reference/diagnostic-codes) — exactly what a `# ry: allow(...)` comment spells |
 | `message` | string | The rendered message |
 | `related` | array | Companion locations, `[]` when there are none. Each entry has `path`, `line`, `column`, `endLine`, `endColumn`, and `message`. A `duplicate` finding names both sites |
 

@@ -21,7 +21,7 @@ Use ordinary Rust tests only when the behavior is awkward to express as a render
 
 The greenfield stack (`crates/syntax`, `crates/semantics`) has its own harness,
 `syntax::testing::run_fixture_suite`: a `.R.test` file holds `#==== group` / `#---- case`
-sections whose source is followed by a `#++++` expectation block; `ROUGHLY_BLESS=1` rewrites
+sections whose source is followed by a `#++++` expectation block; `RY_BLESS=1` rewrites
 expectations and `FIXTURE_FILTER=group__case` runs one case. Suites:
 
 - `crates/syntax/tests/syntax` — golden lossless trees plus syntax errors (`debug_dump`)
@@ -140,7 +140,7 @@ gate.
 
 ### The CLI contract suite
 
-`crates/roughly/tests/test_cli.rs` drives the real `roughly` binary end to end: diagnostic
+`crates/ry/tests/test_cli.rs` drives the real `ry` binary end to end: diagnostic
 rendering (1-based positions, gutters, carets), JSON Lines output, the documented exit-code
 contract (0 clean, 1 findings, 2 usage/configuration/IO errors), configuration discovery and
 failure, per-file `# typing:` directives, suppression comments, NAMESPACE validation, project
@@ -149,7 +149,7 @@ formatter's `--check`/`--diff`/in-place modes.
 
 ### The LSP behavioral suite
 
-`crates/roughly/tests/test_lsp.rs` spawns the real `roughly server` process and drives it over
+`crates/ry/tests/test_lsp.rs` spawns the real `ry server` process and drives it over
 LSP stdio with an async-lsp test client. Coverage: capability negotiation (position encodings,
 pull diagnostics, refresh, label offsets, snippets), document sync (incremental and full-text,
 untitled/non-`file:` buffers, close-time disk rereads), the two-wave push contract and its
@@ -161,8 +161,8 @@ endpoint including UTF-16/UTF-8 range correctness with BMP and non-BMP content a
 out-of-bounds safety, semantic tokens for `#:` bodies, and `.Rtypes`/NAMESPACE buffer serving.
 
 The cancelled-pull test is deterministic through a fault-injection seam: with the
-`ROUGHLY_TEST_DELAY_PULL_MS` environment variable set, the server announces each diagnostics pull
-by creating the `ROUGHLY_TEST_PULL_MARKER` file and then holds the pull (until the cancellation
+`RY_TEST_DELAY_PULL_MS` environment variable set, the server announces each diagnostics pull
+by creating the `RY_TEST_PULL_MARKER` file and then holds the pull (until the cancellation
 token flips, bounded by the delay) before computing. The test sends its `didChange` only after the
 marker appears, so the edit's flip provably lands while the pull is in flight — the retryable
 `SERVER_CANCELLED` response, and the successful retry after it, can be asserted without
@@ -216,11 +216,11 @@ The default crate test command while iterating is `cargo test -p semantics` (ana
 
 ## Blessing expectations
 
-Set `ROUGHLY_BLESS=1` to rewrite the `#++++` expectation blocks in the source `.test` files in
+Set `RY_BLESS=1` to rewrite the `#++++` expectation blocks in the source `.test` files in
 place from the actual runner output instead of failing on a mismatch:
 
 ```sh
-ROUGHLY_BLESS=1 cargo test -p semantics --test test_typing_fixtures
+RY_BLESS=1 cargo test -p semantics --test test_typing_fixtures
 ```
 
 Behavior:
@@ -239,9 +239,9 @@ expectation only when the behavior or wording intentionally improved.
 ## The frozen legacy stack's harnesses
 
 The previous implementation stays in-tree (`legacy/analysis-legacy`, `legacy/engine-legacy`,
-`legacy/roughly-legacy`, with its own `legacy/fixtures` harness) as the cross-implementation oracle
+`legacy/ry-legacy`, with its own `legacy/fixtures` harness) as the cross-implementation oracle
 the differential compares against, and as the benchmark baseline. Its suites still run —
-`cargo test -p analysis-legacy` / `-p engine-legacy` / `-p roughly-legacy`, and the workspace-wide
+`cargo test -p analysis-legacy` / `-p engine-legacy` / `-p ry-legacy`, and the workspace-wide
 battery covers them — but the stack is frozen: do not extend its fixtures or harnesses, and never
 share code between the two stacks. Its `fixtures` crate parses the same `Simple` shape plus a
 `MultiFile` shape (explicit file paths and grouped workspace edits) that its engine-era suites use.

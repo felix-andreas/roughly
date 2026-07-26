@@ -1574,7 +1574,7 @@ fn render_type_error_message(db: &dyn Db, error: &TypeError<'_>) -> String {
             0 => "indexing with an empty index (`x[]`) is not supported yet".to_owned(),
             1 => "indexing with a named index argument is not supported yet".to_owned(),
             count => format!(
-                "indexing with {count} indexes is not supported yet — Roughly does not model matrix and data.frame subsetting"
+                "indexing with {count} indexes is not supported yet — ry does not model matrix and data.frame subsetting"
             ),
         },
         TypeErrorKind::PositionDoesNotExist {

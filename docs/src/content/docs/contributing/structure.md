@@ -1,9 +1,9 @@
 ---
 title: Structure
-description: The file structure of the syntax, semantics, ide, format, roughly, and repl crates
+description: The file structure of the syntax, semantics, ide, format, ry, and repl crates
 ---
 
-This document is the authoritative file structure for Roughly's code. The
+This document is the authoritative file structure for ry's code. The
 crate graph and phase boundaries live in [Architecture](/contributing/architecture); this
 page records the file split and the role of each file. The `*-legacy` crates
 keep their own (frozen) layout and are not documented here.
@@ -21,7 +21,7 @@ keep their own (frozen) layout and are not documented here.
   space) so offsets need no translation
 - `reparse.rs` — statement-splice incremental reparse (an optimization; parse
   correctness never depends on it)
-- `testing.rs` — the fixture harness (`.test` format, `ROUGHLY_BLESS`,
+- `testing.rs` — the fixture harness (`.test` format, `RY_BLESS`,
   `FIXTURE_FILTER`, duplicate-id rejection) shared by every fixture suite
 
 ## `semantics` crate (`src/semantics.rs` is the root)
@@ -65,7 +65,7 @@ actions, document/workspace symbols, annotation-type and S4 navigation.
 
 The preserving formatter over the syntax tree, plus its configuration types.
 
-## `roughly` crate (`src/roughly.rs` is the root)
+## `ry` crate (`src/ry.rs` is the root)
 
 - `main.rs` — the CLI surface and exit-code contract (0 clean, 1 findings,
   2 usage/configuration/IO errors)
@@ -74,18 +74,18 @@ The preserving formatter over the syntax tree, plus its configuration types.
 - `server.rs` — the LSP server: frontend/worker threading, document sync,
   push/pull diagnostics, all feature endpoints, semantic tokens, stub and
   NAMESPACE buffers
-- `config.rs` — `roughly.toml` discovery and parsing
+- `config.rs` — `ry.toml` discovery and parsing
 - `diagnostics.rs` — the shared diagnostics assembly (config gating, strict
   escalation, suppression comments) used by both the server and the CLI
 - `namespace.rs` — NAMESPACE import parsing and validation
 - `position.rs` — the line index: byte offsets ↔ line/column in bytes,
   characters (what the CLI reports), or UTF-16 code units (the LSP default)
-- `stats.rs` — the performance diagnosis behind `roughly debug analysis-stats`
+- `stats.rs` — the performance diagnosis behind `ry debug analysis-stats`
 - `repl_completer.rs` — completion for the interactive console
 
 ## `repl` crate (`src/repl.rs` is the root)
 
-Backs `roughly repl` and `roughly run` by locating and loading the system R at
+Backs `ry repl` and `ry run` by locating and loading the system R at
 runtime, so the rest of the workspace builds and analyzes R with no R present.
 
 - `repl.rs` — the session: evaluation, the read-eval-print loop, exit codes

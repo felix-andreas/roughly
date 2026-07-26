@@ -1,13 +1,13 @@
-# Roughly
+# ry
 
 This extension provides support for the [R programming language](https://www.r-project.org/), including workspace symbol search, code formatting, and syntax diagnostics.
 
 > **Note**
-> The VS Code extension from the marketplace includes a bundled version of the Roughly CLI for **Linux x86_64, macOS aarch64 and Windows x86_64**. If you are using a different architecture, you will need to install the Roughly CLI manually.
+> The VS Code extension from the marketplace includes a bundled version of the ry CLI for **Linux x86_64, macOS aarch64 and Windows x86_64**. If you are using a different architecture, you will need to install the ry CLI manually.
 
 ## Features
 
-Roughly aims to support the following language server features (some are experimental or in progress):
+ry aims to support the following language server features (some are experimental or in progress):
 
 - **Formatting**
   - Format entire document
@@ -22,7 +22,7 @@ Roughly aims to support the following language server features (some are experim
 
 - **Diagnostics**
   - Syntax errors - *including missing or trailing commas*
-  - Basic linting rules - *[full list here](https://roughly.felixandreas.me/reference/diagnostic-codes)*
+  - Basic linting rules - *[full list here](https://ry.felixandreas.me/reference/diagnostic-codes)*
   - Warning for unused variables *(🧪 experimental)*
   - Error for undefined variable *(⚠️ missing)*
   - Argument validation for function calls *(⚠️ missing)*
@@ -42,20 +42,20 @@ Roughly aims to support the following language server features (some are experim
 
 ## Usage
 
-The extension will automatically start the Roughly language server for R files. You can also use the built-in commands to start, stop, or restart the server, or open logs.
+The extension will automatically start the ry language server for R files. You can also use the built-in commands to start, stop, or restart the server, or open logs.
 
 ## Configuration
 
-You can customize the Roughly extension in VS Code through the following settings:
+You can customize the ry extension in VS Code through the following settings:
 
 ```jsonc
 {
   // Use a custom binary instead of the bundled one
-  "roughly.path": "/path/to/roughly",
+  "ry.path": "/path/to/ry",
   // Pass custom arguments; defaults to ["server"]
-  "roughly.args": ["server", "--verbose"],
+  "ry.args": ["server", "--verbose"],
   // Enable experimental features
-  "roughly.experimentalFeatures": ["rename", "range_formatting"],
+  "ry.experimentalFeatures": ["rename", "range_formatting"],
 }
 ```
 
@@ -63,21 +63,21 @@ You can customize the Roughly extension in VS Code through the following setting
 
 ### Format Document
 
-![Format Document](https://assets-felixandreas-me.pages.dev/roughly/format.gif)
+![Format Document](https://assets-felixandreas-me.pages.dev/ry/format.gif)
 
 ### Workspace Symbol Search <kbd>Ctrl</kbd> + <kbd>T</kbd>
 
-![Workspace Symbol Search](https://assets-felixandreas-me.pages.dev/roughly/workspace-symbols.gif)
+![Workspace Symbol Search](https://assets-felixandreas-me.pages.dev/ry/workspace-symbols.gif)
 
 ### Document Symbol Search  <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd>
 
-![Document Symbol Search](https://assets-felixandreas-me.pages.dev/roughly/document-symbols.gif)
+![Document Symbol Search](https://assets-felixandreas-me.pages.dev/ry/document-symbols.gif)
 
 ### Syntax Errors
 
-![Syntax Errors](https://assets-felixandreas-me.pages.dev/roughly/syntax-errors.gif)
+![Syntax Errors](https://assets-felixandreas-me.pages.dev/ry/syntax-errors.gif)
 
 ## Links
 
-* [📦 Source Code](https://github.com/felix-andreas/roughly)
-* [📚 Documentation](https://roughly.felixandreas.me/)
+* [📦 Source Code](https://github.com/felix-andreas/ry)
+* [📚 Documentation](https://ry.felixandreas.me/)

@@ -56,10 +56,10 @@ y
 # special comments should preserve format
 #' roxygen comment
 #* plumber comment
-#: roughly comment
+#: ry comment
 #'roxygen comment
 #*plumber comment
-#:roughly comment
+#:ry comment
 #'@param text
 #*@param text
 #:@param text
@@ -67,10 +67,10 @@ y
 # special comments should preserve format
 #' roxygen comment
 #* plumber comment
-#: roughly comment
+#: ry comment
 #' roxygen comment
 #* plumber comment
-#: roughly comment
+#: ry comment
 #' @param text
 #* @param text
 #: @param text

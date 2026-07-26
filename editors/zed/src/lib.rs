@@ -7,7 +7,7 @@ use {
     zed_extension_api::{self as zed, Result, settings::LspSettings},
 };
 
-const NAME: &str = "roughly";
+const NAME: &str = "ry";
 
 struct Extension {
     cached_binary_path: Option<String>,
@@ -65,7 +65,7 @@ impl Extension {
         );
 
         let release = zed::latest_github_release(
-            "felix-andreas/roughly",
+            "felix-andreas/ry",
             GithubReleaseOptions {
                 require_assets: true,
                 pre_release: false,

@@ -1,6 +1,6 @@
-# Roughly for Zed
+# ry for Zed
 
-Zed extension for [Roughly](https://github.com/felix-andreas/roughly) — an R language server,
+Zed extension for [ry](https://github.com/felix-andreas/ry) — an R language server,
 type checker, and formatter written in Rust.
 
 Not yet published to Zed's extension registry. Install it manually as a dev extension.
@@ -13,20 +13,20 @@ Zed has no built-in R support, so install the [R extension](https://zed.dev/exte
 1. Install a [Rust toolchain](https://rustup.rs) — Zed compiles dev extensions to WebAssembly itself.
 2. Clone the repository:
    ```bash
-   git clone https://github.com/felix-andreas/roughly
+   git clone https://github.com/felix-andreas/ry
    ```
 3. In Zed, run `zed: install dev extension` from the command palette (`ctrl-shift-p` / `cmd-shift-p`)
    and select the `editors/zed` directory of the clone.
 
 Zed rebuilds the extension whenever you reload it, so pull and run `zed: reload extensions` to update.
 
-## The Roughly binary
+## The ry binary
 
 The extension finds the language server in this order, and stops at the first hit:
 
 <!-- prettier-ignore -->
-1. The `roughly` **path in your LSP settings** (below).
-2. **`roughly` on your `PATH`**.
+1. The `ry` **path in your LSP settings** (below).
+2. **`ry` on your `PATH`**.
 3. The **latest GitHub release**, downloaded and cached automatically.
 
 So you need nothing extra for the common case. Point it at your own build with:
@@ -35,9 +35,9 @@ So you need nothing extra for the common case. Point it at your own build with:
 // settings.json
 {
   "lsp": {
-    "roughly": {
+    "ry": {
       "binary": {
-        "path": "/absolute/path/to/roughly",
+        "path": "/absolute/path/to/ry",
         "arguments": ["server"]
       }
     }
@@ -61,4 +61,4 @@ colors come from the server as LSP semantic tokens, which Zed leaves off by defa
 }
 ```
 
-See the [language server documentation](https://roughly.felixandreas.me/reference/configuration#editor-settings) for every setting.
+See the [language server documentation](https://ry.felixandreas.me/reference/configuration#editor-settings) for every setting.

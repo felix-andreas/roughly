@@ -1,6 +1,6 @@
 ---
 title: Installation
-description: Every way to install Roughly, including the cases the quick path does not cover
+description: Every way to install ry, including the cases the quick path does not cover
 ---
 
 Most people are done in one click — see the install section of
@@ -8,7 +8,7 @@ Most people are done in one click — see the install section of
 
 ## VS Code
 
-The [Roughly extension](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly)
+The [ry extension](https://marketplace.visualstudio.com/items?itemName=felix-andreas.ry)
 bundles the binary for **Linux x86_64, macOS aarch64, and Windows x86_64**.
 
 On any other architecture the extension installs but has no binary to run. Install the CLI separately
@@ -17,7 +17,7 @@ and point the extension at it:
 ```json
 // settings.json
 {
-  "roughly.path": "/absolute/path/to/roughly"
+  "ry.path": "/absolute/path/to/ry"
 }
 ```
 
@@ -34,23 +34,23 @@ Not in Zed's extension registry yet. Until it is, install it from the repository
 
 Zed has no built-in R support, so install the [R extension](https://zed.dev/extensions/r) first. Full
 instructions, including how the extension finds the binary, are in
-[`editors/zed`](https://github.com/felix-andreas/roughly/tree/main/editors/zed).
+[`editors/zed`](https://github.com/felix-andreas/ry/tree/main/editors/zed).
 
 ## Command line
 
 **Prebuilt binary.** Download from
-[Releases](https://github.com/felix-andreas/roughly/releases). Assets are named by Rust target triple
-and each archive holds a single `roughly` binary:
+[Releases](https://github.com/felix-andreas/ry/releases). Assets are named by Rust target triple
+and each archive holds a single `ry` binary:
 
 | Platform | Asset |
 | --- | --- |
-| Linux x86_64 | `roughly-x86_64-unknown-linux-gnu.tar.gz` |
-| macOS aarch64 | `roughly-aarch64-apple-darwin.tar.gz` |
-| Windows x86_64 | `roughly-x86_64-pc-windows-gnu.zip` |
+| Linux x86_64 | `ry-x86_64-unknown-linux-gnu.tar.gz` |
+| macOS aarch64 | `ry-aarch64-apple-darwin.tar.gz` |
+| Windows x86_64 | `ry-x86_64-pc-windows-gnu.zip` |
 
 ```bash
-curl -sSL https://github.com/felix-andreas/roughly/releases/download/0.3.0-alpha/roughly-x86_64-unknown-linux-gnu.tar.gz | tar xz
-sudo mv roughly /usr/local/bin/
+curl -sSL https://github.com/felix-andreas/ry/releases/download/0.3.0-alpha/ry-x86_64-unknown-linux-gnu.tar.gz | tar xz
+sudo mv ry /usr/local/bin/
 ```
 
 Name the tag explicitly. Every release so far is marked a pre-release, so `releases/latest/` resolves
@@ -59,7 +59,7 @@ to an older stable tag rather than the newest build.
 **From source**, if you have a [Rust toolchain](https://www.rust-lang.org/tools/install):
 
 ```bash
-cargo install --git https://github.com/felix-andreas/roughly roughly
+cargo install --git https://github.com/felix-andreas/ry ry
 ```
 
 This is also the route for architectures without a prebuilt binary.
@@ -68,20 +68,20 @@ This is also the route for architectures without a prebuilt binary.
 
 ## RStudio
 
-RStudio has no language-server integration, but it can use Roughly as its external formatter:
+RStudio has no language-server integration, but it can use ry as its external formatter:
 
 1. **Tools → Global Options → Code → Formatting → Format with an External Tool**, and set the reformat
-   command to `path/to/roughly fmt`.
+   command to `path/to/ry fmt`.
 2. For format-on-save, **Tools → Global Options → Code → Saving** and tick **Reformat documents on
    save**.
 
-Type checking and code analysis are not available inside RStudio. Run `roughly check` in a terminal, or
+Type checking and code analysis are not available inside RStudio. Run `ry check` in a terminal, or
 in [CI](/guides/continuous-integration).
 
 ## Verifying
 
 ```bash
-roughly --version
+ry --version
 ```
 
 Then run it on a project — [getting started](/getting-started) shows what a first run looks like.

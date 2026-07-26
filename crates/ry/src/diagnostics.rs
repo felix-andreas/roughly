@@ -142,16 +142,22 @@ mod tests {
     #[test]
     fn trailing_and_line_above_suppressions_apply() {
         let source = "x <- T # ry: allow(boolean-shorthand)\n# ry: allow(unused)\ny <- 1\nz <- 1\n";
+        // Offsets are derived, not written out: hard-coding them encodes the
+        // length of the suppression prefix, so changing that prefix silently
+        // moves every diagnostic off the line it was meant to sit on.
+        let suppressed_inline = source.find('T').expect("line 1 has a `T`") as u32;
+        let suppressed_below = source.find("y <- 1").expect("line 3") as u32;
+        let reported = source.find("z <- 1").expect("line 4") as u32;
         let kept = apply_suppressions(
             vec![
-                diagnostic(5, "boolean-shorthand"),
-                diagnostic(69, "unused"),
-                diagnostic(76, "unused"),
+                diagnostic(suppressed_inline, "boolean-shorthand"),
+                diagnostic(suppressed_below, "unused"),
+                diagnostic(reported, "unused"),
             ],
             source,
         );
         assert_eq!(kept.len(), 1);
-        assert_eq!(u32::from(kept[0].range.start()), 76);
+        assert_eq!(u32::from(kept[0].range.start()), reported);
     }
 
     #[test]

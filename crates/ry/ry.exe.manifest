@@ -10,8 +10,8 @@
    that has not enabled UTF-8 system-wide.
 -->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-  <assemblyIdentity version="1.0.0.0" name="roughly" type="win32"/>
-  <description>Roughly — R language tooling</description>
+  <assemblyIdentity version="1.0.0.0" name="ry" type="win32"/>
+  <description>ry — R language tooling</description>
   <application>
     <windowsSettings>
       <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>

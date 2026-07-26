@@ -1,9 +1,9 @@
 ---
 title: Architecture
-description: Implementation architecture of Roughly's analysis stack — the hand-written parser, the salsa semantics database, and the language server
+description: Implementation architecture of ry's analysis stack — the hand-written parser, the salsa semantics database, and the language server
 ---
 
-This document is the authoritative implementation architecture for Roughly. The
+This document is the authoritative implementation architecture for ry. The
 [Typing Reference](/reference/type-system) is the authoritative user-facing typing
 contract; this page defines the implementation boundaries that realize it.
 
@@ -30,11 +30,11 @@ compiler-checked analog of "make illegal states unrepresentable":
   here.
 - **`format`** — the preserving formatter, on `syntax` only
   (compiler-enforced: it can never depend on analysis results).
-- **`roughly`** — the product surface: the LSP server and the CLI
+- **`ry`** — the product surface: the LSP server and the CLI
   (`check`, `fmt`, `server`, `debug`). Owns configuration, position-encoding
   conversion, diagnostics assembly and publication, and suppression comments.
 
-The `*-legacy` crates (`roughly-legacy`, `analysis-legacy`, `engine-legacy`)
+The `*-legacy` crates (`ry-legacy`, `analysis-legacy`, `engine-legacy`)
 are the previous stack, frozen in-tree as the baseline the performance
 benchmarks measure against; no code is shared between the two stacks by
 design.
@@ -93,10 +93,10 @@ Diagnostics split into two layers with one source of truth:
   strict-mode origins separately so hosts publish them only under
   `[check] strict` or a per-file directive.
 
-The host (server and CLI share the assembly in `crates/roughly`) gates classes
+The host (server and CLI share the assembly in `crates/ry`) gates classes
 by configuration, applies per-file `# typing:` overrides, escalates unresolved
 findings to errors under strict, appends lints, and applies
-`# roughly: allow(...)` suppression comments.
+`# ry: allow(...)` suppression comments.
 
 ## The language server
 

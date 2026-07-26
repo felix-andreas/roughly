@@ -134,10 +134,10 @@ enum Job {
 struct WorkerSeed {
     client: ClientSocket,
     experimental_features: ExperimentalFeatures,
-    /// The developer switch (`ry server --debug`, or `ROUGHLY_DEBUG=1`):
+    /// The developer switch (`ry server --debug`, or `RY_DEBUG=1`):
     /// surfaces internal analysis facts such as the hover debug sections.
     /// Deliberately NOT a `ry.toml` key — the config file is user-facing
-    /// contract, and this is an aid for people working on Roughly itself.
+    /// contract, and this is an aid for people working on ry itself.
     debug: bool,
     cancel: CancelHandle,
     idle_interrupt: Arc<AtomicBool>,
@@ -1645,7 +1645,10 @@ fn initialize_result(
             ..Default::default()
         },
         server_info: Some(lsp_types::ServerInfo {
-            name: env!("CARGO_PKG_NAME").to_owned(),
+            // Not `CARGO_PKG_NAME`: the crate is published as `ry-lang`
+            // because the registry name `ry` was taken, but this string is
+            // what editors show the user, and the product is `ry`.
+            name: "ry".to_owned(),
             version: Some(env!("CARGO_PKG_VERSION").to_owned()),
         }),
     }
@@ -2371,11 +2374,11 @@ impl LanguageServer for ServerState {
             // delay). The marker lets the test order its edit strictly after
             // the pull has started — the flip provably targets this pull's
             // token, not one a queued job would refresh away.
-            if let Some(delay) = std::env::var("ROUGHLY_TEST_DELAY_PULL_MS")
+            if let Some(delay) = std::env::var("RY_TEST_DELAY_PULL_MS")
                 .ok()
                 .and_then(|value| value.parse::<u64>().ok())
             {
-                if let Ok(marker) = std::env::var("ROUGHLY_TEST_PULL_MARKER") {
+                if let Ok(marker) = std::env::var("RY_TEST_PULL_MARKER") {
                     std::fs::write(&marker, b"pulling")
                         .expect("the cancelled-pull test marker must be writable");
                 }

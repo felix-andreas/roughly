@@ -1,6 +1,6 @@
 ---
 title: Concepts
-description: How Roughly's type system works — the vocabulary you need to read what it tells you
+description: How ry's type system works — the vocabulary you need to read what it tells you
 ---
 
 ## Inference
@@ -22,7 +22,7 @@ say — a boundary, a domain type, a promise you want held to.
 ## Scalars and vectors
 
 In R, `1L` is an integer vector of length one. There is no separate scalar type, which means the type
-system has to choose a convention. Roughly's is:
+system has to choose a convention. ry's is:
 
 | Notation | Means |
 | --- | --- |
@@ -48,7 +48,7 @@ logical  <  integer  <  double  <  complex
 
 So an `integer` is accepted where a `double` is wanted. `character` and `raw` are deliberately **not**
 on the ladder — R will happily coerce a number to a string, but doing it silently is almost always a
-mistake rather than an intention, so Roughly makes you say it.
+mistake rather than an intention, so ry makes you say it.
 
 Widening happens only when checking whether a value *fits* somewhere. It never happens when the checker
 is working out what two things have in common — that is a different question, and answering it by
@@ -140,7 +140,7 @@ you can see the gaps instead of mistaking them for approval.
 ### `@type`
 
 Start with the case you actually have: a thing in your domain with named fields. In R you would reach
-for S4, R6 or S7. Roughly gives you a third option that the checker can see into:
+for S4, R6 or S7. ry gives you a third option that the checker can see into:
 
 ```r
 #: @type Person {list{name: character, age: integer}}
@@ -290,7 +290,7 @@ Three, and they are per file as well as per project:
 | `on` | Contradictions — places where the types genuinely disagree |
 | `strict` | Contradictions, plus every place a value became `Unknown` |
 
-Set the project default in [`roughly.toml`](/reference/configuration), and override it in any single
+Set the project default in [`ry.toml`](/reference/configuration), and override it in any single
 file with a comment at the top:
 
 ```r

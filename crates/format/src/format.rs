@@ -1,4 +1,4 @@
-//! The Roughly formatter: a preserving formatter over the lossless syntax
+//! The ry formatter: a preserving formatter over the lossless syntax
 //! tree.
 //!
 //! The user's layout intent survives — single-line constructs stay single

@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Roughly are recorded here. The format follows
+All notable changes to ry are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
@@ -28,8 +28,13 @@ This file starts from the type-checker work; earlier history lives in the git lo
 
 ### Changed
 
+- **Renamed from Roughly to ry.** The binary is `ry`, the config file is `ry.toml`, suppression
+  comments are `# ry: allow(...)`, environment variables are `RY_*`, and the editor settings live
+  under `ry.*`. **Nothing needs changing to upgrade:** `roughly.toml`, `# roughly: allow(...)`,
+  `ROUGHLY_*` and the `roughly.*` settings are all still honoured, and the REPL history directory is
+  moved for you. The crate is published as `ry-lang`, since `ry` was already taken on crates.io.
 - Analysis runs on a single in-house red–green memoized query engine with latest-edit-wins
   cancellation; per-edit output is verified byte-identical to a from-scratch rebuild.
 - The R grammar tracks the published `tree-sitter-r` 1.3.0.
 
-[Unreleased]: https://github.com/felix-andreas/roughly/compare/main...HEAD
+[Unreleased]: https://github.com/felix-andreas/ry/compare/main...HEAD

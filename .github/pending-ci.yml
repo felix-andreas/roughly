@@ -7,15 +7,15 @@
 # lacks GitHub `workflow` scope (GitHub 403s workflow-file writes without it).
 #
 # What changed vs the active ci.yml: every cargo command is widened from the
-# default member (crates/roughly, the shipping server + CLI) to `--workspace
-# --exclude rofy --exclude zed_roughly`, so the syntax/semantics/format/ide
+# default member (crates/ry, the shipping server + CLI) to `--workspace
+# --exclude rofy --exclude zed_ry`, so the syntax/semantics/format/ide
 # crates, the cross-stack differential, and the frozen legacy stack are all
 # linted and tested — the bare commands cover only the product crate's own
 # suites today.
 #
 # Verified locally at authoring time (no R present, so rofy/zed are excluded):
-#   cargo clippy --workspace --exclude rofy --exclude zed_roughly --all-targets --all-features -- -D warnings  -> 0 warnings
-#   cargo test   --workspace --exclude rofy --exclude zed_roughly --all-targets --all-features                 -> all suites pass
+#   cargo clippy --workspace --exclude rofy --exclude zed_ry --all-targets --all-features -- -D warnings  -> 0 warnings
+#   cargo test   --workspace --exclude rofy --exclude zed_ry --all-targets --all-features                 -> all suites pass
 # To be re-verified by a human in CI once activated.
 
 name: CI
@@ -50,13 +50,13 @@ jobs:
       # `rofy` needs a local R install (extendr's DEP_R_R_HOME) and `zed` needs the editor/wasm
       # toolchain; neither builds on a stock runner, so they are excluded from the workspace gate.
       - name: clippy
-        run: cargo clippy --workspace --exclude rofy --exclude zed_roughly --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --exclude rofy --exclude zed_ry --all-targets --all-features -- -D warnings
       - name: build
-        run: cargo build --workspace --exclude rofy --exclude zed_roughly --all-targets --all-features
+        run: cargo build --workspace --exclude rofy --exclude zed_ry --all-targets --all-features
       - name: test
-        run: cargo test --workspace --exclude rofy --exclude zed_roughly --all-targets --all-features
+        run: cargo test --workspace --exclude rofy --exclude zed_ry --all-targets --all-features
       - name: doctests
-        run: cargo test --workspace --exclude rofy --exclude zed_roughly --doc --all-features
+        run: cargo test --workspace --exclude rofy --exclude zed_ry --doc --all-features
 
   # The heavy, ignored perf / memory / fuzz / blast-radius suites. Their *deterministic* assertions
   # (exec-counter blast radius, recheck scope, fuzz-robustness invariants) are the regression thresholds;
@@ -73,4 +73,4 @@ jobs:
       # `rofy` needs a local R install (extendr's DEP_R_R_HOME) and `zed` needs the editor/wasm
       # toolchain; neither builds on a stock runner, so they are excluded from the workspace gate.
       - name: ignored suites (release)
-        run: cargo test --release --workspace --exclude rofy --exclude zed_roughly --all-targets --all-features -- --ignored --nocapture
+        run: cargo test --release --workspace --exclude rofy --exclude zed_ry --all-targets --all-features -- --ignored --nocapture

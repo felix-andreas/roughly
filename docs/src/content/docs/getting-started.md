@@ -1,9 +1,9 @@
 ---
 title: Getting started
-description: What Roughly is, what it finds on your first run, and where to install it
+description: What ry is, what it finds on your first run, and where to install it
 ---
 
-Roughly is a toolchain for R, written in Rust. It is four tools in one binary:
+ry is a toolchain for R, written in Rust. It is four tools in one binary:
 
 1. **A language server** — hover, completion, go-to-definition, references, rename, and inlay hints,
    in any editor that speaks LSP.
@@ -19,7 +19,7 @@ CI.
 No configuration, no annotations:
 
 ```bash
-roughly check
+ry check
 ```
 
 ```r
@@ -48,7 +48,7 @@ Fix the typo and make a different mistake — the kind no linter can catch, beca
 a value *is*:
 
 ```toml
-# roughly.toml
+# ry.toml
 [check]
 typing = true
 ```
@@ -64,15 +64,15 @@ error[type-mismatch]: expected `double`, found `character`
                         ^^^^^
 ```
 
-Nothing was annotated. Roughly worked out that `rate` is a number because you multiply by it — and
+Nothing was annotated. ry worked out that `rate` is a number because you multiply by it — and
 that same knowledge is what makes hover, completion, and the console's tab completion useful. It runs
 whether or not you turn the errors on.
 
 ## Install
 
-- **VS Code** — the [Roughly extension](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly), which bundles the binary.
-- **Zed** — from [`editors/zed`](https://github.com/felix-andreas/roughly/tree/main/editors/zed); not in Zed's registry yet.
-- **Command line** — a prebuilt binary from [Releases](https://github.com/felix-andreas/roughly/releases), or `cargo install --git https://github.com/felix-andreas/roughly roughly`.
+- **VS Code** — the [ry extension](https://marketplace.visualstudio.com/items?itemName=felix-andreas.ry), which bundles the binary.
+- **Zed** — from [`editors/zed`](https://github.com/felix-andreas/ry/tree/main/editors/zed); not in Zed's registry yet.
+- **Command line** — a prebuilt binary from [Releases](https://github.com/felix-andreas/ry/releases), or `cargo install --git https://github.com/felix-andreas/ry ry`.
 
 Everything else — other architectures, RStudio, building from source — is on the
 [installation page](/installation).
@@ -81,4 +81,4 @@ Everything else — other architectures, RStudio, building from source — is on
 
 - [Features](/features) — everything you get before configuring anything
 - [Tutorial](/type-checking/tutorial) — the type checker on real code
-- [Why Roughly](/why-roughly) — why this exists, and how far along it is
+- [Why ry](/why-ry) — why this exists, and how far along it is

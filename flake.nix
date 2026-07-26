@@ -72,18 +72,18 @@
               # `commonCargoSources` filters out and must be added explicitly.
               ./types
               ./crates/format/tests/format
-              ./crates/roughly/roughly.exe.manifest
+              ./crates/ry/ry.exe.manifest
             ];
           };
 
           commonArgs = {
             inherit src;
-            pname = "roughly";
+            pname = "ry";
             strictDeps = true;
           };
 
           commonArgsLinux = commonArgs // {
-            cargoExtraArgs = "-p roughly";
+            cargoExtraArgs = "-p ry";
             CARGO_BUILD_TARGET = "x86_64-unknown-linux-gnu";
           };
 
@@ -170,7 +170,7 @@
               (makeCrossArgs target)
               // {
                 extraDummyScript = keepPatchesInDummySrc;
-                buildPhaseCargoCommand = "cargo zigbuild --release -p roughly";
+                buildPhaseCargoCommand = "cargo zigbuild --release -p ry";
                 checkPhaseCargoCommand = "true";
               }
             );
@@ -183,15 +183,15 @@
                 cargoArtifacts = makeCrossArtifacts target;
                 buildPhaseCargoCommand = ''
                   cargoBuildLog=$(mktemp cargoBuildLogXXXX.json)
-                  cargo zigbuild --release --message-format json-render-diagnostics -p roughly >"$cargoBuildLog"
+                  cargo zigbuild --release --message-format json-render-diagnostics -p ry >"$cargoBuildLog"
                 '';
               }
             );
         in
         {
-          roughly-linux-x86_64 = packageLinux;
-          roughly-macos-aarch64 = buildCrossPackage "aarch64-apple-darwin";
-          roughly-windows-x86_64 = buildCrossPackage "x86_64-pc-windows-gnu";
+          ry-linux-x86_64 = packageLinux;
+          ry-macos-aarch64 = buildCrossPackage "aarch64-apple-darwin";
+          ry-windows-x86_64 = buildCrossPackage "x86_64-pc-windows-gnu";
         }
       );
 

@@ -1,7 +1,7 @@
 <h1>
   <p align="center">
     <img src="docs/public/logo.svg" alt="Logo" height="128" >
-    <br />Roughly
+    <br />ry
   </p>
 </h1>
 
@@ -9,20 +9,38 @@
 
 An extremely fast R language server and code formatter, written in Rust.
 <br />
-[Docs](https://roughly.felixandreas.me) · [Releases](https://github.com/felix-andreas/roughly/releases) · [VS Code Extension](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly) · [Zed Extension](https://github.com/felix-andreas/roughly/tree/main/editors/zed)
+[Docs](https://ry-lang.org) · [Releases](https://github.com/felix-andreas/ry/releases) · [VS Code Extension](https://marketplace.visualstudio.com/items?itemName=felix-andreas.ry) · [Zed Extension](https://github.com/felix-andreas/ry/tree/main/editors/zed)
 
 </div>
 
 > [!NOTE]
-> Roughly can be used either as a standalone command-line tool or as an extension in supported editors like VS Code.
+> ry can be used either as a standalone command-line tool or as an extension in supported editors like VS Code.
 
-## Why Roughly?
+## Why ry?
 
-This project was created to address the slow performance of the existing R language server on large codebases. Originally called *"The R(oughly good enough) language server"*, it began as a minimal but fast language server that supported only go-to-definition using regex-based indexing. Since then, the project has evolved into a full-featured language server with proper parsing, formatting, and linting, and the "good enough" part was eventually dropped from the name.
+This project was created to address the slow performance of the existing R language server on large codebases. Originally called *"The R(oughly good enough) language server"*, it began as a minimal but fast language server that supported only go-to-definition using regex-based indexing.
+
+It has been rewritten twice since. The current stack dropped tree-sitter for a hand-written R parser, which is what makes diagnostics like these possible — each pointing at the character that is wrong, where a general-purpose grammar can only report that the file stopped making sense somewhere:
+
+```
+error[trailing-comma]: Unexpected comma after last argument
+ --> a.R:1:12
+1 | x <- c(1, 2,)
+               ^
+
+error[syntax-error]: missing `,` between these arguments
+ --> a.R:2:16
+2 | y <- list(a = 1 b = 2)
+                   ^
+```
+
+On top of that parser sit a static type checker, a formatter, and a linter.
+
+Each rewrite has also made the name shorter. *"Good enough"* went first, leaving **ry**; this one dropped everything except the first and last letter. The pattern is load-bearing — the better it gets, the less of it there is to type — and at this rate the next version is a single keystroke.
 
 ## Features
 
-Roughly aims to support the following language server features (some are experimental or in progress):
+ry aims to support the following language server features (some are experimental or in progress):
 
 - **Formatting**
   - Format entire document
@@ -37,11 +55,11 @@ Roughly aims to support the following language server features (some are experim
 
 - **Diagnostics**
   - Syntax errors - *including missing or trailing commas*
-  - Basic linting rules - *[full list here](https://roughly.felixandreas.me/reference/diagnostic-codes)*
+  - Basic linting rules - *[full list here](https://ry.felixandreas.me/reference/diagnostic-codes)*
   - Warning for unused variables *(opt-in: `[check] unused`)*
   - Error for undefined variable *(⚠️ missing)*
   - Argument validation for function calls *(part of type checking)*
-  - Static type checking — HM-style inference with nominal/structural types, function types, nullable unions, and numeric constraints, driven by [`#:` typing comments](https://roughly.felixandreas.me/type-checking/concepts). Inferred types power editor features by default; `type-mismatch` diagnostics are opt-in via `[check] typing`.
+  - Static type checking — HM-style inference with nominal/structural types, function types, nullable unions, and numeric constraints, driven by [`#:` typing comments](https://ry.felixandreas.me/type-checking/concepts). Inferred types power editor features by default; `type-mismatch` diagnostics are opt-in via `[check] typing`.
 
 - **Editing**
   - Autocomplete local and global variables
@@ -51,30 +69,30 @@ Roughly aims to support the following language server features (some are experim
   - Signature help — inferred call signature with active parameter
   - Inlay hints — inferred types on unannotated bindings
 
-## Roughly CLI
+## ry CLI
 
 ### Usage
 
-Run Roughly as a formatter:
+Run ry as a formatter:
 
 ```
-roughly fmt           # Format all files in the current directory
-roughly fmt <path>    # Format all files in `<path>`
-roughly fmt --check   # Only check if files would be formatted
-roughly fmt --diff    # Only show the diff if files would be formatted
+ry fmt           # Format all files in the current directory
+ry fmt <path>    # Format all files in `<path>`
+ry fmt --check   # Only check if files would be formatted
+ry fmt --diff    # Only show the diff if files would be formatted
 ```
 
-To run Roughly as a linter:
+To run ry as a linter:
 
 ```
-roughly check         # Check all files in the current directory
-roughly check <path>  # Check all files in `<path>`
+ry check         # Check all files in the current directory
+ry check <path>  # Check all files in `<path>`
 ```
 
-Or, to run Roughly as a language server:
+Or, to run ry as a language server:
 
 ```
-roughly server        # Usually started automatically by your editor
+ry server        # Usually started automatically by your editor
 ```
 
 ### Installation
@@ -85,14 +103,14 @@ RStudio, or on a platform without a bundled binary.
 
 #### Download Binary
 
-Download the pre-built binary for your platform from the [releases page](https://github.com/felix-andreas/roughly/releases).
+Download the pre-built binary for your platform from the [releases page](https://github.com/felix-andreas/ry/releases).
 
 #### Install with Cargo
 
-If you have [Cargo](https://www.rust-lang.org/tools/install) installed, install Roughly with:
+If you have [Cargo](https://www.rust-lang.org/tools/install) installed, install ry with:
 
 ```sh
-cargo install --git https://github.com/felix-andreas/roughly roughly
+cargo install --git https://github.com/felix-andreas/ry ry
 ```
 
 #### Build from Source
@@ -107,16 +125,16 @@ cargo build --release
 
 ### Download from Marketplace (Recommended)
 
-[![](https://vsmarketplacebadges.dev/version-short/felix-andreas.roughly.svg)](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly)
+[![](https://vsmarketplacebadges.dev/version-short/felix-andreas.ry.svg)](https://marketplace.visualstudio.com/items?itemName=felix-andreas.ry)
 
-Install the extension from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly).
+Install the extension from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=felix-andreas.ry).
 
 > [!NOTE]
-> The VS Code extension from the marketplace includes a bundled version of the Roughly CLI for **Linux x86_64, macOS aarch64 and Windows x86_64**. If you are using a different architecture, you will need to install the Roughly CLI manually.
+> The VS Code extension from the marketplace includes a bundled version of the ry CLI for **Linux x86_64, macOS aarch64 and Windows x86_64**. If you are using a different architecture, you will need to install the ry CLI manually.
 
 ### Manual Installation
 
-Alternatively, build the extension from source (or [download from releases](https://github.com/felix-andreas/roughly/releases)):
+Alternatively, build the extension from source (or [download from releases](https://github.com/felix-andreas/ry/releases)):
 
 ```bash
 bun run package
@@ -125,21 +143,21 @@ bun run package
 Install the generated VSIX file:
 
 ```bash
-code --install-extension roughly.vsix
+code --install-extension ry.vsix
 ```
 
 ### Extension Settings
 
-You can customize the Roughly extension in VS Code through the following settings:
+You can customize the ry extension in VS Code through the following settings:
 
 ```jsonc
 {
   // Use a custom binary instead of the bundled one
-  "roughly.path": "/path/to/roughly",
+  "ry.path": "/path/to/ry",
   // Pass custom arguments; defaults to ["server"]
-  "roughly.args": ["server", "--verbose"],
+  "ry.args": ["server", "--verbose"],
   // Enable experimental features
-  "roughly.experimentalFeatures": ["range_formatting"],
+  "ry.experimentalFeatures": ["range_formatting"],
 }
 ```
 
@@ -148,26 +166,26 @@ You can customize the Roughly extension in VS Code through the following setting
 
 ### Commands
 
-You can access Roughly-specific commands in VS Code via the Command Palette (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd>):
+You can access ry-specific commands in VS Code via the Command Palette (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd>):
 
-- **Roughly: Open logs**
-- **Roughly: Start/Stop/Restart Server**
-- **Roughly: Format workspace** (⚠️ missing)
-- **Roughly: Show syntax tree** (⚠️ missing)
+- **ry: Open logs**
+- **ry: Start/Stop/Restart Server**
+- **ry: Format workspace** (⚠️ missing)
+- **ry: Show syntax tree** (⚠️ missing)
 
 ## Zed Extension
 
 Not in Zed's extension registry yet. Install it from
-[`editors/zed`](https://github.com/felix-andreas/roughly/tree/main/editors/zed) as a dev extension —
+[`editors/zed`](https://github.com/felix-andreas/ry/tree/main/editors/zed) as a dev extension —
 its README has the three steps.
 
 ## RStudio Integration
 
-Roughly can be used as an external formatter in RStudio. See the [RStudio setup guide](https://roughly.felixandreas.me/installation#rstudio) for detailed instructions.
+ry can be used as an external formatter in RStudio. See the [RStudio setup guide](https://ry.felixandreas.me/installation#rstudio) for detailed instructions.
 
 ## Configuration
 
-You can configure Roughly via a project-specific `roughly.toml` file:
+You can configure ry via a project-specific `ry.toml` file:
 
 ```toml
 [format]
@@ -189,18 +207,18 @@ unused = true
 
 ## Experimental Features
 
-Roughly includes a few experimental features that can be enabled in the VS Code extension settings or via the CLI:
+ry includes a few experimental features that can be enabled in the VS Code extension settings or via the CLI:
 
 | Name               | Description                      |
 | ------------------ | -------------------------------- |
 | `all`              | Enable all experimental features |
 | `range_formatting` | Format selected code ranges      |
 
-Type checking and unused-variable warnings are no longer experimental — configure them under `[check]` in `roughly.toml` (see above).
+Type checking and unused-variable warnings are no longer experimental — configure them under `[check]` in `ry.toml` (see above).
 
 ## Development
 
-See our [development documentation](https://roughly.felixandreas.me/contributing/development).
+See our [development documentation](https://ry.felixandreas.me/contributing/development).
 
 ## License
 

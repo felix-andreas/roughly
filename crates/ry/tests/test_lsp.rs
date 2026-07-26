@@ -2676,8 +2676,8 @@ async fn cancelled_pull_is_retryable_and_recovers() {
         &[],
         capabilities,
         &[
-            ("ROUGHLY_TEST_DELAY_PULL_MS", "1000"),
-            ("ROUGHLY_TEST_PULL_MARKER", &marker_text),
+            ("RY_TEST_DELAY_PULL_MS", "1000"),
+            ("RY_TEST_PULL_MARKER", &marker_text),
         ],
     )
     .await;

@@ -190,7 +190,7 @@ file overriding a shipped name's type does not remove the name from its shipped 
 `stats::sd` stays valid under an `sd` override. Hover shows a name's origin as the namespace of its
 winning declaration.
 
-Skipped never means silent. `roughly check` reports every dropped override declaration as an error
+Skipped never means silent. `ry check` reports every dropped override declaration as an error
 on its stub line (a line that fails to parse, or a declaration naming an unresolvable type) and
 treats an unreadable override file as an I/O failure, and the editor shows the same problems as
 diagnostics while a `.Rtypes` file is open.
@@ -373,7 +373,7 @@ sweep on a keystroke.
 
 ### NAMESPACE import validation
 
-Both `roughly check` and the language server validate a package's `NAMESPACE` file against the
+Both `ry check` and the language server validate a package's `NAMESPACE` file against the
 loaded stubs: every `importFrom(pkg, name)` whose namespace the stub corpus knows (shipped or
 project) but does not export `name` is an **error** on the import site (`` `medain` is not exported
 by `stats`, so this package will not load. ``) — R refuses to load a package with such an import, so
@@ -525,6 +525,6 @@ Two extensions are designed but unbuilt, and their absence is visible:
   CRAN package's names resolve to `Unknown` with an unknown-namespace warning. A project can
   close the gap for itself today by writing its own `stubs/<pkg>.Rtypes`; generating them by
   introspecting an installed library is the intended long-term answer, because which packages
-  and versions are installed is a property of the project, not of Roughly.
+  and versions are installed is a property of the project, not of ry.
 - **R-version keying.** Base evolves across releases — functions appear, signatures change — and
   the shipped corpus describes one snapshot rather than the version a given project runs.

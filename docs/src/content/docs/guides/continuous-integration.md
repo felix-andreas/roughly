@@ -3,32 +3,32 @@ title: Continuous integration
 description: A working CI job for R, and how to decide what should fail the build
 ---
 
-Roughly is one binary with no R dependency, so a CI job is a download and two commands. Nothing to
+ry is one binary with no R dependency, so a CI job is a download and two commands. Nothing to
 install, no package cache, no matrix over R versions.
 
 ## A working job
 
 ```yaml
-# .github/workflows/roughly.yml
-name: roughly
+# .github/workflows/ry.yml
+name: ry
 on: [push, pull_request]
 
 jobs:
-  roughly:
+  ry:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install Roughly
+      - name: Install ry
         env:
-          ROUGHLY_VERSION: 0.3.0-alpha
+          RY_VERSION: 0.3.0-alpha
         run: |
-          curl -sSL "https://github.com/felix-andreas/roughly/releases/download/${ROUGHLY_VERSION}/roughly-x86_64-unknown-linux-gnu.tar.gz" \
+          curl -sSL "https://github.com/felix-andreas/ry/releases/download/${RY_VERSION}/ry-x86_64-unknown-linux-gnu.tar.gz" \
             | tar xz
-          sudo mv roughly /usr/local/bin/
+          sudo mv ry /usr/local/bin/
       - name: Check
-        run: roughly check
+        run: ry check
       - name: Format
-        run: roughly fmt --check
+        run: ry fmt --check
 ```
 
 Both commands exit `1` on findings, which is what fails the job. Neither needs R installed.
@@ -36,21 +36,21 @@ Both commands exit `1` on findings, which is what fails the job. Neither needs R
 **Pin the version.** Every release so far is marked a pre-release, so
 `releases/latest/download/…` resolves to an old stable tag rather than the newest build — and the type
 system is still gaining capability, so a newer version can report findings an older one did not. Name
-the tag explicitly, as above. See [project status](/why-roughly#project-status).
+the tag explicitly, as above. See [project status](/why-ry#project-status).
 
-Asset names follow the Rust target triple — `roughly-aarch64-apple-darwin.tar.gz`,
-`roughly-x86_64-pc-windows-gnu.zip` — and each archive contains the single `roughly` binary.
+Asset names follow the Rust target triple — `ry-aarch64-apple-darwin.tar.gz`,
+`ry-x86_64-pc-windows-gnu.zip` — and each archive contains the single `ry` binary.
 
 ## Deciding what should fail the build
 
 The default is strict: **warnings fail the job**. A run with nothing but `unused` warnings still
 exits `1`.
 
-That is usually right for a project that starts clean, and wrong for one adopting Roughly on an
+That is usually right for a project that starts clean, and wrong for one adopting ry on an
 existing codebase. To gate on errors only while you work through a backlog:
 
 ```bash
-roughly check --min-severity error
+ry check --min-severity error
 ```
 
 The filter applies before the exit code is decided, so warnings still print but no longer fail
@@ -58,20 +58,20 @@ anything.
 
 | You want | Command |
 | --- | --- |
-| Everything to matter | `roughly check` |
-| Only errors to block the build | `roughly check --min-severity error` |
-| Formatting enforced | `roughly fmt --check` |
-| To see the diff CI would apply | `roughly fmt --diff` |
+| Everything to matter | `ry check` |
+| Only errors to block the build | `ry check --min-severity error` |
+| Formatting enforced | `ry fmt --check` |
+| To see the diff CI would apply | `ry fmt --diff` |
 
 Be careful reading exit code `2` as "worse than 1" — it is a *different* failure. It means the run
-could not be completed: an unparseable `roughly.toml`, a path that does not exist, an unreadable file.
+could not be completed: an unparseable `ry.toml`, a path that does not exist, an unreadable file.
 A job that treats any non-zero as "findings" will report a broken config as a code problem. The full
 table is in the [CLI reference](/reference/cli#exit-codes).
 
 ## JSON output
 
 ```bash
-roughly check --output json
+ry check --output json
 ```
 
 writes JSON Lines to stdout — one object per finding, nothing else on the stream, and no summary
@@ -89,11 +89,11 @@ break silently.
 Counting errors for a summary line, without jq:
 
 ```bash
-roughly check --output json | grep -c '"severity":"error"'
+ry check --output json | grep -c '"severity":"error"'
 ```
 
 ## Adopting on an existing project
 
-Do not start by putting `roughly check` in front of a merge gate on a codebase that has never run it.
+Do not start by putting `ry check` in front of a merge gate on a codebase that has never run it.
 Land the tool first, gate second. [Adopting an existing codebase](/guides/adopting) walks through the
 order that works.

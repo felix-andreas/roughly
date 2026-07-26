@@ -4,17 +4,17 @@ description: Every rule the formatter applies, with a before-and-after for each
 ---
 <!-- R CODE IN THIS FILE IS FORMATTED AND SAVED TO docs/src/content/docs/reference/formatting-rules.md -->
 
-Roughly includes a non-invasive R code formatter that emphasizes readability while respecting the existing structure of your code.
+ry includes a non-invasive R code formatter that emphasizes readability while respecting the existing structure of your code.
 
 ## Usage
 
 Format your R files using the command line:
 
 ```sh
-roughly fmt           # Format all files in the current directory
-roughly fmt <path>    # Format all files in <path>
-roughly fmt --check   # List files that would be reformatted, without writing
-roughly fmt --diff    # Show a diff of formatting changes without applying them
+ry fmt           # Format all files in the current directory
+ry fmt <path>    # Format all files in <path>
+ry fmt --check   # List files that would be reformatted, without writing
+ry fmt --diff    # Show a diff of formatting changes without applying them
 ```
 
 `--check` and `--diff` exit 1 when any file would change, so they slot straight into CI. Errors
@@ -23,7 +23,7 @@ roughly fmt --diff    # Show a diff of formatting changes without applying them
 
 ## Philosophy
 
-Roughly's non-invasive approach means it respects your existing line breaks and won’t arbitrarily split expressions you’ve chosen to keep on one line. The formatter is guided by these principles:
+ry's non-invasive approach means it respects your existing line breaks and won’t arbitrarily split expressions you’ve chosen to keep on one line. The formatter is guided by these principles:
 
 * **Single-line expressions remain single-line:** The formatter only adds line breaks if the expression is already multi-line, and will never break single-line expressions into multiple lines (with [one exception](#loops)).
 * **Flexible style preservation:** Both compact ("hugged") and expanded forms for nested expressions are supported, so your preferred style is respected (see [hugging behavior](#hugging-behavior)).
@@ -433,7 +433,7 @@ Additional exceptions to this rule are:
 
 ### Type Annotations
 
-Roughly's type annotations are written in `#:` comments. The formatter treats each block of consecutive `#:` lines as one unit: the block is parsed with the same annotation grammar the type checker uses, and — only when it parses — re-rendered with the canonical spacing used throughout the [typing reference](/reference/type-system): one space after `#:`, no space before `,` or `:` and one space after, spaces around `|` and `->`, and no padding inside `(`, `[`, `{`, or generic `<...>`. A leading type-parameter binder such as `<T>` is followed by a space.
+ry's type annotations are written in `#:` comments. The formatter treats each block of consecutive `#:` lines as one unit: the block is parsed with the same annotation grammar the type checker uses, and — only when it parses — re-rendered with the canonical spacing used throughout the [typing reference](/reference/type-system): one space after `#:`, no space before `,` or `:` and one space after, spaces around `|` and `->`, and no padding inside `(`, `[`, `{`, or generic `<...>`. A leading type-parameter binder such as `<T>` is followed by a space.
 
 ```r
 # type_annotations_compact : compare
@@ -589,7 +589,7 @@ for (item in sequence)
 
 ### Hugging Behavior
 
-"Hugging" refers to how nested expressions are formatted in multiline contexts—keeping them compact by allowing inner expressions to start on the same line as the outer expression's opening delimiter. This is part of Roughly's non-invasive approach: both hugged and expanded formats are allowed.
+"Hugging" refers to how nested expressions are formatted in multiline contexts—keeping them compact by allowing inner expressions to start on the same line as the outer expression's opening delimiter. This is part of ry's non-invasive approach: both hugged and expanded formats are allowed.
 
 **Nested function calls** can be formatted in a hugged style:
 

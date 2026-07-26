@@ -1,9 +1,9 @@
 ---
 title: Diagnostic codes
-description: Every code Roughly can emit, what triggers it, and how to silence it
+description: Every code ry can emit, what triggers it, and how to silence it
 ---
 
-Every finding Roughly reports carries a stable code. This page lists all of them.
+Every finding ry reports carries a stable code. This page lists all of them.
 
 ## How to read a finding
 
@@ -17,7 +17,7 @@ warning[unresolved]: I could not resolve `validte_url` in this package, its impo
 | Part | Meaning |
 | --- | --- |
 | `warning` | Severity — `warning` or `error`. `--min-severity error` reports only errors and exits on them alone |
-| `[unresolved]` | The diagnostic code. Stable across message rewordings: it is what you name in a suppression comment, in `roughly.toml`, and what `--output json` reports as `code` |
+| `[unresolved]` | The diagnostic code. Stable across message rewordings: it is what you name in a suppression comment, in `ry.toml`, and what `--output json` reports as `code` |
 | `R/a.R:2:22` | File, line, and character column of where the finding starts |
 | `^^^^` | The exact source range the finding is about — the name, the token, or the expression, not the whole statement |
 
@@ -25,24 +25,24 @@ Some findings add a related location on a following line, as `= note:` — `dupl
 
 ## Suppressing a finding
 
-A `# roughly: allow(...)` comment silences findings whose range starts on **its own line** (as a trailing comment) or on **the line directly below it**. There is no block or file scope.
+A `# ry: allow(...)` comment silences findings whose range starts on **its own line** (as a trailing comment) or on **the line directly below it**. There is no block or file scope.
 
 | Comment | Silences |
 | --- | --- |
-| `# roughly: allow(unused)` | The one named code |
-| `# roughly: allow(unused, naming-style)` | Every listed code |
-| `# roughly: allow(all)` | Every code |
+| `# ry: allow(unused)` | The one named code |
+| `# ry: allow(unused, naming-style)` | Every listed code |
+| `# ry: allow(all)` | Every code |
 
 ```r
-# roughly: allow(unused)
+# ry: allow(unused)
 scratch <- 1L
 
-total = 1L  # roughly: allow(assignment-operator)
+total = 1L  # ry: allow(assignment-operator)
 
-flag <- T  ## roughly: allow(all)
+flag <- T  ## ry: allow(all)
 ```
 
-The marker is found by a line scan, not a parse: the first `#` on the line, all leading `#` stripped, then the literal `roughly:` and `allow(` up to the first `)`. So `## roughly: allow(x)` and `#roughly:allow(x)` both work — but a `#` inside a string literal earlier on the line moves where the scan starts.
+The marker is found by a line scan, not a parse: the first `#` on the line, all leading `#` stripped, then the literal `ry:` and `allow(` up to the first `)`. So `## ry: allow(x)` and `#ry:allow(x)` both work — but a `#` inside a string literal earlier on the line moves where the scan starts.
 
 **Not suppressible**, because these are not reported against an R source file: `stub` (reported on `.Rtypes`), `config`, and the `unresolved` / `unused-import` findings reported on `NAMESPACE`.
 
@@ -70,7 +70,7 @@ Formatting is suppressed by a different mechanism — `# fmt: skip`, `# fmt: off
 
 ## The codes
 
-Most codes are on by default. These are the opt-ins, all configured in [`roughly.toml`](/reference/configuration):
+Most codes are on by default. These are the opt-ins, all configured in [`ry.toml`](/reference/configuration):
 
 | Code | Turn on with |
 | --- | --- |
@@ -157,4 +157,4 @@ Enabling `strict` also raises every `unresolved` finding in the file from warnin
 | Code | Severity | On by default | Triggered by |
 | --- | --- | --- | --- |
 | `stub` | error | yes | A declaration in a project's `stubs/*.Rtypes` file that would otherwise be dropped in silence: a line that is not a `name : TYPE` declaration, an invalid name, a missing or invalid type, an unknown type name, or `@masked` on a non-variadic function type. The range covers the whole line |
-| `config` | error | yes | A malformed `roughly.toml` — a TOML parse failure, or the wrong type of value on a known key. Reported on the config file by the language server only; `check` reports config failures as a usage error with exit code 2. An *unknown key* is not this finding: it is a `check` warning on stderr and never blocks loading |
+| `config` | error | yes | A malformed `ry.toml` — a TOML parse failure, or the wrong type of value on a known key. Reported on the config file by the language server only; `check` reports config failures as a usage error with exit code 2. An *unknown key* is not this finding: it is a `check` warning on stderr and never blocks loading |

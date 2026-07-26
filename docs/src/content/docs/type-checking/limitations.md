@@ -1,9 +1,9 @@
 ---
 title: Limitations
-description: What Roughly cannot check yet, stated plainly — the gaps that matter before you adopt it
+description: What ry cannot check yet, stated plainly — the gaps that matter before you adopt it
 ---
 
-Roughly is a type checker for a language that was not designed to have one. Some of R resists
+ry is a type checker for a language that was not designed to have one. Some of R resists
 static analysis, some of it is simply not built yet, and you should know which is which before
 you decide how much to trust a clean run.
 
@@ -15,7 +15,7 @@ below — a gap means checks are *skipped*, not that wrong answers are produced.
 Turning on strict mode makes those skips visible:
 
 ```toml
-# roughly.toml
+# ry.toml
 [check]
 typing = true
 strict = true
@@ -67,19 +67,19 @@ understood: bare column names inside `mutate()` or a `data.table` bracket are co
 not unresolved variables, and classes flow through a pipeline. A full `read.csv |> mutate |> filter`
 chain checks clean.
 
-Outside those, a data-masking function Roughly does not know about will report its column names as
+Outside those, a data-masking function ry does not know about will report its column names as
 unresolved. The ecosystem's standard escape hatch works — a top-level
 `utils::globalVariables(c("a", "b"))` silences them for the whole package.
 
-**Attaching a package Roughly does not know weakens the `unresolved` check.** A `library(pkg)` whose
-exports Roughly cannot enumerate means any bare name *could* be one of them, so otherwise-unresolved
+**Attaching a package ry does not know weakens the `unresolved` check.** A `library(pkg)` whose
+exports ry cannot enumerate means any bare name *could* be one of them, so otherwise-unresolved
 bare names are tolerated rather than reported — project-wide, not just in that file. This is what
 keeps the tool usable on real code, but where it applies a clean run says less than it looks like it
 does.
 
 Four things narrow the hole:
 
-1. **Most packages are already known.** Roughly ships the export lists of the packages R code attaches
+1. **Most packages are already known.** ry ships the export lists of the packages R code attaches
    most — see [what ships](/type-checking/stubs#what-ships). Attaching any of them keeps the check
    fully on: a real export resolves, and a typo beside it is still reported with a suggestion.
 2. **A near miss of a name in scope is still reported.** `library(shiny)` cannot explain `repositry`
@@ -116,7 +116,7 @@ do.
 `source()` calls are not followed. Package files under `R/` share one namespace; every other file is
 analyzed on its own. See [project discovery](/reference/configuration#project-discovery) for the rules.
 
-Files directly under `tests/testthat/` are an **approximation**: Roughly analyzes them as one shared
+Files directly under `tests/testthat/` are an **approximation**: ry analyzes them as one shared
 environment, helpers first. Real testthat only shares `helper*.R` and `setup*.R` that way — each
 `test-*.R` runs in its own child environment. So a name one test file defines and another uses will
 resolve here and fail when you actually run the tests. The approximation is deliberate (it keeps
@@ -126,4 +126,4 @@ helper-defined names resolving), but it is more permissive than testthat is.
 
 None of the above is a reason not to adopt it — see
 [adopting an existing codebase](/guides/adopting) for how to turn it on a piece at a time, and
-[project status](/why-roughly#project-status) for how far along the whole thing is.
+[project status](/why-ry#project-status) for how far along the whole thing is.

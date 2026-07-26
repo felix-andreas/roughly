@@ -1,6 +1,6 @@
 //! IDE feature fixtures: the case source carries one `$0` cursor marker
 //! (stripped before analysis); the expectation renders each feature's result
-//! at that position. `ROUGHLY_BLESS=1` accepts new output;
+//! at that position. `RY_BLESS=1` accepts new output;
 //! `FIXTURE_FILTER=group__case` runs one case.
 
 use semantics::{DocumentKind, ProjectFiles, RootDatabase, SourceFile};

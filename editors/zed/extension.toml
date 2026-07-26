@@ -1,11 +1,11 @@
-id = "roughly"
-name = "Roughly"
+id = "ry"
+name = "ry"
 version = "0.2.4-alpha"
 schema_version = 1
 authors = ["Felix Andreas"]
 description = "An R language server and code formatter, written in Rust."
-repository = "https://github.com/felix-andreas/roughly"
+repository = "https://github.com/felix-andreas/ry"
 
-[language_servers.roughly]
-name = "Roughly"
+[language_servers.ry]
+name = "ry"
 language = "R"
