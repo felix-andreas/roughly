@@ -1171,11 +1171,29 @@ Examples:
   error if any member lacks the field
 - `for` over `integer[] | character[]` binds the loop variable as `integer | character`
 
+#### Conditions
+
+`if`, `while` and the operands of `&&` / `||` all take a **scalar condition**, and R decides what
+that admits:
+
+- `logical` is the ordinary case
+- `integer` and `double` are accepted and **coerce**, exactly as R coerces them — zero is false,
+  anything else true. This is what makes `if (length(x))`, `if (nrow(df))` and `while (n)` ordinary
+  R rather than mistakes
+- `character`, `complex` and `raw` are type errors. R refuses `complex` and `raw` outright, and in
+  a `character` condition it accepts only the spellings of `TRUE` and `FALSE` (`"T"`, `"true"`, …)
+  and raises at run time on every other string — so `if ("yes")` is a bug worth reporting
+- a **vector** is a type error: a condition whose length is not one is an error in R too
+- a condition whose type is still undetermined is bound to `logical`, the useful default for an
+  unannotated predicate — so `function(flag) if (flag) 1L` infers `flag: logical`
+
+`!` follows the same coercion rule and always yields a `logical`: `!0` is `TRUE`, `!5` is `FALSE`.
+
 ### `if` expressions
 
 #### `if` without `else`
 
-- requires a scalar `logical` condition
+- requires a [scalar condition](#conditions)
 - infers the branch body as type `T`
 - produces the result type `T | NULL` (the missing branch contributes `NULL` to the join)
 - union normalization applies: a `NULL` body stays `NULL`, an already-nullable body stays a single `T | NULL`, and an `Unknown` body stays `Unknown`
@@ -1187,7 +1205,7 @@ Examples:
 
 #### `if ... else`
 
-- requires a scalar `logical` condition
+- requires a [scalar condition](#conditions)
 - **joins** the two branch types into the result type:
   - branches that unify share that type: `if (flag) 1L else 2L` is `integer`, and `if (cond) a else b` over two unconstrained values keeps them unified as one polymorphic type
   - a `NULL` branch joins by union without constraining the other branch: one branch `T` and one branch `NULL` produce `T | NULL`
@@ -1205,7 +1223,7 @@ Examples:
 - `if (flag) NULL else 2L` infers as `integer | NULL`
 - `if (flag) 1L else "foo"` infers as `integer | character`
 - `if (flag) { } else { }` infers as `NULL`
-- `if (c(TRUE, FALSE)) 1L else 2L` is invalid because the condition is not scalar `logical`
+- `if (c(TRUE, FALSE)) 1L else 2L` is invalid: a condition must be scalar, not a vector
 
 #### Diverging branches
 
@@ -1350,6 +1368,19 @@ lexical scoping.
   any of them — and evaluates to the union of the member return types; each member is checked in
   an isolated probe, so no member's argument bindings leak into another's
 - function calls also follow the named, positional, and optional parameter rules defined under `Function types`
+
+Arguments are matched in R's two passes, and the order is observable:
+
+1. every argument given **by name** claims the parameter of that name, before any positional
+   argument is placed
+2. the positional arguments then fill what is left — the fixed positional parameters first, then
+   the unclaimed named parameters declared before the rest parameter (all of them when the function
+   is not variadic), in declaration order
+3. the rest parameter absorbs whatever remains, positional or named
+
+So in `vapply(xs, character(1), FUN = f)` the named `FUN` is claimed first and `character(1)`
+reaches `FUN.VALUE`, exactly as R matches it — a positional argument never collides with a
+parameter some later named argument has already claimed.
 
 A function call is a type error when:
 
@@ -1849,8 +1880,7 @@ Examples:
 
 ### Boolean operators `&&` and `||`
 
-- `&&` and `||` are defined only for scalar `logical` operands
-- both operands must have type `logical`
+- both operands are [scalar conditions](#conditions): `logical`, or a numeric that coerces
 - the result type is scalar `logical`
 - array-like and map-like logical vectors are not accepted
 
@@ -1897,7 +1927,7 @@ iterations and with the pre-loop state (see `Control-flow joins`).
 
 ### `while`
 
-- requires a scalar `logical` condition
+- requires a [scalar condition](#conditions)
 - the condition is re-evaluated before every iteration, so reads in it also see the loop's joined
   state
 - the whole `while` expression evaluates to `NULL`
@@ -2003,7 +2033,7 @@ Optional parameters must be named: `[name]: TYPE`. A bare optional positional fo
 A function may declare a **rest parameter** to accept a variable number of arguments:
 
 - `fn(...) -> RETURN_TYPE` — accepts any number of arguments of any type (`...` is shorthand for `...: Any`)
-- `fn(...name: TYPE) -> RETURN_TYPE` — each additional argument must have type `TYPE`; the name is optional and, if given, is discarded (rest arguments are matched by position, never by name)
+- the rest parameter is **anonymous**: it is written `...: TYPE`, and naming it (`...items: TYPE`) is an annotation error, because rest arguments are matched by position, never by that name
 - `fn(prefix: TYPE, ...: TYPE) -> RETURN_TYPE` — a rest parameter may follow fixed parameters
 - `fn(...: TYPE, [option]: TYPE) -> RETURN_TYPE` — named parameters may also follow the rest
   parameter; they are matched **by name only**, exactly like R formals declared after `...`

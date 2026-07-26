@@ -976,6 +976,22 @@ fn atomic_in_family(atomic: Atomic, family: GuardFamily) -> bool {
     }
 }
 
+/// Where R's argument matcher sends one supplied argument.
+enum ArgumentTarget {
+    /// A fixed positional parameter, by index into `positional`.
+    Positional(usize),
+    /// A named formal, by index into `named` — whether it was claimed by name
+    /// or filled positionally.
+    Named(usize),
+    /// Absorbed by the rest parameter.
+    Rest,
+    /// A name no parameter declares on a non-variadic function, or one that
+    /// duplicates a formal already supplied.
+    UnmatchedName,
+    /// A positional argument with nowhere left to go.
+    Overflow,
+}
+
 /// A comparison operand whose family is not yet known: a bare variable or
 /// rigid, or a vector whose element is still generic or untracked.
 enum FlexibleComparisonOperand<'db> {
@@ -2412,11 +2428,15 @@ impl<'db> Checker<'db, '_> {
         let inferred = self.infer(operand);
         let resolved = self.structural(inferred);
         match resolved.kind(self.db) {
-            TyKind::Scalar(Atomic::Logical) => scalar(self.db, Atomic::Logical),
+            // `!` coerces a numeric operand exactly as a condition does
+            // (`!0` is TRUE, `!5` is FALSE), and always yields a logical.
+            TyKind::Scalar(Atomic::Logical | Atomic::Integer | Atomic::Double) => {
+                scalar(self.db, Atomic::Logical)
+            }
             TyKind::Vector(element) | TyKind::NamedVector(element)
                 if matches!(
                     element.kind(self.db),
-                    TyKind::Scalar(Atomic::Logical)
+                    TyKind::Scalar(Atomic::Logical | Atomic::Integer | Atomic::Double)
                         | TyKind::Var(_)
                         | TyKind::Any
                         | TyKind::Unknown
@@ -2667,7 +2687,27 @@ impl<'db> Checker<'db, '_> {
         let condition_range = self.blame_range(condition);
         let inferred = self.infer(condition);
         let resolved = self.structural(inferred);
+        if self.condition_coerces(resolved) {
+            return;
+        }
         self.unify_or_report(condition_range, scalar(self.db, Atomic::Logical), resolved);
+    }
+
+    /// Whether R would coerce this condition rather than refuse it. A numeric
+    /// condition is ordinary R — zero is false, anything else true — so
+    /// `if (length(x))` and `while (n)` are idiom, not mistakes. Everything
+    /// else keeps its error: `character` because R accepts only the spellings
+    /// of `TRUE`/`FALSE` there and raises at run time on any other string,
+    /// `complex` and `raw` because R refuses them outright, and a vector
+    /// because a condition of length other than one is an error in R too.
+    /// A still-flexible condition is left to unification, which binds it to
+    /// `logical` — the useful default for an unannotated predicate.
+    fn condition_coerces(&self, ty: Ty<'db>) -> bool {
+        match ty.kind(self.db) {
+            TyKind::Scalar(Atomic::Logical | Atomic::Integer | Atomic::Double) => true,
+            TyKind::Union(members) => members.iter().all(|&member| self.condition_coerces(member)),
+            _ => false,
+        }
     }
 
     /// Binary arithmetic over the classified operand shapes: member-wise over
@@ -4018,19 +4058,15 @@ impl<'db> Checker<'db, '_> {
         }
     }
 
-    /// R's argument matcher over already-inferred argument types: named
-    /// arguments consume their same-named formal; positionals fill the fixed
-    /// positional parameters, then the named formals declared before the rest
-    /// parameter (all of them when the function is not variadic), then the
-    /// rest parameter absorbs the overflow. Every argument is checked, so a
-    /// call with three wrong arguments reports three findings rather than
-    /// forcing a fix-one-recheck loop; a failed `compatible` leaves the table
-    /// untouched, so each argument's verdict is independent. Returns the
-    /// findings in argument order — empty means the call matches, which is
-    /// what an overload probe tests inside a snapshot. A *structural* failure
-    /// (wrong arity, a name no parameter declares) describes the call as a
-    /// whole and is returned alone: per-argument mismatches under a mis-shaped
-    /// call are misleading.
+    /// R's argument matcher over already-inferred argument types. Every
+    /// argument is checked, so a call with three wrong arguments reports three
+    /// findings rather than forcing a fix-one-recheck loop; a failed
+    /// `compatible` leaves the table untouched, so each argument's verdict is
+    /// independent. Returns the findings in argument order — empty means the
+    /// call matches, which is what an overload probe tests inside a snapshot.
+    /// A *structural* failure (wrong arity, a name no parameter declares)
+    /// describes the call as a whole and is returned alone: per-argument
+    /// mismatches under a mis-shaped call are misleading.
     fn match_arguments(
         &mut self,
         callee_range: TextRange,
@@ -4045,183 +4081,75 @@ impl<'db> Checker<'db, '_> {
                 .filter(|field| !field.optional)
                 .count();
         let variadic_element = function.variadic.as_ref().map(|rest| rest.element);
-        // Named parameters declared before the rest parameter fill
-        // positionally, exactly as R fills formals before `...`. Removals
-        // keep declaration order, so the pre-rest parameters are always the
-        // front segment of the remaining list and this count tracks them.
-        let mut pre_rest_remaining = match &function.variadic {
-            Some(rest) => rest.preceding_named,
-            None => function.named.len(),
-        };
-        let mut remaining_named = function.named.clone();
-        let mut next_positional = 0usize;
+        let targets = self.argument_targets(function, arguments);
 
-        // Which arguments the rest parameter will absorb, decided up front
-        // with the same accounting the loop below applies (no type checks):
-        // a function-typed argument earlier in the call may be checked
-        // against the arguments forwarded to it later in the call
-        // (`lapply(x, gsub, pattern = "a")`).
-        let forwarded_argument_indexes: Vec<usize> = if function.variadic.is_some() {
-            let mut consumed_named: Vec<&str> = Vec::new();
-            let mut positional_seen = 0usize;
-            let mut pre_rest_slots = pre_rest_remaining;
-            let mut forwarded = Vec::new();
-            for (index, argument) in arguments.iter().enumerate() {
-                if argument.forwards_dots {
-                    continue;
-                }
-                match &argument.name {
-                    Some(name) => {
-                        let declared_index = function.named.iter().position(|field| {
-                            field.name.text(self.db) == name.as_str()
-                                && !consumed_named.contains(&name.as_str())
-                        });
-                        match declared_index {
-                            Some(declared_index) => {
-                                consumed_named.push(name.as_str());
-                                if declared_index < pre_rest_slots {
-                                    pre_rest_slots -= 1;
-                                }
-                            }
-                            None => forwarded.push(index),
-                        }
-                    }
-                    None => {
-                        if positional_seen < function.positional.len() {
-                            positional_seen += 1;
-                        } else if pre_rest_slots > 0 {
-                            pre_rest_slots -= 1;
-                        } else {
-                            forwarded.push(index);
-                        }
-                    }
-                }
-            }
-            forwarded
-        } else {
-            Vec::new()
-        };
+        // A function-typed argument earlier in the call may be checked against
+        // the arguments forwarded to it later in the call
+        // (`lapply(x, gsub, pattern = "a")`), so the rest parameter's intake
+        // has to be known before any argument is checked.
+        let forwarded_argument_indexes: Vec<usize> = targets
+            .iter()
+            .enumerate()
+            .filter(|(_, target)| matches!(target, Some(ArgumentTarget::Rest)))
+            .map(|(index, _)| index)
+            .collect();
 
         let forwards_dots = arguments.iter().any(|argument| argument.forwards_dots);
         let mut findings = Vec::new();
-        // A name no parameter declares throws off the positional accounting
-        // below, so its arity verdict would be noise on top of a finding that
-        // already says what is wrong.
+        // A name no parameter declares throws off the positional accounting,
+        // so its arity verdict would be noise on top of a finding that already
+        // says what is wrong.
         let mut unknown_name = false;
-        for argument in arguments {
-            if argument.forwards_dots {
+        for (index, argument) in arguments.iter().enumerate() {
+            let Some(target) = targets.get(index).and_then(Option::as_ref) else {
                 continue;
-            }
-            match &argument.name {
-                Some(name) => {
-                    let position = remaining_named
-                        .iter()
-                        .position(|field| field.name.text(self.db) == name.as_str());
-                    match position {
-                        Some(index) => {
-                            let field = remaining_named.remove(index);
-                            if index < pre_rest_remaining {
-                                pre_rest_remaining -= 1;
-                            }
-                            if let Some(ty) = argument.ty
-                                && let Err(error) = self.check_argument(
-                                    field.ty,
-                                    ty,
-                                    argument.range,
-                                    argument.whole_double,
-                                )
-                                && !self.forwarding_callback_probe(
-                                    field.ty,
-                                    ty,
-                                    &forwarded_argument_indexes,
-                                    arguments,
-                                    argument.range,
-                                )
-                            {
-                                findings.push(error);
-                            }
-                        }
-                        None => {
-                            // A named argument matching no declared parameter
-                            // is absorbed by the rest parameter (R collects
-                            // unmatched keywords into `...`); a name that
-                            // *duplicates* an already-given declared parameter
-                            // stays an error, as does an unmatched name on a
-                            // non-variadic function.
-                            let duplicates_declared = function
-                                .named
-                                .iter()
-                                .any(|field| field.name.text(self.db) == name.as_str());
-                            match (variadic_element, duplicates_declared) {
-                                (Some(element), false) => {
-                                    if let Some(ty) = argument.ty
-                                        && let Err(error) = self.check_argument(
-                                            element,
-                                            ty,
-                                            argument.range,
-                                            argument.whole_double,
-                                        )
-                                    {
-                                        findings.push(error);
-                                    }
-                                }
-                                _ => {
-                                    findings.push(TypeError {
-                                        range: argument.name_range.unwrap_or(argument.range),
-                                        kind: self.named_argument_mismatch(function, name),
-                                    });
-                                    unknown_name = true;
-                                }
-                            }
-                        }
+            };
+            match target {
+                ArgumentTarget::Positional(slot) => {
+                    if let Some(&expected) = function.positional.get(*slot)
+                        && let Some(ty) = argument.ty
+                        && let Err(error) =
+                            self.check_argument(expected, ty, argument.range, argument.whole_double)
+                    {
+                        findings.push(error);
                     }
                 }
-                None => {
-                    if next_positional < function.positional.len() {
-                        let expected = function.positional[next_positional];
-                        next_positional += 1;
-                        if let Some(ty) = argument.ty
-                            && let Err(error) = self.check_argument(
-                                expected,
-                                ty,
-                                argument.range,
-                                argument.whole_double,
-                            )
-                        {
-                            findings.push(error);
-                        }
-                    } else if pre_rest_remaining > 0 {
-                        let field = remaining_named.remove(0);
-                        pre_rest_remaining -= 1;
-                        if let Some(ty) = argument.ty
-                            && let Err(error) = self.check_argument(
-                                field.ty,
-                                ty,
-                                argument.range,
-                                argument.whole_double,
-                            )
-                            && !self.forwarding_callback_probe(
-                                field.ty,
-                                ty,
-                                &forwarded_argument_indexes,
-                                arguments,
-                                argument.range,
-                            )
-                        {
-                            findings.push(error);
-                        }
-                    } else if let Some(element) = variadic_element {
-                        if let Some(ty) = argument.ty
-                            && let Err(error) = self.check_argument(
-                                element,
-                                ty,
-                                argument.range,
-                                argument.whole_double,
-                            )
-                        {
-                            findings.push(error);
-                        }
-                    } else if !forwards_dots {
+                ArgumentTarget::Named(formal) => {
+                    if let Some(expected) = function.named.get(*formal).map(|field| field.ty)
+                        && let Some(ty) = argument.ty
+                        && let Err(error) =
+                            self.check_argument(expected, ty, argument.range, argument.whole_double)
+                        && !self.forwarding_callback_probe(
+                            expected,
+                            ty,
+                            &forwarded_argument_indexes,
+                            arguments,
+                            argument.range,
+                        )
+                    {
+                        findings.push(error);
+                    }
+                }
+                ArgumentTarget::Rest => {
+                    if let Some(element) = variadic_element
+                        && let Some(ty) = argument.ty
+                        && let Err(error) =
+                            self.check_argument(element, ty, argument.range, argument.whole_double)
+                    {
+                        findings.push(error);
+                    }
+                }
+                ArgumentTarget::UnmatchedName => {
+                    if let Some(name) = &argument.name {
+                        findings.push(TypeError {
+                            range: argument.name_range.unwrap_or(argument.range),
+                            kind: self.named_argument_mismatch(function, name),
+                        });
+                        unknown_name = true;
+                    }
+                }
+                ArgumentTarget::Overflow => {
+                    if !forwards_dots {
                         return vec![TypeError {
                             range: callee_range,
                             kind: TypeErrorKind::ArityMismatch {
@@ -4234,10 +4162,19 @@ impl<'db> Checker<'db, '_> {
             }
         }
 
+        let positional_filled = targets
+            .iter()
+            .filter(|target| matches!(target, Some(ArgumentTarget::Positional(_))))
+            .count();
+        let missing_required = function.named.iter().enumerate().any(|(formal, field)| {
+            !field.optional
+                && !targets
+                    .iter()
+                    .any(|target| matches!(target, Some(ArgumentTarget::Named(filled)) if *filled == formal))
+        });
         if !forwards_dots
             && !unknown_name
-            && (next_positional != function.positional.len()
-                || remaining_named.iter().any(|field| !field.optional))
+            && (positional_filled != function.positional.len() || missing_required)
         {
             return vec![TypeError {
                 range: callee_range,
@@ -4248,6 +4185,91 @@ impl<'db> Checker<'db, '_> {
             }];
         }
         findings
+    }
+
+    /// R matches arguments in two passes, and the order matters: an exact name
+    /// claims its formal **before** any positional argument is placed, so
+    /// `vapply(xs, character(1), FUN = f)` sends `character(1)` to `FUN.VALUE`
+    /// rather than colliding with the named `FUN`. Positional arguments then
+    /// fill the fixed parameters, then the unclaimed named formals declared
+    /// before the rest parameter (all of them when the function is not
+    /// variadic), in declaration order; the rest parameter absorbs whatever is
+    /// left. `None` marks an argument that forwards `...`, which every caller
+    /// skips.
+    fn argument_targets(
+        &self,
+        function: &FunctionType<'db>,
+        arguments: &[CallArgument<'db>],
+    ) -> Vec<Option<ArgumentTarget>> {
+        let mut targets: Vec<Option<ArgumentTarget>> = arguments.iter().map(|_| None).collect();
+        let mut claimed = vec![false; function.named.len()];
+
+        for (index, argument) in arguments.iter().enumerate() {
+            if argument.forwards_dots {
+                continue;
+            }
+            let Some(name) = &argument.name else { continue };
+            let formal = function
+                .named
+                .iter()
+                .enumerate()
+                .position(|(formal, field)| {
+                    field.name.text(self.db) == name.as_str() && !claimed[formal]
+                });
+            if let Some(formal) = formal {
+                claimed[formal] = true;
+                targets[index] = Some(ArgumentTarget::Named(formal));
+            }
+        }
+
+        let pre_rest = match &function.variadic {
+            Some(rest) => rest.preceding_named.min(function.named.len()),
+            None => function.named.len(),
+        };
+        let mut next_positional = 0usize;
+        let mut next_named = 0usize;
+        for (index, argument) in arguments.iter().enumerate() {
+            if argument.forwards_dots || targets[index].is_some() {
+                continue;
+            }
+            targets[index] = Some(match &argument.name {
+                // A named argument matching no unclaimed formal is absorbed by
+                // the rest parameter (R collects unmatched keywords into
+                // `...`); a name that *duplicates* a formal already supplied
+                // stays an error, as does an unmatched name on a non-variadic
+                // function.
+                Some(name) => {
+                    let duplicates_declared = function
+                        .named
+                        .iter()
+                        .any(|field| field.name.text(self.db) == name.as_str());
+                    match (function.variadic.is_some(), duplicates_declared) {
+                        (true, false) => ArgumentTarget::Rest,
+                        _ => ArgumentTarget::UnmatchedName,
+                    }
+                }
+                None => {
+                    if next_positional < function.positional.len() {
+                        next_positional += 1;
+                        ArgumentTarget::Positional(next_positional - 1)
+                    } else {
+                        while next_named < pre_rest && claimed[next_named] {
+                            next_named += 1;
+                        }
+                        if next_named < pre_rest {
+                            claimed[next_named] = true;
+                            next_named += 1;
+                            ArgumentTarget::Named(next_named - 1)
+                        } else if function.variadic.is_some() {
+                            ArgumentTarget::Rest
+                        } else {
+                            ArgumentTarget::Overflow
+                        }
+                    }
+                }
+            });
+        }
+        targets
     }
 
     fn named_argument_mismatch(
@@ -5863,9 +5885,22 @@ mod tests {
     }
 
     #[test]
-    fn conditions_and_short_circuit_operators_expect_scalar_logical() {
+    fn conditions_coerce_numerics_and_refuse_everything_else() {
         let db = RootDatabase::default();
-        let bad_condition = check_source(&db, "f <- function() if (1L) 2L");
+        // R coerces a numeric condition (zero false, anything else true), so
+        // the `if (length(x))` idiom is not a mistake.
+        for source in [
+            "f <- function() if (1L) 2L",
+            "f <- function() 1L && TRUE",
+            "f <- function(x) if (length(x)) 1L else 2L",
+            "f <- function() if (2.5) 1L else 2L",
+        ] {
+            let ok = check_source(&db, source);
+            assert!(ok.errors.is_empty(), "{source}: {:?}", ok.errors);
+        }
+        // A character condition is a runtime error in R for every string but
+        // the spellings of TRUE and FALSE, so it stays a type error.
+        let bad_condition = check_source(&db, "f <- function() if (\"yes\") 2L");
         assert!(
             bad_condition
                 .errors
@@ -5873,15 +5908,6 @@ mod tests {
                 .any(|error| matches!(error.kind, TypeErrorKind::Mismatch { .. })),
             "{:?}",
             bad_condition.errors
-        );
-        let bad_and = check_source(&db, "f <- function() 1L && TRUE");
-        assert!(
-            bad_and
-                .errors
-                .iter()
-                .any(|error| matches!(error.kind, TypeErrorKind::Mismatch { .. })),
-            "{:?}",
-            bad_and.errors
         );
         let ok = check_source(&db, "f <- function(a, b) a && b");
         assert!(ok.errors.is_empty(), "{:?}", ok.errors);

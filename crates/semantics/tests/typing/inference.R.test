@@ -133,15 +133,19 @@ f: fn() -> integer
 g: fn() -> integer[]
 h: fn() -> integer[]
 
-#---- unary_not_requires_logical
+#---- unary_not_coerces_numerics_and_refuses_the_rest
+# `!` coerces exactly as a condition does (`!0` is TRUE, `!5` is FALSE) and
+# always yields a logical.
 f <- function() !TRUE
 g <- function() !c(TRUE, FALSE)
 h <- function() !1L
+i <- function() !"a"
 #++++
 f: fn() -> logical
 g: fn() -> logical[]
-h: Unknown
-71..73 error[type-mismatch] expected a `logical` value, found `integer`
+h: fn() -> logical
+i: Unknown
+194..197 error[type-mismatch] expected a `logical` value, found `character`
 
 #---- comparison_families
 f <- function() "a" < "b"

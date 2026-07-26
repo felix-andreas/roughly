@@ -35,9 +35,9 @@ compiler-checked analog of "make illegal states unrepresentable":
   conversion, diagnostics assembly and publication, and suppression comments.
 
 The `*-legacy` crates (`roughly-legacy`, `analysis-legacy`, `engine-legacy`)
-are the previous stack, frozen in-tree as the cross-implementation oracle and
-benchmark baseline for the differential suites until every rewrite gate holds;
-no code is shared between the two stacks by design.
+are the previous stack, frozen in-tree as the baseline the performance
+benchmarks measure against; no code is shared between the two stacks by
+design.
 
 ## The semantics database
 

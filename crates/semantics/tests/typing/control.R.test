@@ -42,17 +42,33 @@ f <- function(flag) if (flag) 1L
 #++++
 f: fn(flag: logical) -> integer | NULL
 
-#---- condition_must_be_scalar_logical
+#---- a_numeric_condition_coerces
+# R coerces a numeric condition — zero is false, anything else true — so the
+# `if (length(x))` idiom is ordinary R rather than a mistake.
 f <- function() if (1L) 2L
+g <- function(x) if (length(x)) 1L else 2L
+h <- function() {
+  n <- 3L
+  while (n) n <- n - 1L
+  n
+}
+#++++
+f: fn() -> integer | NULL
+g: <T> fn(x: T) -> integer
+h: fn() -> integer
+
+#---- a_character_condition_is_refused
+# Every string but the spellings of TRUE and FALSE raises at run time in R.
+f <- function() if ("yes") 2L
 #++++
 f: Unknown
-20..22 error[type-mismatch] expected `logical`, found `integer`
+96..101 error[type-mismatch] expected `logical`, found `character`
 
 #---- condition_blame_drills_through_parens
-f <- function() if ((1L)) 2L
+f <- function() if (("yes")) 2L
 #++++
 f: Unknown
-21..23 error[type-mismatch] expected `logical`, found `integer`
+21..26 error[type-mismatch] expected `logical`, found `character`
 
 #---- condition_blame_excludes_trailing_trivia
 f <- function(n) if (n %% 2L ) 2L

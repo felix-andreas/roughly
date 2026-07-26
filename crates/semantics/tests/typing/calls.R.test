@@ -109,6 +109,24 @@ f <- function() {
 #++++
 f: fn() -> integer
 
+#---- a_name_claims_its_formal_before_positionals_are_placed
+# R matches exact names first and only then fills positionals around them, so
+# `TRUE` lands on `c` rather than colliding with the named `b`.
+#: fn(a: integer, b: character, c: logical) -> integer
+three <- function(a, b, c) a
+
+use <- function() three(1L, TRUE, b = "x")
+#++++
+three: fn(a: integer, b: character, c: logical) -> integer
+use: fn() -> integer
+
+#---- a_named_callback_lets_a_positional_reach_the_later_formal
+# The real-world shape: `FUN` is given by name, so `character(1)` fills
+# `FUN.VALUE` instead of being matched against `FUN`.
+label <- function(xs) vapply(xs, character(1), FUN = as.character)
+#++++
+label: <T> fn(xs: list[T] | T[]) -> character[]
+
 #==== union_commit
 #---- flexible_argument_commits_to_the_union_at_first_use
 #: fn(x: integer | character) -> logical

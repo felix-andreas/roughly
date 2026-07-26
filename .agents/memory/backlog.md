@@ -16,13 +16,18 @@ measured the competition). The accuracy fixes landed; what remains is below.
 
 **Bugs the reviews found, each with a repro:**
 
-- **`if (length(x))` demands `logical`** — `expected logical, found integer`. R coerces a numeric
-  scalar condition, and `if (length(x))` / `if (nrow(df))` is everywhere. Three hits in an
-  eight-item random sample of shiny, so this is likely the single highest-volume false positive.
-- **Named-before-positional matching is wrong for a callback.**
-  `vapply(xs, character(1), FUN = f)` reports two errors including a bogus "FUN given twice". R
-  matches names first, then fills positionals around them; the guide claims arguments are matched
-  "exactly like R does".
+- **Numeric conditions FIXED** (`if (length(x))`, `while (n)`, `!length(x)` — R coerces them, zero
+  false and anything else true; `character`/`complex`/`raw`/vector conditions stay errors). One
+  residual: a condition whose type is still *undetermined* is bound to `logical`, so
+  `function(n) while (n) ...` infers `n: logical` and rejects a numeric caller. Fixing that
+  properly needs a "coercible to a condition" constraint — a fourth constraint kind, which is the
+  documented tripwire for designing traits rather than accreting (see `typing-design.md`).
+- **Named-before-positional matching FIXED.** `match_arguments` walked the argument list once, in
+  source order, so a positional argument could take a formal that a *later* named argument was
+  going to claim (`vapply(xs, character(1), FUN = f)` reported a bogus "FUN given twice").
+  Matching is now two passes in `argument_targets` — names claim their formals, then positionals
+  fill what is left — computed once and shared by the checking loop and the rest-parameter
+  forwarding scan, which previously duplicated the accounting and so duplicated the bug.
 - **The accumulator idiom errors where R returns `NULL`.** `args <- list(); if (x) args$escape <-
   TRUE; args$escape`. Worth a design decision rather than a patch: a *definitely* absent field
   should error (that is the flagship win), a *possibly* absent one should yield `T | NULL`.

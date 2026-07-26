@@ -466,7 +466,7 @@ the operator kernel promotes `pi / 2`, and the `T` value binding types `flag`.
 
 `paste`'s variadics, its `sep`/`collapse` named formals, and `length.out`'s dotted parameter name are
 expressible directly
-(`paste : fn([sep]: character, [collapse]: character | NULL, [recycle0]: logical, ...: Any) -> character`).
+(`paste : fn(...: Any, [sep]: character, [collapse]: character | NULL, [recycle0]: logical) -> character` — the rest parameter's position among the named ones is part of the signature, because it decides which parameters a positional argument can still fill).
 One gap remains, degrading returns to the scalar-claim:
 
 - `nchar`-style shape mirroring where the result *atomic* differs from the input's (the result
