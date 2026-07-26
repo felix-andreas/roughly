@@ -86,7 +86,7 @@ The preserving formatter over the syntax tree, plus its configuration types.
 ## `repl` crate (`src/repl.rs` is the root)
 
 Backs `roughly repl` and `roughly run` by locating and loading the system R at
-runtime, so the rest of the workspace builds and analyses R with no R present.
+runtime, so the rest of the workspace builds and analyzes R with no R present.
 
 - `repl.rs` — the session: evaluation, the read-eval-print loop, exit codes
 - `libr.rs` — the runtime binding to R's shared library (no build-time link)

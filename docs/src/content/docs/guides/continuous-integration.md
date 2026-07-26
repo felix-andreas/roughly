@@ -68,7 +68,7 @@ could not be completed: an unparseable `roughly.toml`, a path that does not exis
 A job that treats any non-zero as "findings" will report a broken config as a code problem. The full
 table is in the [CLI reference](/reference/cli#exit-codes).
 
-## Posting findings somewhere
+## JSON output
 
 ```bash
 roughly check --output json
@@ -92,7 +92,7 @@ Counting errors for a summary line, without jq:
 roughly check --output json | grep -c '"severity":"error"'
 ```
 
-## Turning it on for a project that has findings today
+## Adopting on an existing project
 
 Do not start by putting `roughly check` in front of a merge gate on a codebase that has never run it.
 Land the tool first, gate second. [Adopting an existing codebase](/guides/adopting) walks through the

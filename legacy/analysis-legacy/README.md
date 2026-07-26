@@ -24,10 +24,10 @@ and override.
 
 The authoritative, always-current documentation lives on the docs site:
 
-- [Typing Reference](https://roughly.felixandreas.me/typing-reference) — the semantics contract:
+- [Typing Reference](https://roughly.felixandreas.me/reference/type-system) — the semantics contract:
   supported types, unions, vector and list shapes, guard narrowing, strict mode, data-masked
   evaluation (NSE), per-file typing directives
-- [Typing guide](https://roughly.felixandreas.me/typing) — the tutorial
+- [Typing guide](https://roughly.felixandreas.me/type-checking/tutorial) — the tutorial
 - Contributing pages — architecture, this crate's file structure, and the fixture-testing
   contract
 

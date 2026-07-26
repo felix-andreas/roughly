@@ -3,13 +3,9 @@ title: Concepts
 description: How Roughly's type system works — the vocabulary you need to read what it tells you
 ---
 
-This page explains the type system. It is meant to be enough on its own: you should be able to read
-everything the checker says without opening the [specification](/reference/type-system).
-
 ## Inference
 
-**Inference** is the checker working out a type instead of being told one. It is the foundation of
-everything else here: what a value must be follows from what you do with it.
+**Inference** is the checker working out a type instead of being told one. What a value must be follows from what you do with it.
 
 ```r
 scale <- function(x, factor) {
@@ -20,8 +16,7 @@ scale <- function(x, factor) {
 `*` is arithmetic, so `x` and `factor` are numbers. That is inferred, not declared, and it is enough to
 reject `scale("a", 2)`.
 
-This is the single most important thing to understand about the system, because it explains why most R
-needs no annotations at all. You annotate where you want to say something the code does not already
+You annotate where you want to say something the code does not already
 say — a boundary, a domain type, a promise you want held to.
 
 ## Scalars and vectors
@@ -59,35 +54,37 @@ Widening happens only when checking whether a value *fits* somewhere. It never h
 is working out what two things have in common — that is a different question, and answering it by
 widening would quietly lose information.
 
-## Containers
+## Lists
 
-This is the distinction that trips people up, so it is worth being explicit. Lists come in two flavours,
-and the difference is whether the checker knows the shape.
+R gives you one `list()` and expects you to use it for everything. In practice you use it for at least
+four different jobs, and the mistakes you can make with each are different:
 
-**Homogeneous** — every element the same type, length unknown:
-
-| Notation | Means |
-| --- | --- |
-| `integer[]` | Integer vector |
-| `list[integer]` | List of integers |
-| `list[named: integer]` | List of integers keyed by names |
-
-**Heterogeneous** — a fixed shape the checker tracks element by element:
-
-| Notation | Means | Called |
+| What you are building | Type | Example |
 | --- | --- | --- |
-| `list{integer, character}` | Exactly two elements, of those types | A tuple |
-| `list{name: character, age: integer}` | Exactly those fields, of those types | A record |
+| A record with named fields | `list{name: character, age: integer}` | `list(name = "Ada", age = 36L)` |
+| A fixed-size tuple | `list{integer, character}` | `list(1L, "ok")` |
+| A growable sequence, all one type | `list[integer]` | results you `append()` to in a loop |
+| A lookup table keyed by name | `list[named: integer]` | counts by category |
 
-A list literal infers the fixed shape, which is what makes `$` work:
+The split that matters is **fixed shape** versus **unknown shape**. `list{...}` means the checker knows
+exactly which elements exist, so it can check `$` and `[[`. `list[...]` means it knows the element type
+but not how many there are, so it cannot.
+
+Atomic vectors have the same two shapes: `integer` is one value, `integer[]` is many.
+
+**None of this changes anything at runtime.** All four are an ordinary R `list`; `is.list()` is `TRUE`
+for every one, `str()` prints what it always printed, and there is nothing to migrate. The distinction
+exists only so the checker can tell you which of the four you actually built.
+
+That is what makes `$` safe:
 
 ```r
 person <- list(fullname = "Ada", age = 36L)
 person$fullnme
 ```
 
-`person` is `list{fullname: character, age: integer}`, so the checker knows the field does not exist —
-instead of the silent `NULL` you would get at runtime:
+The literal has a fixed shape, so the checker knows the field is not there — instead of the silent
+`NULL` you get at runtime:
 
 ```text
 error[type-mismatch]: field `fullnme` does not exist in `list{fullname: character, age: integer}`. Did you mean `fullname`?
@@ -116,7 +113,7 @@ You have already seen one: when a variable is assigned different types on differ
 after the `if` is the union of both. That is what the type checker reports in the
 [Features](/features) example.
 
-`NULL` is its own type, and this is where unions earn their keep. A function that may return nothing
+`NULL` is its own type, and this is where unions matter most. A function that may return nothing
 has type `character | NULL`, and using that result as a `character` without checking is an error — the
 missing `if (is.null(x))` that would have failed at runtime.
 
@@ -140,45 +137,103 @@ you can see the gaps instead of mistaking them for approval.
 
 ## Naming your own types
 
-Two ways, and choosing between them is a real decision.
+### `@type`
 
-**`@alias` is transparent.** The name is shorthand; it expands to its body everywhere, and the alias and
-its body are freely interchangeable:
-
-```r
-#: @alias UserId {integer}
-```
-
-A `UserId` *is* an `integer`. Anywhere one works, so does the other.
-
-**`@type` is nominal.** The name is a distinct type, even if its representation is identical to
-something else:
-
-```r
-#: @type Celsius {double}
-#: @type Fahrenheit {double}
-```
-
-A `Celsius` is **not** a `Fahrenheit`, and neither is a bare `double`. That is the point — it is how you
-stop the two being mixed up, which no amount of structural checking can do for you.
-
-Because a nominal type is distinct, a structural value never becomes one by accident. The only way in is
-to say so:
+Start with the case you actually have: a thing in your domain with named fields. In R you would reach
+for S4, R6 or S7. Roughly gives you a third option that the checker can see into:
 
 ```r
 #: @type Person {list{name: character, age: integer}}
 
+#: fn(name: character, age: integer) -> Person
+new_person <- function(name, age) {
+  #: @new Person
+  list(name = name, age = age)
+}
+
+#: fn(p: Person) -> character
+greet <- function(p) paste0("hi ", p$name)
+```
+
+A `Person` is an ordinary named list at runtime — no class system, no dispatch, no dependency. But it
+is a **distinct type** to the checker, so `greet` accepts a `Person` and nothing else:
+
+```r
+greet(list(name = "Bob", age = 40L))
+```
+
+```text
+error[type-mismatch]: expected `Person`, found `list{name: character, age: integer}`
+```
+
+Read that error carefully, because it is the whole idea. The list has *exactly* the right fields with
+exactly the right types, and it is still rejected. Matching the shape is not enough — you have to have
+gone through the door:
+
+```r
 #: @new Person
 ada <- list(name = "Ada", age = 36L)
 ```
 
-`@new` checks the value against the representation and then hands you the nominal type. It is the
-single door in, which is exactly what makes the type mean something on the way out. See
-[domain modeling](/type-checking/domain-modeling) for using this in anger.
+`@new` is that door. It checks the value against the declared representation and hands back the nominal
+type. Put it inside a constructor, as `new_person` does, and every `Person` in your program provably
+came from there.
 
-Note the blank line above. A `#:` block commits to one thing: it declares types (`@type`, `@alias`), or
-it annotates the item on the next line — never both. Run them together and you get
-`error[annotation]: @type and @alias declarations need their own #: block`.
+This is **nominal** safety, as opposed to the **structural** kind. Structural typing asks "does it have
+the right shape?"; nominal typing asks "is it the thing?". S4 and R6 answer that question at run time and tell the
+checker nothing. `@type` answers it at analysis time and adds nothing at run time.
+
+### Two names for the same shape
+
+Nominal types matter most when two values have the same shape but must not be swapped:
+
+```r
+#: @type Celsius {double}
+
+#: @type Fahrenheit {double}
+
+#: fn(temp: Celsius) -> Fahrenheit
+to_fahrenheit <- function(temp) {
+  #: @new Fahrenheit
+  temp * 9 / 5 + 32
+}
+
+#: @new Celsius
+freezing <- 0
+
+warm <- to_fahrenheit(freezing)
+to_fahrenheit(warm)
+```
+
+```text
+error[type-mismatch]: expected `Celsius`, found `Fahrenheit`
+```
+
+The last line converts an already-converted temperature — the bug every unit mix-up is. Both types are
+`double` underneath, and arithmetic on them still works, because the representation is visible
+*outward*. What does not happen is a bare `double`, or the other unit, arriving where one is expected.
+
+### `@alias`
+
+Sometimes you want the opposite: a shorthand that stays interchangeable with what it abbreviates.
+
+```r
+#: @alias Row {list{id: integer, label: character}}
+```
+
+`Row` expands to its body everywhere, so a `Row` and that list are the same type. Use it to stop
+repeating a long type; use `@type` when being confused with the underlying value is the thing you are
+trying to prevent.
+
+:::note
+A `#:` block does one thing: it declares types (`@type`, `@alias`) **or** it annotates the item on the
+next line. Run them together and you get
+`error[annotation]: @type and @alias declarations need their own #: block`. Separate them with a blank
+line, as above.
+:::
+
+See [domain modeling](/type-checking/domain-modeling) for constructors, validation, and when R6 is
+still the right answer.
 
 ## Narrowing
 

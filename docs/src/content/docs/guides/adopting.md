@@ -14,7 +14,7 @@ them require you to understand the type system.
 
 Fix those first. It is a short list on most projects, and it clears the noise before you add more.
 
-## 2. Turn typing on, and read before you change anything
+## 2. Turn typing on
 
 ```toml
 # roughly.toml
@@ -23,7 +23,7 @@ typing = true
 ```
 
 Resist fixing anything on the first pass. Read the whole list instead. On real code it collapses into a
-handful of shapes, and recognising the shape is worth more than fixing the first instance:
+handful of shapes, and recognizing the shape is worth more than fixing the first instance:
 
 | Shape | What it usually means |
 | --- | --- |
@@ -53,7 +53,7 @@ the file, in the file, where the next person will see it.
 
 Work outward from the code you trust least or change most.
 
-## 4. Add strict mode last, and only where it earns its keep
+## 4. Strict mode
 
 ```toml
 [check]

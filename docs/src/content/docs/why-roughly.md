@@ -12,7 +12,7 @@ None of them knows what a value *is*, and none of them shares what it learned wi
 R's language servers do know what your values are — they ask a live R session. That is why completion
 on a fitted model works so well in RStudio.
 
-It is also the limit. A session knows code that has *already run*, in the state it happens to be in.
+That is also its limit: a session knows only code that has already run, in the state it happens to be in.
 It cannot tell you about the branch you have not taken, the function nobody called, or the file you
 just opened. Roughly answers from the source alone, so the answers exist in a pull request, in CI, and
 in a file you have never run:
@@ -25,29 +25,29 @@ in a file you have never run:
 And everything is served from **one** understanding: formatting, analysis, editor features and type
 checking are views onto the same knowledge.
 
-## Fast enough to leave on
+## Speed on large codebases
 
-The projects that most need help — the 40,000-line package, the pipeline that grew for six years — are
-where an R-implemented tool gets slow enough that you stop running it. Tooling you switch off is
-tooling you do not have.
+The existing R language server does not keep up on large projects, so people turn it off.
 
-Roughly is Rust, and analysis is incremental: an edit re-checks what that edit could have affected,
-not the project.
+Roughly is written in Rust, and analysis is incremental: an edit re-checks only what that edit could
+have affected, not the project. It is tested against roughly 970,000 lines of real R — 69 CRAN
+packages plus R's own base library — and the check that an edit does not trigger more work than it
+should runs on every change.
 
 It also **needs no R installation**. `check` and `fmt` never load R and never execute your code, which
 is what makes them safe in CI and instant in an editor. The one exception is the
 [R console](/guides/r-console), which by definition runs R.
 
-## Every mature dynamic language grew types
+## Types in dynamic languages
 
 Python has type hints, JavaScript got TypeScript, Ruby has RBS, Elixir is adding set-theoretic types.
 Each stayed dynamic, kept types optional, and adopted them because finding type errors by running the
 program stops scaling long before the codebase does.
 
-R code is full of implicit type expectations — they are exactly the ones that break in production.
+R code is full of implicit type expectations, and nothing checks them until the code runs.
 
-Roughly's answer is deliberately R-shaped, and rests on **inference**: the checker works out types
-from how values are used, rather than making you declare them.
+Roughly's approach rests on **inference**: the checker works out types from how values are used,
+instead of making you declare them.
 
 ```r
 scale <- function(x, factor) x * factor
@@ -60,8 +60,8 @@ you can adopt it one file at a time.
 
 ## Project status
 
-Roughly is version `0.3.0-alpha`. It is not on CRAN, and it has one maintainer. Being honest about
-what that means:
+Roughly is version `0.3.0-alpha`. It is not on CRAN, and it has one maintainer. What that means in
+practice:
 
 **Stable enough to build on.** The diagnostics, the `roughly.toml` keys, the diagnostic codes, and the
 JSON output are covered by tests that fail when they change. CI built on them will not break silently.
@@ -73,7 +73,7 @@ gate a build on a clean run.
 **Where it runs.** `roughly check` reads `.R` files and the R chunks of `.Rmd`, `.qmd`, and `.Rnw`
 documents. The editor integration does not cover literate documents yet — you get them in `check` and
 in CI, but not as you type. The formatter deliberately leaves them alone, since most of an `.Rmd` is
-prose it has no business rewriting.
+prose the formatter should not rewrite.
 
 **What it will not do yet.** The gaps that matter most are data frames, S4, and R6 — see
 [limitations](/type-checking/limitations) for the full picture before you decide how far to trust a

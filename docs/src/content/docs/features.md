@@ -3,72 +3,152 @@ title: Features
 description: What Roughly gives you before you configure anything — and the one flag that changes the rest
 ---
 
-Everything on this page works out of the box — no configuration file, no annotations, nothing turned
-on. Except the last section, which costs one line.
+Everything below works with no configuration and no annotations. The last section needs one line of
+configuration.
 
-## It finds real mistakes
+## Navigation and completion
 
-`roughly check` builds an understanding of your whole project and reports what does not add up. With no
-configuration at all:
+R already has a language server, written in R. On a large project it becomes slow enough that people
+turn it off. The alternative is to stay inside RStudio or Positron, where the analysis is
+good but does not travel to any other editor.
 
-| Finding | What it catches |
-| --- | --- |
-| `unresolved` | A name that resolves nowhere — typos, forgotten imports, a function you deleted. Comes with a "did you mean" suggestion drawn from names actually in scope |
-| `unused` | A value you assign and never read, including dead stores inside a function |
-| `duplicate` | A top-level name defined twice in the same package |
-| `syntax-error` | Parse errors, with a caret under the glyph that broke |
-| `trailing-comma` | `f(1, 2,)` — R reads this as a *missing third argument*, not as a stray comma, so it fails the moment that argument is used |
-| `assignment-operator` | `=` used where `<-` was meant |
-| `boolean-shorthand` | `T` and `F`, which are variables and can be reassigned, unlike `TRUE` and `FALSE` |
+Roughly is a standard language server, so go-to-definition, find-references, completion and hover work
+in VS Code, Zed, Neovim and Helix alike. It reads your whole project, so a name defined in one file
+completes in another:
 
-Two of these are worth dwelling on, because they need a real analysis rather than a text scan.
+```r
+# R/utils.R
+normalise_region <- function(x) tolower(trimws(x))
+```
 
-`unresolved` knows the difference between a name your project defines, a name a package exports, and a
-name that exists nowhere — so it can suggest the right correction instead of guessing. It also
-understands `NAMESPACE`: an `importFrom()` naming something a package does not export is an **error**,
-because R will refuse to load the package.
+```r
+# R/report.R
+normalise_re      # completes to normalise_region
+```
 
-`unused` distinguishes a binding that is never read from one read on some paths only, so it does not
-fire on the normal shapes R code takes.
+## Syntax errors
 
-More checks are available but off by default — naming style, unused parameters, unused imports,
-shadowing a builtin. See [diagnostic codes](/reference/diagnostic-codes) for the full set, and
-[configuration](/reference/configuration) for turning them on.
+Roughly parses R with its own hand-written parser rather than calling R or reusing a grammar. That
+is what makes these messages possible. Forget a comma in a list:
 
-## One style, no debates
+```r
+config <- list(
+  title = "Revenue"
+  subtitle = "by quarter",
+  width = 800
+)
+```
 
-`roughly fmt` formats R with no options to argue about. It is deliberately non-invasive: it normalises
-spacing, indentation, and bracing without rewriting the structure of your code, and it leaves literate
-documents alone entirely. Every rule is written down, with a before and after, in
-[formatting rules](/reference/formatting-rules).
+R reports the token it could not accept:
 
-## Your editor gets smarter
+```text
+Error: unexpected symbol in:
+"  title = "Revenue"
+  subtitle"
+```
 
-Install the extension and the language server does the rest.
+Roughly reports what is missing, and points at the place it should go:
 
-| | |
-| --- | --- |
-| **Hover** | The inferred type of whatever is under the cursor |
-| **Go to definition** | Jump to a binding, across files |
-| **Go to type definition** | Jump from a value to the `@type` that declares it |
-| **Find references** and **rename** | Across the whole project, not just the open file |
-| **Completion** | Locals, project globals, package exports, and record fields after `$` |
-| **Signature help** | The signature of the call you are inside, as you type the arguments |
-| **Inlay hints** | Inferred types shown inline after assignments |
-| **Quick fixes** | Remove an unused assignment, and other one-keystroke corrections |
-| **Outline** and **workspace symbols** | Including S4 and R6 members |
-| **Folding** and **document highlights** | The ordinary editor comforts |
+```text
+error[syntax-error]: missing `,` between these arguments
+ --> a.R:2:20
+2 |   title = "Revenue"
+                       ^
+```
 
-Diagnostics arrive in two waves so the editor never feels stalled: the cheap parse-derived findings
-publish immediately on every keystroke, and the full project analysis follows when it settles.
+The same comparison with a parenthesis left open:
+
+```r
+if (x > 1 {
+  y
+}
+```
+
+```text
+Error: unexpected '{' in "if (x > 1 {"
+```
+
+```text
+error[syntax-error]: unclosed `(` in the `if` condition; expected a matching `)`
+ --> a.R:1:4
+1 | if (x > 1 {
+       ^
+```
+
+R's parser stops at the first error, because its job is to run your code. A parser written for tooling
+carries on, keeps the rest of the file analyzable, and can say which construct was left open.
+
+## Formatting
+
+`roughly fmt` fixes spacing, indentation and bracing:
+
+```r
+x<-c(1,2,3)
+if(x>1){y<-2}
+```
+
+```r
+x <- c(1, 2, 3)
+if (x > 1) { y <- 2 }
+```
+
+What it does not do is decide where your line breaks go. Both of these are already formatted, and both
+stay exactly as written:
+
+```r
+totals <- summarise(data, by = region)
+
+breakdown <- summarise(
+  data,
+  by = region
+)
+```
+
+You chose one call on a line and the other spread over four; the formatter keeps both. A formatter that
+reflows to a column limit would rewrite one of them, and your next diff would show line breaks instead
+of the change you made. There are no options to argue about — the reasoning is in
+[formatting rules](/reference/formatting-rules#philosophy).
+
+## Rename
+
+Rename does not search and replace. It runs the same analysis that answers go-to-definition: every
+occurrence is resolved to the binding it refers to, and only the occurrences bound to the one you
+picked are edited.
+
+That matters because the same word is not the same thing twice. A local `total` inside one function and
+a global `total` used by another are different bindings. A parameter shadows the global of the same
+name for the length of the function. The word appearing inside a string is not a binding at all.
+Renaming one of them must leave the others alone, across every file in the project.
 
 ## One more thing
 
-Every type on this page — the one hover showed you, the one that made completion offer the right
-fields, the one in the inlay hint — came from a type checker that has been running the entire time. You
-did not annotate anything, and you did not turn it on.
+Everything above comes from one model of your project: which names exist, which binding each
+occurrence refers to, and where each is visible. That model is what separates these features from text
+search, and building it is most of the work.
 
-What you have not turned on is whether it **tells you when the answers disagree**:
+The type checker goes one step further. It does not only know which binding a name refers to — it
+knows what kind of value that binding holds. Completion does not only know which names exist, it knows
+what is inside them:
+
+```r
+account <- list(holder = "ada", balance = 120.5)
+account$        # balance, holder — with their types
+```
+
+Nothing declared those fields. And hovering a function you never annotated gives you its full type:
+
+```r
+make <- function(x) list(x, 1L)
+```
+
+```text
+make: fn(x: T) -> list{T, integer}
+```
+
+It takes any value and returns a two-element list of that value and an integer. Inference produced
+that, and it has been running the whole time.
+
+One thing is still off by default: reporting the places where those types disagree.
 
 ```toml
 # roughly.toml
@@ -93,12 +173,13 @@ error[type-mismatch]: expected a numeric value (`integer` or `double`), found `i
  --> parse.R:6:3
 6 |   count + 1L
       ^^^^^
-
-1 problem in 1 file
 ```
 
-One line of configuration, no annotations, and no change to the code. That is the whole of the type
-checker's entry price.
+One line of configuration, no annotations, no change to the code.
+
+Type checking a whole project sounds expensive, and this is where it would show. It does not, because
+analysis is incremental: an edit re-checks only what that edit could have affected, not the project.
+Roughly is tested against roughly 970,000 lines of real R — 69 CRAN packages plus R's base library.
 
 - [Tutorial](/type-checking/tutorial) — put it on real code
 - [Concepts](/type-checking/concepts) — how it works out what it knows

@@ -65,6 +65,15 @@ Companion documents (kept separate only because they are larger in scope): `work
   absent from the sidebar — getting-started closes with the extension links and a one-line install, and
   the page itself only covers awkward cases. Introduction pages live at the site root; every other page
   nests under its group.
+- **Write plain English. No jargon, no idiom, no empty phrases.** Not "table stakes", not "bread and
+  butter", not "under the hood", not "it turns out", not "let's dive in". Headings name their subject
+  ("Syntax errors", "Formatting", "Rename") rather than editorialising about it ("Syntax errors that
+  say what you forgot"). Every sentence must carry information a reader did not have; if a sentence
+  only sets up the next one, delete it. This is a hard rule across the whole site, and reviewers check
+  it.
+- **Never rely on a capability the page has not introduced yet.** The Features page builds
+  navigation → syntax errors → formatting → rename → the type checker, so an example that needs
+  inference cannot appear before the reveal. An example is evidence for the section it sits in.
 - **The rule that keeps pages from bleeding into each other**: explain a thing once, in prose, where it
   is introduced; tabulate it once, in Reference; never half-explain it in a third place. The previous
   layout documented suppression in three pages and configuration in three more. When a page needs a

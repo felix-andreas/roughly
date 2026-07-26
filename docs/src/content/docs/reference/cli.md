@@ -43,7 +43,7 @@ roughly check --min-severity error  # only errors report and gate
 
 | Flag | Argument | Default | Effect |
 | ---- | -------- | ------- | ------ |
-| positional | `FILES...` | `.` | Files and directories to report on. Directories are walked for `.R`, `.r`, and literate extensions; `renv`, `packrat`, `revdep`, `.Rproj.user`, and `.Rcheck` are skipped, and `.gitignore` is honoured even outside a git checkout. A file you name explicitly is always checked, even when `[check] exclude` matches it |
+| positional | `FILES...` | `.` | Files and directories to report on. Directories are walked for `.R`, `.r`, and literate extensions; `renv`, `packrat`, `revdep`, `.Rproj.user`, and `.Rcheck` are skipped, and `.gitignore` is honored even outside a git checkout. A file you name explicitly is always checked, even when `[check] exclude` matches it |
 | `--output` | `human` \| `json` | `human` | `human` renders diagnostics with source snippets on **stderr** and one summary line on **stdout**. `json` writes [JSON Lines](#json-output) on **stdout** and prints no summary |
 | `--min-severity` | `warning` \| `error` | `warning` | Findings below the floor are neither reported nor counted toward the [exit code](#exit-codes) |
 
@@ -184,7 +184,7 @@ wrapping array, no summary object, nothing else on the stream. Keys are alphabet
 | `message` | string | The rendered message |
 | `related` | array | Companion locations, `[]` when there are none. Each entry has `path`, `line`, `column`, `endLine`, `endColumn`, and `message`. A `duplicate` finding names both sites |
 
-A related location is dropped when its file is outside the files this run analysed, rather than
+A related location is dropped when its file is outside the files this run analyzed, rather than
 reported with an unusable path. Warnings the CLI itself emits — unknown config keys, unreadable files
 — stay on stderr as human text and never appear as JSON.
 

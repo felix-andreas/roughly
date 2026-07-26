@@ -1,309 +1,226 @@
 ---
 title: Tutorial
-description: Learn Roughly's type checker for R by using it — from your first run to annotations, domain types, and strict mode
+description: Learn Roughly's type checker by putting it on real R, one step at a time
 ---
 
-This is a walkthrough, not a specification. You will turn the checker on, run it on real code,
-read what it says, and add annotations only where they earn their place.
+This tutorial covers the type checker: writing an annotation, what inference gives you without one,
+unions and `NULL`, declaring your own domain types, generics, and strict mode. It assumes you can
+already run `roughly check` on a project.
 
-Every output on this page is copied from a real run. The snippets are fragments, so where a run would
-also report an `unused` warning for a function nothing calls yet, that line is left out — it is noise
-about the snippet, not about the point being made.
+:::note
+Type errors are opt-in. Add this to `roughly.toml`, or put `# typing: on` at the top of a file:
 
-For the exact rules behind any of it, the [typing reference](/reference/type-system) is the contract.
-For what the checker cannot do, [limitations](/type-checking/limitations) is honest about it.
+```toml
+[check]
+typing = true
+```
+:::
 
-## 1. Run it before you configure anything
+## 1. Your first annotation
 
-Make a file. This one has three ordinary mistakes in it:
+Here is a function with a type written above it:
 
 ```r
-# clean.R
-summarise_orders <- function(orders) {
-  totals = sapply(orders, function(o) o$amount)
-  verbose <- T
-  mean(totals)
+#: fn(price: double, rate: double) -> double
+apply_discount <- function(price, rate) {
+  price * rate
 }
 ```
 
-```bash
-roughly check
+That first line is the annotation. It reads left to right: `fn(` the parameters and their types `)`,
+then `->` and the return type. It lives in a `#:` comment, so R and every other R tool see a comment
+and carry on — annotated code is still ordinary R.
+
+Now call it wrongly:
+
+```r
+apply_discount(100, "0.2")
 ```
 
 ```text
-warning[unused]: `summarise_orders` is assigned but never used.
- --> clean.R:1:1
-1 | summarise_orders <- function(orders) {
-    ^^^^^^^^^^^^^^^^
-
-warning[assignment-operator]: Use <-, not =, for assignment
- --> clean.R:2:10
-2 |   totals = sapply(orders, function(o) o$amount)
-             ^
-
-warning[unused]: `verbose` is assigned but never used.
- --> clean.R:3:3
-3 |   verbose <- T
-      ^^^^^^^
-
-warning[boolean-shorthand]: Use TRUE, not T, for Boolean values
- --> clean.R:3:14
-3 |   verbose <- T
-                 ^
-
-4 problems in 1 file
+error[type-mismatch]: expected `double`, found `character`
+ --> t.R:6:21
+6 | apply_discount(100, "0.2")
+                        ^^^^^
 ```
 
-No configuration, no annotations, no R installation. Every code in brackets is a
-[stable name](/reference/diagnostic-codes) you can suppress individually.
+Found without running anything, and pointing at the argument rather than at the line that would have
+blown up.
 
-Type errors are the one thing you opt into, because they are the part that can be noisy on code
-that has never been checked:
+The annotation is a promise the checker holds you to in both directions. Claim the wrong return type
+and it says so, pointing at the body:
+
+```r
+#: fn(price: double, rate: double) -> character
+apply_discount <- function(price, rate) {
+  price * rate
+}
+```
+
+```text
+error[type-mismatch]: expected `character`, found `double`
+ --> a.R:3:3
+3 |   price * rate
+      ^^^^^^^^^^^^
+```
+
+## 2. Inference
+
+Delete the annotation entirely and run it again:
+
+```r
+apply_discount <- function(price, rate) {
+  price * rate
+}
+
+apply_discount(100, "0.2")
+```
+
+```text
+error[type-mismatch]: expected `double`, found `character`
+ --> t.R:5:21
+5 | apply_discount(100, "0.2")
+                        ^^^^^
+```
+
+The same error. `*` is arithmetic, so `price` and `rate` are numbers — the checker worked that out
+from the body. This is **inference**, and it is why most R needs no annotations at all.
+
+It is worth knowing what kind, because that decides how far you can trust it. Roughly uses
+**Hindley–Milner** inference, the algorithm behind ML, Haskell and Elm. Two properties matter here:
+
+- It computes a **principal type** — the single most general type consistent with how a value is used.
+  Not a guess, not a heuristic, not "the first thing that fit". Run it twice and you get the same
+  answer; run it on a colleague's machine and they get yours.
+- It does not silently accept a contradiction. Within the part of your program it can model, if the
+  types cannot line up, you hear about it.
+
+That second clause carries the honest limit. R has constructs no type system can follow — `UseMethod`
+dispatch, data-frame columns, S4. There the checker yields `Unknown` rather than guessing, and
+`Unknown` is compatible with everything, so one gap does not flood your screen with consequences.
+[Strict mode](#7-strict-mode) is how you find those gaps.
+
+## 3. When to annotate
+
+Inference handles the interior. Annotate at the edges:
+
+- **Exported functions**, and anything else another file or another person calls. The annotation is
+  documentation the checker enforces, and it stops a change to the body quietly changing the contract.
+- **Where you want a promise held.** If a function must return a `double`, say so, and the day someone
+  makes it return a list you find out immediately.
+- **Where inference cannot see.** A value that arrives from a data frame, a database, or `readRDS()`
+  is `Unknown`. If you know what it is, say so.
+
+Not every local variable. Annotating `n <- 1L` adds nothing the checker did not already know.
+
+## 4. `NULL` and narrowing
+
+This is the error most likely to be a real bug in code you have already shipped:
+
+```r
+#: fn(config: list{retries: integer} | NULL) -> integer
+retry_count <- function(config) {
+  config$retries
+}
+```
+
+```text
+error[type-mismatch]: expected a list, found `list{retries: integer} | NULL`
+ --> a.R:3:3
+3 |   config$retries
+      ^^^^^^^^^^^^^^
+```
+
+The `|` makes a union: `config` is *either* that list *or* `NULL`. You cannot reach into it until you
+have ruled out `NULL`. Add the guard and the error goes away:
+
+```r
+#: fn(config: list{retries: integer} | NULL) -> integer
+retry_count <- function(config) {
+  if (is.null(config)) return(3L)
+  config$retries
+}
+```
+
+```text
+1 file checked, no problems
+```
+
+The checker follows the `if`: after the early return, `config` cannot be `NULL` any more, so the field
+access is fine. That is called narrowing.
+
+## 5. Domain types
+
+Two `double`s that must never be mixed up:
+
+```r
+#: @type Celsius {double}
+
+#: @type Fahrenheit {double}
+
+#: fn(t: Celsius) -> Fahrenheit
+to_fahrenheit <- function(t) t
+```
+
+```text
+error[type-mismatch]: expected `Fahrenheit`, found `Celsius`
+```
+
+`@type` makes a name that is its own type, distinct from everything else even when the representation
+is identical. This is the part no amount of inference can do for you — only you know that these two
+numbers mean different things.
+
+See [domain modeling](/type-checking/domain-modeling) for constructors and validation.
+
+## 6. Generics
+
+An unannotated function that constrains nothing is already generic:
+
+```r
+identity2 <- function(x) x
+```
+
+Hover it and you get `<T> fn(x: T) -> T` — for any type `T`, takes one and returns the same one. Add
+arithmetic and the promise narrows on its own to `<T: numeric> fn(x: T) -> T`. You asked for neither,
+and there is nothing to maintain.
+
+One caveat: a single `T` used twice means *the same* type twice. Against
+`<T: numeric> fn(value: T, factor: T) -> T`, the call `scale_by(2L, 0.5)` is reported, because
+`integer` and `double` are different `T`s. Widen one side yourself when you want to mix.
+
+## 7. Strict mode
+
+A clean run means "I found no contradictions". It does not mean "I checked everything". Strict mode
+reports every place a value became `Unknown`:
 
 ```toml
 # roughly.toml
 [check]
 typing = true
-```
-
-## 2. What the checker already knows
-
-With that one line, Roughly reads your code the way a compiler would — no annotations required. It
-knows `config` is a list with three named fields, and that one of them is misspelled:
-
-```r
-config <- list(input_path = "orders.csv", vat_rate = 0.07, currency = "EUR")
-
-total_with_tax <- function(subtotal) {
-  subtotal + subtotal * config$tax_rate
-}
-
-subtotals <- c(240.00, 99.50, 1250.00)
-invoices <- sapply(subtotals, total_with_tax)
-cat("grand total:", sum(invoices), "\n")
-```
-
-```text
-error[type-mismatch]: field `tax_rate` does not exist in `list{input_path: character, vat_rate: double, currency: character}`. Did you mean `vat_rate`?
- --> billing.R:4:25
-4 |   subtotal + subtotal * config$tax_rate
-                            ^^^^^^^^^^^^^^^
-```
-
-Someone renamed the field and missed a use. R would not have told you here — it would have told you
-on line 9, inside `sum`, with `invalid 'type' (list) of argument`. Remove the `sapply` and R does
-not complain at all: `$` on a missing name is `NULL`, and the report goes out with a number missing.
-
-This is the whole pitch, and it cost one line of configuration.
-
-## 3. How it knows: inference
-
-Nothing above was annotated. Roughly works out what a value is from what you do with it:
-
-```r
-scale_by <- function(value, factor) value * factor
-```
-
-`*` is arithmetic, so both parameters must be numeric — and since `*` requires them to agree, they
-are the *same* numeric type. The inferred signature is:
-
-```text
-<T: numeric> fn(value: T, factor: T) -> T
-```
-
-Read that as: for any numeric type `T`, this takes two `T`s and returns a `T`. So `scale_by(2L, 3L)`
-is `integer` and `scale_by(0.5, 2.0)` is `double` — inference did not force one answer where R allows
-several.
-
-One `T` in both positions does mean both arguments must be the *same* numeric type, so
-`scale_by(2L, 0.5)` is reported (`expected integer, found double`) even though R would happily
-compute it. Where you want mixing, widen one side yourself: `scale_by(as.double(2L), 0.5)`.
-
-The same reasoning tracks values through control flow, so guards work:
-
-```r
-#: fn(n: integer | NULL) -> integer
-add_one <- function(n) n + 1L
-```
-
-```text
-error[type-mismatch]: expected a numeric value (`integer` or `double`), found `integer | NULL`
- --> guard.R:2:24
-2 | add_one <- function(n) n + 1L
-                           ^
-```
-
-`n` might be `NULL`, and `NULL + 1L` is an error in R. Guard it and the finding goes away, because
-after the `return` the checker knows `n` cannot be `NULL` any more:
-
-```r
-#: fn(n: integer | NULL) -> integer
-add_one_safely <- function(n) {
-  if (is.null(n)) return(0L)
-  n + 1L
-}
-```
-
-## 4. Your first annotation
-
-Inference describes what your code *does*. An annotation states what it is *for* — and that is a
-different, stronger claim. Use one when you want the contract checked at every call site rather
-than inferred from the body.
-
-Annotations live in `#:` comments, so every other R tool sees a comment and your code stays
-ordinary R:
-
-```r
-#: fn(region: character, amount: double) -> double
-fee_for <- function(region, amount) {
-  if (region == "north") amount * 0.07 else amount * 0.05
-}
-
-order <- list(region = "north", amount = 1240.5)
-fee_for(order$amount, order$region)
-```
-
-```text
-error[type-mismatch]: expected `character`, found `double`
- --> ann.R:7:9
-7 | fee_for(order$amount, order$region)
-            ^^^^^^^^^^^^
-
-error[type-mismatch]: expected `double`, found `character`
- --> ann.R:7:23
-7 | fee_for(order$amount, order$region)
-                          ^^^^^^^^^^^^
-```
-
-Two arguments in the wrong order, both reported, each pointing at the argument rather than the
-call. Without the annotation this particular mistake is still caught — `region == "north"` makes
-`region` a `character` on its own — but the annotation is what makes the *contract* explicit and
-the error land at the caller.
-
-**A parameter with a default goes in brackets.** R decides whether a parameter is optional — a
-formal with a default can always be omitted — so an annotation has to say the same thing:
-
-```r
-#: fn(amount: double, [currency]: character) -> character
-label <- function(amount, currency = "EUR") paste0(currency, amount)
-```
-
-Write `currency` instead of `[currency]` there and the annotation contradicts the code. Roughly says
-so at the definition rather than reporting a missing argument at every caller:
-
-```text
-error[type-mismatch]: this annotation declares `currency` as required, but the function gives it a
-                      default — write `[currency]` to declare it optional, or drop the default
-```
-
-The same applies in reverse: `[currency]` on a formal with no default is reported too.
-
-There is an expanded style too, which suits functions with many parameters and sits naturally
-beside roxygen2:
-
-```r
-#' Fee for an order.
-#: @param region {character}
-#: @param amount {double}
-#: @param [currency] {character}
-#: @returns {double}
-fee_for <- function(region, amount, currency = "EUR") { ... }
-```
-
-## 5. Give your domain its own types
-
-This is where a type checker starts paying for itself. `@type` declares a **nominal** type — one
-that is distinct from its representation, so two things that are both `double` underneath stop
-being interchangeable:
-
-```r
-#: @type Meters {double}
-#: @type Seconds {double}
-
-#: fn(distance: Meters, time: Seconds) -> double
-speed <- function(distance, time) distance / time
-
-#: @new Meters
-run_length <- 400
-
-#: @new Seconds
-run_time <- 52.5
-
-speed(run_length, run_time)
-speed(run_time, run_length)
-```
-
-```text
-error[type-mismatch]: expected `Meters`, found `Seconds`
-  --> nom.R:14:7
-14 | speed(run_time, run_length)
-           ^^^^^^^^
-
-error[type-mismatch]: expected `Seconds`, found `Meters`
-  --> nom.R:14:17
-14 | speed(run_time, run_length)
-                     ^^^^^^^^^^
-```
-
-The first call is accepted; only the swapped one is reported. Both are numbers, both are `double`
-at run time, and R will never distinguish them — nor will any test that happens to pass. `@new` is what mints a nominal value — a plain `400` stays a plain `double`,
-which is what keeps the distinction meaningful.
-
-When you want a name for a shape *without* a new identity — shorthand rather than a distinction —
-use `@alias`:
-
-```r
-#: @alias Row {list{name: character, n: integer}}
-```
-
-An alias is transparent: `Row` and its expansion are the same type everywhere.
-
-## 6. Generics, when you actually have them
-
-You rarely need to write one — inference produces them on its own, as `scale_by` did above. Write
-one when you want to *promise* that a function preserves its argument's type:
-
-```r
-#: <T> fn(x: T[]) -> T[]
-shuffle <- function(x) sample(x)
-
-shuffle(c(1L, 2L))    # integer[]
-shuffle(c("a", "b"))  # character[]
-shuffle(list(1L))     # error[type-mismatch]: expected `T[]`, found `list{integer}`
-```
-
-`T` is bound by the caller, once per call. The third line fails because `T[]` is an *atomic* vector
-and a list is not one.
-
-## 7. Ask what the checker could not see
-
-A clean run means "no errors found". It does not mean "everything was checked" — an unmodelled
-construct becomes `Unknown`, and `Unknown` is compatible with everything so that one gap does not
-cascade into a screen of noise.
-
-Strict mode reports those gaps:
-
-```toml
-[check]
-typing = true
 strict = true
+```
+
+```r
+summarise <- function(frame) {
+  frame$amount
+}
 ```
 
 ```text
 error[strict]: strict mode: this expression has an undetermined type (`Unknown`)
- --> R/a.R:2:28
-2 | count_rows <- function(df) df$whatever
-                               ^^^^^^^^^^^
+ --> a.R:2:3
+2 |   frame$amount
+      ^^^^^^^^^^^^
 ```
 
-That is the honest way to find out how much of a module is really being checked. It is a much
-stronger claim than ordinary checking, so turn it on where you rely on the answer, not everywhere
-at once.
+Data-frame columns have no types yet, so that expression was never really checked — and without strict
+mode it looked like a pass. Turn this on for the modules you rely on, not across a legacy codebase on
+day one.
 
-## 8. Turning it on for real code
+## 8. Adopting it a file at a time
 
-You do not have to convert a project all at once. A directive at the top of a file overrides the
-project setting in either direction:
+You do not have to convert a project at once. A directive at the top of a file beats the project
+setting, in either direction:
 
 ```r
 # typing: on       # check this file even if the project has typing off
@@ -316,9 +233,7 @@ already in it.
 
 ## Where to go next
 
-- [Concepts](/type-checking/concepts) — the vocabulary behind everything above, explained properly
+- [Concepts](/type-checking/concepts) — the full vocabulary: vectors, records, `Any` vs `Unknown`
 - [Domain modeling](/type-checking/domain-modeling) — nominal types instead of S4, R6, or S7
-- [Adopting an existing codebase](/guides/adopting) — turning it on without drowning in findings
-- [Limitations](/type-checking/limitations) — data frames and object systems, stated plainly
-- [Stubs](/type-checking/stubs) — what ships typed, and how to add your own
-- [Type system reference](/reference/type-system) — the precise rules for everything above
+- [Limitations](/type-checking/limitations) — where the checker cannot help yet
+- [Type system reference](/reference/type-system) — the precise rules

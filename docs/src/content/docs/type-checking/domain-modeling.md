@@ -31,7 +31,7 @@ error[strict]: strict mode: this expression has an undetermined type (`Unknown`)
 R6 behaves the same way. This is not a gap that will close soon: both systems build their objects at
 runtime out of values the checker would have to execute to understand.
 
-## A checked type in three lines
+## Declaring a type
 
 ```r
 #: @type Person {list{name: character, age: integer}}
@@ -70,7 +70,7 @@ new_person("Ada", "36")
 error[type-mismatch]: expected `integer`, found `character`
 ```
 
-This is the shape worth internalising. The `@new` is **inside** the constructor, so it is the only
+This is the pattern to use. The `@new` is **inside** the constructor, so it is the only
 door in: everything downstream receives a `Person`, and the checker enforces that statically.
 
 Be clear about which half does what. `@new` is an **analysis-time** check — it is not
@@ -119,7 +119,7 @@ is [`@alias`](/type-checking/concepts#naming-your-own-types), not `@type`.
 A `Box<integer>` and a `Box<character>` are different types, and the element type flows out again when
 you read it.
 
-## When R6 is still the right answer
+## When to use R6
 
 Nominal types describe values. They do not give you:
 
@@ -131,7 +131,7 @@ Nominal types describe values. They do not give you:
   `Unknown` and cannot follow them. (S3 *operator* dispatch, `+.Date` and friends, is resolved
   statically; method dispatch is not.)
 
-The honest split: reach for a nominal type when you have a **value with a shape and an invariant** —
+The rule: use a nominal type when you have a **value with a shape and an invariant** —
 which is most of what an analysis codebase actually passes around. Reach for R6 when you genuinely have
 an **object with identity and mutable state**, and accept that its interior is opaque to the checker.
 

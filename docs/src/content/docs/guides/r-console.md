@@ -26,9 +26,9 @@ holder   character
 ```
 
 R's own console can complete `account$balance` because by the time you press Tab the object exists in
-memory. Roughly gets there differently — it type-checks what you have typed so far — so it can also tell
-you `balance` is a `double`, complete full signatures, and complete names inside `#:` annotations. The
-trade-off is the other half of that coin: **completion never inspects the live R session.**
+memory. Roughly reaches the same answer by type-checking what you have typed so far, which also lets
+it show that `balance` is a `double`, complete full signatures, and complete names inside `#:`
+annotations. The trade-off: **completion never inspects the live R session.**
 
 The console is also the only part of Roughly that needs R at all — see [What needs R](#what-needs-r).
 

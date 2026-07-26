@@ -9,7 +9,7 @@ you decide how much to trust a clean run.
 
 One rule makes the rest of this page readable: **when the checker cannot determine a type, the
 value becomes `Unknown`, and `Unknown` is compatible with everything.** That is what stops one
-unmodelled construct from cascading into a screen of errors. It is also the shape of every gap
+unmodeled construct from cascading into a screen of errors. It is also the shape of every gap
 below — a gap means checks are *skipped*, not that wrong answers are produced.
 
 Turning on strict mode makes those skips visible:
@@ -114,9 +114,9 @@ do.
 ## Scope of analysis
 
 `source()` calls are not followed. Package files under `R/` share one namespace; every other file is
-analysed on its own. See [project discovery](/reference/configuration#project-discovery) for the rules.
+analyzed on its own. See [project discovery](/reference/configuration#project-discovery) for the rules.
 
-Files directly under `tests/testthat/` are an **approximation**: Roughly analyses them as one shared
+Files directly under `tests/testthat/` are an **approximation**: Roughly analyzes them as one shared
 environment, helpers first. Real testthat only shares `helper*.R` and `setup*.R` that way — each
 `test-*.R` runs in its own child environment. So a name one test file defines and another uses will
 resolve here and fail when you actually run the tests. The approximation is deliberate (it keeps

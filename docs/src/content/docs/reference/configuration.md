@@ -3,7 +3,7 @@ title: Configuration
 description: Every roughly.toml key, discovery rule, and editor setting in one place
 ---
 
-Everything you can change about Roughly's behaviour lives in one file, `roughly.toml`; editor settings only say where the binary is.
+Everything you can change about Roughly's behavior lives in one file, `roughly.toml`; editor settings only say where the binary is.
 
 ## Project discovery
 
@@ -15,7 +15,7 @@ Everything you can change about Roughly's behaviour lives in one file, `roughly.
 | `roughly check .` | that directory |
 | The language server | the workspace folder your editor announces; failing that, the process working directory |
 
-| Rule | Behaviour |
+| Rule | Behavior |
 | --- | --- |
 | Search | walk up from the starting directory; the first `roughly.toml` wins. None found: built-in defaults. |
 | Merging | none — one file supplies every key. |
@@ -89,8 +89,8 @@ Four things worth knowing about `exclude`:
 
 - Patterns are anchored at the directory holding `roughly.toml`, and follow gitignore rules: `scripts/` excludes that whole subtree, `**/generated` matches at any depth, `!` re-includes.
 - Excluded directories are pruned without being walked, so exclusion cuts checking time, not just output.
-- A file named on the command line is always checked, files open in the editor are always analysed, and `roughly fmt` ignores the key entirely.
-- Some paths are skipped with no configuration at all, because they hold vendored dependencies rather than your code: `renv/`, `packrat/`, `revdep/`, `.Rproj.user/`, `.Rcheck/`. `.gitignore` is honoured too, git checkout or not.
+- A file named on the command line is always checked, files open in the editor are always analyzed, and `roughly fmt` ignores the key entirely.
+- Some paths are skipped with no configuration at all, because they hold vendored dependencies rather than your code: `renv/`, `packrat/`, `revdep/`, `.Rproj.user/`, `.Rcheck/`. `.gitignore` is honored too, git checkout or not.
 
 ```console
 $ cat roughly.toml
@@ -149,7 +149,7 @@ $ echo $?
 
 Where that lands depends on how Roughly runs:
 
-| | Behaviour |
+| | Behavior |
 | --- | --- |
 | CLI | The message goes to stderr and the command exits 2 — see the [exit codes](/reference/cli#exit-codes). |
 | The language server | Never crashes. At startup it falls back to the defaults; on a live edit it keeps the previous configuration. Either way it shows the message and publishes a `config` finding on `roughly.toml` at the offending line, cleared once the file loads again. |
