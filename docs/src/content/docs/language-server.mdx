@@ -108,8 +108,8 @@ Not yet available:
 Roughly is a standard LSP implementation and works with any editor that speaks LSP:
 
 - **VS Code** — full support via the [dedicated extension](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly)
-- **Zed** — via the [Zed extension](https://zed.dev/extensions/roughly), alongside the R extension
-  (see [Zed Extension](#zed-extension))
+- **Zed** — via the [Zed extension](https://github.com/felix-andreas/roughly/tree/main/editors/zed),
+  alongside the R extension (see [Zed Extension](#zed-extension))
 - **Other editors** — point your LSP client at `roughly server`
 
 ## VS Code Extension
@@ -187,8 +187,9 @@ Roughly's VS Code extension provides several commands to manage the language ser
 
 ## Zed Extension
 
-The [Roughly extension for Zed](https://zed.dev/extensions/roughly) provides the language server for
-R files.
+The [Roughly extension for Zed](https://github.com/felix-andreas/roughly/tree/main/editors/zed)
+provides the language server for R files. It is not in Zed's extension registry yet — install it from
+the repository as a dev extension, following the README linked above.
 
 Zed has no built-in R support, so install the [R extension](https://zed.dev/extensions/r) first — it
 registers the R language and its tree-sitter grammar, and Roughly's extension attaches the language

@@ -346,9 +346,8 @@ const year = new Date().getFullYear()
           <p class="eyebrow">the first type checker for R · written in rust</p>
           <h1 class="hero-heading">Modern developer tooling for R.</h1>
           <p class="subhead">
-            Roughly is a fast, Rust-built toolchain — a static type checker, a language server, and a
-            formatter in one. It catches type errors before you run your code, works in your editor,
-            and changes nothing about the R you already have.
+            Type checker, language server, and formatter in one binary. Catch errors before you run
+            the code — without changing the R you already write.
           </p>
           <div class="cta-cluster">
             <a class="cta cta-lg" href="/getting-started">Get started</a>
@@ -368,12 +367,13 @@ const year = new Date().getFullYear()
             </a>
             <a
               class="btn-vscode"
-              href="https://zed.dev/extensions/roughly"
+              href="https://github.com/felix-andreas/roughly/tree/main/editors/zed"
               target="_blank"
               rel="noopener"
             >
               <svg class="brand-logo zed-logo" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 128 128" aria-hidden="true"><path fill="#ffffff" d="M12 8a4 4 0 0 0-4 4v88H0V12C0 5.373 5.373 0 12 0h107.172c5.345 0 8.022 6.463 4.242 10.243L57.407 76.25H76V68h8v10.25a6 6 0 0 1-6 6H49.407L35.657 98H98V48h8v50a8 8 0 0 1-8 8H27.657l-14 14H116a4 4 0 0 0 4-4V28h8v88c0 6.627-5.373 12-12 12H8.828c-5.345 0-8.022-6.463-4.242-10.243L70.343 52H52v8h-8V50a6 6 0 0 1 6-6h28.343l14-14H30v50h-8V30a8 8 0 0 1 8-8h70.343l14-14Z"/></svg>
               <span>Install in Zed</span>
+              <span class="btn-badge">soon</span>
             </a>
           </div>
         </div>
@@ -737,12 +737,13 @@ roughly check .</code></pre>
             </a>
             <a
               class="btn-vscode"
-              href="https://zed.dev/extensions/roughly"
+              href="https://github.com/felix-andreas/roughly/tree/main/editors/zed"
               target="_blank"
               rel="noopener"
             >
               <svg class="brand-logo zed-logo" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 128 128" aria-hidden="true"><path fill="#ffffff" d="M12 8a4 4 0 0 0-4 4v88H0V12C0 5.373 5.373 0 12 0h107.172c5.345 0 8.022 6.463 4.242 10.243L57.407 76.25H76V68h8v10.25a6 6 0 0 1-6 6H49.407L35.657 98H98V48h8v50a8 8 0 0 1-8 8H27.657l-14 14H116a4 4 0 0 0 4-4V28h8v88c0 6.627-5.373 12-12 12H8.828c-5.345 0-8.022-6.463-4.242-10.243L70.343 52H52v8h-8V50a6 6 0 0 1 6-6h28.343l14-14H30v50h-8V30a8 8 0 0 1 8-8h70.343l14-14Z"/></svg>
               <span>Install in Zed</span>
+              <span class="btn-badge">soon</span>
             </a>
           </div>
         </div>
@@ -771,9 +772,9 @@ roughly check .</code></pre>
 
     <script>
       // ======================================================================
-      // Hero particle field. On load the field runs a one-shot intro: fine sharp
-      // particles fly in and assemble into the R logo leaving soft light trails,
-      // hold, then burst outward into a drifting ambient field. As you then scroll
+      // Hero particle field. On load the field opens as fine sharp particles
+      // streaming on a flow current, which then fly in and assemble into the R logo
+      // leaving soft light trails, hold, then burst back outward into the stream. As you then scroll
       // the hero, the same particles are constrained into the headline "Modern
       // developer tooling for R." — the letters are drawn by the particles
       // themselves; there is no separate DOM heading laid on top.
@@ -792,16 +793,10 @@ roughly check .</code></pre>
         ry: number
         hx: number
         hy: number
-        // Scatter home: a spread-out spot across the field the particle disperses to
-        // between shapes, so the swarm reads as individual particles rather than a
-        // blob before it re-gathers into the next shape.
-        sx: number
-        sy: number
         // How strongly this particle joins the shapes: ~1 = settles onto the glyph
         // and then the letters, 0 = a pure drifter that only ever flows.
         logoness: number
         depth: number
-        seed: number
       }
       type Target = { x: number; y: number }
 
@@ -823,10 +818,11 @@ roughly check .</code></pre>
         const context = ctx
         const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
-        // Load intro (seconds): particles fly in and assemble onto the logo. `intro`
-        // (below) rises 0->1 over the assemble window and then stays 1 — the logo
-        // holds rather than dispersing.
-        const INTRO_DELAY = 0.25
+        // Load intro (seconds): the field streams free on the flow current for
+        // INTRO_DELAY so the hero opens as a living swarm, then particles fly in and
+        // assemble onto the logo. `intro` (below) rises 0->1 over the assemble window
+        // and then stays 1 — the logo holds rather than dispersing.
+        const INTRO_DELAY = 1.8
         const ASSEMBLE = 1.7
         // Idle cycle (seconds): parked at the top, the shape holds, then bursts
         // outward into a streaming swarm, drifts as the swarm, and re-gathers into
@@ -834,8 +830,12 @@ roughly check .</code></pre>
         // half-cycle is HOLD -> FALL (the burst) -> STREAM -> RISE (gather); the two
         // shapes alternate each half-cycle.
         const CYCLE_HOLD = 5
-        const CYCLE_FALL = 1
-        const CYCLE_STREAM = 4
+        // The release is near-instant, and the burst fires only once it has completed.
+        // Detonating while the shape still holds its spring would snap the shrapnel
+        // straight back to the glyph — it reads as an implosion, not an explosion. Too
+        // long a release and the logo visibly sags before the bang.
+        const CYCLE_FALL = 0.15
+        const CYCLE_STREAM = 4.85
         const CYCLE_RISE = 2
         const CYCLE_HALF = CYCLE_HOLD + CYCLE_FALL + CYCLE_STREAM + CYCLE_RISE
 
@@ -874,8 +874,13 @@ roughly check .</code></pre>
         })()
 
         function particleCount() {
-          return cssW < 720 ? 2900 : cssW < 1100 ? 4600 : 6200
+          return cssW < 720 ? 3900 : cssW < 1100 ? 6300 : 8600
         }
+        // Every dot is this one size — depth reads as brightness alone, never as size,
+        // so the field is one population rather than near dots and far dots. Fractional
+        // on purpose: the grain sits a touch above a hairline without going chunky, and
+        // positions are fractional anyway, so nothing gets sharper by rounding it.
+        const GRAIN = 1.6
         function sampleStride() {
           return cssW < 720 ? 4 : 3
         }
@@ -1012,34 +1017,32 @@ roughly check .</code></pre>
           const count = particleCount()
           particles = []
           for (let i = 0; i < count; i++) {
-            // Soft radial scatter filling the hero (denser toward the centre, never a
-            // hollow ring): this is both the particle's start point and the scatter
-            // home it disperses back to between shapes, so the swarm spreads out as
-            // individual particles rather than a blob.
-            const ang = Math.random() * Math.PI * 2
-            const rad = Math.sqrt(Math.random())
-            const sx = cssW * (0.5 + Math.cos(ang) * rad * 0.62)
-            const sy = cssH * (0.5 + Math.sin(ang) * rad * 0.56)
+            // Spread evenly over the whole field: released particles flow on the
+            // current and wrap at the edges, so an even field is what the swarm
+            // settles back to and the hero opens already streaming rather than as a
+            // blob that has to spread. Starting velocity is taken from the current
+            // itself rather than a random direction, so the very first frame is
+            // already streaming coherently instead of easing out of a freeze.
+            const x = Math.random() * cssW
+            const y = Math.random() * cssH
+            const ang = flowAngle(x, y, 0)
             particles.push({
-              x: sx,
-              y: sy,
-              vx: 0,
-              vy: 0,
+              x,
+              y,
+              vx: Math.cos(ang) * 0.55,
+              vy: Math.sin(ang) * 0.55,
               lx: 0,
               ly: 0,
               rx: 0,
               ry: 0,
               hx: 0,
               hy: 0,
-              sx,
-              sy,
               // ~80% of particles settle (almost) fully onto the glyph so the R
               // reads clearly at rest — a small residual keeps the strokes from
               // looking mechanically stamped; the other ~20% never join a shape and
               // keep flowing across the field so it always feels alive.
               logoness: Math.random() < 0.8 ? 0.96 + Math.random() * 0.04 : 0,
               depth: 0.35 + Math.random() * 0.65,
-              seed: Math.random() * Math.PI * 2,
             })
           }
         }
@@ -1129,12 +1132,14 @@ roughly check .</code></pre>
           return phase < swapAt ? fromShape : 1 - fromShape
         }
 
-        // One frame. After the fly-in the shape particles stay assembled: parked at
-        // the top they drift between the logo and the "Roughly" wordmark on the idle
-        // cycle, and scrolling slides that shape into the headline (scrolling back up
-        // returns it to the logo). The ~20% pure drifters never join a shape — they
-        // flow across the field on the flow current and wrap at the edges, keeping the
-        // hero alive. Rather than clearing, the frame is faded toward black so moving
+        // One frame. Every particle sits on one axis: how strongly a shape claims it.
+        // Unclaimed, it rides the flow current and wraps at the field edges; claimed,
+        // it springs onto its point in the current shape. So the field streams before
+        // the first assembly and again between shapes, and the ~20% that never join a
+        // shape stream the whole time. Parked at the top the shape alternates between
+        // the logo and the "Roughly" wordmark on the idle cycle, and scrolling slides
+        // it into the headline (scrolling back up returns it to the logo).
+        // Rather than clearing, the frame is faded toward black so moving
         // particles leave soft light trails; the trail vanishes to a full clear as the
         // scroll text locks in so the letters read crisp.
         function render(now: number) {
@@ -1148,14 +1153,35 @@ roughly check .</code></pre>
           const phase = cycleClock - halfIndex * CYCLE_HALF
           const claim = cycleClaim(phase)
           const shapeSel = cycleShapeSel(halfIndex, phase)
+          // How much of a shape is actually standing there right now — it is what the
+          // free particles orbit, so it fades in with the load intro and out with each
+          // burst.
+          const presence = claim * intro
+          const wellCore = Math.min(cssW, cssH) * 0.19
+          const wellRadius = Math.min(cssW, cssH) * 0.85
           // Fire one outward impulse the instant the shape releases (start of FALL),
           // so it bursts into radial streaks rather than just fading into the swarm.
-          if (burstHalf !== halfIndex && phase >= CYCLE_HOLD && phase < CYCLE_HOLD + 0.4) {
+          // The speed spread is wide on purpose: the flow current moves neighbours in
+          // lockstep, so without it the released shape would slide off as one lump
+          // instead of thinning out into a swarm.
+          const detonateAt = CYCLE_HOLD + CYCLE_FALL
+          if (burstHalf !== halfIndex && phase >= detonateAt && phase < detonateAt + 0.2) {
             burstHalf = halfIndex
             for (const particle of particles) {
-              if (particle.logoness <= 0) continue
-              particle.vx += (particle.x - centroidX) * 0.012 + (Math.random() - 0.5) * 0.6
-              particle.vy += (particle.y - centroidY) * 0.012 + (Math.random() - 0.5) * 0.6
+              const dx = particle.x - centroidX
+              const dy = particle.y - centroidY
+              const dist = Math.sqrt(dx * dx + dy * dy) || 1
+              // The shape becomes shrapnel: squaring the roll sends most of it drifting
+              // out while a thin fast fraction is thrown clear across the field, which
+              // is what makes it read as a burst rather than a uniform expanding ring.
+              // The free field is not a bystander — it takes a shock wave that falls
+              // off with distance, so the blast visibly travels outward through it.
+              const speed =
+                particle.logoness > 0
+                  ? 9 + Math.random() * Math.random() * 46
+                  : 14 / (1 + (dist * dist) / (wellRadius * wellRadius))
+              particle.vx += (dx / dist) * speed + (Math.random() - 0.5) * 4
+              particle.vy += (dy / dist) * speed + (Math.random() - 0.5) * 4
             }
           }
           // How strongly the scroll text is claimed — ramps in fast so the headline
@@ -1178,29 +1204,55 @@ roughly check .</code></pre>
             const form = shaped * claim
             let pullX = 0
             let pullY = 0
-            if (shaped > 0.0001) {
+            if (form > 0.0001) {
               // The shape it gathers onto (logo or "Roughly" by the cycle), slid
               // across to the headline as you scroll.
               const shapeX = p.lx + (p.rx - p.lx) * shapeSel
               const shapeY = p.ly + (p.ry - p.ly) * shapeSel
               const gx = shapeX + (p.hx - shapeX) * morph
               const gy = shapeY + (p.hy - shapeY) * morph
-              // Target blends the spread-out scatter home (claim 0 = individual
-              // particles) with the gathered shape (claim 1). Gentle spring while
-              // scattered, firm once gathered; the intro factor eases the first
-              // assembly so the logo glides in rather than snapping.
-              const tx = p.sx + (gx - p.sx) * claim
-              const ty = p.sy + (gy - p.sy) * claim
-              const springK = (0.045 + 0.07 * claim) * intro
-              pullX = (tx - p.x) * springK
-              pullY = (ty - p.y) * springK
+              // Nothing holds a released particle in place — the pull exists only in
+              // proportion to how claimed the shape is, so a dot eases out of the flow
+              // as the shape gathers and back into it as the shape lets go.
+              const springK = (0.045 + 0.07 * form) * form
+              pullX = (gx - p.x) * springK
+              pullY = (gy - p.y) * springK
             }
-            // Flow current: the pure drifters always flow; a shape dot flows while
-            // scattered into the swarm (claim -> 0) and holds steady once gathered.
-            const flow = p.logoness > 0 ? (1 - claim) * 0.05 : 0.06
-            const angle = flowAngle(p.x, p.y, clock) + p.seed
+            // Flow current: whatever the shape has not claimed rides the current, so
+            // the field streams before the first assembly and again after each burst,
+            // and only the gathered dots hold still.
+            // Flow direction is shared — every dot reads the same noise field, so
+            // neighbours travel together and the swarm streams in visible currents and
+            // eddies. (Offsetting the *angle* per particle would scatter the
+            // directions and the field would degenerate into individual jitter.) Only
+            // the speed varies, by depth, so a clump stretches along the current into a
+            // ribbon rather than sliding as a rigid lump.
+            const flow = 0.055 * (1 - form) * (0.55 + 0.95 * p.depth)
+            const angle = flowAngle(p.x, p.y, clock)
             p.vx += pullX + Math.cos(angle) * flow
             p.vy += pullY + Math.sin(angle) * flow
+            // A gathered shape has mass: everything still loose in the field is drawn
+            // toward it and swept around it, so the free particles read as the same
+            // swarm reacting to the logo rather than as a second, unrelated layer.
+            // Inside the shape's own radius the pull inverts into a push, so the field
+            // orbits and skims the glyph instead of collapsing into a pile at its
+            // centre. The well fades out with the shape, and during the burst there is
+            // nothing left to orbit — the whole field just streams. Weighted by
+            // `1 - shaped`, not by `form`: a dot on its way onto the glyph must not be
+            // shoved back out by the very shape it is joining.
+            const wellPull = 0.15 * presence * (1 - shaped)
+            if (wellPull > 0.0005) {
+              const wx = centroidX - p.x
+              const wy = centroidY - p.y
+              const dist = Math.sqrt(wx * wx + wy * wy) || 1
+              const falloff = 1 / (1 + (dist * dist) / (wellRadius * wellRadius))
+              const radial = Math.max(-1.4, Math.min(1, 1 - wellCore / dist))
+              const acc = wellPull * falloff
+              // Mostly swirl, only a little draw: a stronger radial term would vacuum
+              // the outer field into a ring and leave the corners empty.
+              p.vx += ((wx / dist) * radial * 0.45 - (wy / dist) * 0.9) * acc
+              p.vy += ((wy / dist) * radial * 0.45 + (wx / dist) * 0.9) * acc
+            }
             if (mouse.active) {
               const mdx = p.x - mouse.x
               const mdy = p.y - mouse.y
@@ -1219,22 +1271,24 @@ roughly check .</code></pre>
             p.vy *= damp
             p.x += p.vx
             p.y += p.vy
-            // Only pure drifters wrap the field; shape dots settle at their scatter
-            // home (well inside the field) when released, so they never reach a wrap.
-            if (p.logoness <= 0) {
+            // A released dot wraps the field so the stream is endless in every
+            // direction. Wrapping is suppressed the moment a shape starts claiming it,
+            // because a teleport mid-gather reads as a glitch rather than as flow.
+            if (form < 0.01) {
               if (p.x < -4) p.x += cssW + 8
               else if (p.x > cssW + 4) p.x -= cssW + 8
               if (p.y < -4) p.y += cssH + 8
               else if (p.y > cssH + 4) p.y -= cssH + 8
             }
-            // Fine sharp dots: 1-2px, brighter while sitting on a shape and dim while
-            // flowing so the streaming field stays quiet behind the letters.
-            const size = p.depth > 0.62 ? 2 : 1
-            const base = p.logoness > 0 ? 0.11 + p.depth * 0.16 : 0.1 + p.depth * 0.14
-            let alpha = base + form * (0.44 + p.depth * 0.34)
+            // Bright while sitting on a shape, dim while flowing, so the streaming
+            // field stays quiet behind the letters. The gathered term is generous
+            // enough that most dots clamp at full white: the shapes are read as text,
+            // and text that is only mostly opaque reads as washed out.
+            const base = 0.26 + p.depth * 0.32
+            let alpha = base + form * (0.72 + p.depth * 0.4)
             alpha *= 1 - settle * 0.22
             context.globalAlpha = alpha < 0 ? 0 : alpha > 1 ? 1 : alpha
-            context.fillRect(p.x, p.y, size, size)
+            context.fillRect(p.x, p.y, GRAIN, GRAIN)
           }
           context.globalAlpha = 1
         }
@@ -1268,10 +1322,12 @@ roughly check .</code></pre>
           if (dt > 0.05) dt = 0.05
           clock += dt
           // Advance the idle logo<->swarm<->"Roughly" cycle only while parked at the
-          // very top; any scroll resets it (and re-arms the burst) so returning to the
-          // top restarts on the logo.
+          // very top, and only once the load intro has finished assembling — otherwise
+          // the cycle eats into the hold and the logo bursts moments after arriving.
+          // Any scroll resets it (and re-arms the burst) so returning to the top
+          // restarts on the logo.
           if (progress < 0.02) {
-            cycleClock += dt
+            if (clock > INTRO_DELAY + ASSEMBLE) cycleClock += dt
           } else {
             cycleClock = 0
             burstHalf = -1
@@ -2319,6 +2375,17 @@ roughly check .</code></pre>
       }
       .zed-logo {
         color: var(--foreground);
+      }
+      .btn-badge {
+        margin-left: 0.1rem;
+        padding: 0.1rem 0.42rem;
+        border: 1px solid oklch(1 0 0 / 0.22);
+        border-radius: 999px;
+        font-size: 0.68rem;
+        font-weight: 500;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--muted-foreground);
       }
 
       /* ---------- editorial bands ---------- */
