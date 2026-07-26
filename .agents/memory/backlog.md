@@ -8,6 +8,71 @@
 - **Performance:** keystroke-to-diagnostics p50 ≤ 30 ms / p95 ≤ 100 ms at 300k LoC (read against the raw-parse floor the instrument prints — latency numbers swing ~1.4x with machine load); budgets pinned by `stats_witness` (per-line wall/memory/resolve-step ceilings) with the measurement instruments in `legacy/differential/tests/test_stats.rs`.
 - **No server-killing input** (no `unwrap` panics on protocol-legal messages).
 
+## Open — documentation review findings
+
+Four independent reviews read the docs cold (a first-hour newcomer, an information architect, an
+accuracy auditor executing every claim against the binary, and a positioning analyst who also
+measured the competition). The accuracy fixes landed; what remains is below.
+
+**Bugs the reviews found, each with a repro:**
+
+- **`if (length(x))` demands `logical`** — `expected logical, found integer`. R coerces a numeric
+  scalar condition, and `if (length(x))` / `if (nrow(df))` is everywhere. Three hits in an
+  eight-item random sample of shiny, so this is likely the single highest-volume false positive.
+- **Named-before-positional matching is wrong for a callback.**
+  `vapply(xs, character(1), FUN = f)` reports two errors including a bogus "FUN given twice". R
+  matches names first, then fills positionals around them; the guide claims arguments are matched
+  "exactly like R does".
+- **The accumulator idiom errors where R returns `NULL`.** `args <- list(); if (x) args$escape <-
+  TRUE; args$escape`. Worth a design decision rather than a patch: a *definitely* absent field
+  should error (that is the flagship win), a *possibly* absent one should yield `T | NULL`.
+- **A non-breaking space in `.Rmd` prose produces a spurious `syntax-error`**, rendered against a
+  blank line with an orphan caret. Twenty of data.table's diagnostics come from its French
+  vignettes this way.
+- **Self-checking ggplot2 reports 1132 findings and takes 2.4s** — the one package a stub ships
+  for. The shipped stub appears to collide with the package's own definitions; a project defining
+  a name the corpus declares is supposed to win.
+- **Duplicate type names go unreported in script files.** `reference.md` says the duplicate-`@type`
+  error fires "regardless of file"; it fires in package files only. The value-name analogue is
+  deliberately exempt for scripts, type names are not.
+
+**Documentation that is still wrong (verified, not yet fixed):** `reference.md` documents a
+rest-parameter spelling (`...items`) that never parses, and cites `.agents/memory/typing-design.md`
+— a published contract pointing at an unpublished file; `stdlib-stubs.md` names six symbols
+(`BuiltinKind`, `parse_surface_type`, …) that exist only in the frozen legacy tree, and puts `...`
+last in `paste` when the real declaration has it first (the position is load-bearing);
+`architecture.md` still uses internal gate vocabulary; `development.md`'s re-bless command omits
+`ROUGHLY_BLESS=1`; the `stub` diagnostic code and the SCREAMING_SNAKE naming exemption are emitted
+but documented nowhere; five smaller `language-server.mdx` items (a `bun run package` with no root
+`package.json`, three wrong VS Code palette titles, 4-of-5 code actions, `PAREN_EXPR` folding
+omitted, a `--verbose` example whose own help says it is ignored).
+
+**The structural problem, which is bigger than any single fix.** The site is organised around
+Roughly's subsystems rather than around anything a reader wants to *do*, so there is no tutorial
+and no how-to layer at all: `typing/guide.md` restates `typing/reference.md` in the reference's own
+order for eleven of its thirteen sections and never asks the reader to run anything, and
+`stdlib-stubs.md` is an internal design RFC (`## Problem`, sections titled "not buildable here")
+sitting in the user sidebar. Six pages are missing, in value order: **adopting Roughly on an
+existing codebase** (the per-file `# typing: on` ladder exists and is described in seven scattered
+places, never as a table — every peer type checker leads with this page), a **diagnostics
+reference** (codes are a contract used by `allow(CODE)`, `[lint] CODE = "off"` and the JSON output,
+and no list exists), **CI** (exit codes, `--min-severity`, `fmt --check` and JSON Lines all exist
+*for* CI, and the site has zero YAML), **why a type checker for R**, **limitations** (data frames,
+matrix shape, the three object systems, known false positives), and **comparison** (Air, Jarl,
+lintr, styler, languageserver, checkmate — a page that concedes formatting and lint breadth openly,
+because one that wins everything reads as marketing).
+
+**Positioning.** The headline leads with the formatter and linter — the two things Roughly loses at
+today (Posit's Air is bundled in Positron; Jarl ships 71 rules with `--fix` and an LSP, 140× faster
+than lintr) — and buries the one thing nobody else has. Measured facts the docs never state: 854
+files / 166k lines in 3.6s, and lintr 38.2s vs 0.47s on dplyr. Research confirms **no one has ever
+shipped a static type checker for R**: Vitek's group proved it viable (~80% of CRAN functions
+monomorphic or nearly, 1.98% contract-failure rate) then pivoted to a JIT IR, the one Damas-Milner
+attempt (`RTypeInference`) went dormant in 2021, and Posit's `ark` README states it plans
+"sophisticated static analysis of R code" citing rust-analyzer while Positron ships a Rust type
+checker for *Python*. Full reports and their paste-ready rewrites are the four
+`docs-review-*.md` files produced by that round.
+
 ## Open — adoption review findings (unfixed items, each with a minimal repro)
 
 Three independent black-box adoption reviews (an analysis-script user, a CRAN package author, a
