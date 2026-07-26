@@ -901,6 +901,34 @@ fn fmt_rewrites_in_place_and_exits_zero() {
 }
 
 #[test]
+fn fmt_on_a_deliberately_skipped_file_exits_clean() {
+    // The formatter leaves literate documents alone on purpose. A pre-commit
+    // hook passing one changed file at a time therefore hands it a file it will
+    // not touch, and failing there fails the commit over nothing.
+    let directory = project(&[("report.Rmd", "# Title\n\n```{r}\nx<-1\n```\n")]);
+    for arguments in [
+        vec!["fmt", "--diff", "report.Rmd"],
+        vec!["fmt", "--check", "report.Rmd"],
+        vec!["fmt", "report.Rmd"],
+    ] {
+        let output = roughly(directory.path(), &arguments);
+        assert_eq!(
+            exit_code(&output),
+            0,
+            "{arguments:?} should be clean: {}",
+            stderr(&output)
+        );
+    }
+    // The document is untouched: the chunk keeps its unformatted spacing.
+    let text = fs::read_to_string(directory.path().join("report.Rmd"))
+        .expect("failed to read the document back");
+    assert!(
+        text.contains("x<-1"),
+        "the document must not be rewritten: {text}"
+    );
+}
+
+#[test]
 fn fmt_syntax_error_exits_two() {
     let directory = project(&[("bad.R", SYNTAX_ERROR_SOURCE)]);
     let output = roughly(directory.path(), &["fmt", "bad.R"]);

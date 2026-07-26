@@ -959,9 +959,13 @@ pub fn fmt(
         }
     }
 
+    // Nothing to format is not a usage error, exactly as for `check`: a
+    // pre-commit hook passing one changed file at a time hands the formatter a
+    // literate document it deliberately skips, and failing there fails the
+    // commit over a file the tool was never going to touch.
     if n_files == 0 {
-        error("no R files found under the given path(s)");
-        return Err(CommandError);
+        info("0 files formatted");
+        return Ok(Outcome::Clean);
     }
 
     let (action_format, action_skip) = if check || diff {

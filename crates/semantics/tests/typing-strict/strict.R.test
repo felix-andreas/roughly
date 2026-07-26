@@ -157,3 +157,16 @@ f <- function() f()
 #++++
 f: fn() -> Unknown
 0..19 error[strict] strict mode: could not determine the full type of `f`; it is defined recursively — add a type annotation
+
+#---- an_any_returning_overload_is_a_strict_origin
+# The corpus ends an overload set with an `Any` fallback for the calls it cannot
+# describe, and `Any` then satisfies every later check — so the call is a real
+# hole. Strict mode otherwise reports only `Unknown`, which made the commonest
+# hole invisible to the feature whose whole purpose is finding holes.
+earliest <- function() {
+  d <- as.Date("2024-01-01")
+  min(d)
+}
+#++++
+earliest: fn() -> Any
+367..373 error[strict] strict mode: this expression has an undetermined type (`Unknown`)

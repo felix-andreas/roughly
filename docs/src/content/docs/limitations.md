@@ -21,8 +21,10 @@ typing = true
 strict = true
 ```
 
-Strict mode reports every place a value became `Unknown`. It is the honest way to find out how
-much of a file is actually being checked, and the only way to keep a gap from looking like a pass.
+Strict mode reports every place a value became `Unknown`, and every call whose result the shipped
+declarations could not describe — `min()` on a classed value, say, where the corpus ends the overload
+set with a permissive fallback. It is the honest way to find out how much of a file is actually being
+checked, and the only way to keep a gap from looking like a pass.
 
 ## Data frames
 

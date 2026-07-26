@@ -119,7 +119,7 @@ settings above only control which diagnostics `roughly check` reports.
 
 | Code | Meaning |
 | ---- | ------- |
-| 0 | Clean — no diagnostics (`check`); nothing to change (`fmt`) |
+| 0 | Clean — no diagnostics (`check`); nothing to change (`fmt`). A target with no R in it at all is clean, not a usage error: a stage with nothing to do must not fail a pipeline, and a pre-commit hook handing `fmt` a literate document it deliberately skips must not fail the commit |
 | 1 | Findings — any diagnostic, warnings included (`check`); files that would be reformatted (`fmt --check`, `fmt --diff`) |
 | 2 | Usage, configuration, or I/O error |
 

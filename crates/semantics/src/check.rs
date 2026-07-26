@@ -3441,7 +3441,7 @@ impl<'db> Checker<'db, '_> {
                 return ty;
             }
         }
-        if let Some(ty) = self.try_overloaded_call(range, callee, arguments) {
+        if let Some(ty) = self.try_overloaded_call(id, range, callee, arguments) {
             return ty;
         }
         let callee_range = self.blame_range(callee);
@@ -3800,6 +3800,7 @@ impl<'db> Checker<'db, '_> {
     /// "not an overloaded call" — fall through to normal dispatch.
     fn try_overloaded_call(
         &mut self,
+        id: ExprId,
         range: TextRange,
         callee: ExprId,
         arguments: &[Argument],
@@ -3879,7 +3880,7 @@ impl<'db> Checker<'db, '_> {
                         if caller_entries.is_empty() {
                             self.recorded.insert(callee, resolved);
                             self.selected_overloads.insert(callee, index);
-                            return Some(function.ret);
+                            return Some(self.committed_overload_return(id, function.ret));
                         }
                         let free = caller_entries.iter().all(|(var, entry)| {
                             self.table.find(*var) == *var && self.table.entry(*var) == entry
@@ -3913,7 +3914,7 @@ impl<'db> Checker<'db, '_> {
                 Ok((resolved, function)) => {
                     self.recorded.insert(callee, resolved);
                     self.selected_overloads.insert(callee, index);
-                    return Some(function.ret);
+                    return Some(self.committed_overload_return(id, function.ret));
                 }
                 Err(_) => self.table.rollback(snapshot),
             }
@@ -3933,6 +3934,22 @@ impl<'db> Checker<'db, '_> {
         // must not keep the stale commitment.
         self.selected_overloads.remove(&callee);
         Some(self.unknown())
+    }
+
+    /// The selected candidate's return type, with a strict-mode origin recorded
+    /// when it is `Any`. The corpus ends an overload set with an `Any` fallback
+    /// for the calls it cannot describe (`min` over a classed value), and `Any`
+    /// satisfies every later check — so the call is a genuine hole, and a user
+    /// who turned strict on to find holes should be told about this one. Strict
+    /// otherwise reports only `Unknown`, which is why these were invisible.
+    fn committed_overload_return(&mut self, id: ExprId, ret: Ty<'db>) -> Ty<'db> {
+        if matches!(
+            self.table.shallow_resolve(self.db, ret).kind(self.db),
+            TyKind::Any
+        ) {
+            self.record_strict_origin(id, StrictOriginKind::UnsupportedConstruct);
+        }
+        ret
     }
 
     /// One overload probe. `Ok` means the candidate fits and the bindings it

@@ -142,8 +142,9 @@ permanently yes, including CI. That gap is three bugs, not a redesign."**
 6. **5 of 10 planted bugs caught, and all 5 were cosmetic** (`=`, `T`/`F`, trailing comma). Missed:
    two column typos, two function-name typos, one wrong arity. Unknown *functions* inside `mutate`
    and `filter` are swallowed along with the column names.
-7. **`roughly fmt --diff report.qmd` fails with `no R files found` and exit 2**, which breaks
-   per-file pre-commit hooks — a deliberately skipped file should not be a usage error.
+7. **`fmt` on a target with no R in it FIXED** — it reports `0 files formatted` and exits 0, as
+   `check` already did. A stage with nothing to do must not fail a pipeline, and a pre-commit hook
+   handing the formatter a literate document it deliberately skips must not fail the commit.
 8. An unclosed chunk reports their English prose as an unresolved variable rather than the missing
    fence. And `strict = true` silently escalates `unresolved` from warning to error (12 on their
    project) — the second user to be surprised by that.
@@ -224,15 +225,12 @@ evaporates the moment a date touches `c()`, `[`, `min()`, or a `for` loop." They
 and `unresolved` today, and `typing` on one module "because the date operator work is worth real
 money" — but not tell anyone with matrix-heavy code to turn typing on until (1) and (3) are fixed.
 
-1. **Their soundness diagnosis is WRONG, and what is actually there is still worth fixing.**
-   Verified: `min(Date)` is not typed `integer` — it selects the corpus's trailing `Any` candidate,
-   so the result is `Any`. That is the sanctioned escape hatch, so a `Date` reaching an `integer`
-   parameter is a *skipped* check, not a wrong answer, and the quality bar holds. **But `Any` is
-   deliberately exempt from strict mode**, which only reports `Unknown` — so a user who turns on
-   `strict` precisely to find gaps does not see this one, while `limitations.md` tells them strict
-   reports "every place a value became `Unknown`". Either the corpus's `Any` fallbacks should
-   return `Unknown`, or strict should report an `Any`-returning overload selection; the current
-   arrangement makes the gap-finding feature miss the most common gap.
+1. **Their soundness diagnosis was WRONG, and the real problem behind it is FIXED.** Verified:
+   `min(Date)` is not typed `integer` — it selects the corpus's trailing `Any` candidate, so the check
+   is *skipped*, not wrong, and the quality bar holds. What the finding exposed is that `Any` is
+   exempt from strict mode, so the feature whose whole purpose is finding gaps missed the commonest
+   one. An overload selection that commits an `Any` return now records a strict origin, so
+   `min(d)` on a `Date` is reported under `strict = true`.
 2. **CONFIRMED and genuinely unsound-adjacent: a `<T: numeric>` bound admits a `Date`, and the body's
    arithmetic then fails in R.** `#: <T: numeric> fn(a: T, b: T) -> T` called as `add_them(d1, d2)`
    is accepted, while the direct `d1 + d2` is correctly rejected with `` `+` is not defined between
