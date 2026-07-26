@@ -494,6 +494,15 @@ below, ranked by how often a real user hits it.
 - **Legacy ide fixture port DONE** (fixtures directive, first half): 81 cases ported into `crates/ide/tests/ide/*_ported.R.test` (real legacy corpus: 134 cases / 206 operation sites; ~36 already covered; 15 skipped as genuinely multi-file — the harness is one `SourceFile` per case; deliberate improvements blessed). Cross-file navigation coverage now rests on the LSP tests — consider a multi-file fixture harness extension if that surface grows.
 
 - (Design forks all DECIDED — two-flexible comparison stays unconstrained without a third constraint kind, union compatibility commits flexibles at first use in program order, NAMESPACE bare-resolution stays ungated; decisions.md has the three records.)
+- **An annotation in a position it cannot attach to is silently dropped.** A `#:` block attaches to
+  the following *statement*, so one written beside a lambda inside a call argument
+  (`lapply(xs, #: fn(character) -> character` / `function(v) v + 1L)`) binds to nothing — and a
+  deliberately contradictory type there produces no diagnostic at all. The detached-block case one
+  line above a statement is already a loud `annotation` error naming the fix, so the machinery and
+  the wording both exist; this is the same error in a position the check does not reach. Note the
+  residual gap after fixing it: reporting the silence does not give the lambda parameter an
+  annotatable position, which is the one genuine expressiveness argument for inline type syntax
+  (`typedr-design.md` §3).
 - Overload candidates when touched: `is`, `extends`, `grep(value =)`, `cor` (vector vs matrix — needs matrix nominals). `Date`/`POSIXct` arithmetic refuses loudly today — revisit if real code makes it noisy.
 - **A list operation over a RECORD still loses the field types.** `rev`/`unique`/`head`/`tail`/`Filter` now declare a `list[named: T]` candidate ahead of the plain list one, so a name survives and a field read is `T | NULL` instead of a missing-field error — but a fixed-shape input coerces to a name-keyed list on the way in, so the exact field types are gone and the read stays nullable. Only a shape-mirroring return ("the same record") fixes it, and the type language has no way for a stub to say that; `rev` is the case where the claim would be exactly right (it reorders and drops nothing), while `head`/`tail`/`Filter` genuinely may drop a name and are correctly nullable. Same family as the data.frame row-type and matrix-shape designs.
 
