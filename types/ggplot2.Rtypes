@@ -18,6 +18,13 @@
 # The grammar's operator. `p + geom_point() + theme_minimal()` chains left to
 # right, so the result stays a plot; `%+%` replaces a plot's data.
 +.ggplot : fn(e1: ggplot, e2: gg) -> ggplot
+# Components combine with each other too, and R dispatches all of it through the
+# single `+.gg` method: `theme_minimal() + theme(...)` builds a house theme, and
+# `geom_col() + geom_line()` a layer pair. Without this, a component pair falls
+# through to the numeric rules and reports arithmetic on a `gg`. It also covers
+# the case where the left operand's type was lost — after a `%>%` pipe, say —
+# since either operand may supply the method.
++.gg : fn(e1: gg, e2: gg) -> gg
 %+% : fn(e1: ggplot, e2: Any) -> ggplot
 
 # `ggplot(data, mapping)` starts a plot. `aes()` and `vars()` are data masks: the

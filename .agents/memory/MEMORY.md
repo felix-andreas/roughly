@@ -21,6 +21,10 @@ Companion documents (kept separate only because they are larger in scope): `back
 - The widened whole-workspace CI is staged in `.github/pending-ci.yml`; a human must `git mv` it into `.github/workflows/`. Until then the active CI gates only the product crate's suites — run the workspace battery locally per slice.
 - Current state: the backlog §Open holds no open user-requested items, plus items blocked on external action (extension release for hover fences, CI hardware for deep-fuzz/llvm-cov, the human `git mv` of pending-ci.yml) and two standing habits — grow typing/ide fixture coverage, and the "when touched" notes on overload candidates. Coverage-guided fuzz targets cover parse/format/semantics with the lint layer folded in. The NSE ladder's verb level is SHIPPED: conditional data.table + dplyr stub namespaces, the bracket result-shape classifier, typed-subject masking, formal-aware `@masked`, and the native-pipe desugar compose end to end (see the decision records); `NSE.md` holds the remaining rung (column vocabulary + membership checks, gated on the data.frame row-type design). Details live in the backlog ledger.
 - The landing-page hero animation is user-owned (do not touch). NOTES.md is human-maintained (never edit).
+- **A stub-corpus addition no longer re-blesses the IDE fixtures.** They used to pin absolute byte
+  offsets into `base.Rtypes`, so adding any declaration shifted them and forced a re-bless that
+  proved nothing. The renderer now prints the token the range covers instead. If a corpus addition
+  ever makes those cases fail again, the range is genuinely wrong — do not bless it away.
 - **Landing-page code samples are captured from the running tools, not written by hand.** The
   language-server, check and formatter showcases in `docs/src/pages/index.astro` hold generated
   markup in the frontmatter (`ideCode`, `analysisCode`, `analysisOutput`, `formatterCode`): hovers,

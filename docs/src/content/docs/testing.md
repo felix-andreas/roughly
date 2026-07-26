@@ -58,7 +58,11 @@ expectations and `FIXTURE_FILTER=group__case` runs one case. Suites:
 - `crates/ide/tests/ide` — IDE feature fixtures: the case source carries one `$0` cursor
   marker (stripped before analysis) and the expectation renders each feature's result at
   that position (hover line with its absolute range, definition target range, reference
-  ranges)
+  ranges). A target inside the **stub corpus** renders the token its range covers
+  (`declared in stub source 0 at `print``) rather than a byte offset: an offset into the
+  shipped corpus shifts whenever an unrelated declaration is added, which forced a re-bless
+  on every corpus edit while proving nothing, and the token proves the range points where
+  it should
 
 ### The retired identity differentials, and the benchmark harness
 

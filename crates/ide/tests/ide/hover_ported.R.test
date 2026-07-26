@@ -688,8 +688,8 @@ completion (19): undebug, undebugcall, packageNotFoundError, unique.data.frame, 
 total <- s$0um(1L, 2L)
 #++++
 hover 9..12: sum: fn(...: integer[] | logical[], [na.rm]: logical) -> integer
-hover-definition: package base (3 declaration(s), declared in stub source 0 at 16543..16546)
-definition: stub source 0 16543..16546
+hover-definition: package base (3 declaration(s), declared in stub source 0 at `sum`)
+definition: stub source 0 at `sum`
 references: none
 rename: none
 signature: fn(...: integer[] | logical[], [na.rm]: logical) -> integer (active)

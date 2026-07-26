@@ -195,6 +195,35 @@ shifted: fn(day: Date) -> Date
 ordered: fn(from: Date, until: Date) -> logical
 long: fn(gap: difftime) -> logical
 
+#---- combining_a_class_that_declares_c_keeps_that_class
+# R dispatches `c()` too, so `c(d1, d2)` on two Dates is a Date vector — and a
+# real error on the result must still be caught.
+#: fn(from: Date, until: Date) -> difftime
+span <- function(from, until) {
+  both <- c(from, until)
+  both - from
+}
+#: fn(from: Date, until: Date) -> Unknown
+broken <- function(from, until) {
+  both <- c(from, until)
+  both + until
+}
+#++++
+span: fn(from: Date, until: Date) -> difftime
+broken: fn(from: Date, until: Date) -> Unknown
+349..361 error[type-mismatch] `+` is not defined between `Date` and `Date`
+
+#---- combining_a_class_with_no_c_method_is_indeterminate_not_an_error
+# R's default `c()` strips attributes and returns something unnameable here, so
+# the result is `Unknown`. Reporting a mismatch invented an expectation nothing
+# in the call asked for.
+#: @type Widget {list{id: character}}
+
+#: fn(a: Widget, b: Widget) -> Unknown
+pair <- function(a, b) c(a, b)
+#++++
+pair: fn(a: Widget, b: Widget) -> Unknown
+
 #---- an_operand_pair_the_class_does_not_accept_reports_the_class
 f <- function() as.Date("2024-01-15") + as.Date("2024-03-01")
 #++++

@@ -73,17 +73,23 @@
 Compare.Date : fn(e1: Date, e2: Date) -> logical
 Compare.Date : fn(e1: Date, e2: character) -> logical
 Compare.Date : fn(e1: character, e2: Date) -> logical
+# R dispatches `c()` as well, so a class with a `c.Class` method keeps its class
+# through concatenation: `c(d1, d2)` is a `Date` vector, not the doubles under
+# it. Declaring the method is what tells the checker so.
+c.Date : fn(...: Date) -> Date
 
 +.POSIXct : fn(e1: POSIXct, e2: double) -> POSIXct
 +.POSIXct : fn(e1: double, e2: POSIXct) -> POSIXct
 -.POSIXct : fn(e1: POSIXct, e2: POSIXct) -> difftime
 -.POSIXct : fn(e1: POSIXct, e2: double) -> POSIXct
 Compare.POSIXct : fn(e1: POSIXct, e2: POSIXct) -> logical
+c.POSIXct : fn(...: POSIXct) -> POSIXct
 
 # A `difftime` keeps its class through scaling and combination, and compares
 # with itself or a bare number (`elapsed > 30`).
 Arith.difftime : fn(e1: difftime, e2: difftime) -> difftime
 Arith.difftime : fn(e1: difftime, e2: double) -> difftime
+c.difftime : fn(...: difftime) -> difftime
 Arith.difftime : fn(e1: double, e2: difftime) -> difftime
 Compare.difftime : fn(e1: difftime, e2: difftime) -> logical
 Compare.difftime : fn(e1: difftime, e2: double) -> logical

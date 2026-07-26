@@ -3473,6 +3473,40 @@ impl<'db> Checker<'db, '_> {
     /// double < complex < character; `raw` only combines with itself), drops
     /// `NULL` arguments (`c(x, NULL)` is `c(x)`, `c()` is `NULL`), and keeps
     /// names: an all-named call builds a map-like vector.
+    /// `c()` over arguments that are all the same nominal, when that class
+    /// declares a `c.Class` method: the result is that nominal. `None` when the
+    /// arguments are not uniform nominals or the class declares no such method.
+    fn combine_nominal(&mut self, inferred: &[Ty<'db>]) -> Option<Ty<'db>> {
+        let mut nominal: Option<Ty<'db>> = None;
+        for &ty in inferred {
+            if matches!(ty.kind(self.db), TyKind::Null) {
+                continue;
+            }
+            if !matches!(ty.kind(self.db), TyKind::Named(..)) {
+                return None;
+            }
+            match nominal {
+                Some(seen) if seen != ty => return None,
+                Some(_) => {}
+                None => nominal = Some(ty),
+            }
+        }
+        let nominal = nominal?;
+        let TyKind::Named(name, _) = nominal.kind(self.db) else {
+            return None;
+        };
+        let method = format!("c.{}", name.text(self.db));
+        self.globals?
+            .scheme(&method, false)
+            .map(|_| nominal)
+            .or_else(|| {
+                self.globals?
+                    .overloads(&method, false)
+                    .filter(|candidates| !candidates.is_empty())
+                    .map(|_| nominal)
+            })
+    }
+
     fn infer_combine(&mut self, id: ExprId, arguments: &[Argument]) -> Ty<'db> {
         if arguments.is_empty() {
             return crate::types::null(self.db);
@@ -3498,6 +3532,16 @@ impl<'db> Checker<'db, '_> {
                 .map(|&ty| self.list_element_type(ty).unwrap_or(ty))
                 .collect();
             return Ty::new(self.db, TyKind::List(union_of(self.db, elements)));
+        }
+        // R dispatches `c()` too, and a class whose `c.Class` method is
+        // declared keeps its class through concatenation — `c(d1, d2)` on two
+        // `Date`s is a `Date` vector, not the integers underneath. Uniform
+        // nominal arguments therefore resolve through that declaration; a
+        // nominal with no such method falls through to the atomic rules below,
+        // where it becomes indeterminate rather than an error, because the
+        // checker does not know what R's default `c()` makes of it.
+        if let Some(combined) = self.combine_nominal(&inferred) {
+            return combined;
         }
         let mut item_atomic: Option<Atomic> = None;
         let mut all_arguments_are_named = true;
@@ -3546,6 +3590,16 @@ impl<'db> Checker<'db, '_> {
             };
             let Some(argument_atomics) = argument_atomics.filter(|atomics| !atomics.is_empty())
             else {
+                // A nominal with no declared `c.Class` method is not an error:
+                // R's default `c()` strips attributes and returns something the
+                // checker cannot name, so the result is indeterminate. Claiming
+                // a mismatch here reported `expected integer, found gg` on
+                // correct code, an expectation nothing in the call asked for.
+                if matches!(resolved.kind(self.db), TyKind::Named(..)) {
+                    self.record_strict_origin(id, StrictOriginKind::UnsupportedConstruct);
+                    result_indeterminate = true;
+                    continue;
+                }
                 self.errors.push(TypeError {
                     range: argument_range,
                     kind: TypeErrorKind::Mismatch {

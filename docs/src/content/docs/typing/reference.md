@@ -1657,6 +1657,12 @@ A class that declares an operator but accepts no candidate for the operands at h
 the numeric rules — R rejects that expression too. A class that declares nothing falls through to
 the rules below unchanged, so an opaque nominal is still a type error under arithmetic.
 
+**`c()` dispatches too.** A class that declares a `c.Class` method keeps its class through
+concatenation, so `c(d1, d2)` on two `Date`s is a `Date` and a real error on the result is still
+caught. A nominal with no such method is *indeterminate* rather than an error: R's default `c()`
+strips attributes and returns something the checker cannot name, so the result is `Unknown` and a
+strict-mode origin.
+
 The method name's suffix is the **nominal's** name, not R's full class vector: Roughly's nominals
 carry one name, so a class declared `@type ggplot` takes `+.ggplot` even though R registers the
 method as `+.gg`.

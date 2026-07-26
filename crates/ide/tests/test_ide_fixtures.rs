@@ -35,6 +35,26 @@ fn render(source: &str) -> String {
     output
 }
 
+/// The text a stub-source range covers, rendered instead of the absolute byte
+/// offsets. A declaration's offset into the shipped corpus shifts whenever an
+/// unrelated stub is added, so pinning the number made every corpus addition
+/// re-bless these cases while proving nothing; pinning the *token* proves the
+/// range points where it should and survives.
+fn stub_text(db: &RootDatabase, source_index: usize, range: syntax::TextRange) -> String {
+    let Some(sources) = semantics::stubs::StubSources::try_get(db) else {
+        return "<no stub sources>".to_owned();
+    };
+    let Some((_, text)) = sources.sources(db).get(source_index) else {
+        return "<no such stub source>".to_owned();
+    };
+    let start = usize::from(range.start());
+    let end = usize::from(range.end());
+    match text.get(start..end) {
+        Some(slice) => format!("`{slice}`"),
+        None => "<range outside the stub source>".to_owned(),
+    }
+}
+
 fn render_at(
     db: &RootDatabase,
     files: ProjectFiles,
@@ -78,10 +98,9 @@ fn render_at(
                     let declared = declaration
                         .map(|target| {
                             format!(
-                                ", declared in stub source {} at {}..{}",
+                                ", declared in stub source {} at {}",
                                 target.source_index,
-                                u32::from(target.range.start()),
-                                u32::from(target.range.end()),
+                                stub_text(db, target.source_index, target.range),
                             )
                         })
                         .unwrap_or_default();
@@ -101,10 +120,9 @@ fn render_at(
             u32::from(target.range.end()),
         )),
         Some(ide::DefinitionTarget::Stub(target)) => output.push_str(&format!(
-            "definition: stub source {} {}..{}\n",
+            "definition: stub source {} at {}\n",
             target.source_index,
-            u32::from(target.range.start()),
-            u32::from(target.range.end()),
+            stub_text(db, target.source_index, target.range),
         )),
         None => output.push_str("definition: none\n"),
     }
@@ -136,10 +154,9 @@ fn render_at(
             u32::from(target.range.end()),
         )),
         Some(ide::DefinitionTarget::Stub(target)) => output.push_str(&format!(
-            "type-definition: stub source {} {}..{}\n",
+            "type-definition: stub source {} at {}\n",
             target.source_index,
-            u32::from(target.range.start()),
-            u32::from(target.range.end()),
+            stub_text(db, target.source_index, target.range),
         )),
         None => {}
     }
