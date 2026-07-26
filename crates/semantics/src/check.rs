@@ -75,6 +75,13 @@ pub enum TypeErrorKind<'db> {
         found: Ty<'db>,
     },
     /// An annotation declares a parameter the definition has no formal for.
+    /// An annotation declares a parameter required while the function gives it
+    /// a default. R decides optionality, so the annotation is the thing that is
+    /// wrong — and reporting it here rather than at every caller is the
+    /// difference between "my annotation is wrong" and "this tool is broken".
+    AnnotationRequiredButDefaulted {
+        name: String,
+    },
     AnnotationParameterMismatch {
         name: String,
     },
@@ -350,6 +357,11 @@ pub fn check_item_with_annotation<'db>(
                     context.rigid_constraints.insert(*name, *constraint);
                 }
                 context.check_declared_function(*value, &function);
+                // A formal with a default is optional in R, whatever the
+                // annotation says, so the exported scheme takes optionality
+                // from the code and the annotation's disagreement is reported
+                // once, here, instead of as a missing argument at every caller.
+                let declared = context.reconcile_declared_optionality(root, *value, declared);
                 context.recorded.insert(root, declared.body);
                 scheme = Some(declared);
                 scheme_is_declared = true;
@@ -3950,6 +3962,56 @@ impl<'db> Checker<'db, '_> {
             self.record_strict_origin(id, StrictOriginKind::UnsupportedConstruct);
         }
         ret
+    }
+
+    /// The declared scheme with each parameter's optionality taken from the
+    /// function's formals: a formal with a default is optional in R, and no
+    /// annotation can change that. Every field the annotation declared required
+    /// while the code defaults it is reported against the definition.
+    fn reconcile_declared_optionality(
+        &mut self,
+        root: ExprId,
+        value: ExprId,
+        declared: TypeScheme<'db>,
+    ) -> TypeScheme<'db> {
+        let ExpressionKind::Function { parameters, .. } = &self.module.expression(value).kind
+        else {
+            return declared;
+        };
+        let defaulted: Vec<String> = parameters
+            .iter()
+            .filter(|parameter| parameter.default.is_some())
+            .map(|parameter| parameter.name.clone())
+            .collect();
+        if defaulted.is_empty() {
+            return declared;
+        }
+        let TyKind::Function(function) = declared.body.kind(self.db).clone() else {
+            return declared;
+        };
+        let mut corrected = function.clone();
+        let mut mismatches = Vec::new();
+        for field in &mut corrected.named {
+            let name = field.name.text(self.db);
+            if !field.optional && defaulted.iter().any(|formal| formal == name) {
+                field.optional = true;
+                mismatches.push(name.to_owned());
+            }
+        }
+        if mismatches.is_empty() {
+            return declared;
+        }
+        let range = self.blame_range(root);
+        for name in mismatches {
+            self.errors.push(TypeError {
+                range,
+                kind: TypeErrorKind::AnnotationRequiredButDefaulted { name },
+            });
+        }
+        TypeScheme {
+            binders: declared.binders,
+            body: Ty::new(self.db, TyKind::Function(corrected)),
+        }
     }
 
     /// One overload probe. `Ok` means the candidate fits and the bindings it

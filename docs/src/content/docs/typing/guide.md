@@ -173,6 +173,24 @@ call. Without the annotation this particular mistake is still caught — `region
 `region` a `character` on its own — but the annotation is what makes the *contract* explicit and
 the error land at the caller.
 
+**A parameter with a default goes in brackets.** R decides whether a parameter is optional — a
+formal with a default can always be omitted — so an annotation has to say the same thing:
+
+```r
+#: fn(amount: double, [currency]: character) -> character
+label <- function(amount, currency = "EUR") paste0(currency, amount)
+```
+
+Write `currency` instead of `[currency]` there and the annotation contradicts the code. Roughly says
+so at the definition rather than reporting a missing argument at every caller:
+
+```text
+error[type-mismatch]: this annotation declares `currency` as required, but the function gives it a
+                      default — write `[currency]` to declare it optional, or drop the default
+```
+
+The same applies in reverse: `[currency]` on a formal with no default is reported too.
+
 There is an expanded style too, which suits functions with many parameters and sits naturally
 beside roxygen2:
 
@@ -180,8 +198,9 @@ beside roxygen2:
 #' Fee for an order.
 #: @param region {character}
 #: @param amount {double}
+#: @param [currency] {character}
 #: @returns {double}
-fee_for <- function(region, amount) { ... }
+fee_for <- function(region, amount, currency = "EUR") { ... }
 ```
 
 ## 5. Give your domain its own types

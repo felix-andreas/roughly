@@ -592,3 +592,16 @@ apply_variadic: fn(callback: fn(...: integer) -> integer) -> integer
 fixed: fn(x: integer) -> integer
 use_fixed: Unknown
 201..206 error[type-mismatch] expected `fn(...: integer) -> integer`, found `fn(x: integer) -> integer`
+
+#---- optionality_comes_from_the_formals_not_the_annotation
+# A formal with a default is optional in R, whatever the annotation says. This
+# used to be reported as a missing argument at every CALLER, which reads as "the
+# tool cannot see default arguments" rather than "my annotation is wrong".
+#: fn(amount: double, currency: character) -> character
+label <- function(amount, currency = "EUR") paste0(currency, amount)
+
+use <- function() label(1.0)
+#++++
+label: fn(amount: double, [currency]: character) -> character
+use: fn() -> character
+291..359 error[type-mismatch] this annotation declares `currency` as required, but the function gives it a default — write `[currency]` to declare it optional, or drop the default

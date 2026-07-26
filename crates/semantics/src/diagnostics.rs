@@ -1524,6 +1524,9 @@ fn render_type_error_message(db: &dyn Db, error: &TypeError<'_>) -> String {
             "`@if-unknown` applies only where the type is unknown, and this is already `{}` — drop the annotation, or use `#:` to check the type or `@trust` to override it",
             renderer.render(db, *found)
         ),
+        TypeErrorKind::AnnotationRequiredButDefaulted { name } => format!(
+            "this annotation declares `{name}` as required, but the function gives it a default — write `[{name}]` to declare it optional, or drop the default"
+        ),
         TypeErrorKind::AnnotationParameterMismatch { name } => format!(
             "this annotation names a parameter `{name}`, but the function does not define one — annotation parameter names must match the function's parameter names"
         ),

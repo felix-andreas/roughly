@@ -1422,6 +1422,12 @@ really are missing). A pipe R itself would reject — a right-hand side that is 
 positional or repeated `_`, a `_` nested inside a subexpression — is not guessed at: it stays an
 opaque operator (silent `Unknown`, quiet reads).
 
+**Optionality comes from the formals, not the annotation.** A formal with a default is optional in R,
+and no annotation can change that, so the exported signature takes each parameter's optionality from
+the function and an annotation that disagrees is reported once at the definition — never as a missing
+argument at the call sites, which are correct. Both directions report: a required declaration over a
+defaulted formal, and an `[optional]` declaration over a formal with no default.
+
 Argument checking is compatibility-based, not exact-equality-based:
 
 - the ordinary coercions defined in this document apply at parameter positions, for example scalar-like `T` into array-like `T[]` and `T` or `NULL` into `T | NULL`
