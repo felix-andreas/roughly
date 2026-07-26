@@ -98,8 +98,8 @@ result <- sum(1, 2, 3,)
 
 A `# roughly: allow(code, ...)` comment suppresses matching diagnostics on its own line (as a
 trailing comment) or on the line directly below it. The codes are the bracketed names diagnostics
-render with — the lint codes above plus `unused`, `unresolved`, and the other check codes —
-and `allow(all)` suppresses everything for that line:
+render with — see the [diagnostic codes reference](/diagnostics) for every one — and
+`allow(all)` suppresses everything for that line:
 
 ```r
 flag <- T  # roughly: allow(boolean-shorthand)
