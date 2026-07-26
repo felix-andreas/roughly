@@ -569,6 +569,34 @@ fn check_without_r_files_reports_nothing_and_exits_clean() {
 }
 
 #[test]
+fn a_configured_exclude_does_not_lose_the_vendored_directory_skip() {
+    // `renv/activate.R` alone is a thousand generated lines, so vendored
+    // directories are always skipped. A project that also configures its own
+    // excludes must not lose that: an `exclude` matching nothing once dragged
+    // a whole renv library into the walk.
+    let vendored = &[
+        ("a.R", "x = 1\n"),
+        ("renv/library/pkg/R/vendored.R", "y = T\n"),
+        ("packrat/lib/vendored.R", "z = T\n"),
+    ];
+    for exclude in [
+        "[check]\n",
+        "[check]\nexclude = []\n",
+        "[check]\nexclude = [\"nothing-here/\"]\n",
+    ] {
+        let mut files = vendored.to_vec();
+        files.push(("roughly.toml", exclude));
+        let directory = project(&files);
+        let output = roughly(directory.path(), &["check"]);
+        assert!(
+            stdout(&output).contains("in 1 file"),
+            "exclude {exclude:?} walked a vendored directory: {}",
+            stdout(&output)
+        );
+    }
+}
+
+#[test]
 fn check_answer_is_independent_of_how_the_paths_are_named() {
     // A `#: @alias` declared in one package file, referenced from another: the
     // reference must resolve however the command spells the paths, or

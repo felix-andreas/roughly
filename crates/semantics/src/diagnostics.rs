@@ -283,12 +283,26 @@ pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
             {
                 continue;
             }
-            // A near-miss of one of the project's own definitions is reported
-            // even under the blanket tolerance an unknowable export set earns:
-            // `library(testthat)` cannot explain `validte_url` in a project
-            // that defines `validate_url`, and a typo of your own function is
-            // the case where the hint is worth most.
-            let project_typo = project_definition_suggestion(db, name);
+            // A near-miss of a name the project itself binds is reported even
+            // under the blanket tolerance an unknowable export set earns.
+            // `library(shiny)` cannot explain `repositry` in a function whose
+            // parameter is `repository`, and `library(testthat)` cannot explain
+            // `validte_url` in a project that defines `validate_url`: a name one
+            // edit away from a binding of your own is a typo, not somebody
+            // else's export. Locals and parameters of the enclosing item count
+            // as well as the project's top-level definitions — a typo of a name
+            // in lexical scope on the same line is the case a user is least
+            // willing to see missed.
+            let project_typo = project_definition_suggestion(db, name).or_else(|| {
+                nearest_name(
+                    name,
+                    naming
+                        .bindings
+                        .values()
+                        .map(|binding| binding.name.as_str()),
+                )
+                .map(str::to_owned)
+            });
             if project_typo.is_none() && crate::metadata::imports_every_name(db) {
                 continue;
             }

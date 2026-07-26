@@ -22,7 +22,7 @@ turn whole classes on or off.
 | --- | --- | --- |
 | `syntax-error` | Code that does not parse. A broken region reports this and nothing else — the checker draws no conclusions from source that failed to parse | Always |
 | `annotation` | A malformed `#:` annotation: a type that does not parse, an unknown type name, a `@type`/`@alias` block mixed with checked annotations | Always |
-| `unresolved` | A name that resolves nowhere — not in this package, its imports, or the standard library. Includes a "did you mean" suggestion for a near miss | Always |
+| `unresolved` | A name that resolves nowhere — not in this package, its imports, or the standard library. Includes a "did you mean" suggestion for a near miss. **A `library(pkg)` for a package with no shipped stub tolerates otherwise-unresolved bare names**, since that package's export set is unknowable — except a near miss of a name your own project binds, which is reported anyway | Always |
 | `unused` | A binding nothing ever reads. Top-level bindings are reported in scripts but not in package files, where any file may use them | Yes — `[check] unused = false` opts out |
 | `duplicate` | Two top-level definitions of one name in a **package**, reported at both sites — a script is sequential, so rebinding there is ordinary. Also two `@type`/`@alias` declarations of one type name | Always |
 | `stub` | A problem in a `.Rtypes` stub the project ships — reported against the stub, since a stub that fails to load silently withdraws the types it promised | Always |

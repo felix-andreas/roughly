@@ -3433,6 +3433,7 @@ impl<'db> Checker<'db, '_> {
                 "c" => Some(self.infer_combine(id, arguments)),
                 "list" => Some(self.infer_list(arguments)),
                 "switch" => Some(self.infer_switch(range, arguments)),
+                "structure" => self.infer_structure(id, arguments),
                 "return" => Some(self.infer_return(range, arguments)),
                 _ => None,
             };
@@ -3608,6 +3609,43 @@ impl<'db> Checker<'db, '_> {
 
     /// `list(...)` builds the fixed shapes: all-unnamed → tuple-like,
     /// all-named → record-like, partially named → an array-like list.
+    /// `structure(value, ...)` returns `value` with attributes attached, and
+    /// attributes are not part of a type here — a `class` attribute is data,
+    /// which is why S3 dispatch is not modelled. So the call has the type of
+    /// its first argument, and `structure(list(name = "a"), class = "dog")`
+    /// stays the record it is built from, with its fields checkable.
+    ///
+    /// `dim` is the exception: it turns a vector into an array, and array
+    /// *shape* is untracked, so claiming the vector type would be a claim the
+    /// checker cannot stand behind. Those fall through to the declaration
+    /// (`Any`) and stay a strict origin. `None` means "not intercepted".
+    fn infer_structure(&mut self, id: ExprId, arguments: &[Argument]) -> Option<Ty<'db>> {
+        let shape_changing = arguments.iter().any(|argument| {
+            argument
+                .name
+                .as_deref()
+                .is_some_and(|name| matches!(name, "dim" | ".Dim"))
+        });
+        if shape_changing {
+            return None;
+        }
+        // `.Data` is the formal's name, so it may be given either way.
+        let value = arguments
+            .iter()
+            .find(|argument| argument.name.as_deref() == Some(".Data"))
+            .or_else(|| arguments.iter().find(|argument| argument.name.is_none()))?
+            .value?;
+        let ty = self.infer(value);
+        for argument in arguments {
+            if let Some(other) = argument.value
+                && other != value
+            {
+                self.infer(other);
+            }
+        }
+        Some(self.record(id, ty))
+    }
+
     fn infer_list(&mut self, arguments: &[Argument]) -> Ty<'db> {
         if arguments.is_empty() {
             return Ty::new(self.db, TyKind::Tuple(Vec::new()));

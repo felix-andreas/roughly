@@ -56,7 +56,7 @@ In short:
 | S3 operator dispatch (`+.Date`, `Arith.Class`, `Ops.Class`) | **Yes** — statically resolved |
 | A directly called S3 method (`print.myclass(x)`) | Yes, as an ordinary function |
 | `UseMethod` dispatch | No — the call is `Unknown` |
-| `structure(x, class = "dog")` | No — the class attribute is data, not a type |
+| `structure(x, class = "dog")` | The value keeps `x`'s type — the class attribute is data, not a type — so its fields stay checkable |
 | S4 (`setClass`, `new`, `x@slot`, `setMethod`) | No — `Unknown` throughout |
 | R6 (`R6Class`, `$new`, fields, methods) | No — `Unknown` throughout |
 
@@ -74,6 +74,16 @@ chain checks clean.
 Outside those, a data-masking function Roughly does not know about will report its column names as
 unresolved. The ecosystem's standard escape hatch works — a top-level
 `utils::globalVariables(c("a", "b"))` silences them for the whole package.
+
+**Attaching an unstubbed package weakens the `unresolved` check.** A `library(pkg)` for a package
+Roughly ships no stub for means any bare name *could* be one of its exports, so otherwise-unresolved
+bare names are tolerated rather than reported — project-wide, not just in that file. This is what
+keeps the tool usable on real code, but it means a clean run says less than it looks like it does.
+Two things narrow the hole: a near miss of a name your own project binds — a top-level definition, or
+a local or parameter in scope — is reported anyway, because `library(shiny)` cannot explain
+`repositry` next to a `repository` parameter; and writing a two-line `stubs/<pkg>.Rtypes` for the
+package restores full checking, as well as silencing the unknown-namespace warning. `strict = true`
+also makes the tolerated reads visible.
 
 A project's own `%op%` is deliberately left opaque: it may be an NSE wrapper whose right operand is
 quoted rather than evaluated (magrittr's `%>%` is the canonical case), and checking that as an

@@ -574,30 +574,34 @@ pub(crate) fn collect_r_files(
     // Honour `.gitignore` whether or not the tree is a git checkout: a
     // generated or vendored file is not project code either way.
     builder.require_git(false);
-    builder.filter_entry(|entry| {
-        !entry
+    // ONE predicate for both rules: `filter_entry` replaces the previous
+    // closure rather than composing with it, so registering the configured
+    // excludes separately would silently drop the vendored-directory skip and
+    // walk a project's whole `renv` library.
+    let gitignore = exclude.filter(|_| target.is_dir()).cloned();
+    builder.filter_entry(move |entry| {
+        let is_dir = entry
             .file_type()
-            .is_some_and(|file_type| file_type.is_dir())
-            || !entry
+            .is_some_and(|file_type| file_type.is_dir());
+        if is_dir
+            && entry
                 .file_name()
                 .to_str()
                 .is_some_and(|name| VENDORED_DIRECTORIES.contains(&name))
+        {
+            return false;
+        }
+        let Some(gitignore) = &gitignore else {
+            return true;
+        };
+        let relative = entry
+            .path()
+            .strip_prefix(gitignore.path())
+            .unwrap_or_else(|_| entry.path());
+        !gitignore
+            .matched_path_or_any_parents(relative, is_dir)
+            .is_ignore()
     });
-    if let Some(gitignore) = exclude.filter(|_| target.is_dir()) {
-        let gitignore = gitignore.clone();
-        builder.filter_entry(move |entry| {
-            let is_dir = entry
-                .file_type()
-                .is_some_and(|file_type| file_type.is_dir());
-            let relative = entry
-                .path()
-                .strip_prefix(gitignore.path())
-                .unwrap_or_else(|_| entry.path());
-            !gitignore
-                .matched_path_or_any_parents(relative, is_dir)
-                .is_ignore()
-        });
-    }
     builder
         .build()
         .filter_map(|entry| match entry {

@@ -2322,7 +2322,7 @@ deliberate, not a to-do list, so this section states both what happens and why.
 | An operator on a nominal (`+.Class`, `Arith.Class`, `Ops.Class`) | **Dispatches statically** — see [operator methods on a class](#operators) |
 | A directly called S3 method (`speak.dog(x)`) | An ordinary call, checked against that function's own signature |
 | `UseMethod("speak")`, and any call to an S3 generic | Result is `Unknown`, a strict-mode origin |
-| `structure(list(...), class = "dog")` | A plain record — the `class` attribute is data, not a type |
+| `structure(list(...), class = "dog")` | The value keeps its argument's type — a `class` attribute is data, not a type — so the record's fields stay checkable. A `dim` attribute is the exception: it makes the value an array, whose shape is untracked, so those stay `Unknown` |
 | `setClass` / `setGeneric` / `setMethod` / `new` | Not modelled; `new(...)` is `Unknown` |
 | `x@slot` read or write | Fully lowered, types as `Unknown` (see below) |
 | `R6Class(...)`, `$new(...)`, fields, methods | Not modelled; `Unknown` |
