@@ -118,15 +118,11 @@ permanently yes, including CI. That gap is three bugs, not a redesign."**
    the top-priority item in the whole backlog. A clean run is indistinguishable from "not checked".
    Their note: the two-line `stubs/<pkg>.Rtypes` remedy both silences the namespace warning *and*
    restores checking, but it is only described on the contributor-facing stubs page.
-2. **`typing = true` reports errors on ordinary ggplot2 `+` chains** — it added exactly 7 findings to
-   their project, **all 7 false positives and 0 real**. Two shapes: `df %>% ggplot(aes(...)) +
-   geom_col()` (the `|>` spelling is clean, `%>%` is not) and `theme_minimal(base_size) + theme(...)`,
-   a house theme. The message is ``expected a numeric value (`integer` or `double`), found `gg` `` —
-   and they had no idea what `gg` is. This directly contradicts `limitations.md`'s promise that a gap
-   means checks are *skipped*, never that wrong answers are produced, and `type-mismatch` is not
-   configurable, so their only escape is turning typing off entirely. Likely cause: the shipped
-   corpus declares `+.ggplot` but nothing for `gg + gg`, so a theme pair and an opaque-`%>%` left
-   operand fall through to the numeric rules.
+2. **ggplot2 `+` chains FIXED.** The corpus declared `+.ggplot` but nothing for a component pair,
+   so `theme_minimal() + theme(...)` and a chain whose left operand was lost through `%>%` fell
+   through to the numeric rules and reported arithmetic on a `gg`. R routes all of it through the
+   single `+.gg` method, which the corpus now declares; a genuine mistake (`plot + 1L`) is still
+   caught, naming both classes.
 3. **Inline `` `r expr` `` in prose is invisible — neither a use nor checked.** A value assigned in a
    chunk and displayed only via inline code is reported `unused`, and a typo'd function inside inline
    code is not reported at all. It hit three of their headline numbers. Their reaction is the
@@ -190,10 +186,9 @@ doc page mentions for this purpose — while the path the docs *do* recommend (h
 6. **`data.table` is rejected where `data.frame` is expected, and the wrong direction is accepted.**
    `needs_df(data.table(a = 1L))` is legal R and reports `expected data.frame, found data.table`;
    `needs_dt(data.frame(a = 1L))`, the direction that really is wrong, reports nothing.
-7. **`on.exit()` reads do not count as uses**, so the canonical rollback guard
-   (`committed <- TRUE` ... `on.exit(if (!committed) dbRollback(con))`) is reported unused — and the
-   "obvious fix" a user would apply makes every transaction roll back. A false positive that leads
-   directly to a data-loss bug.
+7. **`on.exit()` reads FIXED.** R stores the expression and runs it at return, so it observes the
+   *last* value of what it reads; a read inside it now keeps every write of that name in the frame
+   alive, exactly as a closure capture does. A genuine dead store beside a guard still reports.
 8. **Recursion defeats `is.logical()` narrowing** — the identical non-recursive function is clean.
 9. **A maybe-`NULL` value is only caught by arithmetic.** `toupper`, `nchar` and `substr` on a
    `character | NULL` all pass, despite the guide promising this class of check.
@@ -235,14 +230,14 @@ money" — but not tell anyone with matrix-heavy code to turn typing on until (1
    constraint meaning "supports this operator with these operands" replaces both this relaxation and
    the operand tie. Do not patch it again; design it.
    Also: `sort`/`head`/`rev` on dates report ``found `T[]` ``, leaking an unbound type variable.
-3. **FP — `x[i, j]` on an unannotated parameter is an error**, and it was 5 of the 8 findings on their
-   untouched project. It contradicts `reference.md`, which says `[` on an unannotated parameter
-   yields `Unknown` precisely "because refusing here would flag ordinary code". It fires only when the
-   receiver is still an inference variable (annotating `matrix` or `@trust Any` both pass), and it is
-   internally inconsistent: `p[1:2, ]` is accepted, `p[1, , drop = FALSE]` is not.
-4. **FP — `c(d1, d2)` errors with ``expected `integer`, found `Date` ``**, and so does `c(d1)` alone.
-   R returns a `Date` vector. The message is nonsense to a reader: nothing in the expression is an
-   integer.
+3. **FP — `x[i, j]` on an unannotated parameter FIXED.** A subject whose shape the author never
+   wrote down is now sound-by-refusal for *any* index shape, which is what the reference already
+   promised; a subject whose shape *was* written down still refuses a shape no rule covers
+   (`c(1L, 2L)[1L, 2L]` is an error).
+4. **FP — `c()` on a classed value FIXED, and it does better than not erroring:** a class declaring
+   a `c.Class` method keeps its class through concatenation (`c(d1, d2)` is a `Date`, and
+   `dates + d2` is still refused as `Date + Date`), which is R's own dispatch rule. A nominal with no
+   such method is indeterminate rather than an error.
 5. **FP — `vapply(x, f, numeric(1))` errors whenever the callback is not statically `double`.** R
    accepts a wider template; they confirmed with `roughly run` that
    `vapply(1:3, function(i) i, numeric(1))` works.

@@ -4757,7 +4757,15 @@ impl<'db> Checker<'db, '_> {
         match subject.kind(self.db) {
             TyKind::Unknown => return self.unknown(),
             TyKind::Any => return crate::types::any(self.db),
-            TyKind::Named(..) => {
+            // A subject whose shape the author never wrote down — a sealed
+            // nominal (`df[rows, cols]`), or a parameter still undetermined
+            // (`function(m, i, j) m[i, j]`) — supports value-dependent
+            // indexing of any shape at run time, none of it modelled. It is
+            // sound-by-refusal before the index-arity check below, so
+            // idiomatic two-index subsetting on it is not an error: the whole
+            // point of `function(m, i, j) m[i, j]` is that the caller knows
+            // the shape and the callee does not.
+            TyKind::Named(..) | TyKind::Var(_) | TyKind::Rigid(_) => {
                 self.record_strict_origin(id, StrictOriginKind::UnsupportedConstruct);
                 return self.unknown();
             }

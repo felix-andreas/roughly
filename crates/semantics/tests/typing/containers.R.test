@@ -245,8 +245,7 @@ pick: <T, U> fn(m: T, i: U) -> Unknown
 #---- two_filled_indexes_report_the_filled_count
 cell <- function(m, k) m[k, , drop = FALSE]
 #++++
-cell: Unknown
-23..43 error[type-mismatch] indexing with 2 indexes is not supported yet — Roughly does not model matrix and data.frame subsetting
+cell: <T, U> fn(m: T, k: U) -> Unknown
 
 #==== vector_subsetting
 #---- scalar_index_selects_one_element

@@ -165,6 +165,37 @@ print(y)
 x: integer
 y: integer
 
+#---- an_on_exit_read_keeps_later_writes_alive
+# R stores `on.exit`'s expression and runs it when the function returns, so it
+# observes the LAST value of what it reads. Treating it as an ordinary argument
+# made the canonical rollback guard a dead store — and deleting that write, the
+# obvious response to the warning, makes every transaction roll back.
+guard <- function(con) {
+  committed <- FALSE
+  on.exit(if (!committed) rollback(con))
+  committed <- TRUE
+  invisible(committed)
+}
+print(guard)
+#++++
+guard: <T> fn(con: T) -> logical
+383..391 warning[unresolved] I could not resolve `rollback` in this package, its imports, or builtins.
+
+#---- a_real_dead_store_beside_an_on_exit_guard_still_reports
+guard <- function(con) {
+  committed <- FALSE
+  on.exit(if (!committed) rollback(con))
+  scratch <- 1L
+  scratch <- 2L
+  committed <- TRUE
+  invisible(scratch)
+}
+print(guard)
+#++++
+guard: <T> fn(con: T) -> integer
+72..80 warning[unresolved] I could not resolve `rollback` in this package, its imports, or builtins.
+89..96 warning[unused] `scratch` is assigned but never used.
+
 #---- operator_use_is_a_use
 `%||%` <- function(a, b) if (is.null(a)) b else a
 fallback <- NULL %||% 3L

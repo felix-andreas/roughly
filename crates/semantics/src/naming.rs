@@ -146,6 +146,7 @@ pub fn resolve_item_with_masked_verbs(
         read_parameter_slots: BTreeSet::new(),
         emit: true,
         quiet_depth: 0,
+        deferred_depth: 0,
         naming: ItemNaming::default(),
     };
     if let Some(root) = module.root {
@@ -233,6 +234,11 @@ struct Context<'a> {
     /// Non-zero inside an unsupported operator's operands: reads resolve but
     /// unresolved names stay quiet.
     quiet_depth: u32,
+    /// Non-zero while walking an expression R evaluates LATER than this line —
+    /// `on.exit`'s argument, which runs at function exit. A read inside it sees
+    /// the final value of the names it mentions, so it keeps every write of
+    /// those names alive.
+    deferred_depth: u32,
     naming: ItemNaming,
 }
 
@@ -387,6 +393,36 @@ impl Context<'_> {
                             self.resolve(value);
                         }
                     }
+                    return;
+                }
+                // `on.exit(expr)` does not evaluate `expr` here — R stores it
+                // and runs it when the function returns, so it observes the
+                // LAST value of everything it reads, not the value at this
+                // line. Walking it as an ordinary argument made the canonical
+                // rollback guard a dead store:
+                //
+                //     committed <- FALSE
+                //     on.exit(if (!committed) rollback(con))
+                //     ...
+                //     committed <- TRUE          # "assigned but never used"
+                //
+                // and the obvious response to that warning — deleting the
+                // write — makes every transaction roll back. A read inside the
+                // deferred expression therefore keeps every write of that name
+                // in this frame alive, exactly as a closure capture does.
+                let deferred_callee = matches!(
+                    &self.module.expression(*callee).kind,
+                    ExpressionKind::NameRef(name)
+                        if name == "on.exit" && !self.naming.resolutions.contains_key(callee)
+                );
+                if deferred_callee {
+                    self.deferred_depth += 1;
+                    for argument in arguments {
+                        if let Some(value) = argument.value {
+                            self.resolve(value);
+                        }
+                    }
+                    self.deferred_depth -= 1;
                     return;
                 }
                 // A masking call evaluates the arguments its `...` absorbs
@@ -756,7 +792,7 @@ impl Context<'_> {
                         self.naming.maybe_undefined.insert(id);
                     }
                 }
-                if depth < self.current_function_depth() {
+                if depth < self.current_function_depth() || self.deferred_depth > 0 {
                     // A read of an enclosing frame's slot from inside a
                     // function: a capture — every write of the name IN THAT
                     // FRAME stays observable (sequential rebindings are one

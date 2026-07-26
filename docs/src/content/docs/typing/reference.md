@@ -333,6 +333,21 @@ that the inner binding shadows is not what the closure reads, and it still warns
 - `f <- function() { x <- "outer"; g <- function() { x <- TRUE; function() x } }` warns that
   `x <- "outer"` is unused: the innermost function reads `g`'s `x`, which shadows it
 
+**`on.exit(expr)` reads the same way.** R stores the expression and runs it when the function
+returns, so it observes the *last* value of every name it mentions rather than the value at the
+`on.exit` line. A read inside it therefore keeps every write of that name in the frame alive, exactly
+as a capture does — which is what makes the standard rollback guard clean:
+
+```r
+with_transaction <- function(con, body) {
+  committed <- FALSE
+  on.exit(if (!committed) dbRollback(con))
+  body(con)
+  committed <- TRUE          # read by the exit handler, not a dead store
+  invisible(TRUE)
+}
+```
+
 ### Type names
 
 Top-level `@type` and `@alias` declarations share one project-global namespace.
@@ -1596,7 +1611,10 @@ never pinned down, as in `function(node) node$value`, `function(x) x[[1L]]`, or 
 unconstrained. Reading fields, elements, and slices off a value whose shape the author never wrote
 down is how idiomatic R walks recursive and generic data (a tree fold, a generic accessor), so
 refusing here would flag ordinary code. The access is instead sound-by-refusal and surfaced as an
-unsupported construct under [strict mode](#strict-mode), exactly as for an opaque nominal.
+unsupported construct under [strict mode](#strict-mode), exactly as for an opaque nominal. This
+covers **multi-index** subsetting too: `function(m, i, j) m[i, j]` is silent, because the whole point
+of that function is that the caller knows the shape and the callee does not. A subject whose shape
+*was* written down still refuses a shape no rule covers — `c(1L, 2L)[1L, 2L]` is an error.
 Recovering the field or element type by constraining the variable to a record-with-field or
 indexable shape is future work.
 
