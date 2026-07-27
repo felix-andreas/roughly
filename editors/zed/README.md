@@ -1,6 +1,6 @@
 # ry for Zed
 
-Zed extension for [ry](https://github.com/felix-andreas/ry) — an R language server,
+Zed extension for [ry](https://github.com/felix-andreas/roughly) — an R language server,
 type checker, and formatter written in Rust.
 
 Not yet published to Zed's extension registry. Install it manually as a dev extension.
@@ -13,7 +13,7 @@ Zed has no built-in R support, so install the [R extension](https://zed.dev/exte
 1. Install a [Rust toolchain](https://rustup.rs) — Zed compiles dev extensions to WebAssembly itself.
 2. Clone the repository:
    ```bash
-   git clone https://github.com/felix-andreas/ry
+   git clone https://github.com/felix-andreas/roughly
    ```
 3. In Zed, run `zed: install dev extension` from the command palette (`ctrl-shift-p` / `cmd-shift-p`)
    and select the `editors/zed` directory of the clone.

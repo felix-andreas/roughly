@@ -71,8 +71,8 @@ whether or not you turn the errors on.
 ## Install
 
 - **VS Code** — the [ry extension](https://marketplace.visualstudio.com/items?itemName=felix-andreas.ry), which bundles the binary.
-- **Zed** — from [`editors/zed`](https://github.com/felix-andreas/ry/tree/main/editors/zed); not in Zed's registry yet.
-- **Command line** — a prebuilt binary from [Releases](https://github.com/felix-andreas/ry/releases), or `cargo install --git https://github.com/felix-andreas/ry ry-lang`.
+- **Zed** — from [`editors/zed`](https://github.com/felix-andreas/roughly/tree/main/editors/zed); not in Zed's registry yet.
+- **Command line** — a prebuilt binary from [Releases](https://github.com/felix-andreas/roughly/releases), or `cargo install --git https://github.com/felix-andreas/roughly ry-lang`.
 
 Everything else — other architectures, RStudio, building from source — is on the
 [installation page](/installation).

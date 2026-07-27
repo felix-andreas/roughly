@@ -13,7 +13,7 @@ iana-time-zone = { path = "patches/iana-time-zone" }
 [workspace.package]
 version = "0.3.0-alpha"
 license = "UPL-1.0"
-repository = "https://github.com/felix-andreas/ry"
+repository = "https://github.com/felix-andreas/roughly"
 
 [workspace.dependencies]
 clap = { version = "4.5.40", features = ["derive"] }

@@ -298,10 +298,10 @@ const year = new Date().getFullYear()
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Roughly — the first type checker for R, and the tooling to match</title>
+    <title>ry — the first type checker for R, and the tooling to match</title>
     <meta
       name="description"
-      content="Roughly is a fast Rust toolchain for R: the first static type checker, a full language server, and a project formatter in one tool. Catch type errors before you run — without changing your existing code."
+      content="ry is a fast Rust toolchain for R: the first static type checker, a full language server, and a project formatter in one tool. Catch type errors before you run — without changing your existing code."
     />
     <link rel="icon" href="/favicon.svg" />
     <script is:inline>
@@ -391,7 +391,7 @@ const year = new Date().getFullYear()
           <h2>Three tools, one binary.</h2>
           <p class="lede">
             Built for R users who have outgrown RStudio: editor smarts, problem-catching analysis,
-            and one consistent style from a single binary. R has world-class statistics — Roughly
+            and one consistent style from a single binary. R has world-class statistics — ry
             brings the IDE-grade tooling other ecosystems already take for granted, fast enough to
             scale past 300k lines.
           </p>
@@ -690,7 +690,7 @@ const year = new Date().getFullYear()
           </div>
 
           <p class="band-foot">
-            <a class="doclink" href="/formatter">Formatter docs <span aria-hidden="true">→</span></a>
+            <a class="doclink" href="/reference/formatting-rules">Formatting Rules <span aria-hidden="true">→</span></a>
             <span class="band-aside"
               ><code>--check</code> and <code>--diff</code> exit 1 when a file would change, so CI
               stays honest. <code># fmt: skip</code> and <code># fmt: off</code> opt code out.</span
@@ -708,16 +708,22 @@ const year = new Date().getFullYear()
           <h2>Drop it onto your R project.</h2>
           <p class="lede">
             Nothing about your existing R has to change. Install the VS Code extension in one click —
-            no toolchain required — or grab the CLI and point Roughly at your project.
+            no toolchain required — or grab the CLI and point ry at your project.
           </p>
-          <pre class="codeblock"><code><span class="c-muted"># install the CLI</span>
-cargo install --git https://github.com/felix-andreas/roughly roughly
-<span class="c-muted"># format, lint, and type-check</span>
-roughly fmt .
-roughly check .</code></pre>
+          <div class="steps">
+            <div class="step">
+              <p class="step-label">1 &middot; Install</p>
+              <pre class="codeblock"><code>cargo install --git https://github.com/felix-andreas/roughly ry-lang</code></pre>
+            </div>
+            <div class="step">
+              <p class="step-label">2 &middot; Run it on your project</p>
+              <pre class="codeblock"><code>ry fmt .     <span class="c-muted"># format</span>
+ry check .   <span class="c-muted"># lint and type-check</span></code></pre>
+            </div>
+          </div>
           <p class="band-note">
             Grab the <a class="inline-link" href="https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly" target="_blank" rel="noopener">VS Code extension</a>
-            from the Marketplace, then tune behavior in <a class="inline-link" href="/configuration">configuration</a>.
+            from the Marketplace, then tune behavior in <a class="inline-link" href="/reference/configuration">configuration</a>.
           </p>
           <div class="cta-cluster">
             <a class="cta cta-lg" href="/getting-started">Get started</a>
@@ -2516,6 +2522,22 @@ roughly check .</code></pre>
         padding: 0.02rem 0.32rem;
         font-size: 0.86em;
       }
+      .steps {
+        display: grid;
+        gap: 1.25rem;
+        margin: 1.4rem 0 0;
+      }
+      .step .codeblock {
+        margin: 0.5rem 0 0;
+      }
+      .step-label {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.82rem;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
       .band-note {
         margin: 1.1rem 0 0;
         max-width: 58ch;

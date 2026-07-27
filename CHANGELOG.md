@@ -37,4 +37,4 @@ This file starts from the type-checker work; earlier history lives in the git lo
   cancellation; per-edit output is verified byte-identical to a from-scratch rebuild.
 - The R grammar tracks the published `tree-sitter-r` 1.3.0.
 
-[Unreleased]: https://github.com/felix-andreas/ry/compare/main...HEAD
+[Unreleased]: https://github.com/felix-andreas/roughly/compare/main...HEAD

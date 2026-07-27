@@ -9,10 +9,10 @@
 	"homepage": "https://ry-lang.org",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/felix-andreas/ry"
+		"url": "https://github.com/felix-andreas/roughly"
 	},
 	"bugs": {
-		"url": "https://github.com/felix-andreas/ry/issues"
+		"url": "https://github.com/felix-andreas/roughly/issues"
 	},
 	"icon": "images/icon.png",
 	"keywords": [

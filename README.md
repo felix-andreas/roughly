@@ -9,9 +9,9 @@ binary. It reads your source rather than running it, so it needs no R installati
 code that has never been executed.
 
 [**Docs**](https://ry-lang.org) ·
-[**Releases**](https://github.com/felix-andreas/ry/releases) ·
+[**Releases**](https://github.com/felix-andreas/roughly/releases) ·
 [**VS Code**](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly) ·
-[**Zed**](https://github.com/felix-andreas/ry/tree/main/editors/zed)
+[**Zed**](https://github.com/felix-andreas/roughly/tree/main/editors/zed)
 
 </div>
 
@@ -67,9 +67,9 @@ warning[unresolved]: I could not resolve `normalise_regoin` in this package, its
 - **VS Code** — the [extension](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly)
   bundles the binary, so there is nothing else to set up. It is still published under the project's
   previous name while the rename lands.
-- **A binary** — from [Releases](https://github.com/felix-andreas/ry/releases), for CI or any other
+- **A binary** — from [Releases](https://github.com/felix-andreas/roughly/releases), for CI or any other
   editor.
-- **Cargo** — `cargo install --git https://github.com/felix-andreas/ry ry-lang`.
+- **Cargo** — `cargo install --git https://github.com/felix-andreas/roughly ry-lang`.
 
 Then, in a project directory:
 
@@ -89,7 +89,7 @@ typing = true
 For CI, `--output json` emits JSON Lines and the exit status is `0` clean, `1` findings, `2` usage
 error. ry is an ordinary LSP server, so it works in any editor with LSP support; the VS Code and Zed
 extensions live in this repository, and Zed's installs from
-[`editors/zed`](https://github.com/felix-andreas/ry/tree/main/editors/zed) as a dev extension until it
+[`editors/zed`](https://github.com/felix-andreas/roughly/tree/main/editors/zed) as a dev extension until it
 reaches the registry. For RStudio, ry works as an external formatter — the
 [setup guide](https://ry-lang.org/installation#rstudio) has the steps.
 
