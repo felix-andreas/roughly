@@ -25,7 +25,7 @@
 
 ### Download Binary (Recommended)
 
-Download the pre-built binary for your platform from the [releases page](https://github.com/felix-andreas/roughly/releases).
+Download the pre-built binary for your platform from the [releases page](https://github.com/felix-andreas/ry/releases).
 
 ### Build from Source
 
