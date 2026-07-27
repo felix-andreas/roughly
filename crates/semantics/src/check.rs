@@ -299,6 +299,13 @@ pub fn check_item_with_annotation<'db>(
         capture_repass_needed: false,
         pre_materialized: FxHashMap::default(),
         no_default_formals: rustc_hash::FxHashSet::default(),
+        non_local_slots: FxHashMap::default(),
+        next_non_local_slot: naming
+            .bindings
+            .keys()
+            .map(|slot| slot.0 + 1)
+            .max()
+            .unwrap_or(0),
     };
     // An annotation whose type mentions a cyclically expanding alias is
     // unusable: report once at the annotated statement (where legacy blames
@@ -836,6 +843,16 @@ struct Checker<'db, 'a> {
     /// Formal-parameter slots with no default: a `missing(name)` guard on
     /// one marks its true edge read-erroring.
     no_default_formals: rustc_hash::FxHashSet<BindingId>,
+    /// Slots standing for names this item reads but does not bind — a
+    /// top-level variable another statement assigned, which naming records as
+    /// a non-local because scopes are per-item. A guard needs somewhere to put
+    /// its refinement, and flow state for a name belongs in the environment
+    /// like any other slot's, so the name gets a slot here rather than a
+    /// second place to look. Identity only: the type itself lives in the
+    /// environment, and these ids are minted above every id naming issued so
+    /// they cannot collide with a real binding.
+    non_local_slots: FxHashMap<String, BindingId>,
+    next_non_local_slot: u32,
 }
 
 /// One call argument, inferred exactly once before any signature matching, so
@@ -1550,6 +1567,15 @@ impl<'db> Checker<'db, '_> {
             // stub corpus. Unresolved reads stay silent Unknown (naming owns
             // the unresolved diagnostic); a read that RESOLVES to a binding
             // with no known type is a strict origin.
+            // A guard narrowed this name earlier in the same expression, so the
+            // refinement is the observed type here — reading through to the
+            // binding again would discard it.
+            if let Some(name) = self.naming.non_locals.get(&id)
+                && let Some(&slot) = self.non_local_slots.get(name)
+                && let Some(EnvEntry::Mono(refined)) = self.environment.get(slot)
+            {
+                return refined;
+            }
             if let Some(name) = self.naming.non_locals.get(&id).cloned()
                 && let Some(scheme) = self.globals.and_then(|globals| {
                     globals.scheme(&name, self.naming.deferred_non_locals.contains(&id))
@@ -2310,7 +2336,23 @@ impl<'db> Checker<'db, '_> {
                 ) {
                     return None;
                 }
-                let slot = *self.naming.resolutions.get(&value)?;
+                let slot = match self.naming.resolutions.get(&value) {
+                    Some(&slot) => slot,
+                    // A name this item reads but does not bind: a top-level
+                    // variable an earlier statement assigned. Narrowing it is
+                    // sound for the same reason it is sound for a local — the
+                    // guard and the branches are one expression, evaluated in
+                    // order — but a read from inside a closure is excluded,
+                    // because that body runs later and the test proves nothing
+                    // about the value it will see then.
+                    None => {
+                        if self.naming.deferred_non_locals.contains(&value) {
+                            return None;
+                        }
+                        let observed = self.infer(value);
+                        self.non_local_guard_slot(value, observed)?
+                    }
+                };
                 if name == "missing" {
                     return self
                         .no_default_formals
@@ -2331,6 +2373,27 @@ impl<'db> Checker<'db, '_> {
             }
             _ => None,
         }
+    }
+
+    /// The slot standing for a non-local name in this item, seeded with the
+    /// type the read observed so the guard has a union to filter. `None` when
+    /// the read is not a non-local at all (an unresolved name, which narrows
+    /// nothing).
+    fn non_local_guard_slot(&mut self, read: ExprId, observed: Ty<'db>) -> Option<BindingId> {
+        let name = self.naming.non_locals.get(&read)?.clone();
+        let slot = match self.non_local_slots.get(&name) {
+            Some(&slot) => slot,
+            None => {
+                let slot = BindingId(self.next_non_local_slot);
+                self.next_non_local_slot += 1;
+                self.non_local_slots.insert(name, slot);
+                slot
+            }
+        };
+        if self.environment.get(slot).is_none() {
+            self.environment.set(slot, EnvEntry::Mono(observed));
+        }
+        Some(slot)
     }
 
     fn guard_edges(

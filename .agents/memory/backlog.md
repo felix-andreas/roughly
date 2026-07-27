@@ -62,12 +62,22 @@ mistaken for a mere precision gap when read from one direction only.
 
 ### B. False positives on the first thing a newcomer writes
 
-3. **Guard narrowing never fires at file top level.** Verified: `x <- maybe(); if (is.null(x)) ... else
-   want_chr(x)` errors at top level; the byte-identical guard inside a function body is clean.
-   `type-system.md` promises the opposite in as many words — *"only reads of local variable slots narrow
-   (parameters, function locals, **script locals**)"*. This is what an evaluator hits in their first ten
-   lines, and its shape — the tool demanding a null check you already wrote — is the failure most likely
-   to make someone switch typing off. Should jump the queue on visibility alone.
+3. **FIXED — guard narrowing did not fire at file top level.** `recognize_guard` required the tested
+   read to be in `naming.resolutions`, and a top-level variable read by a *later* statement is not:
+   scopes are per-item, so it is a non-local. The guard bailed at the slot lookup, which is why the
+   byte-identical guard inside a function body was clean — there, everything is one item.
+
+   A non-local read now gets a checker-minted slot (ids allocated above every id naming issued, so
+   they cannot collide), seeded with the type the read observed, and the ordinary environment carries
+   the refinement from there — no second place to keep flow state. Null, negated and family guards all
+   narrow at top level now.
+
+   **One limit is inherent and is now documented rather than hidden:** a refinement does not outlive
+   the statement it was made in, because checking is per top-level statement. So
+   `if (is.null(x)) stop(...)` followed by a *separate* top-level statement does not narrow, while the
+   same idiom inside a function body or one braced block does. Fixtured both ways. Making it cross
+   statements would mean threading flow state between items, which `item_check`'s per-item memoization
+   is built to avoid — not worth it for this, but that is the reason, not an oversight.
 
 4. **A duplicate type name is unchecked in script projects.** Verified: two `@alias Thing` declarations
    in a `ry.toml` project produce no duplicate error; the second silently wins, so a `Thing` declared

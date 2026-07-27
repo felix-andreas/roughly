@@ -1336,8 +1336,18 @@ Rules and limits:
   }
   ```
 
-- only reads of **local variable slots** narrow (parameters, function locals, script locals);
-  package globals and arbitrary expressions (`is.null(f(x))`, `is.null(x$field)`) do not
+- only reads of a **variable** narrow — parameters, function locals, and a top-level variable an
+  earlier statement assigned. Arbitrary expressions (`is.null(f(x))`, `is.null(x$field)`) do not
+- **a refinement does not outlive the statement it was made in.** Checking is per top-level statement,
+  so a guard narrows within its own `if` — including the whole `if`/`else` and anything nested in it —
+  but a *following* top-level statement reads the variable's unrefined type again. This is what
+  separates the two spellings of the early-return idiom: inside a function body, or inside one braced
+  top-level block, `if (is.null(x)) stop(...)` narrows `x` for the rest of the body, because the guard
+  and the later reads are one statement. Written as bare top-level statements, the `stop()` guard and
+  the read that follows it are two statements, and the read is not narrowed
+- a read from inside a **closure** narrows if the guard is in the same statement, matching how a local
+  behaves; the guard's own subject must not itself be a deferred read, since that body runs later and
+  the test proves nothing about the value it will see then
 - conditions combined with `&&` / `||` are not decomposed yet
 - `is.na(x)` is not a type guard: `NA`-ness is a value property, not a type property, in this
   system

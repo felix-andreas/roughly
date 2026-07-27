@@ -267,3 +267,97 @@ n: integer
 n: double
 final: fn() -> double
 33..38 warning[unused] `final` is assigned but never used.
+
+#==== top_level_guards
+#---- a_guard_narrows_a_top_level_variable
+# The shape a newcomer writes first, and it used to report: the checker demanded
+# a null check that was right there. A top-level variable is a non-local to the
+# statement that reads it, because scopes are per-statement, so the guard needs a
+# slot of its own to refine.
+#: fn(s: character) -> character
+want_chr <- function(s) s
+
+#: fn() -> character | NULL
+maybe <- function() NULL
+
+x <- maybe()
+if (is.null(x)) {
+  message <- "none"
+} else {
+  message <- want_chr(x)
+}
+#++++
+want_chr: fn(s: character) -> character
+maybe: fn() -> character | NULL
+x: character | NULL
+419..426 warning[unused] `message` is assigned but never used.
+
+#---- a_negated_top_level_guard_narrows_the_other_edge
+#: fn(s: character) -> character
+want_chr <- function(s) s
+
+#: fn() -> character | NULL
+maybe <- function() NULL
+
+x <- maybe()
+narrowed <- if (!is.null(x)) want_chr(x) else "none"
+#++++
+want_chr: fn(s: character) -> character
+maybe: fn() -> character | NULL
+x: character | NULL
+narrowed: character
+127..135 warning[unused] `narrowed` is assigned but never used.
+
+#---- a_family_guard_narrows_a_top_level_variable
+#: fn(s: character) -> character
+want_chr <- function(s) s
+
+#: fn() -> character | integer
+mixed <- function() 1L
+
+y <- mixed()
+narrowed <- if (is.character(y)) want_chr(y) else "none"
+#++++
+want_chr: fn(s: character) -> character
+mixed: fn() -> character | integer
+y: character | integer
+narrowed: character
+128..136 warning[unused] `narrowed` is assigned but never used.
+
+#---- a_refinement_does_not_outlive_its_statement
+# Checking is per top-level statement, so the following statement reads the
+# unrefined type. The early-return idiom therefore needs the guard and the read
+# in one statement — a function body, or one braced block.
+#: fn(s: character) -> character
+want_chr <- function(s) s
+
+#: fn() -> character | NULL
+maybe <- function() NULL
+
+x <- maybe()
+if (is.null(x)) stop("no")
+after <- want_chr(x)
+#++++
+want_chr: fn(s: character) -> character
+maybe: fn() -> character | NULL
+x: character | NULL
+after: Unknown
+371..376 warning[unused] `after` is assigned but never used.
+389..390 error[type-mismatch] expected `character`, found `character | NULL`
+
+#---- the_early_return_idiom_narrows_inside_one_braced_statement
+#: fn(s: character) -> character
+want_chr <- function(s) s
+
+#: fn() -> character | NULL
+maybe <- function() NULL
+
+{
+  x <- maybe()
+  if (is.null(x)) stop("no")
+  kept <- want_chr(x)
+}
+#++++
+want_chr: fn(s: character) -> character
+maybe: fn() -> character | NULL
+162..166 warning[unused] `kept` is assigned but never used.
