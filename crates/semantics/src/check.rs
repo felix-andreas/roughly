@@ -3805,11 +3805,17 @@ impl<'db> Checker<'db, '_> {
         union_of(self.db, members)
     }
 
-    /// Ordered overload probing: the first candidate whose signature accepts
-    /// the arguments wins and its return is the call's type. Only a plain
-    /// name resolves through an overload set, and a local binding shadowing
-    /// the name disables it (the local wins, as everywhere). `None` means
-    /// "not an overloaded call" — fall through to normal dispatch.
+    /// Ordered overload probing. Declaration order is the tiebreak, not the
+    /// whole rule: a candidate that accepts the arguments without narrowing
+    /// any of the caller's still-open inference variables is a fact rather
+    /// than a guess, and outranks an earlier-declared candidate that fits
+    /// only by pinning one down. The whole-number-literal courtesy is off in
+    /// the first round and a second round runs only if nothing matched
+    /// strictly, so a literal never steers selection away from a candidate
+    /// the argument's true type would have chosen. Only a plain name resolves
+    /// through an overload set, and a local binding shadowing the name
+    /// disables it (the local wins, as everywhere). `None` means "not an
+    /// overloaded call" — fall through to normal dispatch.
     fn try_overloaded_call(
         &mut self,
         id: ExprId,

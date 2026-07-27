@@ -523,9 +523,15 @@ pub(crate) fn analysable_source(path: &Path, text: String) -> String {
 /// versions). Wrong types on known keys remain hard errors.
 pub(crate) fn warn_unknown_config_keys(config: &config::Config) {
     for key in &config.unknown_keys {
-        warn(&format!(
-            "ignoring unknown config key `{key}` — check the spelling, or update ry"
-        ));
+        match config::suggested_table(key) {
+            Some(table) => warn(&format!(
+                "ignoring config key `{key}` — it belongs under `[{table}]`, and nothing outside a \
+                 table sets it"
+            )),
+            None => warn(&format!(
+                "ignoring unknown config key `{key}` — check the spelling, or update ry"
+            )),
+        }
     }
 }
 

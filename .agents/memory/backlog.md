@@ -506,6 +506,46 @@ below, ranked by how often a real user hits it.
 - Overload candidates when touched: `is`, `extends`, `grep(value =)`, `cor` (vector vs matrix — needs matrix nominals). `Date`/`POSIXct` arithmetic refuses loudly today — revisit if real code makes it noisy.
 - **A list operation over a RECORD still loses the field types.** `rev`/`unique`/`head`/`tail`/`Filter` now declare a `list[named: T]` candidate ahead of the plain list one, so a name survives and a field read is `T | NULL` instead of a missing-field error — but a fixed-shape input coerces to a name-keyed list on the way in, so the exact field types are gone and the read stays nullable. Only a shape-mirroring return ("the same record") fixes it, and the type language has no way for a stub to say that; `rev` is the case where the claim would be exactly right (it reorders and drops nothing), while `head`/`tail`/`Filter` genuinely may drop a name and are correctly nullable. Same family as the data.frame row-type and matrix-shape designs.
 
+## Open — a package does not recognize its own namespace
+
+Checking a CRAN package's own source reports `unknown package namespace \`withr\`` on every internal
+`withr::foo()` call inside `withr` itself. A package qualifying its own exports is ordinary R and the
+name is knowable from `DESCRIPTION`, so this is a false positive on the most common possible input:
+somebody running `ry check` inside the package they maintain. Found while surveying the CRAN corpus
+for real findings; every package that self-qualifies produces a run of them, which buries whatever
+genuine findings sit alongside.
+
+## Open — two absent stub-grammar features are inflating the overload corpus
+
+A declaration file needs several signatures for `min`, `abs`, `sum`, the `cum*` family and friends
+only because the `.Rtypes` grammar cannot write what they actually are: **a constrained binder**
+(`<T: numeric> fn(x: T) -> T`) and **a shape-mirroring return** ("same shape as the input"). The
+inference engine already has both concepts — a constrained type variable is what `<T, U: numeric>`
+in a hover string is — so this is a surface-syntax gap, not a semantics gap. Closing it collapses a
+large share of the corpus's sets into single signatures, which is worth more than the tidiness
+suggests: every set is a per-call-site search, and every one removed is inference by unification
+instead.
+
+Watch the wording when this is written about. It is easy, and wrong, to say these functions "have no
+principal scheme" — they do; the declaration language cannot spell it. The docs said the wrong thing
+until it was caught by review.
+
+## Open — a misplaced config key was a silent no-op, and the class of bug is not closed
+
+FIXED for the specific case: a key written at the top level that belongs under a table now names the
+table (`ignoring config key `typing` — it belongs under `[check]``) instead of saying only that it is
+unknown. Writing `typing = true` outside `[check]` had loaded clean, checked nothing, and reported
+"no problems" — the same failure mode as an unresolvable namespace disabling unresolved-name
+checking, and the one this project treats as the worst kind: a clean run indistinguishable from a run
+that never happened.
+
+Still open, and the reason this stays filed: **an ignored key is a warning, and a warning can be
+missed.** A config file is small, hand-written and rarely revisited, so the cost of refusing outright
+is low and the cost of proceeding is a project that silently is not checked. Consider making an
+unknown key a hard error when the file is a *local* `ry.toml` while keeping the warning for forward
+compatibility only where it is actually needed. Decide it deliberately; the current forward-compat
+rationale (`config.rs`, `Config::unknown_keys`) is written down and is not obviously wrong.
+
 ## Open — a cyclic scheme fails to converge on a whole CRAN package
 
 The `rlang` abort on a cyclic interface is FIXED (see the ledger), and fixing it uncovered a

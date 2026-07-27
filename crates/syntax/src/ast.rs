@@ -62,16 +62,47 @@ impl Name {
         self.0.first_token()
     }
 
-    /// The referenced name with backticks stripped.
+    /// The referenced name, as R sees it: backticks stripped and escapes
+    /// resolved, so `` `a\`b` `` and any other spelling of the same name
+    /// compare equal for resolution, rename and completion.
     pub fn text(&self) -> Option<String> {
         let token = self.token()?;
         let text = token.text();
-        let stripped = text
-            .strip_prefix('`')
-            .and_then(|t| t.strip_suffix('`'))
-            .unwrap_or(text);
-        Some(stripped.to_owned())
+        let Some(quoted) = text.strip_prefix('`').and_then(|t| t.strip_suffix('`')) else {
+            return Some(text.to_owned());
+        };
+        Some(unescape_name(quoted))
     }
+}
+
+/// Resolves the escapes R allows inside a backtick-quoted name. Only the
+/// character escapes a name can actually carry are translated; anything else
+/// keeps its backslash, which matches R treating an unknown escape as an error
+/// rather than as a silent deletion — dropping it here would make two
+/// different names compare equal.
+fn unescape_name(quoted: &str) -> String {
+    let mut out = String::with_capacity(quoted.len());
+    let mut characters = quoted.chars();
+    while let Some(character) = characters.next() {
+        if character != '\\' {
+            out.push(character);
+            continue;
+        }
+        match characters.next() {
+            Some('n') => out.push('\n'),
+            Some('t') => out.push('\t'),
+            Some('r') => out.push('\r'),
+            // A backslash before a real newline keeps the newline and drops
+            // the backslash, so the name spans the line break.
+            Some(escaped @ ('\\' | '`' | '"' | '\'' | '\n')) => out.push(escaped),
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
 }
 
 impl BinaryExpr {

@@ -740,8 +740,13 @@ Examples:
 
 - `Unknown` means the checker could not infer a more specific type
 - `Unknown` may arise from unsupported constructs, unresolved names, partially supported constructs, or insufficient type information
-- `Unknown` is only compatible with `Any`
-- `Unknown` is not compatible with ordinary concrete types
+- `Unknown` is compatible with every type, in both directions — the same blanket compatibility `Any`
+  has. This is what keeps one unmodelled value from cascading into a run of follow-on errors, and it
+  is also why a gap in the checker's knowledge means checks are *skipped* rather than wrong: a value
+  the checker could not type flows into a `double` parameter without complaint
+- `Unknown` differs from `Any` in intent, not in compatibility: `Any` is a declared "do not check
+  this", while `Unknown` records that the checker *could not tell*. Only `Unknown` is reported by
+  [strict mode](#strict-mode), which is the way to see where the checking stopped
 - `Unknown` is not an explicit escape hatch
 - `Unknown` should remain visible in user-facing output and fixture expectations
 - `Unknown` is used to preserve progress and reduce cascading secondary diagnostics
@@ -1510,8 +1515,12 @@ call site:
 one place this type system departs from Hindley-Milner: a name with several signatures has no single
 most general type, so a call has to be *resolved by search* rather than inferred, which costs both
 the principal-type guarantee and the speed that comes with plain unification. That price is worth
-paying for a fixed, curated corpus describing a standard library nobody designed with types in mind —
-`min` and `abs` have no principal scheme — and it is not worth paying across a whole codebase. So a
+paying for a fixed, curated corpus describing a standard library nobody designed with types in mind,
+and it is not worth paying across a whole codebase. Two caveats on *why* the corpus needs sets, since
+they point at work rather than at a law: a family like `min`/`abs` is really one constrained,
+shape-preserving scheme (`<T: numeric> fn(x: T) -> T`) written out longhand, because the declaration
+grammar cannot yet express a constrained binder or a shape-mirroring return. Closing those two gaps
+would collapse a large share of the corpus's sets into single signatures. So a
 `#:` annotation on your own function declares exactly one signature, and always will; if you want one
 name to accept several shapes, give the parameter a [union type](#union-types) or take the shapes
 apart into separate functions.

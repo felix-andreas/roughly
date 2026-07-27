@@ -1539,7 +1539,10 @@ impl Worker {
             .config
             .unknown_keys
             .iter()
-            .map(|key| format!("`{key}`"))
+            .map(|key| match crate::config::suggested_table(key) {
+                Some(table) => format!("`{key}` (it belongs under `[{table}]`)"),
+                None => format!("`{key}`"),
+            })
             .collect::<Vec<_>>()
             .join(", ");
         // Name the file that was actually loaded: a project may still be on

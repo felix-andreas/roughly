@@ -259,6 +259,48 @@ impl fmt::Display for ConfigParseError {
 
 impl std::error::Error for ConfigParseError {}
 
+/// The table a bare top-level key belongs under, when its name is a key of a
+/// known table. `typing = true` written outside `[check]` is the easy mistake
+/// to make and by far the most dangerous one: the file still loads, so the run
+/// reports nothing and a project that is not being type-checked is
+/// indistinguishable from one that is clean. A warning that only says "unknown
+/// key" leaves the reader looking for a typo they did not make, so it has to
+/// name the placement instead.
+pub fn suggested_table(unknown_key: &str) -> Option<&'static str> {
+    // A dotted path is already inside a table, so it is a misspelling rather
+    // than a misplacement, and the plain wording is the right answer for it.
+    if unknown_key.contains('.') {
+        return None;
+    }
+    TABLE_KEYS
+        .iter()
+        .find(|(_, keys)| keys.contains(&unknown_key))
+        .map(|(table, _)| *table)
+}
+
+/// Which keys each config table accepts. Serde offers no way to enumerate a
+/// struct's field names at run time, so this list is written out; the
+/// `table_keys_match_the_config_structs` test pins every entry to the real
+/// struct so the two cannot drift apart.
+const TABLE_KEYS: [(&str, &[&str]); 3] = [
+    ("format", &["indent-width", "line-ending"]),
+    (
+        "lint",
+        &[
+            "naming-style",
+            "assignment-operator",
+            "boolean-shorthand",
+            "missing-comma",
+            "trailing-comma",
+            "unused-parameter",
+            "unused-import",
+            "shadows-builtin",
+            "shadows-namespace",
+        ],
+    ),
+    ("check", &["unused", "typing", "strict", "exclude"]),
+];
+
 /// Resolves `.` and `..` components lexically (without touching the
 /// filesystem), so an ancestor walk over the result visits only true
 /// ancestors. Lexical resolution can differ from the filesystem view when
@@ -450,6 +492,36 @@ mod tests {
             config.check.typing,
             "the known keys around an unknown one still apply"
         );
+    }
+
+    #[test]
+    fn a_table_key_written_at_the_top_level_names_its_table() {
+        assert_eq!(suggested_table("typing"), Some("check"));
+        assert_eq!(suggested_table("indent-width"), Some("format"));
+        assert_eq!(suggested_table("naming-style"), Some("lint"));
+        // A genuine misspelling has no placement to suggest, and neither does
+        // a key already inside a table.
+        assert_eq!(suggested_table("typng"), None);
+        assert_eq!(suggested_table("check.typing"), None);
+    }
+
+    #[test]
+    fn table_keys_match_the_config_structs() {
+        for (table, keys) in TABLE_KEYS {
+            for key in keys {
+                // The value is deliberately arbitrary: a key the struct has
+                // rejects a wrong type as a hard error, while a key it does
+                // not have is skipped and recorded. Only the second outcome
+                // means this list has drifted.
+                let text = format!("[{table}]\n{key} = 0\n");
+                if let Ok(config) = Config::from_toml_str(&text) {
+                    assert!(
+                        config.unknown_keys.is_empty(),
+                        "`{table}.{key}` is listed in TABLE_KEYS but the struct does not have it"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

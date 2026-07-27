@@ -16,6 +16,13 @@ edition = "2024"
 //!
 //! Usage: `scripts/render-diagnostic-svg.rs <fixture.R> <out.svg>`
 //! The fixture's directory needs a `ry.toml`; the binary must be built first.
+//!
+//! The README's image is `docs/public/diagnostic.svg`, rendered from a file
+//! named `billing.R` holding exactly the snippet the README shows above it,
+//! beside a `ry.toml` containing `[check]` / `typing = true`. Keep the two in
+//! step: the picture is the one thing in that document that cannot be verified
+//! by reading it, so a stale render is invisible until someone notices the
+//! wording no longer matches the tool.
 
 use std::fmt::Write as _;
 use std::process::Command;

@@ -399,6 +399,20 @@ impl Lexer<'_> {
                     );
                     break;
                 }
+                // R reads a backtick-quoted name with the same escape rules as
+                // a string, so a name may contain a literal backtick as `` \` ``
+                // and a literal backslash as `\\`. Treating the escaped backtick
+                // as the terminator would end the name early and turn the rest
+                // of the line into a cascade of parse errors.
+                Some('\\') => {
+                    if self.bump().is_none() {
+                        self.error(
+                            "unterminated backtick name; expected a closing `` ` ``",
+                            start,
+                        );
+                        break;
+                    }
+                }
                 Some('`') => break,
                 Some(_) => {}
             }

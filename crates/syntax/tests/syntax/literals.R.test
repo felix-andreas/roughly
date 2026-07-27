@@ -210,6 +210,32 @@ SOURCE_FILE@0..9
     LITERAL@8..9
       DOUBLE@8..9 "1"
 
+#---- backtick_name_with_escaped_backtick
+`foo}\`` <- 1
+#++++
+SOURCE_FILE@0..13
+  BINARY_EXPR@0..13
+    NAME@0..8
+      IDENT@0..8 "`foo}\\``"
+    WHITESPACE@8..9 " "
+    LESS_MINUS@9..11 "<-"
+    WHITESPACE@11..12 " "
+    LITERAL@12..13
+      DOUBLE@12..13 "1"
+
+#---- backtick_name_with_escaped_backslash
+`a\\b` <- 1
+#++++
+SOURCE_FILE@0..11
+  BINARY_EXPR@0..11
+    NAME@0..6
+      IDENT@0..6 "`a\\\\b`"
+    WHITESPACE@6..7 " "
+    LESS_MINUS@7..9 "<-"
+    WHITESPACE@9..10 " "
+    LITERAL@10..11
+      DOUBLE@10..11 "1"
+
 #---- unicode_name
 Vielfältig <- 1
 #++++

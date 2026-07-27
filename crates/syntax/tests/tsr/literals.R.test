@@ -62,27 +62,14 @@ SOURCE_FILE@0..259
   NAME@69..82
     IDENT@69..82 "`a \"literal\"`"
   NEWLINE@82..83 "\n"
-  NAME@83..102
-    IDENT@83..102 "`another\nliteral \\`"
-  WHITESPACE@102..103 " "
-  ERROR@103..140
-    IDENT@103..106 "foo"
-    IDENT@106..109 "`\n`"
-    IDENT@109..118 "backslash"
-    WHITESPACE@118..119 " "
-    IDENT@119..127 "followed"
-    WHITESPACE@127..128 " "
-    IDENT@128..130 "by"
-    WHITESPACE@130..131 " "
-    IDENT@131..138 "newline"
-    WHITESPACE@138..139 " "
-    BACKSLASH@139..140 "\\"
-  NEWLINE@140..141 "\n"
-  NAME@141..144
-    IDENT@141..144 "`\n`"
-  ERROR@144..147
-    BACKSLASH@144..145 "\\"
-    IDENT@145..147 "``"
+  NAME@83..107
+    IDENT@83..107 "`another\nliteral \\` foo`"
+  NEWLINE@107..108 "\n"
+  NAME@108..142
+    IDENT@108..142 "`backslash followed by newline \\\n`"
+  NEWLINE@142..143 "\n"
+  NAME@143..147
+    IDENT@143..147 "`\\``"
   NEWLINE@147..148 "\n"
   COMMENT@148..166 "# Pipe placeholder"
   NEWLINE@166..167 "\n"
@@ -106,8 +93,6 @@ SOURCE_FILE@0..259
     UNDERSCORE@254..255 "_"
   ERROR@255..259
     IDENT@255..259 "foo_"
-err: 103..106: unexpected identifier after this expression; expected a newline or `;`
-err: 144..145: unexpected `\` after this expression; expected a newline or `;`
 err: 244..247: unexpected identifier after this expression; expected a newline or `;`
 err: 249..250: unexpected `_` after this expression; expected a newline or `;`
 err: 255..259: unexpected identifier after this expression; expected a newline or `;`

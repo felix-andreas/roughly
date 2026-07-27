@@ -90,8 +90,10 @@ It is worth knowing what kind, because that decides how far you can trust it. ry
 **Hindley–Milner** inference, the algorithm behind ML, Haskell and Elm. Two properties matter here:
 
 - It computes a **principal type** — the single most general type consistent with how a value is used.
-  Not a guess, not a heuristic, not "the first thing that fit". Run it twice and you get the same
-  answer; run it on a colleague's machine and they get yours.
+  Not a guess, not a heuristic. Run it twice and you get the same answer; run it on a colleague's
+  machine and they get yours. (Calls into the standard library are the one place a *choice* is made,
+  because a handful of R's builtins are declared with several signatures; the
+  [rules for that](/reference/type-system#overload-sets) are fixed and deterministic too.)
 - It does not silently accept a contradiction. Within the part of your program it can model, if the
   types cannot line up, you hear about it.
 
