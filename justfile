@@ -104,13 +104,13 @@ build-extension $kind *args:
 # RELEASE
 #
 
-publish $version:
+publish $version $notes="":
     #!/usr/bin/env bash
     set -euo pipefail
 
     just bump-version $version
     just release $version
-    just publish-github $version
+    just publish-github $version "$notes"
     just publish-marketplace $version
 
 publish-commit $version="":
@@ -193,7 +193,7 @@ release $version:
     just build-platform-vsix aarch64-apple-darwin darwin-arm64 ry $dir $kind
     just build-platform-vsix x86_64-pc-windows-gnu win32-x64 ry.exe $dir $kind
 
-publish-github $version:
+publish-github $version $notes="":
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -213,7 +213,7 @@ publish-github $version:
     	"release/$version/ry-linux-x64.vsix#VS Code extension (linux-x64)" \
     	"release/$version/ry-darwin-arm64.vsix#VS Code extension (darwin-arm64)" \
     	"release/$version/ry-win32-x64.vsix#VS Code extension (win32-x64)" \
-    	--notes ""
+    	--notes "$notes"
 
 publish-github-update $version:
     gh release upload $version \
