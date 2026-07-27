@@ -1382,6 +1382,14 @@ lexical scoping.
 - a namespace is **known** when stubs declare it: the shipped standard-library packages, plus any
   project stub file — `stubs/dplyr.Rtypes` declares the namespace `dplyr`
   (see [Standard library stubs](/type-checking/stubs))
+- **the project's own package is always known**, whatever the stubs say. Qualifying a name with the
+  package you are editing (`withr::defer()` inside `withr`, named by `DESCRIPTION`'s `Package`
+  field) reads the definition the checker already holds, so the read has that definition's type
+  rather than `Unknown`. This case wins over a stub namespace of the same name, the same way a
+  package binding shadows a stub name. The name itself is **not** validated: a package exports
+  names its sources never bind — a re-export, an S4 generic from `setGeneric`, a dataset under
+  `data/`, a binding installed by `.onLoad` — so a name the definitions do not cover is left alone
+  rather than reported
 - when the stubs declare `name` in `pkg`, the qualified read has the stub's type, exactly like the
   bare name; a name only the namespace's [export manifest](#standard-library-exports) lists
   validates the same way and types `Unknown`

@@ -506,14 +506,30 @@ below, ranked by how often a real user hits it.
 - Overload candidates when touched: `is`, `extends`, `grep(value =)`, `cor` (vector vs matrix — needs matrix nominals). `Date`/`POSIXct` arithmetic refuses loudly today — revisit if real code makes it noisy.
 - **A list operation over a RECORD still loses the field types.** `rev`/`unique`/`head`/`tail`/`Filter` now declare a `list[named: T]` candidate ahead of the plain list one, so a name survives and a field read is `T | NULL` instead of a missing-field error — but a fixed-shape input coerces to a name-keyed list on the way in, so the exact field types are gone and the read stays nullable. Only a shape-mirroring return ("the same record") fixes it, and the type language has no way for a stub to say that; `rev` is the case where the claim would be exactly right (it reorders and drops nothing), while `head`/`tail`/`Filter` genuinely may drop a name and are correctly nullable. Same family as the data.frame row-type and matrix-shape designs.
 
-## Open — a package does not recognize its own namespace
+## Open — a package's own `pkg::name` reads are resolved but not validated
 
-Checking a CRAN package's own source reports `unknown package namespace \`withr\`` on every internal
-`withr::foo()` call inside `withr` itself. A package qualifying its own exports is ordinary R and the
-name is knowable from `DESCRIPTION`, so this is a false positive on the most common possible input:
-somebody running `ry check` inside the package they maintain. Found while surveying the CRAN corpus
-for real findings; every package that self-qualifies produces a run of them, which buries whatever
-genuine findings sit alongside.
+FIXED: the project's own package (from `DESCRIPTION`'s `Package` field) is now a known namespace
+whatever the stubs say, so `withr::defer()` inside `withr` reads the project's own definition and has
+its type instead of `Unknown`, and the `unknown package namespace` false positive is gone. The own
+package also wins over a stub namespace of the same name, matching the rule that a package binding
+shadows a stub name.
+
+Still open: **the name itself is not checked**, so `withr::typoed_name()` reports nothing. Validating
+it against the project's definitions was implemented, measured, and removed — across the CRAN corpus
+every candidate report was a false positive, because a package's export set is not the set of names
+its sources bind:
+
+- a **re-export** — `shiny` has `importFrom(htmltools, validateCssUnit)` beside
+  `export(validateCssUnit)`, so the name is exported with no definition in the package;
+- an **S4 generic** from `setGeneric("raster", ...)` (`raster`), which S4 opacity already covers;
+- a **lazy-loaded dataset** under `data/` — `survival::survexp.us` lives in `data/survexp.rda`;
+- a binding installed by **`.onLoad`** (`cli`'s `symbol`);
+- an **S3 generic re-exported from another package** (`broom`'s `glance`, from `generics`).
+
+Closing this needs the package's real export set, which means reading `NAMESPACE` `export()` *and*
+resolving re-exports, plus a decision about `exportPattern` (a regex over names, so it makes the set
+unknowable and must fall back to silence). Worth doing — a typo in a self-qualified call is
+otherwise invisible — but it is a namespace-model slice, not a one-line check.
 
 ## Open — two absent stub-grammar features are inflating the overload corpus
 

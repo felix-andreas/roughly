@@ -182,6 +182,35 @@ f <- function(d) dplyr::filter(d)
 #++++
 f: <T> fn(d: T) -> T
 
+#---- a_package_qualifying_its_own_name_reads_its_own_definition
+#description Package: withr
+defer <- function(x) x + 1L
+call_it <- function() withr::defer(2L)
+#++++
+defer: <T: numeric> fn(x: T) -> T
+call_it: fn() -> integer
+
+#---- an_own_package_name_with_no_definition_in_view_stays_quiet
+#description Package: withr
+call_it <- function() withr::deferred_run()
+#++++
+call_it: fn() -> Unknown
+
+#---- the_own_package_wins_over_a_stub_namespace_of_the_same_name
+#description Package: stats
+sd <- function(x) "not the real one"
+call_it <- function() stats::sd(1L)
+#++++
+sd: <T> fn(x: T) -> character
+call_it: fn() -> character
+
+#---- a_different_package_is_still_validated
+#description Package: withr
+call_it <- function(d) dplyr::mutate(d, x = 1)
+#++++
+call_it: <T> fn(d: T) -> Unknown
+51..64 warning[unresolved] unknown package namespace `dplyr`.
+
 #==== datatable
 #---- declared_dependency_activates_the_stub
 #description Imports: data.table

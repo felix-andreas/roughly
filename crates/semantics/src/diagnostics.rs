@@ -889,6 +889,18 @@ fn duplicate_type_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> 
 /// namespace, or (for `::` only — `:::` reaches unexported names) a name the
 /// namespace does not declare. No stub corpus means no validation.
 fn namespace_read_message(db: &dyn Db, read: &crate::naming::NamespaceRead) -> Option<String> {
+    // A package qualifying its own names reads definitions the checker already
+    // holds, so the stub corpus has no say — and neither does validation. A
+    // package's export set is not the set of names its sources bind: a
+    // re-export (`importFrom(htmltools, validateCssUnit)` beside
+    // `export(validateCssUnit)`), an S4 generic from `setGeneric`, a lazy-
+    // loaded dataset under `data/`, and a binding installed by `.onLoad` are
+    // all exported without a definition in view. Every candidate report
+    // measured across a CRAN corpus was one of those, so this stays silent
+    // rather than guessing at the difference.
+    if crate::metadata::is_own_package(db, &read.package) {
+        return None;
+    }
     match crate::stubs::namespace_known(db, &read.package)? {
         // A declared dependency without stubs is a real package the corpus
         // simply does not describe — its reads stay quiet, not "unknown".

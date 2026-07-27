@@ -110,6 +110,15 @@ pub fn imports_every_name(db: &dyn Db) -> bool {
         || metadata.attached(db).iter().any(unknowable)
 }
 
+/// Whether `package` is the project's own package, from `DESCRIPTION`'s
+/// `Package` field. A package qualifying its own names (`withr::defer()`
+/// inside `withr`) is ordinary R, and this is the one namespace whose contents
+/// need no stubs: they are the project's own definitions, already in view.
+pub fn is_own_package(db: &dyn Db, package: &str) -> bool {
+    PackageMetadata::try_get(db)
+        .is_some_and(|metadata| metadata.package(db).as_deref() == Some(package))
+}
+
 /// Whether `package` is part of the package's declared universe: a
 /// `DESCRIPTION` dependency or the source of any `NAMESPACE` import.
 pub fn declared_dependency(db: &dyn Db, package: &str) -> bool {

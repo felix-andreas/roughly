@@ -5785,6 +5785,12 @@ fn validated_namespace_name(
     let Some(package) = package else {
         return Some(name);
     };
+    // The project's own package resolves through the global environment, which
+    // already holds its definitions — and wins over a stub namespace of the
+    // same name, exactly as a package binding shadows a stub name.
+    if crate::metadata::is_own_package(db, package) {
+        return Some(name);
+    }
     match crate::stubs::namespace_known(db, package) {
         None => Some(name),
         Some(false) => None,
