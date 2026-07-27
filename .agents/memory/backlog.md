@@ -531,20 +531,49 @@ resolving re-exports, plus a decision about `exportPattern` (a regex over names,
 unknowable and must fall back to silence). Worth doing — a typo in a self-qualified call is
 otherwise invisible — but it is a namespace-model slice, not a one-line check.
 
-## Open — two absent stub-grammar features are inflating the overload corpus
+## Closed — the overload corpus is NOT inflated by missing grammar (investigated; premise was false)
 
-A declaration file needs several signatures for `min`, `abs`, `sum`, the `cum*` family and friends
-only because the `.Rtypes` grammar cannot write what they actually are: **a constrained binder**
-(`<T: numeric> fn(x: T) -> T`) and **a shape-mirroring return** ("same shape as the input"). The
-inference engine already has both concepts — a constrained type variable is what `<T, U: numeric>`
-in a hover string is — so this is a surface-syntax gap, not a semantics gap. Closing it collapses a
-large share of the corpus's sets into single signatures, which is worth more than the tidiness
-suggests: every set is a per-call-site search, and every one removed is inference by unification
-instead.
+This was filed as "two absent stub-grammar features"; both features exist, and collapsing the corpus
+buys one line. Recorded so it is not re-derived.
 
-Watch the wording when this is written about. It is easy, and wrong, to say these functions "have no
-principal scheme" — they do; the declaration language cannot spell it. The docs said the wrong thing
-until it was caught by review.
+**The constrained binder already works**, in `#:` annotations and `.Rtypes` files alike. Measured:
+`zzabs : <T: numeric> fn(x: T) -> T` in a project stub types `zzabs(1L)` as `integer`, `zzabs(2.5)`
+as `double`, `zzabs(c(1L, 2L))` as `integer[]`, `zzabs(c(1.5, 2.5))` as `double[]`, and rejects
+`zzabs("no")`. Vectors included — so the "shape-mirroring return" is not a separate missing feature
+either; it falls out of the binder.
+
+**The extra candidates are not redundancy, they carry facts a binder cannot state.** Three of them:
+
+- **`logical` promotes to `integer`, it does not preserve.** R gives `abs(TRUE)` → `integer`, so a
+  type-preserving binder would be wrong; the concrete `fn(x: integer) -> integer` candidate is what
+  catches logical, because a concrete `integer` parameter accepts `logical` by coercion while a
+  `numeric`-constrained *variable* refuses it. That asymmetry is deliberate and correct here.
+- Sets whose int and logical arms are already unioned into one line (`cumsum`, `cummin`, `cummax`)
+  gain nothing: the binder replaces a line that already covers two cases.
+- `min`/`max`/`range`/`sort` carry a `character` candidate, which no numeric binder subsumes.
+
+A trial collapse of `abs` from five candidates to four was behaviour-identical across seven probes
+(scalar/vector × integer/double, logical, logical vector, and the wrapper) — and `abs` is the only
+set with that scalar-and-vector-times-int-and-double shape. One line, in one function, is not worth a
+corpus-wide edit, so it was reverted.
+
+Wording trap, still worth keeping: never say these functions "have no principal scheme" — they do,
+and now the declaration language *can* spell it. The reason for the sets is R's coercion table, not
+the grammar.
+
+## Open — a stdlib wrapper loses all type information (found while investigating the above)
+
+`function(x) abs(x)` infers `fn(x: T) -> Any`, and the same holds for `sum`, `cumsum` and every other
+set: wrapping a standard-library numeric function in one of your own throws the types away. The cause
+is the fact-beats-guess rule — the `Any` fallback fits while binding nothing, so it beats every
+candidate that would narrow `x`.
+
+The rule is right in general and the fallback is load-bearing: `declares_arithmetic` lets a nominal
+with an `Arith.`/`+.` method satisfy the numeric constraint, so forcing `x` numeric would reject a
+user's S3 class that legitimately defines `abs.myclass`. Any fix has to keep that working, which is
+why this is a design slice and not a tweak — the candidate shape is "if every non-fallback candidate
+imposes the same constraint, imposing it is a fact rather than a guess", which needs a decision
+record and adversarial review before it is written.
 
 ## Open — a misplaced config key was a silent no-op, and the class of bug is not closed
 
