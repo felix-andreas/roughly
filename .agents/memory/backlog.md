@@ -159,6 +159,31 @@ nominal distinctness, and no cascades outside the `@param` case. The gap is not 
 **diagnostics render the artifact unification left behind rather than the fact that failed**, and that
 the nominal story protects construction but nothing after it.
 
+## Open — diagnostic wording is not styled consistently
+
+Six findings shown side by side in the README read as though five people wrote them: three
+`type-mismatch` messages are lowercase sentence fragments with em dashes, `Unexpected comma after last
+argument` and `Use TRUE, not T, for Boolean values` are capitalised (the second imperative), and
+``` `tmp` is assigned but never used. ``` is the only one carrying a full stop. Caught by a README
+reviewer who noticed the page claims a finding "says the same thing" everywhere while the sample
+visibly disagrees with itself.
+
+Pick one style, write it into the diagnostics reference as a rule, and sweep. Lowercase fragment with
+no trailing period is the most common shape already and matches the surrounding tools' conventions;
+the lint messages are the outliers.
+
+## Open — release-artifact versions have drifted apart
+
+`Cargo.toml` is `0.3.0-alpha`, `editors/code/package.json` is `0.3.0`, `editors/zed/extension.toml` is
+`0.2.4-alpha`. The VS Code number may be deliberate — the Marketplace rejects a prerelease suffix — but
+Zed's is simply stale, and nothing keeps the three in step. Decide whether one source of truth is
+possible (a release script that stamps all three) or record why not.
+
+Related and user-owned: the extension is published as `felix-andreas.roughly`, and
+`felix-andreas.ry` is a 404, so every README and docs link that the rename swept to the new identifier
+points at nothing until it is republished. The README now links the working identifier and says why.
+Verified: `felix-andreas.roughly` returns 200, `felix-andreas.ry` returns 404.
+
 ## Open — test-user round 2 findings
 
 Five simulated users, each on a distinct project of their own writing, learning the tool from the
