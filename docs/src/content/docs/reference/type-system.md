@@ -380,8 +380,15 @@ Top-level `@type` and `@alias` declarations share one project-global namespace.
 
 - type references may resolve to declarations in the same file or in another file
 - forward references are allowed
-- duplicate type names are errors regardless of file or declaration kind
+- duplicate type names are errors regardless of declaration kind — `@type` twice, `@alias` twice, or
+  one of each all conflict
 - every declaration participating in a duplicate-name conflict is erroneous
+- **the namespace a duplicate is judged against is the one the declaration lives in.** Package files
+  share the project-global namespace, so two package files declaring one name conflict. A script's
+  declarations are its own file only — a name declared in one script is invisible to the next, so two
+  scripts may each declare `Thing` without conflict, while declaring it twice *inside* one script is
+  the duplicate. Without this, the later declaration would silently win and every diagnostic it
+  produced would be unfalsifiable from the visible source
 - type parameters are local binders and shadow project-global type names
 - a type reference that resolves to nothing — not a built-in type, an in-scope binder, a project
   `@type`/`@alias` declaration, or a stub-declared class — is an error at the referencing token

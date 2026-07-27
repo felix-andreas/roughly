@@ -79,12 +79,25 @@ mistaken for a mere precision gap when read from one direction only.
    statements would mean threading flow state between items, which `item_check`'s per-item memoization
    is built to avoid — not worth it for this, but that is the reason, not an oversight.
 
-4. **A duplicate type name is unchecked in script projects.** Verified: two `@alias Thing` declarations
-   in a `ry.toml` project produce no duplicate error; the second silently wins, so a `Thing` declared
-   `double` on line 1 yields ``expected `character`, found `double` `` — unfalsifiable from the visible
-   source. The same input **in a package reports it properly**, so the check exists and does not run for
-   the other project kind, contradicting `diagnostic-codes.md` ("anywhere in the project") and
-   `ry check --help` ("the directory holding `ry.toml` or `DESCRIPTION`").
+4. **FIXED, but not as reported — the report's premise was half wrong.** `duplicate_type_diagnostics`
+   returned early for any non-package file. The report read that as "the check does not run for script
+   projects", implying script declarations should conflict across files like a package's. They should
+   not: measured, a script's type declarations reach **only their own file** — an `@alias Shared` in
+   `one.R` is not visible from `two.R`, which reports ``I do not know the type `Shared` ``. So two
+   scripts may each declare `Thing`, and reporting that as a conflict would have been a new false
+   positive.
+
+   The real gap was narrower: a name declared twice **inside one script file**, where the namespace
+   genuinely is shared. That went unreported, the later declaration silently won, and the mismatch it
+   produced was unfalsifiable — a `Thing` declared `double` above and `character` below yields
+   ``expected `character`, found `double` `` with nothing in view to explain it. Both declarations are
+   now reported, each pointing at the other, with wording that names the namespace it is judged against.
+
+   Packages already handled the within-file case (the project map counts one file twice), and that path
+   is untouched. Three script fixtures plus a CLI test for the cross-file no-conflict half, which the
+   fixture suites cannot express because a case is one file. The reference said duplicates are errors
+   "regardless of file" while also saying non-package files do not join the project namespace; it now
+   states which namespace a duplicate is judged against.
 
 5. **`= NULL` is exempt from the default-value check.** `#: fn([title]: character)` with
    `title = NULL` passes, while `title = 42L` is caught — and `NULL` then provably reaches a

@@ -1194,3 +1194,31 @@ fn masked_stub_verbs_mask_rest_absorbed_arguments() {
         );
     }
 }
+
+#[test]
+fn a_type_name_two_scripts_both_declare_is_not_a_duplicate() {
+    // A duplicate is judged against the namespace the declaration lives in. A
+    // script's type declarations reach only its own file — a name declared in
+    // one script is invisible to the next — so two scripts may each declare
+    // `Thing`. Only a repeat inside one file conflicts, which the fixture
+    // suites cover; this guards the cross-file half, which they cannot express
+    // because a fixture case is one file.
+    let directory = project(&[
+        ("ry.toml", "[check]\ntyping = true\n"),
+        (
+            "one.R",
+            "#: @alias Thing {double}\n\nuse_a <- 1.0\nprint(use_a)\n",
+        ),
+        (
+            "two.R",
+            "#: @alias Thing {character}\n\nuse_b <- \"x\"\nprint(use_b)\n",
+        ),
+    ]);
+    let output = ry(directory.path(), &["check", "."]);
+    assert!(
+        !stderr(&output).contains("declared more than once"),
+        "two scripts each declaring one name must not conflict: {}",
+        stderr(&output)
+    );
+    assert_eq!(exit_code(&output), 0, "{}", stderr(&output));
+}

@@ -819,16 +819,17 @@ fn duplicate_type_map(
     sites
 }
 
-/// Errors for a project-global type name declared more than once: `@type` and
-/// `@alias` share one project-global namespace and every declaration
-/// participating in a duplicate-name conflict is erroneous (see the typing
-/// reference). Script declarations shadow the project namespace instead of
-/// conflicting with it, so only package files participate. Occurrence order
-/// is project order, then declaration order within a file; each site points
-/// at its nearest neighbouring declaration.
+/// Errors for a type name declared more than once: `@type` and `@alias` share
+/// one namespace and every declaration participating in a duplicate-name
+/// conflict is erroneous (see the typing reference). A duplicate is judged
+/// against the namespace the declaration lives in, which differs by document
+/// kind — package files share the project-global one, a script's declarations
+/// are its own file only — so the two cases are separate walks. Occurrence
+/// order is project order, then declaration order within a file; each site
+/// points at its nearest neighbouring declaration.
 fn duplicate_type_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
     if *file.kind(db) != DocumentKind::Package {
-        return Vec::new();
+        return script_duplicate_type_diagnostics(db, file);
     }
     let Some(files) = crate::ProjectFiles::try_get(db) else {
         return Vec::new();
@@ -881,6 +882,43 @@ fn duplicate_type_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> 
                 }],
             });
         }
+    }
+    diagnostics
+}
+
+/// Duplicate type names inside one script. A script's type declarations reach
+/// only its own file — the next script cannot see them — so two scripts may
+/// each declare a name without conflicting, and the duplicate to report is a
+/// repeat *within* the file. Left unreported, the later declaration silently
+/// won and every diagnostic it produced was unfalsifiable from the visible
+/// source: a name declared `double` above and `character` below yields
+/// ``expected `character`, found `double` `` with nothing to explain it.
+fn script_duplicate_type_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
+    let sites = type_declaration_sites(db, file);
+    let mut diagnostics = Vec::new();
+    for (index, (name, range)) in sites.iter().enumerate() {
+        let Some((_, neighbour_range)) = sites
+            .iter()
+            .enumerate()
+            .filter(|(other, (other_name, _))| *other != index && other_name == name)
+            .map(|(other, (_, other_range))| (other, *other_range))
+            .min_by_key(|(other, _)| index.abs_diff(*other))
+        else {
+            continue;
+        };
+        diagnostics.push(Diagnostic {
+            range: *range,
+            severity: Severity::Error,
+            code: "annotation",
+            message: format!(
+                "the type name `{name}` is declared more than once — `@type` and `@alias` declarations share one namespace, which for a script is this file."
+            ),
+            related: vec![RelatedLocation {
+                file,
+                range: neighbour_range,
+                message: "another declaration of this name is here.",
+            }],
+        });
     }
     diagnostics
 }

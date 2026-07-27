@@ -361,3 +361,42 @@ maybe <- function() NULL
 want_chr: fn(s: character) -> character
 maybe: fn() -> character | NULL
 162..166 warning[unused] `kept` is assigned but never used.
+
+#==== duplicate_type_names
+#---- a_name_declared_twice_in_one_script_is_a_duplicate
+# A script's type declarations reach only its own file, so the repeat inside the
+# file is the conflict. Unreported, the later declaration silently won and the
+# mismatch it produced could not be explained from the visible source.
+#: @alias Thing {double}
+
+#: @alias Thing {character}
+
+#: fn(t: Thing) -> character
+use_it <- function(t) t
+#++++
+use_it: fn(t: Thing) -> character
+234..255 error[annotation] the type name `Thing` is declared more than once — `@type` and `@alias` declarations share one namespace, which for a script is this file.
+260..284 error[annotation] the type name `Thing` is declared more than once — `@type` and `@alias` declarations share one namespace, which for a script is this file.
+315..321 warning[unused] `use_it` is assigned but never used.
+
+#---- a_type_and_an_alias_of_one_name_conflict_too
+#: @type Thing {double}
+
+#: @alias Thing {character}
+
+keep <- 1.0
+#++++
+keep: double
+3..23 error[annotation] the type name `Thing` is declared more than once — `@type` and `@alias` declarations share one namespace, which for a script is this file.
+28..52 error[annotation] the type name `Thing` is declared more than once — `@type` and `@alias` declarations share one namespace, which for a script is this file.
+54..58 warning[unused] `keep` is assigned but never used.
+
+#---- distinct_names_in_one_script_are_fine
+#: @alias First {double}
+
+#: @alias Second {character}
+
+keep <- 1.0
+#++++
+keep: double
+56..60 warning[unused] `keep` is assigned but never used.

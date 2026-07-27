@@ -116,7 +116,7 @@ A statement that fails to parse as R suppresses every name-resolution and typing
 | `annotation` | error | yes | A malformed block: `@forall` after `@param`, `@param` after `@return`, more than one `@return`, a duplicate type-parameter name, `@new` with no nominal, or an unknown constraint (only `numeric` and `atomic` exist) |
 | `annotation` | error | yes | A dangling `#:` — no expression on the next line, a blank line in between, or no type expression at all |
 | `annotation` | error | yes | Type-argument arity: arguments applied to a non-generic, the wrong number of them, or a bare reference to a generic that needs them |
-| `annotation` | error | yes | A `@type`/`@alias` block that is not at file top level; `@new` naming an `@alias` rather than a `@type`; the same type name declared twice anywhere in the project (`@type` and `@alias` share one project-wide namespace) |
+| `annotation` | error | yes | A `@type`/`@alias` block that is not at file top level; `@new` naming an `@alias` rather than a `@type`; the same type name declared twice in one namespace — across package files, which share a project-wide one, or twice inside one script, whose declarations reach only their own file (`@type` and `@alias` share the namespace either way) |
 | `annotation` | error | yes | An unrecognized `# typing:` directive value |
 | `type-mismatch` | error | no | An argument, or a returned value, whose type does not match the declared one |
 | `type-mismatch` | error | no | Calling something that is not a function, or a callee that may be `NULL` |
