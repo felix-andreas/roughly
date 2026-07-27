@@ -5481,6 +5481,19 @@ impl<'db> Checker<'db, '_> {
         self.join_writes_reporting(&writes);
     }
 
+    /// One slot entry as a monotype, for joining paths that disagree about
+    /// what the slot holds. A scheme instantiates: its quantified variables
+    /// become fresh ones, which the export edge erases like any other residual.
+    fn entry_monotype(&mut self, entry: EnvEntry<'db>) -> Ty<'db> {
+        match entry {
+            EnvEntry::Mono(ty) | EnvEntry::MissingFormal(ty) => ty,
+            EnvEntry::Scheme(index) => {
+                let scheme = self.scheme_arena[index as usize].clone();
+                self.instantiate(&scheme)
+            }
+        }
+    }
+
     /// Like `join_writes`, reporting the slots whose entries actually changed
     /// (the loop fixed point's stability signal).
     fn join_writes_reporting(
@@ -5502,8 +5515,34 @@ impl<'db> Checker<'db, '_> {
                     Some(EnvEntry::Mono(self.join_types(a, b)))
                 }
                 (None, Some(entry)) => Some(entry),
-                (_, entry @ Some(EnvEntry::Scheme(_))) => entry,
-                (Some(_), Some(entry)) => Some(entry),
+                // Identical entries on both paths: nothing joins, and keeping
+                // the entry as-is preserves a function slot's polymorphism.
+                (Some(a), Some(b)) if a == b => Some(a),
+                // A function slot conditionally rewritten. The scheme has to
+                // collapse to a monotype union of what each path holds: a slot
+                // that may hold either of two different functions is not
+                // polymorphic, and its honest type is the union. Taking one
+                // side — which this did in both directions, a branch scheme
+                // replacing whatever preceded it and a monotype replacing a
+                // scheme — invented a type belonging to neither path, so the
+                // slot claimed a contract the other path does not satisfy and
+                // reads answered from it in both directions.
+                (Some(a), Some(b)) => {
+                    // Union rather than `join_types`, which unifies first and
+                    // only unions when unification fails. Two instantiated
+                    // schemes are always unifiable through their fresh
+                    // variables — `fn(x: T) -> T` unifies with
+                    // `fn(x: U) -> character` by binding `T := character` — and
+                    // the merged signature describes neither path while linking
+                    // variables that instantiation made independent precisely
+                    // so they would stay separate.
+                    let (a, b) = (self.entry_monotype(a), self.entry_monotype(b));
+                    let (a, b) = (
+                        self.table.resolve(self.db, a),
+                        self.table.resolve(self.db, b),
+                    );
+                    Some(EnvEntry::Mono(union_of(self.db, [a, b])))
+                }
                 (_, None) => None,
             };
             if let Some(entry) = joined

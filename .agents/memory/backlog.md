@@ -19,11 +19,14 @@ perfectly while blaming the wrong expression counts as a failure here.
 The four most serious claims were **re-verified independently** before filing; every one held, and two
 turned out worse than reported.
 
-### A. The checker gives a WRONG answer, not a skipped one — two confirmed cases (one fixed)
+### A. The checker gives a WRONG answer, not a skipped one — two confirmed cases (both fixed)
 
 `limitations.md` sells the whole trust story on one sentence: *"a gap means checks are **skipped**, not
 that wrong answers are produced."* Both of these broke it, and both were silent under `strict = true`.
-The first is fixed; **the second is now the highest-value open item in the round.**
+Both are now fixed. Shared lesson worth keeping: each one produced a type belonging to *neither* of the
+program's possible states — a stale field type, and a merged signature — and in both cases that single
+wrong type generated a false positive and a false negative simultaneously, which is why either could be
+mistaken for a mere precision gap when read from one direction only.
 
 1. **FIXED — a field write through a nominal value was discarded, and the stale belief was used both
    ways.** `replacement_written_type` handled `Record` and empty `Tuple` and let everything else fall
@@ -36,16 +39,26 @@ The first is fixed; **the second is now the highest-value open item in the round
    (R only warns and coerces for `x$f <- v` on an atomic, so there is nothing to refuse). Structural
    records still retype, which is the contrast the report drew. Reference updated, seven fixtures.
 
-2. **A function-valued `if` without `else` drops the pre-branch arm — a soundness bug.** Verified
-   against real R:
-   ```r
-   pick <- function(shout) { fmt <- function(x) x; if (shout) fmt <- function(x) paste0(x, "!"); fmt }
-   plain <- pick(FALSE); n <- plain(1L) + 1L      # R prints 2
-   ```
-   ry reports ``expected a numeric value, found `character` `` — correct code rejected, and the message
-   is factually wrong about the value. The contrast is exact and points at the fix: the identical shape
-   over a *non-function* value correctly yields `integer | character`, so the join machinery exists and
-   closures do not use it. The exported type is wrong in the unsound direction too.
+2. **FIXED — a branch join involving a function slot invented a type belonging to neither path.**
+   `join_writes_reporting` let a branch's scheme replace whatever preceded it, and a monotype replace a
+   scheme, so a conditionally reassigned function kept **one** arm. `pick` above exported
+   `fn(shout: logical) -> fn(x: T) -> character` — the parameter from the identity branch, the return
+   from the `paste0` branch, a signature neither function has. Both directions followed: a
+   character-expecting call on `pick(FALSE)(1L)` was **accepted** though R gives `integer`, and numeric
+   use was rejected with ``found `character` ``, a claim about the value that was simply untrue.
+
+   The join now unions the two entries' monotypes, and unions rather than unifying: `join_types` tries
+   unification first, and two *instantiated* schemes always unify through their fresh variables
+   (`fn(x: T) -> T` with `fn(x: U) -> character` by binding `T := character`), which is exactly how the
+   fabricated signature arose. `pick` is now
+   `<T, U> fn(shout: logical) -> fn(x: T) -> T | fn(x: U) -> character`, calling it returns
+   `integer | character`, and a single reaching write still keeps let-polymorphism. The reference
+   already specified this join correctly — the implementation had simply never matched it.
+
+   **The original report's framing was wrong and is corrected here:** this was not "correct code
+   rejected". R fails on the other path (`pick(TRUE)(1L) + 1L` is `non-numeric argument to binary
+   operator`), so refusing the repro is right; what was broken was the fabricated type and the
+   inaccurate message. The repro still reports, now as ``found `integer | character` ``.
 
 ### B. False positives on the first thing a newcomer writes
 

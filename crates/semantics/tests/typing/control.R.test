@@ -76,6 +76,66 @@ f <- function(n) if (n %% 2L ) 2L
 f: Unknown
 21..28 error[type-mismatch] expected a numeric value (`integer` or `double`), found `logical`
 
+#---- a_conditionally_reassigned_function_unions_both_signatures
+# Both paths write a function, so the slot cannot stay polymorphic: its type is
+# the union of the two signatures. Taking either side alone would claim a
+# contract the other path does not satisfy.
+pick <- function(shout) {
+  fmt <- function(x) x
+  if (shout) fmt <- function(x) paste0(x, "!")
+  fmt
+}
+#++++
+pick: <T, U> fn(shout: logical) -> fn(x: T) -> T | fn(x: U) -> character
+
+#---- a_function_conditionally_replaced_by_a_non_function_unions_too
+reverse <- function(flag) {
+  f <- function(x) x
+  if (flag) f <- 42L
+  f
+}
+#++++
+reverse: <T> fn(flag: logical) -> fn(x: T) -> T | integer
+
+#---- calling_a_conditionally_reassigned_function_unions_the_returns
+pick <- function(shout) {
+  fmt <- function(x) x
+  if (shout) fmt <- function(x) paste0(x, "!")
+  fmt
+}
+apply_it <- function(shout) pick(shout)(1L)
+#++++
+pick: <T, U> fn(shout: logical) -> fn(x: T) -> T | fn(x: U) -> character
+apply_it: fn(shout: logical) -> integer | character
+
+#---- a_union_of_signatures_is_not_a_character
+# The soundness half: the value may be the identity, so a character-expecting
+# call must be refused. This was accepted while the slot claimed only the
+# second branch's signature.
+#: fn(s: character) -> character
+want_chr <- function(s) s
+
+pick <- function(shout) {
+  fmt <- function(x) x
+  if (shout) fmt <- function(x) paste0(x, "!")
+  fmt
+}
+unsound <- function() want_chr(pick(FALSE)(1L))
+#++++
+want_chr: fn(s: character) -> character
+pick: <T, U> fn(shout: logical) -> fn(x: T) -> T | fn(x: U) -> character
+unsound: Unknown
+376..391 error[type-mismatch] expected `character`, found `integer | character`
+
+#---- an_unconditional_function_binding_stays_polymorphic
+# The contrast: one reaching write keeps let-polymorphism.
+plain <- function() {
+  fmt <- function(x) x
+  fmt
+}
+#++++
+plain: <T> fn() -> fn(x: T) -> T
+
 #==== returns
 #---- early_return_unions
 f <- function(c) {

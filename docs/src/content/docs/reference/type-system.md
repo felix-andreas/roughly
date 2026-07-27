@@ -302,6 +302,12 @@ Joins and generalization:
 - when writes merge at a join, the variable holds the join of the written types as a **monotype**
   (a scheme-producing write contributes its instantiated body); conditional reassignment therefore
   monomorphizes
+- a join involving an instantiated scheme **unions** rather than unifying, even where the two sides
+  would unify. Instantiation gives each path independent variables, so
+  `fn(x: T) -> T` and `fn(x: U) -> character` unify only by binding `T := character` — a signature
+  that belongs to neither path and links variables that were made separate on purpose. Two
+  conditionally-assigned functions therefore read as a union of both signatures, and a call on that
+  union returns the union of their return types
 
 Definite assignment:
 
