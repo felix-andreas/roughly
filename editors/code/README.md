@@ -79,5 +79,5 @@ You can customize the ry extension in VS Code through the following settings:
 
 ## Links
 
-* [📦 Source Code](https://github.com/felix-andreas/roughly)
+* [📦 Source Code](https://github.com/felix-andreas/ry)
 * [📚 Documentation](https://ry-lang.org/)

@@ -8,7 +8,7 @@ Most people are done in one click — see the install section of
 
 ## VS Code
 
-The [ry extension](https://marketplace.visualstudio.com/items?itemName=felix-andreas.ry)
+The [ry extension](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly)
 bundles the binary for **Linux x86_64, macOS aarch64, and Windows x86_64**.
 
 On any other architecture the extension installs but has no binary to run. Install the CLI separately
@@ -34,12 +34,12 @@ Not in Zed's extension registry yet. Until it is, install it from the repository
 
 Zed has no built-in R support, so install the [R extension](https://zed.dev/extensions/r) first. Full
 instructions, including how the extension finds the binary, are in
-[`editors/zed`](https://github.com/felix-andreas/roughly/tree/main/editors/zed).
+[`editors/zed`](https://github.com/felix-andreas/ry/tree/main/editors/zed).
 
 ## Command line
 
 **Prebuilt binary.** Download from
-[Releases](https://github.com/felix-andreas/roughly/releases). Assets are named by Rust target triple
+[Releases](https://github.com/felix-andreas/ry/releases). Assets are named by Rust target triple
 and each archive holds a single `ry` binary:
 
 | Platform | Asset |
@@ -49,7 +49,7 @@ and each archive holds a single `ry` binary:
 | Windows x86_64 | `ry-x86_64-pc-windows-gnu.zip` |
 
 ```bash
-curl -sSL https://github.com/felix-andreas/roughly/releases/download/0.3.0-alpha/ry-x86_64-unknown-linux-gnu.tar.gz | tar xz
+curl -sSL https://github.com/felix-andreas/ry/releases/download/0.3.0-alpha/ry-x86_64-unknown-linux-gnu.tar.gz | tar xz
 sudo mv ry /usr/local/bin/
 ```
 
@@ -59,7 +59,7 @@ to an older stable tag rather than the newest build.
 **From source**, if you have a [Rust toolchain](https://www.rust-lang.org/tools/install):
 
 ```bash
-cargo install --git https://github.com/felix-andreas/roughly ry-lang
+cargo install --git https://github.com/felix-andreas/ry ry-lang
 ```
 
 The package is `ry-lang` because the name `ry` was already taken on crates.io; the binary it
