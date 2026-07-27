@@ -3,16 +3,16 @@ title: Installation
 description: Every way to install ry, including the cases the quick path does not cover
 ---
 
-Most people are done in one click — see the install section of
-[getting started](/getting-started#install). This page is for everything else.
+The common paths are on the install section of
+[getting started](/getting-started#install). This page covers the remaining cases.
 
 ## VS Code
 
 The [ry extension](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly)
 bundles the binary for **Linux x86_64, macOS aarch64, and Windows x86_64**.
 
-On any other architecture the extension installs but has no binary to run. Install the CLI separately
-and point the extension at it:
+On any other architecture the extension installs but has no binary to run. Install the CLI
+separately and point the extension at it:
 
 ```json
 // settings.json
@@ -53,8 +53,8 @@ curl -sSL https://github.com/felix-andreas/ry/releases/download/0.3.0-alpha/ry-x
 sudo mv ry /usr/local/bin/
 ```
 
-Name the tag explicitly. Every release so far is marked a pre-release, so `releases/latest/` resolves
-to an older stable tag rather than the newest build.
+Name the tag explicitly. Every release so far is marked a pre-release, so `releases/latest/`
+resolves to an older stable tag rather than the newest build.
 
 **From source**, if you have a [Rust toolchain](https://www.rust-lang.org/tools/install):
 
@@ -67,7 +67,8 @@ installs is `ry`.
 
 This is also the route for architectures without a prebuilt binary.
 
-**Planned:** a one-line installer, so neither a manual download nor a Rust toolchain is needed. No date.
+**Planned:** a one-line installer, so neither a manual download nor a Rust toolchain is needed. It
+is not scheduled.
 
 ## RStudio
 

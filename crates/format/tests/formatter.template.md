@@ -4,7 +4,7 @@ description: Every rule the formatter applies, with a before-and-after for each
 ---
 <!-- R CODE IN THIS FILE IS FORMATTED AND SAVED TO docs/src/content/docs/reference/formatting-rules.md -->
 
-ry includes a non-invasive R code formatter that emphasizes readability while respecting the existing structure of your code.
+ry includes a non-invasive R code formatter. It normalizes spacing, indentation and bracing, and preserves the structure you wrote.
 
 ## Usage
 
@@ -17,22 +17,22 @@ ry fmt --check   # List files that would be reformatted, without writing
 ry fmt --diff    # Show a diff of formatting changes without applying them
 ```
 
-`--check` and `--diff` exit 1 when any file would change, so they slot straight into CI. Errors
+`--check` and `--diff` exit 1 when any file would change, which is what a CI job gates on. Errors
 (for example a file that cannot be parsed) exit 2 — see the full
 [exit-code table](/reference/cli#exit-codes).
 
 ## Philosophy
 
-ry's non-invasive approach means it respects your existing line breaks and won’t arbitrarily split expressions you’ve chosen to keep on one line. The formatter is guided by these principles:
+The formatter preserves existing line breaks and does not split expressions that are written on one line. Four principles follow from that:
 
-* **Single-line expressions remain single-line:** The formatter only adds line breaks if the expression is already multi-line, and will never break single-line expressions into multiple lines (with [one exception](#loops)).
-* **Flexible style preservation:** Both compact ("hugged") and expanded forms for nested expressions are supported, so your preferred style is respected (see [hugging behavior](#hugging-behavior)).
-* **Automatic braces only when needed:** Braces are added automatically only where they prevent subtle bugs (see [auto-bracing](#auto-bracing)).
-* **Minimal configuration:** The formatter works out of the box with sensible defaults, so you can use it immediately without extra setup (see [configuration](/reference/configuration)).
+* **Single-line expressions remain single-line:** The formatter adds line breaks only where the expression is already multi-line, and never breaks a single-line expression into several (with [one exception](#loops)).
+* **Both nesting styles are preserved:** Compact ("hugged") and expanded forms for nested expressions are equally valid, and neither is rewritten into the other (see [hugging behavior](#hugging-behavior)).
+* **Braces are added only where they prevent a bug:** Auto-bracing applies where omitting braces changes what a later edit means (see [auto-bracing](#auto-bracing)).
+* **Two configuration keys:** Indent width and line endings, both documented under [configuration](/reference/configuration). There are no style options, because a reflowing formatter would rewrite line breaks the author chose.
 
 ## Formatting Rules
 
-Below is a comprehensive list of rules describing the behavior of the formatter for different kinds of expressions, including edge cases where special handling is applied.
+The rules below describe the formatter's behavior for each kind of expression, including the edge cases that receive special handling.
 
 ### Binary Operators
 
@@ -177,7 +177,7 @@ if (
 
 Loops are the only expressions that are **not allowed** on a single line.
 
-Because `for`, `while`, and `repeat` loops are used solely for their side effects and do not return meaningful values, the formatter always requires these loops to be written across multiple lines with explicit braces (see [auto-bracing](#auto-bracing)). This ensures that side-effecting code is visually distinct from pure expressions.
+`for`, `while`, and `repeat` loops are evaluated for their side effects and return no meaningful value, so the formatter writes them across multiple lines with explicit braces (see [auto-bracing](#auto-bracing)). This keeps side-effecting code visually distinct from expressions that produce a value.
 
 **For loops** always enforce braced blocks for the body, ensuring consistency:
 
@@ -200,7 +200,7 @@ while(condition) action()
 repeat action()
 ```
 
-**Multiline for loop headers:** The formatter allows both of the following styles for multiline `for` loop headers, preserving your preferred structure:
+**Multiline for loop headers:** Both of the following styles for multiline `for` loop headers are preserved:
 
 ```r
 # for_loops_multline_head: format
@@ -232,7 +232,7 @@ call(
 )
 ```
 
-**Nested function calls** can use either a hugged style—where the inner call starts right after the outer call's parenthesis—or an expanded style. Both are preserved by the formatter, letting you choose the most readable form for your code.
+**Nested function calls** can use either a hugged style — where the inner call starts directly after the outer call's parenthesis — or an expanded style. The formatter preserves both.
 
 ```r
 # hugging_nested_function_calls : format
@@ -259,7 +259,7 @@ call(a = x, b = y, c = inner(
 ))
 ```
 
-This behavior is particularly useful for testing frameworks and S4 method definitions:
+This applies to testing frameworks and S4 method definitions:
 
 ```r
 # test_that_and_s4_example: format
@@ -318,7 +318,7 @@ lapply(data, \(x) {
 
 ### Switch Statements
 
-Switch statements are formatted like normal function calls. For fallthrough cases (e.g., `case = ,`), an extra space is added after the `=` to clearly indicate the fallthrough.
+Switch statements are formatted like ordinary function calls. For fallthrough cases (`case = ,`), an extra space is added after the `=` to mark the fallthrough.
 
 ```r
 # switch_statements : format
@@ -353,7 +353,7 @@ pkg :: process
 pkg ::: filter
 ```
 
-When chaining extract or namespace operators across multiple lines, the formatter indents each subsequent line to make the chain visually distinct and easy to follow:
+When an extract or namespace chain spans several lines, each subsequent line is indented one step:
 
 ```r
 # extract_operator_chained : compare
@@ -364,7 +364,7 @@ call(x, y)
 
 ### String Literals
 
-String literals receive intelligent quote normalization. The formatter prefers double quotes (`"`) unless the string contains unescaped double quotes:
+String literals are normalized to double quotes (`"`), unless the string contains unescaped double quotes:
 
 ```r
 # string_literals : compare
@@ -552,11 +552,11 @@ You can also skip formatting for an entire file by placing `# fmt: skip-file` at
 
 ## Rationale
 
-This section explains the key design decisions that guided the formatter's implementation.
+This section records the design decisions behind the rules above.
 
 ### Auto-Bracing
 
-**Accidental bugs:** It's easy to accidentally introduce subtle bugs when omitting braces in loops, function definitions, or `if` expressions. For example, if you later add a line after an unbraced `if`, only the first line is controlled by the condition:
+**Accidental bugs:** Omitting braces in loops, function definitions, or `if` expressions makes a later edit change what the code means. Adding a line after an unbraced `if` leaves only the first line under the condition:
 
 ```r
 # _ : skip
@@ -589,7 +589,7 @@ for (item in sequence)
 
 ### Hugging Behavior
 
-"Hugging" refers to how nested expressions are formatted in multiline contexts—keeping them compact by allowing inner expressions to start on the same line as the outer expression's opening delimiter. This is part of ry's non-invasive approach: both hugged and expanded formats are allowed.
+"Hugging" is the compact layout for a nested expression in a multiline context: the inner expression starts on the same line as the outer expression's opening delimiter. Both hugged and expanded forms are allowed, and the formatter preserves whichever was written.
 
 **Nested function calls** can be formatted in a hugged style:
 
@@ -622,4 +622,4 @@ result <- outer(
 )
 ```
 
-See the [compact multiline calls](#function-calls) section under Function Calls for more details. The formatter preserves this style, which is especially useful for S4 methods and testing frameworks.
+See [compact multiline calls](#function-calls) under Function Calls. This style is preserved, which is what keeps S4 methods and testing-framework calls intact.

@@ -839,6 +839,30 @@ unknown key a hard error when the file is a *local* `ry.toml` while keeping the 
 compatibility only where it is actually needed. Decide it deliberately; the current forward-compat
 rationale (`config.rs`, `Config::unknown_keys`) is written down and is not obviously wrong.
 
+## Open — strict mode does not surface reads tolerated by an unknown attached package
+
+The blanket tolerance is the one hole strict mode leaves open, and three docs pages had claimed the
+opposite ("`strict = true` makes every tolerated read visible"). Measured: with a
+`library(<package with no manifest>)` in the project, a read of a name nothing defines produces **no
+finding at all** under `[check] typing = true, strict = true` — verified across four shapes (bare
+read, call, call assigned then used, and the value used numerically; all report `no problems`).
+
+The cause is a boundary rather than a bug: the tolerance is applied while names are resolved, and
+strict mode reports undetermined *types* at their origin. `type-system.md` explicitly excludes an
+unresolved-name reference from being a strict origin, because naming already reports it — but a
+*tolerated* read is precisely the case where naming does not, so it falls between the two layers.
+
+This matters because it is the failure mode this project treats as worst: a clean strict run that
+reads as "I understood everything" while an unknown `library()` silently switched a whole class of
+checking off project-wide. The fix is presumably to record tolerated reads as strict origins (they
+are genuinely undetermined), which needs naming to hand the origin to the strict stream. Until then
+the docs say so plainly — `limitations.md` and `stubs.md` now state that strict does not close it,
+and that declaring the package is what does.
+
+Adjacent and still true: strict *does* report `Unknown` origins from unsupported constructs and from
+`Any`-returning stub calls (`min()` on a classed value, `data.frame()`, `subset()`, `df$amount` all
+verified), and it *does* escalate genuinely-unresolved names from warning to error.
+
 ## Open — `htmltools` and `mgcv` spin on CPU at flat memory
 
 Checking `htmltools`'s package directory (7,669 lines) runs past **five minutes** at 100% CPU and

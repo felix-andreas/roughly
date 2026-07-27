@@ -8,8 +8,8 @@ describes what ry does today and is kept accurate; the pages below describe what
 it might do, what is still undecided, and why. They are deliberately absent from
 the sidebar — this page is the way in.
 
-Read them for the reasoning, not for the current behaviour. Where a draft and the
-rest of the documentation disagree, the rest of the documentation is right. The
+Read them for the reasoning, not for current behaviour. Where a draft and the
+rest of the documentation disagree, the rest of the documentation is correct. The
 authoritative typing contract is the [type system reference](/reference/type-system/),
 and what the checker cannot do yet is listed under
 [limitations](/type-checking/limitations/).
@@ -24,9 +24,8 @@ here as the record of why.
 
 Type-system questions with no settled answer yet, each with the options on the
 table and the current stopgap. Tagged unions, S3 dispatch, data frame and matrix
-modelling, the variadic `...` body, and the import model. Traits are here too, as
-a closed entry — declined rather than deferred, with the reasoning, because
-"why not typeclasses" is a question that keeps coming back.
+modelling, the variadic `...` body, and the import model. Traits are here too as
+a closed entry: declined rather than deferred, with the reasoning recorded.
 
 ### [Data masking](/contributing/design/data-masking/)
 
