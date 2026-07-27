@@ -1258,16 +1258,46 @@ fn item_check_recover<'db>(
     // drives the cycle), so the round cap must live here too. A value still
     // changing at the cap is non-converging — a self-referential definition
     // whose type grows a level per round (`x <- list(v = x)`), or an
-    // oscillation — so the exported scheme pins to the sound refusal. The
-    // pinned value is a fixed point one round later: re-execution under an
-    // `Unknown` self-scheme reproduces itself.
+    // oscillation — so both export surfaces pin to the sound refusal.
+    //
+    // What the pin must NOT do is derive from this round's recomputation. A
+    // check carries six fields besides the scheme, and every one of them keeps
+    // moving while the cycle does: pinning only the scheme and taking the rest
+    // from `value` returns a different check every round, so the equality test
+    // above can never succeed and salsa iterates to its own limit and panics
+    // (`too many cycle iterations`) or exhausts memory first, whichever the
+    // machine reaches. Re-pinning what was already returned is a fixed point by
+    // construction — the next round produces it unchanged and the test passes.
+    // The sibling recoveries are safe from this because a bare `TypeScheme` pin
+    // is already a constant.
     if cycle.iteration() >= SCHEME_ROUND_CAP {
-        return value.map(|check| check::ItemCheck {
-            scheme: Some(types::TypeScheme::monomorphic(types::unknown(db))),
-            ..check
-        });
+        return last_provisional
+            .clone()
+            .or(value)
+            .map(|check| refuse_check(db, check));
     }
     value
+}
+
+/// A check with both export surfaces cut to `Unknown`: what a non-converging
+/// cycle member exports, so downstream items check against an absent fact
+/// rather than an untrustworthy shape. Findings inside the item are kept.
+///
+/// This must be **idempotent** — `refuse_check(refuse_check(c))` equal to
+/// `refuse_check(c)` — because that is what lets the recovery above terminate:
+/// re-pinning an already-pinned value reproduces it, so the round after the cap
+/// compares equal and the fixpoint stops. `refusal_is_idempotent` pins it.
+fn refuse_check<'db>(db: &'db dyn Db, check: check::ItemCheck<'db>) -> check::ItemCheck<'db> {
+    let refused = types::TypeScheme::monomorphic(types::unknown(db));
+    check::ItemCheck {
+        scheme: Some(refused.clone()),
+        top_level_bindings: check
+            .top_level_bindings
+            .iter()
+            .map(|(name, _)| (name.clone(), refused.clone()))
+            .collect(),
+        ..check
+    }
 }
 
 /// The salsa-backed cross-item resolver handed to the checker.
@@ -1573,6 +1603,35 @@ fn set_generic_target(node: &syntax::SyntaxNode) -> Option<String> {
 mod tests {
     use super::*;
     use salsa::Setter as _;
+
+    /// The property the cycle recovery's termination rests on. Pinning a check
+    /// that is already pinned has to reproduce it exactly, or the round after
+    /// the cap compares unequal and salsa iterates to its own limit — which is
+    /// what a whole CRAN package used to hit, panicking with "too many cycle
+    /// iterations" or exhausting memory first. Only the two export surfaces may
+    /// be rewritten; the findings inside the item must survive untouched.
+    #[test]
+    fn refusal_is_idempotent() {
+        let db = RootDatabase::default();
+        let integer = types::scalar(&db, types::Atomic::Integer);
+        let check = check::ItemCheck {
+            expression_types: Default::default(),
+            errors: Vec::new(),
+            strict_origins: Vec::new(),
+            scheme: Some(types::TypeScheme::monomorphic(integer)),
+            selected_overloads: Default::default(),
+            masked_reads: Default::default(),
+            top_level_bindings: vec![("value".to_owned(), types::TypeScheme::monomorphic(integer))],
+        };
+
+        let once = refuse_check(&db, check);
+        let twice = refuse_check(&db, once.clone());
+        assert_eq!(once, twice, "re-pinning a pinned check must reproduce it");
+
+        let unknown = types::TypeScheme::monomorphic(types::unknown(&db));
+        assert_eq!(once.scheme.as_ref(), Some(&unknown));
+        assert_eq!(once.top_level_bindings, vec![("value".to_owned(), unknown)]);
+    }
 
     #[test]
     fn parse_tracks_text_edits() {

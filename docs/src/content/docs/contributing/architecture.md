@@ -74,6 +74,14 @@ Analysis is incremental at **item** granularity on salsa:
   single exported truth. Member checks inside the fixpoint never re-enter
   `item_check`, so no salsa cycle forms; salsa's own cycle recovery remains
   only as a backstop for reference edges the static graph cannot see.
+- **A cycle recovery's refusal must not depend on the round that produced it.**
+  Salsa stops iterating when a recovery returns a value equal to the last one,
+  so the value a recovery pins at its round cap has to be reachable again
+  unchanged. A pin computed from the freshly recomputed value is not: the parts
+  it leaves alone keep moving with the cycle, every round differs, and salsa
+  runs to its own `MAX_ITERATIONS` and panics. Pin a constant, or re-pin what
+  was already returned — and where the pinned type is a composite, cut *every*
+  exported surface, not just the obvious one.
 - Whole-project walks read **per-item projections**, not full naming:
   `item_interface_reads` (the read-name set feeding `interface_sccs`) and
   `item_top_level_names` (the binding names feeding conditional-slot

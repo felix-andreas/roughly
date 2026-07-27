@@ -591,48 +591,27 @@ unknown key a hard error when the file is a *local* `ry.toml` while keeping the 
 compatibility only where it is actually needed. Decide it deliberately; the current forward-compat
 rationale (`config.rs`, `Config::unknown_keys`) is written down and is not obviously wrong.
 
-## Open — a cyclic scheme fails to converge on a whole CRAN package
+## Open — `htmltools` and `mgcv` spin on CPU at flat memory
 
-The `rlang` abort on a cyclic interface is FIXED (see the ledger), and fixing it uncovered a
-**second, independent cycle failure** that the first one had been hiding by aborting earlier.
-
-`ry check` on rlang's **whole package directory** — 163 `.R` files, including the test tree — dies
-with `too many cycle iterations` (exit 101). Its `R/` directory alone, 76 files, completes normally
-with 838 findings. The two symptoms observed for this input — that panic, and an OOM kill — are the
-same phenomenon: a fixpoint that never settles, so whether the process is killed for memory or gives
-up on the iteration count depends only on how much memory is free at the time. Measured directly:
-**7.0 GB RSS 60 seconds in**, on a package that is a fraction of the 302K-LoC corpus that peaks at
-~300 MiB. That is unbounded iteration, not a large-project memory cost, so do not chase an
-allocation profile.
-
-The message is salsa's, raised when a cycle exceeds its iteration budget, so the failing query is one
-whose recovery lets it iterate — every scheme query in the interface chain now has recovery, and
-`statement_binding_scheme` caps its own rounds at `SCHEME_ROUND_CAP`, so the first job is to identify
-*which* query is spinning rather than to assume it is that one. A scheme that alternates between two
-non-equal values across rounds will never satisfy the fixpoint's equality test; the fix shape is
-almost certainly the one `scc_schemes` already uses — refuse to a widened answer on disagreement
-instead of iterating toward one.
-
-Reproduce: extract rlang's CRAN sources and run `ry check rlang/`. Contrast with
-`ry check rlang/R/`, which succeeds.
-
-**A separate pathology, and do not conflate them: `htmltools` spins on CPU at flat memory.** Checking
-its package directory (7,669 lines) runs past four minutes at 100% CPU and **42 MB RSS**, measured at
-182 seconds. Constant memory rules out the runaway-fixpoint shape above — this is an algorithm that
-is superlinear or non-terminating within a bounded working set, so the two need separate
-investigations. `mgcv` (37,253 lines) behaves the same way.
+Checking `htmltools`'s package directory (7,669 lines) runs past **five minutes** at 100% CPU and
+**42 MB RSS**, measured at 182 seconds. Constant memory is the distinguishing fact: it rules out the
+non-converging-fixpoint shape that made `rlang` fail, and that diagnosis held — fixing the fixpoint
+took `rlang` from a 213-second death to a 9-second clean run and left `htmltools` timing out
+unchanged, with no cycle panic in its output. So this is an algorithm that is superlinear or
+non-terminating within a bounded working set. `mgcv` (37,253 lines) behaves the same way.
 
 Also still open from the same investigation: **`targets` 1.12.0 (63,979 lines) takes 43.7 s** where a
 similarly sized ggplot2 takes 2.0 s — a ~20x outlier, R6-heavy code the obvious suspect, unprofiled.
 A smaller sibling worth a look because it is cheap to profile: **`MASS` (5,951 lines) takes 6.5 s**,
 roughly 900 lines/second where the corpus average is ~50,000.
 
-**Missing regression coverage.** The cycle fix is verified against the real package but has no
-fixture: the failing input is 3,185 lines across four rlang files, and a synthetic case built from the
-suspected mechanism (an S3 method name the checker constructs, which the static reference graph cannot
-see) did **not** reproduce it. Until the exact missing edge is identified, the guard rests on the
-corpus suites. Finding it is worth a session on its own, because the same blind spot is what makes the
-SCC groups wrong in the first place.
+**Missing end-to-end coverage for both cycle fixes.** Neither has a fixture. The failing inputs are
+whole CRAN packages, and synthetic cases built from the suspected mechanisms did not reproduce
+either one — for the non-convergence, a self-growing definition, three mutual-recursion shapes and an
+overloaded-call cycle all converge fine, because a single item pins and settles and the bug needs
+several members' pins to interact. What is pinned instead is the structural property the fix rests on
+(`refusal_is_idempotent` in `semantics.rs`), which is the part that can be tested without
+reproducing the cycle. The end-to-end guard rests on the corpus suites.
 
 ## Open — the formatter is slower than the type checker
 
@@ -748,6 +727,8 @@ is moved once rather than renamed, so nobody loses their history.
 - CRAN stub auto-generation via R introspection, R-version-keyed corpora, stubtest validation (R-dependent). (NAMESPACE/DESCRIPTION awareness moved to Open — semantics by user ask.)
 
 ## Shipped ledger (one line each; rationale in `decisions.md`, contracts in the docs site)
+
+- **A non-converging cycle now terminates, because the refusal no longer depends on the round that produced it:** `item_check_recover` pinned only `scheme` at the round cap and took `ItemCheck`'s six other fields from the freshly recomputed value, so every round returned a different check, the recovery's own equality test could never succeed, and salsa iterated to its `MAX_ITERATIONS` of 200 — 184 rounds past the cap — then panicked with `too many cycle iterations`, or exhausted memory first, whichever the machine reached (the two symptoms were always one bug). Its sibling recoveries were safe only incidentally: `global_scheme_recover` and `statement_binding_recover` return a bare `TypeScheme`, so their pin is already a constant, and `item_check` is the only one of the three with a composite return. The pin now re-pins what was already returned, a fixed point by construction, and cuts both export surfaces rather than just one — `top_level_bindings` was leaking moving schemes out of an item that had already been declared non-converging, which its own doc comment said it did not. Verified on the real reproduction: rlang's whole package directory went from a 213-second death to a clean 9-second run reporting 806 findings, and the flattened 163-file variant that had been OOM-killed now finishes in 14 seconds. `refusal_is_idempotent` pins the property; `htmltools` still stalls with no cycle panic, confirming it is a genuinely separate pathology.
 
 - **`ry check` no longer aborts on cyclic package interfaces:** `scc_schemes` was the one query in the interface-fixpoint chain with no salsa cycle recovery, while `item_check` and `global_scheme` — the queries either side of it — both had one. Its doc comment asserted that member checks run directly so "no salsa cycle forms", and the decision record reserved recovery "as a backstop for edges the static graph cannot see"; the backstop was never installed, so such an edge aborted the process. `interface_sccs` builds edges only from names appearing in an item's source, so a name the checker *constructs* is invisible to it and the group is not as maximal as the fixpoint assumes. Recovery pins the group to `Unknown` — the answer the round cap already gives — and refuses on first disagreement rather than iterating, because the group runs its own bounded fixpoint internally and letting salsa iterate it too multiplies those rounds into an out-of-memory kill (measured: the iterating version turned the panic into exit 137, which is worse than the bug). Verified on the real reproduction: rlang's `R/` went from exit 101 to a clean run with 838 findings.
 
