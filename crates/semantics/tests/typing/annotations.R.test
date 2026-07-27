@@ -605,3 +605,55 @@ use <- function() label(1.0)
 label: fn(amount: double, [currency]: character) -> character
 use: fn() -> character
 291..359 error[type-mismatch] this annotation declares `currency` as required, but the function gives it a default — write `[currency]` to declare it optional, or drop the default
+
+#==== null_defaults
+#---- a_null_default_must_fit_the_declared_type
+# `function(title = NULL)` is R's usual spelling for an optional argument, but a
+# caller who omits it leaves `NULL` in the body, so a declared `character` is a
+# promise the function does not keep. Exempting this let the annotation lie.
+#: fn([title]: character) -> character
+label <- function(title = NULL) "x"
+#++++
+label: fn([title]: character) -> character
+303..307 error[type-mismatch] `title` defaults to `NULL`, which its declared type `character` does not admit — a caller who omits it leaves `NULL` in the body. Declare it `character | NULL` and narrow with `is.null()`
+
+#---- a_nullable_declared_type_admits_the_null_default
+#: fn([title]: character | NULL) -> character
+label <- function(title = NULL) "x"
+#++++
+label: fn([title]: character | NULL) -> character
+
+#---- any_admits_a_null_default
+#: fn([anything]: Any) -> character
+label <- function(anything = NULL) "x"
+#++++
+label: fn([anything]: Any) -> character
+
+#---- an_unannotated_parameter_is_unaffected_by_its_null_default
+label <- function(title = NULL) "x"
+#++++
+label: <T> fn([title]: T) -> character
+
+#---- a_non_null_default_is_checked_as_before
+#: fn([count]: character) -> character
+label <- function(count = 42L) "x"
+#++++
+label: fn([count]: character) -> character
+65..68 error[type-mismatch] expected `character`, found `integer`
+
+#---- the_crash_a_lying_annotation_used_to_hide
+# `if (title == "draft")` with `title` absent is `argument is of length zero` at
+# run time. Declared nullable it is caught; the guarded form is clean.
+#: fn([title]: character | NULL) -> character
+unguarded <- function(title = NULL) {
+  if (title == "draft") "D" else "F"
+}
+
+#: fn([title]: character | NULL) -> character
+guarded <- function(title = NULL) {
+  if (is.null(title)) "F" else if (title == "draft") "D" else "F"
+}
+#++++
+unguarded: fn([title]: character | NULL) -> character
+guarded: fn([title]: character | NULL) -> character
+242..247 error[type-mismatch] expected a comparable value (numeric, `character`, or `logical`), found `character | NULL`

@@ -1589,6 +1589,13 @@ fn render_type_error_message(db: &dyn Db, error: &TypeError<'_>) -> String {
         TypeErrorKind::AnnotationParameterMismatch { name } => format!(
             "this annotation names a parameter `{name}`, but the function does not define one — annotation parameter names must match the function's parameter names"
         ),
+        TypeErrorKind::NullDefaultNotAdmitted { name, declared } => {
+            let mut renderer = TypeRenderer::default();
+            let declared = renderer.render(db, *declared);
+            format!(
+                "`{name}` defaults to `NULL`, which its declared type `{declared}` does not admit — a caller who omits it leaves `NULL` in the body. Declare it `{declared} | NULL` and narrow with `is.null()`"
+            )
+        }
         TypeErrorKind::AliasCycle { name } => {
             format!("Type alias `{name}` expands in a cycle.")
         }

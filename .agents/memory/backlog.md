@@ -99,12 +99,23 @@ mistaken for a mere precision gap when read from one direction only.
    "regardless of file" while also saying non-package files do not join the project namespace; it now
    states which namespace a duplicate is judged against.
 
-5. **`= NULL` is exempt from the default-value check.** `#: fn([title]: character)` with
-   `title = NULL` passes, while `title = 42L` is caught — and `NULL` then provably reaches a
-   `character` parameter. This is the most common way R spells an optional argument. Related and worth
-   stating in the docs: `[title]` relaxes only the *call*; inside the body `title` is an unqualified
-   `character`, so the bracket looks like optionality and enforces none. `character | NULL` is the
-   spelling that works.
+5. **FIXED — `= NULL` is no longer exempt from the default-value check.** This was a documented
+   decision, not an oversight ("a `NULL` default is R's 'no value' sentinel … always allowed"), so it
+   was weighed rather than flipped, and the measurement settled it: the exemption hides a real crash.
+   Declared `[title]: character` with `title = NULL`, the body's `if (title == "draft")` passed the
+   checker and failed at run time with R's `argument is of length zero`. Declared
+   `character | NULL`, the same body is caught statically, and adding `if (is.null(title))` clears it —
+   so the remedy was already fully supported and only the exemption stood in the way.
+
+   The default is now checked like any other, with its own diagnostic rather than a bare mismatch,
+   because this is the usual R spelling and the fix is specific: ``` `title` defaults to `NULL`, which
+   its declared type `character` does not admit — a caller who omits it leaves `NULL` in the body.
+   Declare it `character | NULL` and narrow with `is.null()` ```. `Any` still admits it, an
+   unannotated parameter is unaffected, and non-`NULL` defaults are unchanged.
+
+   Three examples **in the reference itself** relied on the exemption and now read `character | NULL`.
+   One of them guarded with `if (!is.null(label))` while declaring `label` as plain `character` — the
+   spec demonstrating the lie in its own sample is the clearest evidence the rule was wrong.
 
 ### C. Annotations that validate themselves and then enforce nothing
 

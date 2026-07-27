@@ -92,7 +92,7 @@ double_count <- function(count) count + count
 ```r
 #: @param render_count {fn(integer) -> character}
 #: @param count {integer}
-#: @param [label] {character}
+#: @param [label] {character | NULL}
 #: @returns {character}
 apply_renderer <- function(render_count, count, label = NULL) {
   if (!is.null(label)) paste0(label, ": ", render_count(count)) else render_count(count)
@@ -2106,7 +2106,7 @@ Examples:
 
 ```r
 #: @param count {integer}
-#: @param [label] {character}
+#: @param [label] {character | NULL}
 #: @return {integer}
 double_count <- function(count, label = NULL) { count + count }
 ```
@@ -2227,7 +2227,7 @@ double_count <- function(count) count + count
 ```
 
 ```r
-#: fn(count: integer, [label]: character) -> integer
+#: fn(count: integer, [label]: character | NULL) -> integer
 double_count <- function(count, label = NULL) count + count
 ```
 
@@ -2281,10 +2281,15 @@ An unannotated `function(...)` expression infers a function type directly from i
 - a constraint an inference variable still carries at an item's export edge survives as a scheme
   binder — `mixed_apply <- invoke(mirror)` exports `<T: numeric> fn(x: T) -> T`, so cross-item
   calls keep checking it — while an unconstrained residual variable erases to `Unknown`
-- default value expressions are typechecked: an error inside a default is reported, and a non-`NULL`
-  default for an annotated parameter must be compatible with the declared type
-- a `NULL` default is R's "no value" sentinel for an optional parameter, so it is always allowed
-  regardless of the declared parameter type
+- default value expressions are typechecked: an error inside a default is reported, and a default for
+  an annotated parameter must be compatible with the declared type
+- **a `NULL` default is checked like any other.** `function(title = NULL)` is R's usual spelling for an
+  optional argument, but it does not make the parameter optional *to the body*: when the caller omits
+  it, `title` is `NULL` there, so a declared `character` is a promise the function does not keep.
+  Declare the parameter `character | NULL` and narrow it — `if (is.null(title))` — which is what makes
+  `if (title == "draft")` an error rather than a run-time
+  `argument is of length zero`. Marking the parameter `[title]` relaxes only the *call*; it says
+  callers may omit the argument, not that the body may receive nothing
 - an unannotated parameter's type still comes from its uses, not from its default, so a non-`NULL`
   default does not pin the inferred parameter type
 

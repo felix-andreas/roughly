@@ -85,6 +85,13 @@ pub enum TypeErrorKind<'db> {
     AnnotationParameterMismatch {
         name: String,
     },
+    /// A `NULL` default on a parameter whose declared type does not admit
+    /// `NULL`. Its own variant rather than a plain mismatch because it is the
+    /// usual R spelling of an optional argument and the remedy is specific.
+    NullDefaultNotAdmitted {
+        name: String,
+        declared: Ty<'db>,
+    },
     /// An annotation mentions a type alias whose expansion re-enters itself.
     AliasCycle {
         name: String,
@@ -3424,13 +3431,39 @@ impl<'db> Checker<'db, '_> {
                 // any other default must fit the declared type. An undeclared
                 // formal's type comes from its uses, not its default.
                 let resolved_default = self.table.resolve(self.db, default_ty);
-                if declared && !matches!(resolved_default.kind(self.db), TyKind::Null) {
-                    let whole_double = self.is_whole_double(default);
+                if declared {
                     let default_range = self.blame_range(default);
-                    if let Err(error) =
-                        self.check_argument(parameter_ty, default_ty, default_range, whole_double)
+                    // `function(title = NULL)` is how R spells an optional
+                    // argument, but the caller omitting it puts `NULL` in the
+                    // body, where a declared `character` is a promise the
+                    // function does not keep. Exempting it — which this used
+                    // to do — let the annotation lie: `if (title == "draft")`
+                    // then passed the checker and failed at run time with
+                    // `argument is of length zero`. The remedy is a nullable
+                    // declared type plus a guard, so the message names it
+                    // instead of reporting a bare mismatch.
+                    if matches!(resolved_default.kind(self.db), TyKind::Null)
+                        && !self
+                            .table
+                            .compatible(self.db, resolved_default, parameter_ty)
                     {
-                        self.errors.push(error);
+                        self.errors.push(TypeError {
+                            range: default_range,
+                            kind: TypeErrorKind::NullDefaultNotAdmitted {
+                                name: parameter.name.clone(),
+                                declared: parameter_ty,
+                            },
+                        });
+                    } else if !matches!(resolved_default.kind(self.db), TyKind::Null) {
+                        let whole_double = self.is_whole_double(default);
+                        if let Err(error) = self.check_argument(
+                            parameter_ty,
+                            default_ty,
+                            default_range,
+                            whole_double,
+                        ) {
+                            self.errors.push(error);
+                        }
                     }
                 }
             }
