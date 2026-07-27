@@ -506,28 +506,41 @@ below, ranked by how often a real user hits it.
 - Overload candidates when touched: `is`, `extends`, `grep(value =)`, `cor` (vector vs matrix — needs matrix nominals). `Date`/`POSIXct` arithmetic refuses loudly today — revisit if real code makes it noisy.
 - **A list operation over a RECORD still loses the field types.** `rev`/`unique`/`head`/`tail`/`Filter` now declare a `list[named: T]` candidate ahead of the plain list one, so a name survives and a field read is `T | NULL` instead of a missing-field error — but a fixed-shape input coerces to a name-keyed list on the way in, so the exact field types are gone and the read stays nullable. Only a shape-mirroring return ("the same record") fixes it, and the type language has no way for a stub to say that; `rev` is the case where the claim would be exactly right (it reorders and drops nothing), while `head`/`tail`/`Filter` genuinely may drop a name and are correctly nullable. Same family as the data.frame row-type and matrix-shape designs.
 
-## Open — `ry check` exhausts memory on a whole CRAN package
+## Open — a cyclic scheme fails to converge on a whole CRAN package
 
-The `rlang` panic is FIXED (see the ledger), and fixing it uncovered a second,
-independent failure that the panic had been hiding by aborting first.
+The `rlang` abort on a cyclic interface is FIXED (see the ledger), and fixing it uncovered a
+**second, independent cycle failure** that the first one had been hiding by aborting earlier.
 
-`ry check` on rlang's **whole package directory** — 163 `.R` files, including the test tree — is
-killed by the OOM killer (exit 137) with 16 GB free. Its `R/` directory alone, 76 files, completes
-normally with 838 findings. So the cliff is somewhere between those two inputs, and it is not the
-cycle: with cycle recovery installed, analysis runs on and consumes everything available rather than
-stopping.
+`ry check` on rlang's **whole package directory** — 163 `.R` files, including the test tree — dies
+with `too many cycle iterations` (exit 101). Its `R/` directory alone, 76 files, completes normally
+with 838 findings. The two symptoms observed for this input — that panic, and an OOM kill — are the
+same phenomenon: a fixpoint that never settles, so whether the process is killed for memory or gives
+up on the iteration count depends only on how much memory is free at the time. Measured directly:
+**7.0 GB RSS 60 seconds in**, on a package that is a fraction of the 302K-LoC corpus that peaks at
+~300 MiB. That is unbounded iteration, not a large-project memory cost, so do not chase an
+allocation profile.
 
-This matters more than the file count suggests. The memory shape at scale was measured before as
-~300 MiB at 302K LoC, and rlang is far smaller than that, so something here is not linear — a
-plausible suspect is that the test tree puts many items in one namespace and inflates an SCC group,
-since group cost is members × rounds and both grow together. Measure the largest group's size before
-assuming.
+The message is salsa's, raised when a cycle exceeds its iteration budget, so the failing query is one
+whose recovery lets it iterate — every scheme query in the interface chain now has recovery, and
+`statement_binding_scheme` caps its own rounds at `SCHEME_ROUND_CAP`, so the first job is to identify
+*which* query is spinning rather than to assume it is that one. A scheme that alternates between two
+non-equal values across rounds will never satisfy the fixpoint's equality test; the fix shape is
+almost certainly the one `scc_schemes` already uses — refuse to a widened answer on disagreement
+instead of iterating toward one.
 
 Reproduce: extract rlang's CRAN sources and run `ry check rlang/`. Contrast with
 `ry check rlang/R/`, which succeeds.
 
+**A separate pathology, and do not conflate them: `htmltools` spins on CPU at flat memory.** Checking
+its package directory (7,669 lines) runs past four minutes at 100% CPU and **42 MB RSS**, measured at
+182 seconds. Constant memory rules out the runaway-fixpoint shape above — this is an algorithm that
+is superlinear or non-terminating within a bounded working set, so the two need separate
+investigations. `mgcv` (37,253 lines) behaves the same way.
+
 Also still open from the same investigation: **`targets` 1.12.0 (63,979 lines) takes 43.7 s** where a
 similarly sized ggplot2 takes 2.0 s — a ~20x outlier, R6-heavy code the obvious suspect, unprofiled.
+A smaller sibling worth a look because it is cheap to profile: **`MASS` (5,951 lines) takes 6.5 s**,
+roughly 900 lines/second where the corpus average is ~50,000.
 
 **Missing regression coverage.** The cycle fix is verified against the real package but has no
 fixture: the failing input is 3,185 lines across four rlang files, and a synthetic case built from the

@@ -5,7 +5,7 @@ description: Why R needs one fast toolchain with a type checker at its core — 
 
 R has good tools, but they are separate tools. Linting, formatting, style, analysis and running the
 code are five programs that each parse your source and each build their own partial picture of it.
-None of them knows what a value *is*, and none of them shares what it learned with the others.
+None of them shares what it learned with the others, so each one starts over.
 
 ## Static, not a live session
 
@@ -27,10 +27,11 @@ checking are views onto the same knowledge.
 
 ## Speed on large codebases
 
-The existing R language server does not keep up on large projects, so people turn it off.
+Large R projects are where tooling latency stops being a detail: once a check takes long enough to
+break your train of thought, you stop running it, and the tool may as well not exist.
 
 ry is written in Rust, and analysis is incremental: an edit re-checks only what that edit could
-have affected, not the project. It is tested against ry 970,000 lines of real R — 69 CRAN
+have affected, not the project. It is tested against roughly 970,000 lines of real R — 69 CRAN
 packages plus R's own base library — and the check that an edit does not trigger more work than it
 should runs on every change.
 

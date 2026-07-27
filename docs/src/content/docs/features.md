@@ -8,10 +8,6 @@ configuration.
 
 ## Navigation and completion
 
-R already has a language server, written in R. On a large project it becomes slow enough that people
-turn it off. The alternative is to stay inside RStudio or Positron, where the analysis is
-good but does not travel to any other editor.
-
 ry is a standard language server, so go-to-definition, find-references, completion and hover work
 in VS Code, Zed, Neovim and Helix alike. It reads your whole project, so a name defined in one file
 completes in another:
@@ -179,7 +175,7 @@ One line of configuration, no annotations, no change to the code.
 
 Type checking a whole project sounds expensive, and this is where it would show. It does not, because
 analysis is incremental: an edit re-checks only what that edit could have affected, not the project.
-ry is tested against ry 970,000 lines of real R — 69 CRAN packages plus R's base library.
+ry is tested against roughly 970,000 lines of real R — 69 CRAN packages plus R's base library.
 
 - [Tutorial](/type-checking/tutorial) — put it on real code
 - [Concepts](/type-checking/concepts) — how it works out what it knows

@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 146" width="780" height="146" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 788 146" width="788" height="146" role="img" aria-labelledby="title desc">
   <title id="title">A ry diagnostic</title>
-  <desc id="desc">error[type-mismatch]: expected a numeric value (`integer` or `double`), found `character` /  --&gt; a.R:8:35 / 8 | total_with_tax(list(19.99, 5.00), "0.07") /                                       ^^^^^^ / 1 problem in 1 file</desc>
+  <desc id="desc">error[type-mismatch]: expected a numeric value (`integer` or `double`), found `character` /  --&gt; billing.R:9:35 / 9 | total_with_tax(list(19.99, 5.00), "0.07") /                                       ^^^^^^ / 1 problem in 1 file</desc>
   <style>
     .bg { fill: #ffffff; stroke: #d0d7de; }
     .fg { fill: #1f2328; }
@@ -16,10 +16,10 @@
     }
     text { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; font-size: 14px; white-space: pre; }
   </style>
-  <rect class="bg" x="0.5" y="0.5" width="779" height="145" rx="6"/>
+  <rect class="bg" x="0.5" y="0.5" width="787" height="145" rx="6"/>
   <text x="16" y="30"><tspan x="16.0" class="red" font-weight="600">error[type-mismatch]: </tspan><tspan x="200.8" class="fg" font-weight="600">expected a numeric value (`integer` or `double`), found `character`</tspan></text>
-  <text x="16" y="52"><tspan x="16.0" class="fg"> </tspan><tspan x="24.4" class="blue" font-weight="600">--&gt;</tspan><tspan x="49.6" class="fg"> a.R:8:35</tspan></text>
-  <text x="16" y="74"><tspan x="16.0" class="blue" font-weight="600">8 |</tspan><tspan x="41.2" class="fg"> total_with_tax(list(19.99, 5.00), "0.07")</tspan></text>
-  <text x="16" y="96"><tspan x="335.2" class="red" font-weight="600">^^^^^^</tspan></text>
+  <text x="16" y="52"><tspan x="16.0" class="fg"> </tspan><tspan x="24.4" class="blue" font-weight="600">--&gt;</tspan><tspan x="49.6" class="fg"> billing.R:9:35</tspan></text>
+  <text x="16" y="74"><tspan x="16.0" class="blue" font-weight="600">9 |</tspan><tspan x="41.2" class="fg"> total_with_tax(list(19.99, 5.00), "0.07")</tspan></text>
+  <text x="16" y="96"><tspan x="16.0" class="fg">                                      </tspan><tspan x="335.2" class="red" font-weight="600">^^^^^^</tspan></text>
   <text x="16" y="118"><tspan x="16.0" class="fg">1 problem in 1 file</tspan></text>
 </svg>
