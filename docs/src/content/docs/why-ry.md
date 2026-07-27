@@ -35,9 +35,9 @@ have affected, not the project. It is tested against roughly 970,000 lines of re
 packages plus R's own base library — and the check that an edit does not trigger more work than it
 should runs on every change.
 
-It also **needs no R installation**. `check` and `fmt` never load R and never execute your code, which
-is what makes them safe in CI and instant in an editor. The one exception is the
-[R console](/guides/r-console), which by definition runs R.
+`check` and `fmt` never load R and never execute your code, which is what makes them safe in CI and
+instant in an editor. The one exception is the [R console](/guides/r-console), which by definition
+runs R.
 
 ## Types in dynamic languages
 

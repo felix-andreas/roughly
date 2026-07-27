@@ -102,7 +102,7 @@ breakdown <- summarise(
 
 You chose one call on a line and the other spread over four; the formatter keeps both. A formatter that
 reflows to a column limit would rewrite one of them, and your next diff would show line breaks instead
-of the change you made. There are no options to argue about — the reasoning is in
+of the change you made. The style itself is fixed, with almost no configuration — the reasoning is in
 [formatting rules](/reference/formatting-rules#philosophy).
 
 ## Rename

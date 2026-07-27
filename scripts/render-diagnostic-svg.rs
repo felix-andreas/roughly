@@ -17,11 +17,11 @@ edition = "2024"
 //! Usage: `scripts/render-diagnostic-svg.rs <fixture.R> <out.svg>`
 //! The fixture's directory needs a `ry.toml`; the binary must be built first.
 //!
-//! The README's image is `docs/public/diagnostic.svg`, rendered from a file
-//! named `billing.R` holding exactly the snippet the README shows above it,
-//! beside a `ry.toml` containing `[check]` / `typing = true`. Keep the two in
-//! step: the picture is the one thing in that document that cannot be verified
-//! by reading it, so a stale render is invisible until someone notices the
+//! The README's image is `.github/diagnostic.svg`, rendered from a file
+//! named `setup.R` holding exactly the snippet the README shows above it,
+//! beside a `ry.toml` (an empty one is enough). Keep the two in step: the
+//! picture is the one thing in that document that cannot be verified by
+//! reading it, so a stale render is invisible until someone notices the
 //! wording no longer matches the tool.
 
 use std::fmt::Write as _;
@@ -55,6 +55,15 @@ fn svg(text: &str) -> String {
         .lines()
         .map(parse_ansi)
         .filter(|spans| !spans.is_empty())
+        .filter(|spans| {
+            // The "--> file:line:col" locus and the trailing "N problems in
+            // M files" run summary are terminal chrome, not the diagnostic
+            // itself — the image shows only the finding.
+            let plain: String = spans.iter().map(|span| span.text.as_str()).collect();
+            let plain = plain.trim();
+            !plain.starts_with("-->")
+                && !(plain.starts_with(|c: char| c.is_ascii_digit()) && plain.contains(" problem"))
+        })
         .collect();
 
     // A monospace advance of 0.6em is the usual approximation and only decides
@@ -65,7 +74,7 @@ fn svg(text: &str) -> String {
         .max()
         .unwrap_or(0);
     let width = (columns as f32 * 8.4).max(360.0) + 40.0;
-    let height = lines.len() as f32 * 22.0 + 36.0;
+    let height = lines.len() as f32 * 22.0 + 30.0;
     // The description is what a screen reader announces and what search
     // indexes, so it carries the diagnostic as plain text — escapes stripped.
     let plain: String = lines

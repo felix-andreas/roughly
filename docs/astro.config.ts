@@ -33,7 +33,7 @@ export default defineConfig({
 			},
 			favicon: '/favicon.svg',
 			social: [
-				{ label: "Visual Studio Marketplace", icon: "vscode", href: 'https://marketplace.visualstudio.com/items?itemName=felix-andreas.ry' },
+				{ label: "Visual Studio Marketplace", icon: "vscode", href: 'https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly' },
 				{ label: "GitHub", icon: "github", href: 'https://github.com/felix-andreas/ry' },
 			],
 			// The installation page is deliberately absent: getting started closes with
@@ -106,20 +106,8 @@ export default defineConfig({
 							link: '/getting-started',
 						},
 						{
-							label: 'Why ry',
-							link: '/why-ry',
-						},
-						{
-							label: 'Features',
-							link: '/features',
-						},
-						{
-							label: 'Type checking',
-							link: '/type-checking/tutorial',
-						},
-						{
-							label: 'Reference',
-							link: '/reference/configuration',
+							label: 'News',
+							link: '/news',
 						},
 					],
 					footerText: `<div class="py-8 flex items-center justify-between"><div class="flex items-center gap-2"><img src="/logo.svg" width="12" /> ry © ${new Date().getFullYear()}</div><a href="https://felixandreas.me/legal-notice/" target="_blank" rel="noopener" class="no-underline text-gray-500">Legal Notice</a></div>`

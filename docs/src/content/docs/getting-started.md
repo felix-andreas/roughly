@@ -6,13 +6,12 @@ description: What ry is, what it finds on your first run, and where to install i
 ry is a toolchain for R, written in Rust. It is four tools in one binary:
 
 1. **A language server** — hover, completion, go-to-definition, references, rename, and inlay hints,
-   in any editor that speaks LSP.
-2. **A formatter** — one style, no options to argue about.
-3. **An R console** — a REPL whose completion knows your project.
-4. **A type checker** — optional, and the reason the other three know what your code means.
+   in any editor that supports LSP.
+2. **A formatter** — a single consistent style, with almost no configuration.
+3. **An R console** — a REPL with project-aware completion.
+4. **A type checker** — optional; its inferred types also power the editor features.
 
-It needs no R installation and no changes to your code, so the same binary runs in your editor and in
-CI.
+It requires no changes to your code, and the same binary runs in your editor and in CI.
 
 ## Your first run
 
