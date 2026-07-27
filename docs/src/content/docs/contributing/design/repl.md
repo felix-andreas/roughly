@@ -1,12 +1,15 @@
-# REPL design — runtime-loaded R, no build-time linking
+---
+title: REPL design
+description: "How the R console loads R at runtime with no build-time linking"
+---
 
 **Status: v1 SHIPPED and e2e-VERIFIED against real R** as `crates/repl`
-behind `roughly repl` (user decisions: subcommand packaging, reedline +
+behind `ry repl` (user decisions: subcommand packaging, reedline +
 nu-ansi-term kept, rofy frozen under `legacy/`). Implemented: discovery, the
 typed runtime-binding layer, the ReadConsole-hosted reedline console with
 lexer highlighting and conservative completeness, SIGINT interrupt routing,
-pty e2e tests (skip-if-no-R) in the roughly crate, the headless runner
-(`roughly run` / `repl --file`), vi keybindings, and the Windows embedding
+pty e2e tests (skip-if-no-R) in the ry crate, the headless runner
+(`ry run` / `repl --file`), vi keybindings, and the Windows embedding
 (verified on real Windows + R — see its section). The full pty suite runs
 green against a real R on Unix ptys AND Windows ConPTY (interactive
 evaluation, multiline, error stream, Ctrl-C interruption, both batch
@@ -20,7 +23,7 @@ Tab completion SHIPPED** (the first analysis rung): the repl crate exposes
 a `SessionCompleter` seam (accept + complete; the console feeds accepted
 lines back, an `Arc<Mutex>` shares the object between reedline's menu and
 the accept path) so the crate stays syntax-only, and the host implements
-`AnalysisCompleter` (`crates/roughly/src/repl_completer.rs`) —
+`AnalysisCompleter` (`crates/ry/src/repl_completer.rs`) —
 `ide::completion` over the session-as-script (one salsa `SourceFile`
 updated per request; stubs + export manifests installed), so the menu
 shows typed signatures for stdlib names, session bindings, `pkg::`
@@ -31,11 +34,11 @@ unit tests. Not yet: live-session facts (the R environment listing
 unioned in), pre-eval diagnostics, hover on the input line, graphics
 devices.
 
-User-initiated: integrate a first-class REPL into roughly — the successor to the
+User-initiated: integrate a first-class REPL into ry — the successor to the
 `rofy` experiment — **without any build-time link dependency on R**. This
 document records the architecture that makes that possible (verified against a
 production-grade Rust R kernel's source; techniques described on their own
-terms) and how roughly's analysis stack turns a console into something more
+terms) and how ry's analysis stack turns a console into something more
 than an echo loop.
 
 ## Why rofy's approach is a dead end
@@ -142,7 +145,7 @@ symbol by name, with per-symbol optionality:
   C `printf` output that bypasses R's console.
 
 ## Windows implementation (VERIFIED on real Windows + R 4.5.2: the full pty
-e2e suite runs green over ConPTY, plus `roughly run` exit codes, `system()`,
+e2e suite runs green over ConPTY, plus `ry run` exit codes, `system()`,
 `~` expansion, and `.Platform$GUI`)
 
 Windows R embedding does NOT use the Unix `ptr_R_ReadConsole` globals — it
@@ -179,14 +182,14 @@ machine-verified end to end):
 - **`.Platform$GUI`**: RGui-mode init stamps it `"Rgui"`, and the LinkDLL
   flip does not retroactively update it — packages take `"Rgui"` as license
   to call Rgui-only GUI functions (menus, dialogs) that fail here. The
-  console feeds a first hidden line that rebinds it to `"roughly"` in
+  console feeds a first hidden line that rebinds it to `"ry"` in
   `baseenv()` (unlock/relock `.Platform`) before any user input. Known gap:
   R sources the startup profiles before the first console read, so profile
   code still sees `"Rgui"`; fixing that would mean suppressing native
   profile loading and sourcing them manually after init — deliberately not
   taken on.
-- **Encoding**: `roughly.exe` embeds a Windows application manifest
-  declaring UTF-8 as the active code page (`crates/roughly/build.rs`, MSVC
+- **Encoding**: `ry.exe` embeds a Windows application manifest
+  declaring UTF-8 as the active code page (`crates/ry/build.rs`, MSVC
   linker `/MANIFESTINPUT` — no build dependency). Embedded R (4.2+, UCRT)
   takes its native encoding from the host process's code page and `R.exe`
   declares UTF-8 the same way; without the manifest R runs in the system
@@ -250,8 +253,8 @@ is already the LSP's job.
 
 ## Headless runner (v1 SHIPPED) and file pre-loading
 
-`roughly run script.R` executes a file through the embedded runtime and
-exits at its end; `roughly repl --file script.R` (also `-f`) feeds the same
+`ry run script.R` executes a file through the embedded runtime and
+exits at its end; `ry repl --file script.R` (also `-f`) feeds the same
 script and then hands over to the interactive prompt. Mechanism (decided):
 the ReadConsole frontend feeds the script bytes exactly like accepted
 console input, and in batch mode answers end-of-input once they are
@@ -260,12 +263,12 @@ the console. Exit-code propagation without new C surface: batch mode
 prepends `options(error = function() q(status = 1, save = "no"))`, so a
 top-level error halts the script and the process exits 1 (plain-Command e2e
 tests pin exit 0 + output and exit 1 + halt; skip-if-no-R like the rest).
-Vi keybindings shipped alongside: `roughly repl --keybindings vi` (emacs
+Vi keybindings shipped alongside: `ry repl --keybindings vi` (emacs
 default) — the editor's built-in vi mode, no console config story needed
 yet. Still ahead for the runner: run TypedR files directly (typecheck,
-compile in memory, execute — see `typedr-design.md`).
+compile in memory, execute — see [Inline type syntax](/contributing/design/inline-type-syntax/)).
 
-## What makes it better than rofy (the roughly integration)
+## What makes it better than rofy (the previous integration)
 
 The REPL is not a goal in itself — the point is a console with the analyzer in
 the same process:

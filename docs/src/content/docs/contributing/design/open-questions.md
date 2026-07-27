@@ -1,16 +1,19 @@
-# Open type-system design questions
+---
+title: Open type-system questions
+description: "Type-system design questions that are not yet decided, with the options on the table"
+---
 
-Forward-looking design space for Roughly's type system: questions that are **not yet decided** and the options on the table, with the current stopgap and why. This is distinct from `decisions.md` (the log of what has been *settled*) — entries here are live deliberations. When one is resolved, move the decision + rationale to `decisions.md` and delete it here. The settled contract is always `docs/src/content/docs/reference/type-system.md`; nothing here is contract until it lands there.
+Forward-looking design space for ry's type system: questions that are **not yet decided** and the options on the table, with the current stopgap and why. This is distinct from `decisions.md` (the log of what has been *settled*) — entries here are live deliberations. When one is resolved, move the decision + rationale to `decisions.md` and delete it here. The settled contract is always `docs/src/content/docs/reference/type-system.md`; nothing here is contract until it lands there.
 
 *(Resolved and moved to `decisions.md` §Beta-semantics: generic vector element types → atomic-element constraint on the existing constraint mechanism; ad-hoc overloading → ordered overload sets with probe-then-rollback, confined to declaration files, traits declined; multi-member unions → join/annotation-only, never bound into unification variables; R variable model → mutable slots with union-at-join reads.)*
 
-## 1. Tags / discriminated unions via a Roughly stdlib
+## 1. Tags / discriminated unions via a ry stdlib
 
-**Question.** How to provide Roc-style tags (OCaml polymorphic variants) for R: a compiler-known Roughly library exposing tag **constructors** and a **`match`** function with exhaustive-pattern checking.
+**Question.** How to provide Roc-style tags (OCaml polymorphic variants) for R: a compiler-known ry library exposing tag **constructors** and a **`match`** function with exhaustive-pattern checking.
 
 **Direction (user):** provide them through a stdlib the checker knows specially, not through new R syntax — annotated R stays ordinary R. Post-beta.
 
-**Unresolved tension:** `typedr-design.md` proposes the opposite route — real syntax in a compiled dialect — for the same capability. Both reach exhaustive case analysis; they differ in whether the checker blesses particular call shapes or owns a grammar, and in whether a build step is acceptable. Building both is waste, so settle the fork (it is §3 of that document) before either is implemented, and delete the losing half.
+**Unresolved tension:** [Inline type syntax](/contributing/design/inline-type-syntax/) proposes the opposite route — real syntax in a compiled dialect — for the same capability. Both reach exhaustive case analysis; they differ in whether the checker blesses particular call shapes or owns a grammar, and in whether a build step is acceptable. Building both is waste, so settle the fork (it is §3 of that document) before either is implemented, and delete the losing half.
 
 **Design space to work out before building:**
 - representation: a tagged value is presumably `list(tag = "Name", value = ...)` at runtime — does the type system model it as `union` of nominal-ish tag types, or as a new core form?
@@ -117,7 +120,7 @@ the whole bracket types `Unknown`), and the stub corpus's `masked` set (variadic
   compile-time data dependency.
 - **Python:** mypy/pyright deliberately do NOT type pandas columns (pandas-stubs types
   operations, columns stay stringly); schema checking lives in runtime validators (pandera).
-  The mainstream punt marks how far the cost curve bends — and where Roughly can
+  The mainstream punt marks how far the cost curve bends — and where ry can
   differentiate, since steps 1-2 fit its architecture (stub contracts + structural records)
   without new inference machinery.
 

@@ -70,7 +70,7 @@ five opt-in lints are unusable on a package with an S3 class and a testthat suit
    Deliberately NOT changed: the class attribute still does not mint a nominal type — `@new` remains
    the only nominal introduction, and reading `class[1]` instead would type a
    `c("grouped_df", "tbl_df", "tbl", "data.frame")` value as `grouped_df` and then reject it at a
-   `data.frame` parameter. See `typedr-design.md` §3.
+   `data.frame` parameter. See `contributing/design/inline-type-syntax.md` §3.
 2. **`library(yourpkg)` in `tests/testthat.R` FIXED.** The project's own name — `DESCRIPTION`'s
    `Package` field, now carried on the metadata input — earns no tolerance: its export set is not
    unknowable, those exports being the project's own definitions. `usethis` generates that file, so
@@ -315,7 +315,7 @@ measured the competition). The accuracy fixes landed; what remains is below.
   residual: a condition whose type is still *undetermined* is bound to `logical`, so
   `function(n) while (n) ...` infers `n: logical` and rejects a numeric caller. Fixing that
   properly needs a "coercible to a condition" constraint — a fourth constraint kind, which is the
-  documented tripwire for designing traits rather than accreting (see `typing-design.md`).
+  documented tripwire for designing traits rather than accreting (see `contributing/design/open-questions.md`).
 - **Named-before-positional matching FIXED.** `match_arguments` walked the argument list once, in
   source order, so a positional argument could take a formal that a *later* named argument was
   going to claim (`vapply(xs, character(1), FUN = f)` reported a bogus "FUN given twice").
@@ -346,7 +346,7 @@ measured the competition). The accuracy fixes landed; what remains is below.
   deliberately exempt for scripts, type names are not.
 
 **Documentation that is still wrong (verified, not yet fixed):** `reference.md` documents a
-rest-parameter spelling (`...items`) that never parses, and cites `.agents/memory/typing-design.md`
+rest-parameter spelling (`...items`) that never parses, and cites `contributing/design/open-questions.md`
 — a published contract pointing at an unpublished file; `stdlib-stubs.md` names six symbols
 (`BuiltinKind`, `parse_surface_type`, …) that exist only in the frozen legacy tree, and puts `...`
 last in `paste` when the real declaration has it first (the position is load-bearing);
@@ -473,7 +473,7 @@ below, ranked by how often a real user hits it.
   `expected ggplot, found gg`. Same shape for dates: `add_days <- function(d, n) d + n`. Annotating
   the helper fixes it and the message is clear, but the tie is an over-commitment: R's `+` never
   required its operands to share a type, and a class that declares `+.Class` accepts pairings the tie
-  forbids. **This is the "traits" / third-constraint-kind question in `typing-design.md`, now tripped a
+  forbids. **This is the "traits" / third-constraint-kind question in `contributing/design/open-questions.md`, now tripped a
   third time by shipped features** — the right fix is a "supports this operator" constraint instead of
   `Numeric`, replacing both the tie and the `declares_arithmetic` relaxation that lets an
   arithmetic-declaring class satisfy `Numeric` today. Next stub corpus addition that returns a real
@@ -502,7 +502,7 @@ below, ranked by how often a real user hits it.
   the wording both exist; this is the same error in a position the check does not reach. Note the
   residual gap after fixing it: reporting the silence does not give the lambda parameter an
   annotatable position, which is the one genuine expressiveness argument for inline type syntax
-  (`typedr-design.md` §3).
+  (`contributing/design/inline-type-syntax.md` §3).
 - Overload candidates when touched: `is`, `extends`, `grep(value =)`, `cor` (vector vs matrix — needs matrix nominals). `Date`/`POSIXct` arithmetic refuses loudly today — revisit if real code makes it noisy.
 - **A list operation over a RECORD still loses the field types.** `rev`/`unique`/`head`/`tail`/`Filter` now declare a `list[named: T]` candidate ahead of the plain list one, so a name survives and a field read is `T | NULL` instead of a missing-field error — but a fixed-shape input coerces to a name-keyed list on the way in, so the exact field types are gone and the read stays nullable. Only a shape-mirroring return ("the same record") fixes it, and the type language has no way for a stub to say that; `rev` is the case where the claim would be exactly right (it reorders and drops nothing), while `head`/`tail`/`Filter` genuinely may drop a name and are correctly nullable. Same family as the data.frame row-type and matrix-shape designs.
 
@@ -658,9 +658,9 @@ run most often.
 
 ## Open — REPL (v1 shipped; the analysis wiring is the open rung)
 
-- **v1 SHIPPED and e2e-VERIFIED against real R** (`crates/repl` behind `roughly repl`; `repl-design.md` has the architecture, status, and the two pty-harness requirements): runtime-loaded R (no build-time link — the workspace builds R-less everywhere), reedline console inside the ReadConsole hook, lexer highlighting, conservative completeness with R's continuation as the safety net, SIGINT interrupt routing. The pty e2e suite (skip-if-no-R) runs green against real R — agent containers CAN install R (recipe in MEMORY.md short-term), so run `cargo test -p roughly --test test_repl_e2e` before REPL-touching changes, anywhere.
-- **Analysis-backed Tab completion SHIPPED** (first analysis rung; `repl-design.md` has the seam design): typed signatures for stdlib names, session bindings, `pkg::` exports, manifest names — `SessionCompleter` seam keeps the repl crate syntax-only, `AnalysisCompleter` in roughly runs `ide::completion` over the session-as-script. **Open — remaining rungs:** live-session facts (the R environment listing unioned into completions), pre-evaluation diagnostics on pending input, hover on the input line, graphics-device story (versioned mirror structs, see the design record). The headless runner is shipped.
-- **REPL Windows: real-machine smoke test pending.** The embedding is implemented (`repl-design.md` has the recipe: Rstart callbacks via R_DefParamsEx's version handshake, sibling-DLL preloading, RGui→LinkDLL switch, UserBreak+deferred interrupt pair) and compile/clippy-verified against x86_64-pc-windows-gnu — but no Windows machine with R has ever executed it. Smoke: `roughly repl` (prompt, evaluate, Ctrl-C, vi mode) and `roughly run` (output, exit 0/1). Known caveat to watch: terminal VT input handling in the editor layer.
+- **v1 SHIPPED and e2e-VERIFIED against real R** (`crates/repl` behind `roughly repl`; `contributing/design/repl.md` has the architecture, status, and the two pty-harness requirements): runtime-loaded R (no build-time link — the workspace builds R-less everywhere), reedline console inside the ReadConsole hook, lexer highlighting, conservative completeness with R's continuation as the safety net, SIGINT interrupt routing. The pty e2e suite (skip-if-no-R) runs green against real R — agent containers CAN install R (recipe in MEMORY.md short-term), so run `cargo test -p roughly --test test_repl_e2e` before REPL-touching changes, anywhere.
+- **Analysis-backed Tab completion SHIPPED** (first analysis rung; `contributing/design/repl.md` has the seam design): typed signatures for stdlib names, session bindings, `pkg::` exports, manifest names — `SessionCompleter` seam keeps the repl crate syntax-only, `AnalysisCompleter` in roughly runs `ide::completion` over the session-as-script. **Open — remaining rungs:** live-session facts (the R environment listing unioned into completions), pre-evaluation diagnostics on pending input, hover on the input line, graphics-device story (versioned mirror structs, see the design record). The headless runner is shipped.
+- **REPL Windows: real-machine smoke test pending.** The embedding is implemented (`contributing/design/repl.md` has the recipe: Rstart callbacks via R_DefParamsEx's version handshake, sibling-DLL preloading, RGui→LinkDLL switch, UserBreak+deferred interrupt pair) and compile/clippy-verified against x86_64-pc-windows-gnu — but no Windows machine with R has ever executed it. Smoke: `roughly repl` (prompt, evaluate, Ctrl-C, vi mode) and `roughly run` (output, exit 0/1). Known caveat to watch: terminal VT input handling in the editor layer.
 
 ## Open — delete the `rofy` crate (user-approved, unlike the other legacy crates)
 
@@ -670,7 +670,7 @@ other crate under `legacy/` still needs its own explicit go and must stay in-tre
 Why this one is different: `rofy` is the *predecessor* of a shipped component, not a frozen oracle.
 It embeds R through `extendr`/libR-sys, so bindgen runs at build time against a local R and the
 binary carries a load-time dependency on libR — which is exactly why it is excluded from CI and from
-every gate. `crates/repl` replaced that approach with runtime symbol binding (`repl-design.md`), is
+every gate. `crates/repl` replaced that approach with runtime symbol binding (`contributing/design/repl.md`), is
 e2e-verified against real R on both Unix ptys and Windows ConPTY, and already exceeds it: headless
 runner, vi keybindings, SIGINT routing, analysis-backed Tab completion. `rofy` is 266 lines across
 `lib.rs` and `main.rs`, with no graphics-device code, so the parity surface is small.
@@ -720,7 +720,7 @@ is moved once rather than renamed, so nobody loses their history.
 
 ## Post-beta (explicitly out of scope for now)
 
-- Tags / discriminated unions via a compiler-known stdlib `match` (design in `typing-design.md` first).
+- Tags / discriminated unions via a compiler-known stdlib `match` (design in `contributing/design/open-questions.md` first).
 - S3 dispatch modeling (`UseMethod`) — prerequisite for honest `print`/`summary`/`plot`.
 - data.frame column-level typing; matrix dimensionality; real S4 typing.
 - Traits/typeclasses (tripwire: the third constraint kind).

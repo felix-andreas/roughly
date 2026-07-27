@@ -84,6 +84,10 @@ export default defineConfig({
 						{ slug: 'contributing/structure' },
 						{ slug: 'contributing/testing' },
 						{ slug: 'contributing/authoring-stubs' },
+						// The drafts under contributing/design/ are deliberately not
+						// listed: they are proposals and open questions, not contracts,
+						// and this index is the single way in.
+						{ slug: 'contributing/design' },
 					],
 				},
 			],

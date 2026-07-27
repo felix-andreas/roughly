@@ -1,8 +1,8 @@
 //! An interactive R console with ry's language smarts, embedding R
 //! WITHOUT a build-time link dependency: the R shared library is located and
 //! `dlopen`ed at runtime, and every C-API symbol is resolved by name
-//! (`libr`). The design record lives in the repository's agent memory
-//! (`repl-design.md`); the short version:
+//! (`libr`). The design record is the REPL design page under
+//! `docs/src/content/docs/contributing/design/`; the short version:
 //!
 //! - R owns the calling thread and runs its REAL main loop
 //!   (`run_Rmainloop`); the console lives inside R's `ReadConsole` callback,

@@ -1,8 +1,11 @@
-# NSE — working draft
+---
+title: Data masking
+description: "Working draft: checking non-standard evaluation, data.table first"
+---
 
 Ideas-in-progress for checking non-standard evaluation (data masking). The settled
 framing — the four-step design ladder and the precedent survey — lives in
-`.agents/memory/typing-design.md` §7; this file is the sketchpad where concrete
+[Open type-system questions](/contributing/design/open-questions/) §7; this file is the sketchpad where concrete
 designs get drafted before they graduate into that record or the typing reference.
 **data.table is the pressing target.**
 

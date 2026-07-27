@@ -248,7 +248,7 @@ finding here". That is a feature, not a special case, and it would apply to ever
 
 **Only admit features that are fast to check — which means HM.** The bar for any proposed addition to the type system is: does it keep inference to unification over the existing constraint mechanism, decidable and linear-ish, with no search and no global solving? If not, it does not go in, however useful it looks. Soundness and speed are not traded for expressiveness.
 
-What this rules out, so nobody re-derives it: **type classes / traits** (declined, not deferred — see the tripwire note in `typing-design.md`), **general subtyping** (subtype inference is a different, slower algorithm than unification; a declared *coercion* at a named boundary is HM and is the shape any variance work must take), and any construct requiring backtracking search over a program-wide constraint set.
+What this rules out, so nobody re-derives it: **type classes / traits** (declined, not deferred — see the tripwire note in `contributing/design/open-questions.md`), **general subtyping** (subtype inference is a different, slower algorithm than unification; a declared *coercion* at a named boundary is HM and is the shape any variance work must take), and any construct requiring backtracking search over a program-wide constraint set.
 
 **The sanctioned exception is declaration files.** A `.Rtypes` stub may do things a user's own annotated code may not — today that means ad-hoc overloading. The exception is bounded on purpose: the cost of a non-principal feature is proportional to how much code it applies to, and a stub surface is a fixed, curated corpus the project itself maintains, not user code. It is also where the need is real: R's base library was never designed with types, so no principal scheme describes `min` or `abs`, and a gradual checker that cannot describe the standard library is not usable at all. A user's `#:` annotation stays pure HM, which is what keeps the *user-facing* promise ("your code, checked, fast") honest.
 
@@ -806,7 +806,7 @@ Impact: correctness — the corpus differential reaches 1,523/1,523 with one adj
 
 # Decision record: data.table awareness — conditional stub namespace, result-shape classifier, typed-subject masking
 
-**Status:** decided and implemented (agent-owned decision under the delegated ownership mandate; graduates NSE.md "idea 1", the first rung of the data-masking ladder in typing-design.md §7).
+**Status:** decided and implemented (agent-owned decision under the delegated ownership mandate; graduates contributing/design/data-masking.md "idea 1", the first rung of the data-masking ladder in contributing/design/open-questions.md §7).
 
 **The gap.** The masked-bracket recognition was purely syntactic and its result was always `Unknown`: chains lost their class after one bracket, `DT[speed > 20]` (no marker) warned "could not resolve speed" on the most idiomatic data.table line there is, and no shipped stub could give a value the `data.table` class in the first place.
 

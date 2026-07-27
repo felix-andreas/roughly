@@ -1,4 +1,7 @@
-# Inline type syntax for R (a compiled dialect)
+---
+title: Inline type syntax
+description: "Proposal, not implemented: inline type annotations as a compiled R dialect"
+---
 
 Status: proposal, nothing implemented.
 
@@ -118,7 +121,7 @@ source shadows its generated twin, so each definition is analysed once. But
 shadowing alone would make a stale committed twin invisible — the configuration
 where a reviewer reads one program and the author reads another. So the twin's
 header hash is checked during analysis too, and a mismatch is a project-level
-diagnostic in the editor, not only a `roughly build --check` failure.
+diagnostic in the editor, not only a `ry build --check` failure.
 
 **Mixed packages need no special rule.** A typed source participates in the package
 namespace exactly as its twin would, and collation order is defined over the
@@ -131,8 +134,8 @@ source, so positions are already the author's. A map is needed only to trace a
 convenience; the committed, formatter-normalised output plus a header pointer is
 the fallback every compiled-to-host language relies on.
 
-**The editor never writes.** Generation happens in `roughly build` and in a single
-`roughly build --watch` the user starts. Two editors open on one project would
+**The editor never writes.** Generation happens in `ry build` and in a single
+`ry build --watch` the user starts. Two editors open on one project would
 otherwise be two processes writing one path, and determinism plus the header hash
 means a redundant build writes nothing at all.
 
@@ -238,7 +241,7 @@ front of package authors.
 - What the source directory is called.
 - Whether inline types may annotate `...`, which the comment notation types as a
   rest parameter.
-- Whether the script path (§8) ships with no `roughly build` at all in v1.
+- Whether the script path (§8) ships with no `ry build` at all in v1.
 - Hover, go-to-definition and rename on an inline type position — expected to fall
   out of the existing type-position support, but unverified.
 - Editor behaviour on a half-written inline type, where error recovery matters more
