@@ -8,6 +8,157 @@
 - **Performance:** keystroke-to-diagnostics p50 ≤ 30 ms / p95 ≤ 100 ms at 300k LoC (read against the raw-parse floor the instrument prints — latency numbers swing ~1.4x with machine load); budgets pinned by `stats_witness` (per-line wall/memory/resolve-step ceilings) with the measurement instruments in `legacy/differential/tests/test_stats.rs`.
 - **No server-killing input** (no `unwrap` panics on protocol-legal messages).
 
+## Open — test-user round 3: typing enthusiasts (the type system, not the libraries)
+
+Three simulated users probing **the type checker itself** rather than package coverage, from the docs
+and `--help` only: one on parametric polymorphism and higher-order code, one on domain modelling and
+nullability, one adversarial about the `#:` surface and where carets land. Each judged **location and
+message as separate verdicts**, which is what makes this round different — a diagnostic that reads
+perfectly while blaming the wrong expression counts as a failure here.
+
+The four most serious claims were **re-verified independently** before filing; every one held, and two
+turned out worse than reported.
+
+### A. The checker gives a WRONG answer, not a skipped one — two confirmed cases
+
+`limitations.md` sells the whole trust story on one sentence: *"a gap means checks are **skipped**, not
+that wrong answers are produced."* Both of these break it, and both are silent under `strict = true`.
+
+1. **A field write through a nominal value is discarded, and the stale belief is then used both ways.**
+   Verified: after `ada$age <- "not a number"` on a `Person {list{name: character, age: integer}}`,
+   `double_it(ada$age)` (wants `integer`) is **accepted** and will crash at runtime, while
+   `want_chr(ada$age)` (wants `character`, and is correct) is **rejected** with ``expected `character`,
+   found `integer` ``. One line, a false negative and a false positive together. `ada$email <- "x"` is
+   also accepted without adding the field, and `[[` behaves the same. The *structural* case is correct
+   — `rec$age <- "nope"` does retype the field — so this is nominal-specific. `type-system.md` specifies
+   the write for record-like `x` and simply does not cover a nominal whose representation is record-like.
+   **This is the highest-value item in the round:** it is the only place found where the tool answers
+   wrongly rather than declining to answer, and it removes the point of `@type`, since an invariant
+   that holds only at the moment of construction is not an invariant.
+
+2. **A function-valued `if` without `else` drops the pre-branch arm — a soundness bug.** Verified
+   against real R:
+   ```r
+   pick <- function(shout) { fmt <- function(x) x; if (shout) fmt <- function(x) paste0(x, "!"); fmt }
+   plain <- pick(FALSE); n <- plain(1L) + 1L      # R prints 2
+   ```
+   ry reports ``expected a numeric value, found `character` `` — correct code rejected, and the message
+   is factually wrong about the value. The contrast is exact and points at the fix: the identical shape
+   over a *non-function* value correctly yields `integer | character`, so the join machinery exists and
+   closures do not use it. The exported type is wrong in the unsound direction too.
+
+### B. False positives on the first thing a newcomer writes
+
+3. **Guard narrowing never fires at file top level.** Verified: `x <- maybe(); if (is.null(x)) ... else
+   want_chr(x)` errors at top level; the byte-identical guard inside a function body is clean.
+   `type-system.md` promises the opposite in as many words — *"only reads of local variable slots narrow
+   (parameters, function locals, **script locals**)"*. This is what an evaluator hits in their first ten
+   lines, and its shape — the tool demanding a null check you already wrote — is the failure most likely
+   to make someone switch typing off. Should jump the queue on visibility alone.
+
+4. **A duplicate type name is unchecked in script projects.** Verified: two `@alias Thing` declarations
+   in a `ry.toml` project produce no duplicate error; the second silently wins, so a `Thing` declared
+   `double` on line 1 yields ``expected `character`, found `double` `` — unfalsifiable from the visible
+   source. The same input **in a package reports it properly**, so the check exists and does not run for
+   the other project kind, contradicting `diagnostic-codes.md` ("anywhere in the project") and
+   `ry check --help` ("the directory holding `ry.toml` or `DESCRIPTION`").
+
+5. **`= NULL` is exempt from the default-value check.** `#: fn([title]: character)` with
+   `title = NULL` passes, while `title = 42L` is caught — and `NULL` then provably reaches a
+   `character` parameter. This is the most common way R spells an optional argument. Related and worth
+   stating in the docs: `[title]` relaxes only the *call*; inside the body `title` is an unqualified
+   `character`, so the bracket looks like optionality and enforces none. `character | NULL` is the
+   spelling that works.
+
+### C. Annotations that validate themselves and then enforce nothing
+
+6. **An annotation in call-argument position is parsed, name-resolved, and dropped.** Already filed as
+   "silently dropped in a non-attachable position"; this round adds the part that makes it dangerous —
+   **a typo inside such an annotation IS reported**, so the user gets positive feedback that it is live.
+   With `@new` the drop resurfaces as a wrong error elsewhere in the file. Attachment was confirmed
+   working at every other depth tried (block tail, `if` arm, `for` body, bare parentheses, binary
+   operand), so argument position is the single hole.
+
+7. **A `@param` naming a non-existent parameter cascades onto correct call sites.** One bad
+   `@param missing_one` produced 5 errors: the primary says "**this** annotation names a parameter…"
+   while underlining the *function definition*, and the invalid annotation's arity is then adopted, so
+   four correct `f(1L)` calls are told they are missing an argument. Every caret in that output is on
+   code the user must not change. `type-system.md` states the governing principle — *"a broken
+   annotation never produces follow-on findings"* — for a list of shape violations that does not include
+   this one; the rule should cover it.
+
+### D. Placement: precise inside an expression, coarse at every compound boundary
+
+Caret placement was found excellent for ordinary nesting (four-deep calls, multi-line arguments,
+lambdas, pipes) and the renderer is display-width aware while JSON stays in codepoints — both correct,
+which is rarer than it sounds. The failures are all "collapse to the outermost node":
+
+- comparison operators (`<`, `==`, `>=`, `!=`) underline the whole binary expression, so the underlined
+  text contains both operand types and the message cannot be read; arithmetic and unary `-` get it right
+- a return-type mismatch with an `if`/`else` tail blames the whole construct, and the offending arm's
+  line is never rendered
+- `$` / `[[` underline the entire access chain rather than the bad key, even while the message names the
+  key and suggests a correction
+- surplus positional arguments blame the callee; a record mismatch is never attributed to the offending
+  field, printing two ~340-character near-identical type dumps to diff by eye (nested is worse — the
+  path is never named)
+- out-of-range ranges: a parse error reported on line 10 of a 9-line file; annotation ranges ending at
+  end-of-line spill onto the next line, so editors squiggle across the break
+
+### E. Rendering drops information the message depends on
+
+8. **Binder constraints are dropped from every rendered type**, so `lapply(words, function(s) s + 1L)`
+   over a character list reports ``expected `fn(character) -> T`, found `fn(s: U) -> U` `` — which
+   describes a call that *should* fit, and never mentions `character`, `+`, or numeric. The reference
+   states the contract (`function(x) x + 1L` renders as `<T: numeric> fn(x: T) -> T`) and it is not met;
+   the constraint is enforced but invisible, so an acceptable and an unacceptable function print
+   identically. The good message already exists — annotating the lambda parameter produces a precise
+   ``expected a numeric value…, found `character` `` — so the fix is to check the callback body against
+   the instantiated parameter type rather than unify whole function types and print the residue. Same
+   root cause behind the `Reduce` and `Filter` reports and the "expected `list[T] | T[]`, found
+   `character[]`" message, which is false as printed.
+9. **`(fn(A) -> B) | NULL` renders without its parentheses**, so it prints identically to
+   `fn(A) -> (B | NULL)` — two different types. The docs name this exact form as the one that round-trips.
+   Copying a type out of an error and back into an annotation silently changes it.
+10. **A rank-2 annotation produces 7 diagnostics and the first one is false** ("only one compact
+    annotation fits in a `#:` block" — there is one). The correct message, *"higher-rank polymorphism is
+    not supported"*, is buried second and coded `syntax-error` though it is a deliberate expressiveness
+    limit. Same misdiagnosis class: a braceless `@param count integer` reports a form clash that does not
+    exist, and prescribes a fix that would add a fourth error.
+
+### F. Smaller, but cheap
+
+- `do.call` returns `Any`, which disables checking *and* blinds `strict` — a hole in exactly the
+  higher-order code this checker is for. Corpus-authored `Any` where the docs say `Any` should appear
+  only when a user writes it.
+- `strict` only asks whether a binding *is* `Unknown`, not whether it *contains* one, so
+  `fn(Unknown) -> integer` passes silently. Undercuts the "only way to keep a gap from looking like a
+  pass" claim.
+- `logical` is accepted at a declared `integer` parameter but rejected at an inferred `numeric` one, so
+  the same function is accepted or rejected depending on whether the type was written down. R promotes
+  logical in arithmetic and the docs say so twice.
+- `@new` is unrestricted project-wide, so `domain-modeling.md`'s *"the only door in"* and
+  `concepts.md`'s *"provably came from there"* overstate it. Either add an encapsulation modifier or
+  soften both sentences to "by convention".
+- A narrowing failure on a field or behind `&&` produces a message **byte-identical** to having written
+  no guard at all. The docs know the fix ("lift the value into a local first"); the diagnostic should
+  say it.
+- Nominal unions are unchecked through `$` while structural unions are exact; and there is no
+  discriminator for nominal types (`is.list` is true of both arms), so tagged unions cannot be narrowed
+  at all.
+- An alias cycle is reported on the *use* with a whole-statement caret and never at the declaration; an
+  unused cyclic alias is not reported at all, though the reference says definition cycles are errors.
+- A second `#:` annotation on one line is silently swallowed (first wins), while harmless trailing prose
+  errors — the ambiguous input is the quiet one.
+- Missing-argument errors do not name the parameter, though the sibling wrong-name error lists all of
+  them. Near-miss suggestions have a length floor that misses short field names (`person$nam`).
+
+**What the round says overall.** Both testers who could reach a verdict said the core is real — genuine
+HM with generalization, an occurs check, per-parameter variance, working generic nominals, airtight
+nominal distinctness, and no cascades outside the `@param` case. The gap is not the engine; it is that
+**diagnostics render the artifact unification left behind rather than the fact that failed**, and that
+the nominal story protects construction but nothing after it.
+
 ## Open — test-user round 2 findings
 
 Five simulated users, each on a distinct project of their own writing, learning the tool from the
