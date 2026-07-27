@@ -19,7 +19,7 @@ the shipped corpus:
 | **Export lists only** | the tidyverse (and `library(tidyverse)` itself), `knitr`, `rlang`, `glue`, `magrittr`, `scales`, `jsonlite`, `R6`, and every namespace R ships |
 
 The difference between the last two rows matters. A **typed** namespace gives calls through it real
-types. An **export list** gives no types, but it does tell the checker which names exist — which is what
+types. An **export list** gives no types, but it tells the checker which names exist, which is what
 keeps [`unresolved`](/reference/diagnostic-codes) working, so a typo next to a real export is still
 caught.
 
@@ -29,11 +29,12 @@ Attaching a package ry has never heard of weakens the `unresolved` check across 
 bare name *could* be one of that package's exports, so unresolved names are tolerated rather than
 reported.
 
-Two things limit the damage. A near-miss of a name your **own** project binds is still reported —
-`library(shiny)` cannot explain `repositry` sitting next to a `repository` parameter. And
-`strict = true` makes every tolerated read visible.
+One thing limits the damage: a near miss of a name your **own** project binds is still reported —
+`library(shiny)` cannot explain `repositry` sitting next to a `repository` parameter. Strict mode
+does not help here, because the tolerance is applied while names are resolved rather than through
+the type of the result.
 
-The real fix is to declare the package yourself.
+The fix is to declare the package yourself.
 
 ## Teaching it about a package
 
@@ -48,19 +49,20 @@ connect: fn(host: character) -> Session
 ```
 
 Stub declarations are bare — no `#:` prefix, and `@type` in a stub names an opaque type rather than
-giving it a representation. That is usually what you want for a package's own objects: you care that
-`connect()` returns a `Session` and that a `Session` is not a `character`, not what is inside it.
+giving it a representation. That is usually what you want for a package's own objects: what matters
+is that `connect()` returns a `Session` and that a `Session` is not a `character`, not what is
+inside it.
 
-That gives you three things at once: `connect()` gets a real signature, `mypkg::connect` validates as a
-known namespace, and the unknown-namespace warning goes away.
+That gives you three things at once: `connect()` gets a real signature, `mypkg::connect` validates
+as a known namespace, and the unknown-namespace warning goes away.
 
 You do not have to describe the whole package. Declare what you call.
 
 ## Overriding a shipped declaration
 
-The same mechanism corrects the shipped corpus. A declaration in your `stubs/` directory **replaces**
-the shipped one of the same name, so if a return type is wrong, or a name is missing for your version
-of a package, you can fix it locally without waiting for a release.
+The same mechanism corrects the shipped corpus. A declaration in your `stubs/` directory
+**replaces** the shipped one of the same name, so if a return type is wrong, or a name is missing
+for your version of a package, you can fix it locally without waiting for a release.
 
 Overriding a name does not remove it from its own namespace: `stats::sd` stays valid under an `sd`
 override.

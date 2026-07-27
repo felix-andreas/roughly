@@ -71,6 +71,17 @@ Companion documents in this folder (kept separate only because they are larger i
   say what you forgot"). Every sentence must carry information a reader did not have; if a sentence
   only sets up the next one, delete it. This is a hard rule across the whole site, and reviewers check
   it.
+- **The register is neutral and precise: plain declarative sentences (user directive).** The README's
+  "Why ry" and "Type system" sections are the style reference. No punchy fragments or sales lines
+  ("no options to argue about", "built for exactly this job", "One more thing"), no rhetorical
+  build-up ("Read that error carefully, because it is the whole idea"), and no promoting an
+  incidental fact into a selling point. State a limit as a fact rather than as candour about a limit
+  — "the honest way to find out" is just "how you find out". **Motivate a design decision with the
+  technical reason**, not with its virtue: R is highly dynamic, ry targets soundness and speed on
+  large codebases, so inference is Hindley–Milner, and class hierarchies plus user-side overloading
+  are excluded because a system admitting them can spend unbounded time on one expression. Where a
+  construct cannot be described statically it is `Unknown`, so a gap is a skipped check rather than a
+  wrong answer.
 - **Never rely on a capability the page has not introduced yet.** The Features page builds
   navigation → syntax errors → formatting → rename → the type checker, so an example that needs
   inference cannot appear before the reveal. An example is evidence for the section it sits in.
@@ -93,6 +104,14 @@ Companion documents in this folder (kept separate only because they are larger i
 - **Docs claims are verified against the binary, never against other docs.** A prior pass shipped a
   fabricated JSON example and formatter behaviour the tool does not have; the rewrite caught a
   fabricated `--output json` sample still in the install page. Run examples before writing them down.
+  A pass that only intended to change *prose* still found five false claims, so re-run the examples
+  even when the edit is stylistic. The kinds that drift: **quoted diagnostic text** truncated or
+  paraphrased (the `@type`/`@alias` block message, the misplaced-config-key warning), **rendered
+  types missing their binder** (a hover written `fn(x: T) -> …` when the tool prints
+  `<T> fn(x: T) -> …`), **flag behaviour described from intent** (`--min-severity error` was said to
+  still print warnings; it suppresses them entirely), and **a capability claimed in several pages at
+  once** (strict mode "makes every tolerated read visible" — it does not; see `backlog.md`). Driving
+  the LSP server over stdio from a throwaway script is the way to check hover and completion.
 
 ### Architecture
 

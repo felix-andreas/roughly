@@ -34,9 +34,9 @@ jobs:
 Both commands exit `1` on findings, which is what fails the job. Neither needs R installed.
 
 **Pin the version.** Every release so far is marked a pre-release, so
-`releases/latest/download/…` resolves to an old stable tag rather than the newest build — and the type
-system is still gaining capability, so a newer version can report findings an older one did not. Name
-the tag explicitly, as above. See [project status](/why-ry#project-status).
+`releases/latest/download/…` resolves to an old stable tag rather than the newest build. The type
+system is also still gaining capability, so a newer version can report findings an older one did
+not. Name the tag explicitly, as above. See [project status](/why-ry#project-status).
 
 Asset names follow the Rust target triple — `ry-aarch64-apple-darwin.tar.gz`,
 `ry-x86_64-pc-windows-gnu.zip` — and each archive contains the single `ry` binary.
@@ -46,15 +46,16 @@ Asset names follow the Rust target triple — `ry-aarch64-apple-darwin.tar.gz`,
 The default is strict: **warnings fail the job**. A run with nothing but `unused` warnings still
 exits `1`.
 
-That is usually right for a project that starts clean, and wrong for one adopting ry on an
-existing codebase. To gate on errors only while you work through a backlog:
+That is usually right for a project that starts clean, and wrong for one adopting ry on an existing
+codebase. To gate on errors only while you work through a backlog:
 
 ```bash
 ry check --min-severity error
 ```
 
-The filter applies before the exit code is decided, so warnings still print but no longer fail
-anything.
+The filter applies before anything is reported, so warnings are neither printed nor counted toward
+the exit code. A run whose only findings are warnings prints `1 file checked, no problems` and exits
+`0`.
 
 | You want | Command |
 | --- | --- |
@@ -63,9 +64,9 @@ anything.
 | Formatting enforced | `ry fmt --check` |
 | To see the diff CI would apply | `ry fmt --diff` |
 
-Be careful reading exit code `2` as "worse than 1" — it is a *different* failure. It means the run
-could not be completed: an unparseable `ry.toml`, a path that does not exist, an unreadable file.
-A job that treats any non-zero as "findings" will report a broken config as a code problem. The full
+Exit code `2` is not "worse than 1" — it is a *different* failure. It means the run could not be
+completed: an unparseable `ry.toml`, a path that does not exist, an unreadable file. A job that
+treats any non-zero status as "findings" will report a broken config as a code problem. The full
 table is in the [CLI reference](/reference/cli#exit-codes).
 
 ## JSON output
@@ -82,9 +83,9 @@ anything out.
 {"code":"type-mismatch","column":21,"endColumn":27,"endLine":4,"line":4,"message":"expected `integer`, found `character`","path":"/home/you/demo/main.R","related":[],"severity":"error"}
 ```
 
-Every field is documented in the [CLI reference](/reference/cli#json-output), and the field names are a
-contract — they are covered by tests that fail when they change, so a script built on them will not
-break silently.
+Every field is documented in the [CLI reference](/reference/cli#json-output), and the field names
+are a contract — they are covered by tests that fail when they change, so a script built on them
+will not break silently.
 
 Counting errors for a summary line, without jq:
 
@@ -95,5 +96,5 @@ ry check --output json | grep -c '"severity":"error"'
 ## Adopting on an existing project
 
 Do not start by putting `ry check` in front of a merge gate on a codebase that has never run it.
-Land the tool first, gate second. [Adopting an existing codebase](/guides/adopting) walks through the
-order that works.
+Land the tool first, gate second. [Adopting an existing codebase](/guides/adopting) walks through
+the order that works.

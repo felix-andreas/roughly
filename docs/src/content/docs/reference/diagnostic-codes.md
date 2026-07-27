@@ -3,7 +3,7 @@ title: Diagnostic codes
 description: Every code ry can emit, what triggers it, and how to silence it
 ---
 
-Every finding ry reports carries a stable code. This page lists all of them.
+Every finding ry reports carries a stable code. This page lists them all.
 
 ## How to read a finding
 
@@ -64,7 +64,7 @@ Several R idioms are recognized directly, with no comment needed:
 | A file that calls `R6Class` | `self`, `private` and `super` resolve in it |
 | A name created by `<<-` anywhere in the file | Resolves |
 | A name starting with `.` or `_` | Never reports `unused` |
-| `library(pkg)` for a package with no shipped stub | `unresolved` goes quiet, except for near misses of names your own project binds |
+| `library(pkg)` for a package with no shipped stub | `unresolved` is suppressed project-wide, except for near misses of names your own project binds |
 
 Formatting is suppressed by a different mechanism — `# fmt: skip`, `# fmt: off` / `# fmt: on`, `# fmt: skip-file`. See [formatting rules](/reference/formatting-rules).
 

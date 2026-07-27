@@ -3,7 +3,7 @@ title: Testing
 description: The fixture-testing contract and suite structure
 ---
 
-This project prefers fixture tests for source-driven behavior because they are:
+This project prefers fixture tests for source-driven behavior. They are:
 
 - easy for a human to read in diffs
 - easy to extend into many cases quickly
@@ -232,7 +232,7 @@ Behavior:
 - blessing an already-correct suite changes no bytes
 
 Review every blessed change before committing: bless captures whatever the runner currently
-produces, so it will happily record an intentionally wrong outcome if the implementation is wrong.
+produces, so it records an intentionally wrong outcome when the implementation is wrong.
 Fixtures are the desired-semantics contract, not a regression archive — accept a changed
 expectation only when the behavior or wording intentionally improved.
 

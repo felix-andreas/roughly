@@ -3,7 +3,7 @@ title: Configuration
 description: Every ry.toml key, discovery rule, and editor setting in one place
 ---
 
-Everything you can change about ry's behavior lives in one file, `ry.toml`; editor settings only say where the binary is.
+Everything you can change about ry's behavior lives in one file, `ry.toml`. Editor settings only say where the binary is.
 
 ## Project discovery
 
@@ -85,7 +85,7 @@ Type inference always runs — hover, inlay hints, and signature help work regar
 
 A `# typing: off`, `# typing: on`, or `# typing: strict` line at the top of a file replaces both `typing` and `strict` for that file — see [the per-file directive](/reference/type-system#per-file-directive).
 
-Four things worth knowing about `exclude`:
+Four rules govern `exclude`:
 
 - Patterns are anchored at the directory holding `ry.toml`, and follow gitignore rules: `scripts/` excludes that whole subtree, `**/generated` matches at any depth, `!` re-includes.
 - Excluded directories are pruned without being walked, so exclusion cuts checking time, not just output.
@@ -107,11 +107,12 @@ warning[unused]: `v` is assigned but never used.
 
 ## Invalid and unknown keys
 
-An unknown key is never fatal — a config written for a newer ry still starts an older one.
+An unknown key is never fatal, so a config written for a newer ry still starts an older one.
 
 | Situation | Result |
 | --- | --- |
 | Unknown key | Ignored, with one warning naming it. Known keys beside it still load, and the exit code is unaffected. |
+| Known key at the wrong level | Ignored, with a warning naming the table it belongs under. A `typing = true` written outside `[check]` sets nothing. |
 | Wrong type on a known key | Hard error. |
 | Malformed TOML | Hard error. |
 | Invalid `[check] exclude` pattern | Hard error. |
@@ -129,7 +130,7 @@ typing = true
 [format]
 indent = 4
 $ ry check .
-warning: ignoring unknown config key `strict` — check the spelling, or update ry
+warning: ignoring config key `strict` — it belongs under `[check]`, and nothing outside a table sets it
 warning: ignoring unknown config key `check.stric` — check the spelling, or update ry
 warning: ignoring unknown config key `format.indent` — check the spelling, or update ry
 1 file checked, no problems

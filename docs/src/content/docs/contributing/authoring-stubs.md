@@ -210,7 +210,7 @@ use of one into a false `unresolved`).
 A manifest does not need a `.Rtypes` file beside it. **Manifest-only namespaces** — `tibble`,
 `tidyr`, `readr`, `purrr`, `stringr`, `forcats`, `lubridate`, `magrittr`, `rlang`, `glue`, `scales`,
 `knitr`, `jsonlite`, `R6`, `tidyverse` — carry no typed declarations at all, so every name from them
-is `Unknown`. What they buy is a **knowable export set**, and that is worth more than it sounds:
+is `Unknown`. What they supply is a **knowable export set**, which matters because
 attaching a package whose exports the checker cannot enumerate turns off unresolved-name detection for
 the whole project (see [the tolerance](/reference/type-system#naming-and-scoping)), so before these manifests
 existed a single `library(stringr)` meant a clean run said nothing about typos anywhere. Adding

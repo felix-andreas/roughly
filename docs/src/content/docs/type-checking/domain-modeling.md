@@ -4,11 +4,11 @@ description: Give your domain its own checked types with nominal declarations, i
 ---
 
 R's object systems were designed for dispatch, not for static reasoning. This page shows what to use
-instead when what you want is for the checker to *know* what a value is.
+instead when what you want is for the checker to know what a value is.
 
 ## What the object systems give a checker
 
-Nothing, mostly. Here is an S4 class and an R6 class, and a function that only accepts strings:
+Very little. Here is an S4 class and an R6 class, and a function that only accepts strings:
 
 ```r
 setClass("Point", representation(x = "numeric"))
@@ -21,15 +21,15 @@ want_chr(pt@x)
 ```
 
 That is accepted. `pt@x` is declared `"numeric"` in the class definition, it is being passed where a
-`character` is required, and no finding is reported — because the checker cannot see inside S4 at all.
-Turn on strict mode and it says so plainly:
+`character` is required, and no finding is reported, because the checker cannot see inside S4. Strict
+mode reports it as an undetermined type:
 
 ```text
 error[strict]: strict mode: this expression has an undetermined type (`Unknown`)
 ```
 
-R6 behaves the same way. This is not a gap that will close soon: both systems build their objects at
-runtime out of values the checker would have to execute to understand.
+R6 behaves the same way. This gap will not close soon: both systems build their objects at runtime
+out of values the checker would have to execute to understand.
 
 ## Declaring a type
 
@@ -41,8 +41,8 @@ ada <- list(name = "Ada", age = 36L)
 ```
 
 `@type` declares a nominal type — a name that is its own type, distinct from everything else, even
-things with an identical representation. `@new` is the one way a plain list becomes one, and it checks
-the list against the declared shape as it goes.
+things with an identical representation. `@new` is the one way a plain list becomes one, and it
+checks the list against the declared shape as it goes.
 
 From there the checker knows what `ada` is: `ada$name` is a `character`, `ada$nam` is a reported
 mistake, and passing `ada` where a `Person` is wanted works while passing any other list does not.
@@ -70,20 +70,19 @@ new_person("Ada", "36")
 error[type-mismatch]: expected `integer`, found `character`
 ```
 
-This is the pattern to use. The `@new` is **inside** the constructor, so it is the only
-door in: everything downstream receives a `Person`, and the checker enforces that statically.
+The `@new` is **inside** the constructor, so the constructor is the only way in: everything
+downstream receives a `Person`, and the checker enforces that statically.
 
-Be clear about which half does what. `@new` is an **analysis-time** check — it is not
-`setValidity()`, not an R6 `initialize()`, and it emits no runtime assertion. It cannot know that
-`age` is non-negative, and it cannot check a field whose type it could not determine. The `stop()` on
-the line above is what enforces the invariant when the code actually runs.
-
-The pairing is the point: the `stop()` guards values at run time, the `@new` guards *shape* at
-analysis time, and both sit in the one function every caller has to go through.
+The two halves do different jobs. `@new` is an **analysis-time** check — it is not `setValidity()`,
+not an R6 `initialize()`, and it emits no runtime assertion. It cannot know that `age` is
+non-negative, and it cannot check a field whose type it could not determine. The `stop()` on the
+line above is what enforces the invariant when the code runs. The `stop()` guards values at run
+time, the `@new` guards shape at analysis time, and both sit in the one function every caller goes
+through.
 
 ## Distinct types that look identical
 
-This is the trick no structural checker can do for you:
+This is what a structural checker cannot do for you:
 
 ```r
 #: @type Celsius {double}
@@ -98,17 +97,17 @@ to_fahrenheit <- function(t) t
 error[type-mismatch]: expected `Fahrenheit`, found `Celsius`
 ```
 
-Both are `double` underneath, and neither is interchangeable with the other. Two `character` ids, two
-currencies, a validated email beside an unvalidated string — anywhere your domain has values that are
-the same shape but must not be mixed, this is how you say so.
+Both are `double` underneath, and neither is interchangeable with the other. Two `character` ids,
+two currencies, a validated email beside an unvalidated string — anywhere your domain has values
+that are the same shape but must not be mixed, this is how you say so.
 
 The representation still leaks **outward**: a `Celsius` is accepted anywhere a plain `double` is
-expected, so `t / 2` and `mean(temps)` keep working. What does not happen is the reverse — a bare
-`double` never becomes a `Celsius` on its own. That asymmetry is the whole design: arithmetic stays
-convenient, while the only way *into* the type is a `@new` you wrote.
+expected, so `t / 2` and `mean(temps)` keep working. The reverse does not hold — a bare `double`
+never becomes a `Celsius` on its own. That asymmetry is deliberate: arithmetic stays convenient,
+while the only way *into* the type is a `@new` you wrote.
 
-If you want the opposite — a name that is pure shorthand and stays interchangeable with its body — that
-is [`@alias`](/type-checking/concepts#naming-your-own-types), not `@type`.
+If you want the opposite — a name that is pure shorthand and stays interchangeable with its body —
+that is [`@alias`](/type-checking/concepts#naming-your-own-types), not `@type`.
 
 ## Types with a parameter
 
@@ -116,26 +115,27 @@ is [`@alias`](/type-checking/concepts#naming-your-own-types), not `@type`.
 #: @type Box<T> {list{value: T}}
 ```
 
-A `Box<integer>` and a `Box<character>` are different types, and the element type flows out again when
-you read it.
+A `Box<integer>` and a `Box<character>` are different types, and the element type flows out again
+when you read it.
 
 ## When to use R6
 
 Nominal types describe values. They do not give you:
 
-- **Mutable state with reference semantics.** An R6 object shared between callers, mutated in place,
-  is a thing this cannot express.
+- **Mutable state with reference semantics.** An R6 object shared between callers and mutated in
+  place is a thing this cannot express.
 - **Inheritance hierarchies.** There is no subtyping between nominal types.
 - **Dispatch.** If you need `print()` and `summary()` to do the right thing per class, that is S3.
   Those go through `UseMethod`, which dispatches at run time — the checker types such calls as
   `Unknown` and cannot follow them. (S3 *operator* dispatch, `+.Date` and friends, is resolved
   statically; method dispatch is not.)
 
-The rule: use a nominal type when you have a **value with a shape and an invariant** —
-which is most of what an analysis codebase actually passes around. Reach for R6 when you genuinely have
-an **object with identity and mutable state**, and accept that its interior is opaque to the checker.
+Use a nominal type when you have a **value with a shape and an invariant**, which is most of what an
+analysis codebase passes around. Use R6 when you have an **object with identity and mutable state**,
+and accept that its interior is opaque to the checker.
 
-Plenty of R code uses R6 for things that are really just values. Those are the ones worth converting.
+Plenty of R code uses R6 for things that are really just values. Those are the ones worth
+converting.
 
 ## Next
 

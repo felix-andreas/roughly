@@ -226,11 +226,11 @@ architecture; none block the analysis rung:
   prompt clock and sqlite-history timestamps use it); see the Apple-framework
   decision record for why that matters at release time.
 - **History**: sqlite backend (an editor feature flag) and import from
-  `.Rhistory`/radian history formats — cheap onboarding win.
+  `.Rhistory`/radian history formats — low cost, removes a migration step.
 - **E2e assertions**: parse pty output through a vt100 screen model instead
   of grepping raw transcripts — robust against redraws and cursor movement.
-- **Help**: a fuzzy help browser over installed packages is table stakes in
-  the field; ours should come from the analysis stack (hover docs already
+- **Help**: a fuzzy help browser over installed packages, which comparable
+  consoles provide; ours should come from the analysis stack (hover docs already
   exist) rather than a parallel Rd pipeline.
 - **Reprex mode**, rendered through our own formatter.
 - Auto-matching brackets / smart quotes; TOML-config for colors and prompts

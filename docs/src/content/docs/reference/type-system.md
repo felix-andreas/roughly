@@ -329,8 +329,7 @@ do not check against a shape the checker could not establish and one mistake doe
 a file. An item carrying an explicit **declaration** is the exception: a `#:` annotation is what the
 author says the binding is, and it stays that whether or not the body honours it. So a function whose
 body violates its annotation reports the body error *and* keeps checking every call site against the
-declared signature — otherwise a caller's mistake would stay hidden until the body was fixed, which
-inverts the order anyone works in.
+declared signature; otherwise a caller's mistake would stay hidden until the body was fixed.
 
 Unused (dead-store) analysis follows from the same reaching sets when the `unused` check is
 enabled: an assignment whose written value no read can observe on any path warns
@@ -503,8 +502,7 @@ This is an error because the checker already knows the type.
 `#: @trust TYPE` is a trusted coercion.
 
 - it tells the checker to treat the annotated value as `TYPE` without requiring ordinary compatibility at that annotation site
-- this is the “trust me bro” escape hatch
-- it is similar in spirit to TypeScript’s `as`
+- it is the unchecked escape hatch, similar in spirit to TypeScript’s `as`
 - conceptually, `#: @trust TYPE` is like coercing through `Any` and then to `TYPE`, but written directly because that is more ergonomic
 
 Examples:
@@ -675,7 +673,7 @@ Examples:
 - `list(1L, 2L, 3L)` currently infers as `list{integer, integer, integer}`, not `list[integer]`
 - `list(foo = 1L, bar = 2L)` currently infers as `list{foo: integer, bar: integer}`, not `list[named: integer]`
 
-This is not set in stone. If this default turns out to be awkward in practice, it may be reasonable to introduce distinct tuple and record constructors later, even if they remain runtime aliases of R lists.
+This default is provisional. If it proves awkward in practice, distinct tuple and record constructors may be introduced later, even if they remain runtime aliases of R lists.
 
 #### List coercions
 
@@ -1046,7 +1044,7 @@ as bare `@type NAME` — see [Standard library stubs](/type-checking/stubs). For
 
 - `$`, `[`, and `[[` are accepted and the result is `Unknown` rather than an error: the R object
   behind such a class commonly supports value-dependent access (`df$amount`, `df[rows, ]`), and
-  refusing would reject the most idiomatic R there is
+  refusing would reject ordinary R
 - the access is not checked further — no field-existence, index-count, or index-type checking —
   so `df[i, j]` and `df[rows, ]` both pass
 - every such access is an unsupported construct under [strict mode](#strict-mode): the untyped
@@ -1128,7 +1126,7 @@ Unification is the **invariant floor**: when it must produce a single representa
 
 ### Union types
 
-A union type `A | B | ...` describes a value that has one of the member types. Any number of members is allowed, and any type may be a member; `T | NULL` — the nullable form of `T` — is simply the two-member special case.
+A union type `A | B | ...` describes a value that has one of the member types. Any number of members is allowed, and any type may be a member; `T | NULL` — the nullable form of `T` — is the two-member special case.
 
 - union syntax is allowed anywhere a type can appear, including:
   - variable annotations
@@ -1235,7 +1233,7 @@ that admits:
   R rather than mistakes
 - `character`, `complex` and `raw` are type errors. R refuses `complex` and `raw` outright, and in
   a `character` condition it accepts only the spellings of `TRUE` and `FALSE` (`"T"`, `"true"`, …)
-  and raises at run time on every other string — so `if ("yes")` is a bug worth reporting
+  and raises at run time on every other string, so `if ("yes")` is reported
 - a **vector** is a type error: a condition whose length is not one is an error in R too
 - a condition whose type is still undetermined is bound to `logical`, the useful default for an
   unannotated predicate — so `function(flag) if (flag) 1L` infers `flag: logical`
@@ -1263,7 +1261,7 @@ Examples:
   - branches that unify share that type: `if (flag) 1L else 2L` is `integer`, and `if (cond) a else b` over two unconstrained values keeps them unified as one polymorphic type
   - a `NULL` branch joins by union without constraining the other branch: one branch `T` and one branch `NULL` produce `T | NULL`
   - branches with genuinely different types produce their union: `if (flag) 1L else "foo"` is `integer | character` — different branch types are **not** a type error
-  - a branch whose type is still an **unconstrained** inference variable is never pinned by the other branch: `function(flag, x) if (flag) x else "s"` is `<T> fn(flag: logical, x: T) -> T | character`, not `fn(flag: logical, x: character)`. Unifying there would make the *caller* wrong for a line that is not, and it is what the guard rule requires — the whole point of `if (is.character(x)) x else "other"` is that the caller may pass something else
+  - a branch whose type is still an **unconstrained** inference variable is never pinned by the other branch: `function(flag, x) if (flag) x else "s"` is `<T> fn(flag: logical, x: T) -> T | character`, not `fn(flag: logical, x: character)`. Unifying there would make the *caller* wrong for a line that is not, and it is what the guard rule requires: `if (is.character(x)) x else "other"` exists precisely because the caller may pass something else
   - a branch whose variable the body has already **constrained** may unify with the other, because that pin adds nothing the program did not already require: `function(n) if (n <= 1L) 1L else n * fact(n - 1L)` converges to `fn(n: integer) -> integer`
   - two branches that are **both** still open tie to each other, since neither pins the other: `function(value, fallback) if (is.null(value)) fallback else value` is `<T> fn(value: T | NULL, fallback: T) -> T`
   - an `Unknown` branch makes the whole conditional `Unknown` rather than claiming the other branch's type
@@ -1551,10 +1549,10 @@ call site:
 **Only a declaration file can overload a name**, and that boundary is deliberate. Overloading is the
 one place this type system departs from Hindley-Milner: a name with several signatures has no single
 most general type, so a call has to be *resolved by search* rather than inferred, which costs both
-the principal-type guarantee and the speed that comes with plain unification. That price is worth
-paying for a fixed, curated corpus describing a standard library nobody designed with types in mind,
-and it is not worth paying across a whole codebase. Two caveats on *why* the corpus needs sets, since
-they point at work rather than at a law: a family like `min`/`abs` is really one constrained,
+the principal-type guarantee and the speed that comes with plain unification. That cost is acceptable
+for a fixed, curated corpus describing a standard library nobody designed with types in mind, and
+unacceptable across a whole codebase. Two caveats on *why* the corpus needs sets, since they point at
+work rather than at a law: a family like `min`/`abs` is really one constrained,
 shape-preserving scheme (`<T: numeric> fn(x: T) -> T`) written out longhand, because the declaration
 grammar cannot yet express a constrained binder or a shape-mirroring return. Closing those two gaps
 would collapse a large share of the corpus's sets into single signatures. So a
@@ -1697,8 +1695,8 @@ unconstrained. Reading fields, elements, and slices off a value whose shape the 
 down is how idiomatic R walks recursive and generic data (a tree fold, a generic accessor), so
 refusing here would flag ordinary code. The access is instead sound-by-refusal and surfaced as an
 unsupported construct under [strict mode](#strict-mode), exactly as for an opaque nominal. This
-covers **multi-index** subsetting too: `function(m, i, j) m[i, j]` is silent, because the whole point
-of that function is that the caller knows the shape and the callee does not. A subject whose shape
+covers **multi-index** subsetting too: `function(m, i, j) m[i, j]` is silent, because such a function
+is written for a caller that knows the shape when the callee does not. A subject whose shape
 *was* written down still refuses a shape no rule covers — `c(1L, 2L)[1L, 2L]` is an error.
 Recovering the field or element type by constraining the variable to a record-with-field or
 indexable shape is future work.
@@ -2429,7 +2427,7 @@ apply_renderer <- function(render_count, count) { render_count(count) }
 
 ry checks the parts of R's object systems that are **written down as declarations**, and
 declines the parts that are **decided at run time from a value's class attribute**. The boundary is
-deliberate, not a to-do list, so this section states both what happens and why.
+deliberate rather than pending work, so this section states both what happens and why.
 
 | Construct | What the checker does |
 | --- | --- |
@@ -2443,18 +2441,18 @@ deliberate, not a to-do list, so this section states both what happens and why.
 | `self` / `private` / `super` inside an R6 method | Resolve as names, type as `Unknown` |
 
 `x@slot` reads (and `x@slot <- v` writes) an S4 object slot. The slot's type is unknown, but the
-construct is not a hole:
+construct is still analyzed:
 
 - a slot read types as `Unknown` and is a strict-mode origin
 - the subject expression is inferred, so its own type errors surface
 - the subject's variable read counts for naming, unused analysis, references, and rename
 - a slot write is an ordinary replacement-form assignment of its base variable
 
-### You can give your own classes a checked type today
+### Declaring a checked type for your own classes
 
-A class is a nominal with a representation, and that is [something you can
+A class is a nominal type with a representation, which is [something you can
 declare](#type-parameters-aliases-and-nominal-types). Wrapping the constructor is enough to get
-slot types, constructor arity, and field access checked on an S4 or R6 class right now:
+slot types, constructor arity, and field access checked on an S4 or R6 class:
 
 ```r
 #: @type Point {list{x: double, y: double}}
@@ -2548,8 +2546,8 @@ Unresolved references carry the `unresolved` diagnostic code:
 
 Outside strict mode these are warnings. Under strict (configured, or via the per-file directive)
 they are **errors**: a name the checker cannot see is a hole in the checked surface, not a hint. So
-turning strict on can raise the severity of findings that were already there, without their count
-changing — worth knowing before a `--min-severity error` gate sees them.
+turning strict on can raise the severity of findings that were already there without changing their
+count, which matters when a `--min-severity error` gate reads them.
 
 Two `unresolved` findings are errors whatever the mode, because they stop the package from loading
 rather than describing a gap in the checker's view: a `NAMESPACE` `importFrom` naming something the
@@ -2654,9 +2652,9 @@ declaration whose only parameter is `...` (`join_by : @masked fn(...: Any) -> An
 argument. A locally defined function of the same name masks nothing, and `@masked` on a
 non-variadic declaration is a stub error.
 
-A file that calls `R6Class` gets `self`, `private` and `super` for free inside it: R6 builds those
+A file that calls `R6Class` resolves `self`, `private` and `super` inside it: R6 builds those
 bindings at construction, so they resolve nowhere lexically and a read of one is not an unresolved
-name, exactly as `this` is not one in a JavaScript class. The recognition is syntactic (a local
+name, in the same way `this` is not one in a JavaScript class. The recognition is syntactic (a local
 binding shadowing `R6Class` is not honored) and file-scoped — a file that defines no R6 class still
 warns about `self`. Their type is `Unknown` for now; R6 field and method types are not yet modelled.
 

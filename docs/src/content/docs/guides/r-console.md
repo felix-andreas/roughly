@@ -1,6 +1,6 @@
 ---
 title: Working in the R console
-description: Run a real R session inside ry, with Tab completion that knows your types
+description: Run a real R session inside ry, with Tab completion backed by the type checker
 ---
 
 `ry repl` gives you an R prompt whose Tab completion comes from ry's type checker, and
@@ -13,7 +13,7 @@ process, and hands control to R's real main loop. Everything R does, R still doe
 autoprinting, error messages, `browser()`, `readline()`, S4 dispatch. Your `.Rprofile` is sourced.
 Packages install and attach normally.
 
-What ry replaces is the *line editor* in front of R. That is where the difference shows up:
+What ry replaces is the *line editor* in front of R. That is where the two differ:
 
 ```
 $ ry repl
@@ -25,10 +25,10 @@ balance  double
 holder   character
 ```
 
-R's own console can complete `account$balance` because by the time you press Tab the object exists in
-memory. ry reaches the same answer by type-checking what you have typed so far, which also lets
+R's own console can complete `account$balance` because by the time you press Tab the object exists
+in memory. ry reaches the same answer by type-checking what you have typed so far, which also lets
 it show that `balance` is a `double`, complete full signatures, and complete names inside `#:`
-annotations. The trade-off: **completion never inspects the live R session.**
+annotations. The trade-off is that **completion never inspects the live R session.**
 
 The console is also the only part of ry that needs R at all — see [What needs R](#what-needs-r).
 
@@ -56,7 +56,7 @@ To pin a specific R, set `R_HOME` for the one command:
 R_HOME=/opt/R/4.5.1/lib/R ry repl
 ```
 
-Startup problems fail immediately and say what to do, with exit status 2:
+Startup problems fail immediately and name the cause, with exit status 2:
 
 ```
 $ ry run analysis.R
@@ -66,16 +66,16 @@ $ R_HOME=/nonexistent ry run analysis.R
 error: R_HOME is set to /nonexistent, but that directory does not exist
 ```
 
-One hard requirement beyond "R is installed": it must have been built as a shared library
-(`--enable-R-shlib`). Every CRAN binary distribution is. If yours is not, ry says so and names the
-directory it looked in.
+There is one requirement beyond "R is installed": it must have been built as a shared library
+(`--enable-R-shlib`). Every CRAN binary distribution is. If yours is not, ry reports that and names
+the directory it looked in.
 
 R 4.2 or newer is what this is developed and tested against, and it is required on Windows. Nothing
-checks the version, so an older R will simply fail at load time with a missing-symbol error rather than
-a clear message.
+checks the version, so an older R fails at load time with a missing-symbol error rather than a clear
+message.
 
 Sessions start clean and leave nothing behind: no `.RData` is restored on the way in, and nothing is
-saved on the way out. `ry repl` also needs a terminal — piping into it does nothing useful, since
+saved on the way out. `ry repl` also needs a terminal — piping into it does nothing useful, because
 the editor cannot run and the session immediately sees end of input. Use `ry run` for anything
 non-interactive.
 
@@ -91,9 +91,9 @@ nzchar                              fn(x: Any, [keepNA]: logical) -> logical
 getDLLRegisteredRoutines.character  From the `base` package.
 ```
 
-The first two have typed [stubs](/type-checking/stubs) shipped with ry, so you get the full
-signature and which arguments are optional (`[type]`). The third is a real `base` export with no stub
-yet, so you get the name and its package. Tab again to cycle, Enter to accept.
+The first two have typed [stubs](/type-checking/stubs) shipped with ry, so the full signature and
+the optional arguments (`[type]`) are shown. The third is a real `base` export with no stub yet, so
+only the name and its package are shown. Tab again to cycle, Enter to accept.
 
 Six kinds of completion are available:
 
@@ -125,23 +125,23 @@ subsequence (which needs three characters). Names you defined outrank standard-l
 
 ### Three things it will not complete
 
-Completion is static analysis over the session transcript, and only that transcript. Each of these looks
-like a bug the first time:
+Completion is static analysis over the session transcript, and only that transcript. The
+consequences are:
 
 - **Objects R knows about but ry never saw you type.** Anything created by `source()` or defined in
   a file you passed to `-f` is invisible to Tab. `ry repl -f setup.R` feeds the script straight to
-  R, so `compound()` from that file runs fine but does not complete. Paste the definition into the
-  prompt if you want it completed.
+  R, so `compound()` from that file runs but does not complete. Paste the definition into the
+  prompt to have it completed.
 - **Your project's files and `ry.toml`.** The console analyzes one document — the session. It does
   not read your working directory, your project sources, or your `stubs/*.Rtypes` overrides. Use the
   [language server](/features) for typed work inside project files.
-- **Third-party packages.** Only the standard library is available. `library(dplyr)` attaches dplyr in R
-  as usual, but `dplyr::muta` + Tab still offers nothing typed — activating those stubs needs project
-  metadata that a console session does not have.
+- **Third-party packages.** Only the standard library is available. `library(dplyr)` attaches dplyr
+  in R as usual, but `dplyr::muta` + Tab offers nothing typed: activating those stubs needs project
+  metadata a console session does not have.
 
 ## Editing
 
-The editor is ry's, and it behaves the way a modern shell does.
+The editor is ry's, and its keys follow the conventions of a modern shell.
 
 | Key | Effect |
 | --- | --- |
@@ -169,11 +169,11 @@ Multi-line input is one editable buffer, not a sequence of lines you can no long
 ```
 
 ry decides a line is incomplete from the syntax alone — an open bracket, a trailing operator, a
-dangling comma, an unclosed string. It is deliberately conservative: if it guesses "complete" and R
-disagrees, R asks for the rest with its own `+` prompt and nothing is lost.
+dangling comma, an unclosed string. It is deliberately conservative: if it treats a line as complete
+and R disagrees, R asks for the rest with its own `+` prompt and nothing is lost.
 
-Every prompt R produces passes through unchanged, because ry does not render prompts of its own. So
-debugging works exactly as you expect:
+Every prompt R produces passes through unchanged, because ry renders no prompts of its own, so
+debugging behaves as it does in stock R:
 
 ```
 > f <- function(x) { browser(); x * 2 }
@@ -214,8 +214,8 @@ $ echo $?
 0
 ```
 
-An error at top level halts the script and fails the run — the same halt-on-error contract `Rscript`
-gives you:
+An error at top level halts the script and fails the run, the same halt-on-error contract `Rscript`
+has:
 
 ```
 $ ry run report.R     # cat("before\n"); stop("rate table is empty"); cat("after\n")
@@ -229,7 +229,7 @@ $ echo $?
 stops there, and the status is 1. An explicit `q(status = 7)` in your script passes straight through.
 For the full status table, see the [CLI reference](/reference/cli).
 
-Four things to know before you reach for it as an `Rscript` replacement:
+Four things to know before using it as an `Rscript` replacement:
 
 - **`ry run` does no analysis.** No type checking, no findings, no diagnostic codes — the bytes go
   to R. Run [`ry check`](/reference/cli) if you want the script checked.
@@ -239,8 +239,8 @@ Four things to know before you reach for it as an `Rscript` replacement:
 - **If your script sets its own `options(error = ...)`, it replaces the handler that produces the
   failing exit status**, and a failing script may then exit 0.
 
-`ry repl -f FILE` uses the same feeding mechanism but keeps you at the prompt afterwards, which is
-the fastest way to load a scratch setup and start poking at it.
+`ry repl -f FILE` uses the same feeding mechanism but keeps you at the prompt afterwards, which
+loads a scratch setup before an interactive session.
 
 ## What needs R
 

@@ -7,7 +7,8 @@ ry is a toolchain for R, written in Rust. It is four tools in one binary:
 
 1. **A language server** — hover, completion, go-to-definition, references, rename, and inlay hints,
    in any editor that supports LSP.
-2. **A formatter** — a single consistent style, with almost no configuration.
+2. **A formatter** — a single consistent style; no configuration beyond indent width and line
+   endings.
 3. **An R console** — a REPL with project-aware completion.
 4. **A type checker** — optional; its inferred types also power the editor features.
 
@@ -38,13 +39,13 @@ warning[unresolved]: I could not resolve `ratee` in this package, its imports, o
 1 problem in 1 file
 ```
 
-One transposed letter, found without running anything. R would have found it too — halfway through the
-job, on whichever machine ran it first.
+One transposed letter, found without running anything. R reports the same mistake only when
+execution reaches that line.
 
 ## Now turn on the type checker
 
-Fix the typo and make a different mistake — the kind no linter can catch, because it needs to know what
-a value *is*:
+Fix the typo and make a different mistake — one no linter can catch, because catching it requires
+knowing what a value *is*:
 
 ```toml
 # ry.toml
@@ -63,9 +64,9 @@ error[type-mismatch]: expected `double`, found `character`
                         ^^^^^
 ```
 
-Nothing was annotated. ry worked out that `rate` is a number because you multiply by it — and
-that same knowledge is what makes hover, completion, and the console's tab completion useful. It runs
-whether or not you turn the errors on.
+Nothing was annotated. ry worked out that `rate` is a number because you multiply by it, and that
+same knowledge is what hover, completion, and the console's tab completion read. It runs whether or
+not you turn the errors on.
 
 ## Install
 

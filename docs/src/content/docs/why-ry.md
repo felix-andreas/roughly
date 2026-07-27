@@ -9,11 +9,11 @@ None of them shares what it learned with the others, so each one starts over.
 
 ## Static, not a live session
 
-R's language servers do know what your values are — they ask a live R session. That is why completion
-on a fitted model works so well in RStudio.
+R's language servers know what your values are because they ask a live R session. That is what makes
+completion on a fitted model work in RStudio.
 
-That is also its limit: a session knows only code that has already run, in the state it happens to be in.
-It cannot tell you about the branch you have not taken, the function nobody called, or the file you
+It is also the limit: a session knows only code that has already run, in the state it happens to be
+in. It cannot describe the branch you have not taken, the function nobody called, or the file you
 just opened. ry answers from the source alone, so the answers exist in a pull request, in CI, and
 in a file you have never run:
 
@@ -22,13 +22,13 @@ in a file you have never run:
 - a value that is sometimes `NULL`, used as though it never is
 - a name you deleted in another file
 
-And everything is served from **one** understanding: formatting, analysis, editor features and type
+All of these come from **one** understanding: formatting, analysis, editor features and type
 checking are views onto the same knowledge.
 
 ## Speed on large codebases
 
-Large R projects are where tooling latency stops being a detail: once a check takes long enough to
-break your train of thought, you stop running it, and the tool may as well not exist.
+Latency matters most on large R projects, where a check slow enough to interrupt your work stops
+being run at all.
 
 ry is written in Rust, and analysis is incremental: an edit re-checks only what that edit could
 have affected, not the project. It is tested against roughly 970,000 lines of real R — 69 CRAN
@@ -36,8 +36,8 @@ packages plus R's own base library — and the check that an edit does not trigg
 should runs on every change.
 
 `check` and `fmt` never load R and never execute your code, which is what makes them safe in CI and
-instant in an editor. The one exception is the [R console](/guides/r-console), which by definition
-runs R.
+fast in an editor. The one exception is the [R console](/guides/r-console), which runs R by
+definition.
 
 ## Types in dynamic languages
 
@@ -48,36 +48,42 @@ program stops scaling long before the codebase does.
 R code is full of implicit type expectations, and nothing checks them until the code runs.
 
 ry's approach rests on **inference**: the checker works out types from how values are used,
-instead of making you declare them.
+instead of requiring you to declare them.
 
 ```r
 scale <- function(x, factor) x * factor
 ```
 
 `*` is arithmetic, so both parameters are numbers. Nothing was declared, and `scale("a", 2)` is
-already an error. That is why most R needs no annotations at all — and the ones you do write live in
-`#:` comments, so the file stays ordinary R that every other tool reads. Type checking is opt-in, so
-you can adopt it one file at a time.
+already an error. This is why most R needs no annotations at all. The ones you do write live in
+`#:` comments, so the file stays ordinary R that every other tool reads, and type checking is
+opt-in, so you can adopt it one file at a time.
+
+The inference is Hindley–Milner, which is sound and close to linear on real code. That choice
+excludes two features R programmers might expect — class hierarchies and overloading in your own
+functions — because a type system that admits them can spend an unbounded amount of time on a
+single expression, which an editor cannot afford. R is dynamic enough that some constructs cannot be
+described statically at all; those become `Unknown`, which is compatible with everything, so a gap
+means a check was skipped rather than a wrong answer produced.
 
 ## Project status
 
-ry is version `0.3.0-alpha`. It is not on CRAN, and it has one maintainer. What that means in
-practice:
+ry is version `0.3.0-alpha`. It is not on CRAN, and it has one maintainer. In practice:
 
-**Stable enough to build on.** The diagnostics, the `ry.toml` keys, the diagnostic codes, and the
-JSON output are covered by tests that fail when they change. CI built on them will not break silently.
+**The interfaces are stable.** The diagnostics, the `ry.toml` keys, the diagnostic codes, and the
+JSON output are covered by tests that fail when they change, so CI built on them will not break
+silently.
 
-**Still gaining capability.** The type system is where the movement is. A new release may report
-findings an older one did not — which is the point, but it means pinning a version is sensible if you
-gate a build on a clean run.
+**The type system is still gaining capability.** A new release may report findings an older one did
+not, so pin a version if you gate a build on a clean run.
 
 **Where it runs.** `ry check` reads `.R` files and the R chunks of `.Rmd`, `.qmd`, and `.Rnw`
-documents. The editor integration does not cover literate documents yet — you get them in `check` and
-in CI, but not as you type. The formatter deliberately leaves them alone, since most of an `.Rmd` is
-prose the formatter should not rewrite.
+documents. The editor integration does not cover literate documents yet — you get them in `check`
+and in CI, but not as you type. The formatter skips them, since most of an `.Rmd` is prose the
+formatter should not rewrite.
 
-**What it will not do yet.** The gaps that matter most are data frames, S4, and R6 — see
-[limitations](/type-checking/limitations) for the full picture before you decide how far to trust a
+**What it does not cover yet.** The largest gaps are data frames, S4, and R6 — see
+[limitations](/type-checking/limitations) for the full account before deciding how far to trust a
 clean run.
 
 ## Next

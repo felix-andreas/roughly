@@ -155,7 +155,7 @@ to *this* design rather than to the naming decision:
   extensions — but a sibling directory keeps tarball hygiene and roxygen simple and
   leaves no doubt about which file ships.
 
-## 6. The parser work, honestly
+## 6. The parser work
 
 An earlier draft claimed "this is not a large parser change". That was wrong, and
 the reason is specific: **the type grammar is not self-delimiting.** It currently
