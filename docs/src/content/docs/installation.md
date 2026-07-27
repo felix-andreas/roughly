@@ -59,8 +59,11 @@ to an older stable tag rather than the newest build.
 **From source**, if you have a [Rust toolchain](https://www.rust-lang.org/tools/install):
 
 ```bash
-cargo install --git https://github.com/felix-andreas/ry ry
+cargo install --git https://github.com/felix-andreas/ry ry-lang
 ```
+
+The package is `ry-lang` because the name `ry` was already taken on crates.io; the binary it
+installs is `ry`.
 
 This is also the route for architectures without a prebuilt binary.
 

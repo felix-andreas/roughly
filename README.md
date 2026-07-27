@@ -110,7 +110,7 @@ Download the pre-built binary for your platform from the [releases page](https:/
 If you have [Cargo](https://www.rust-lang.org/tools/install) installed, install ry with:
 
 ```sh
-cargo install --git https://github.com/felix-andreas/ry ry
+cargo install --git https://github.com/felix-andreas/ry ry-lang
 ```
 
 #### Build from Source

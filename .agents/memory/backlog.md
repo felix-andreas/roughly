@@ -506,6 +506,45 @@ below, ranked by how often a real user hits it.
 - Overload candidates when touched: `is`, `extends`, `grep(value =)`, `cor` (vector vs matrix — needs matrix nominals). `Date`/`POSIXct` arithmetic refuses loudly today — revisit if real code makes it noisy.
 - **A list operation over a RECORD still loses the field types.** `rev`/`unique`/`head`/`tail`/`Filter` now declare a `list[named: T]` candidate ahead of the plain list one, so a name survives and a field read is `T | NULL` instead of a missing-field error — but a fixed-shape input coerces to a name-keyed list on the way in, so the exact field types are gone and the read stays nullable. Only a shape-mirroring return ("the same record") fixes it, and the type language has no way for a stub to say that; `rev` is the case where the claim would be exactly right (it reorders and drops nothing), while `head`/`tail`/`Filter` genuinely may drop a name and are correctly nullable. Same family as the data.frame row-type and matrix-shape designs.
 
+## Open — CRASH: `ry check` panics on `rlang`
+
+**Highest-priority open bug.** `ry check` aborts with exit 101 on rlang, which sits under most of the
+tidyverse, so this reaches a large share of real R projects. It also reproduces when ~20 CRAN packages
+are checked as a single project.
+
+Reproduction: extract rlang's CRAN sources and run `ry check rlang/` (163 `.R` files). The panic:
+
+```
+thread '<unnamed>' panicked at salsa-0.28.0/src/function/fetch.rs:176:21:
+dependency graph cycle when querying scc_schemes(Id(1800)), set cycle_fn/cycle_initial to fixpoint iterate.
+```
+
+**The design anticipated this and the guard was never installed.** `scc_schemes` resolves cyclic
+package interfaces through one canonical fixpoint, and its own doc comment states that member checks
+"run directly — never through `item_check` — so no salsa cycle forms". The decision record adds that
+"salsa cycle recovery stays only as a backstop for edges the static graph cannot see" — but no
+`cycle_fn`/`cycle_initial` is configured on the query, so when such an edge does appear the backstop is
+a panic.
+
+Likely mechanism, to confirm rather than assume: a member check resolves a name *outside* its own SCC
+group, which falls through the overlay to the ordinary global path and back into `item_check`, which
+re-enters `scc_schemes` for the same group. That is exactly an edge the static reference graph
+(`interface_sccs`) did not see, so the group is not as maximal as the fixpoint assumes.
+
+The fix is a cycle recovery whose fallback is the documented safe answer — the same one the round cap
+already uses when members will not converge, which is to pin them to `Unknown` rather than export a
+value that depends on which query arrived first. Refusing is sound here; guessing is not. Needs its own
+slice with a fixture built from a reduced repro, because it changes what a cyclic group exports.
+
+Two things found alongside it, both unconfirmed as to cause:
+
+- **A ~20x performance outlier.** `targets` 1.12.0 (63,979 lines) takes 43.7 s where ggplot2's 64,302
+  lines take 2.0 s. R6-heavy code is the obvious suspect; profile before believing it.
+- The `cargo install` spec was broken by the rename and is fixed — worth knowing the shape of the
+  mistake, since it recurs: the *package* is `ry-lang` while the *binary* is `ry`, so anything naming
+  the package (install specs, `-p` flags, `CARGO_PKG_NAME`) needs the long name and anything naming the
+  command needs the short one.
+
 ## Open — the formatter is slower than the type checker
 
 Measured on a release build over 3,835 files / 703,289 lines / 30 MiB of real CRAN sources, in a
