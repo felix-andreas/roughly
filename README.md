@@ -48,7 +48,6 @@ For comparison, R reports the same mistake as:
 
 ```text
 Error: unexpected string constant in "planets <- c("Mercury", "Venus" "Earth""
-Execution halted
 ```
 
 Tree-sitter also recovers from broken input, but a dedicated parser can report precisely what is
