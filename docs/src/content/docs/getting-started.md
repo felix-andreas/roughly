@@ -14,6 +14,16 @@ ry is a toolchain for R, written in Rust. It is four tools in one binary:
 
 It requires no changes to your code, and the same binary runs in your editor and in CI.
 
+## Install
+
+Roughly can be used either as a standalone command-line tool or as an extension in supported editors like VS Code:
+
+- **CLI:** Download a [prebuilt binary](https://github.com/felix-andreas/ry/releases)
+- **VS Code Extension:** Install from [marketplace](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly)
+- **Zed Extension**: Install manually [from here](https://github.com/felix-andreas/ry/tree/main/editors/zed)
+
+For detailed instructions or other installation methods (e.g. for RStudio or building from source) see the [installation page](/installation).
+
 ## Your first run
 
 No configuration, no annotations:
@@ -67,15 +77,6 @@ error[type-mismatch]: expected `double`, found `character`
 Nothing was annotated. ry worked out that `rate` is a number because you multiply by it, and that
 same knowledge is what hover, completion, and the console's tab completion read. It runs whether or
 not you turn the errors on.
-
-## Install
-
-- **VS Code** — the [ry extension](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly), which bundles the binary.
-- **Zed** — from [`editors/zed`](https://github.com/felix-andreas/ry/tree/main/editors/zed); not in Zed's registry yet.
-- **Command line** — a prebuilt binary from [Releases](https://github.com/felix-andreas/ry/releases), or `cargo install --git https://github.com/felix-andreas/ry ry-lang`.
-
-Everything else — other architectures, RStudio, building from source — is on the
-[installation page](/installation).
 
 ## Next
 

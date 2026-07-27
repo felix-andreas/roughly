@@ -68,7 +68,7 @@ means a check was skipped rather than a wrong answer produced.
 
 ## Project status
 
-ry is version `0.3.0-alpha`. It is not on CRAN, and it has one maintainer. In practice:
+The project has alpha level quality.
 
 **The interfaces are stable.** The diagnostics, the `ry.toml` keys, the diagnostic codes, and the
 JSON output are covered by tests that fail when they change, so CI built on them will not break
