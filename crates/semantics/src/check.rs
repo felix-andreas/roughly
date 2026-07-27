@@ -1218,7 +1218,7 @@ impl<'db> Checker<'db, '_> {
                         self.apply_expression_annotation(id, value, value_ty)
                     }
                 };
-                self.write_target(spelling, target, value_ty);
+                self.write_target(spelling, target, value, value_ty);
                 value_ty
             }
             ExpressionKind::Unary { operator, operand } => {
@@ -1639,7 +1639,13 @@ impl<'db> Checker<'db, '_> {
         }
     }
 
-    fn write_target(&mut self, spelling: AssignSpelling, target: ExprId, value_ty: Ty<'db>) {
+    fn write_target(
+        &mut self,
+        spelling: AssignSpelling,
+        target: ExprId,
+        value: ExprId,
+        value_ty: Ty<'db>,
+    ) {
         let target_expression = self.module.expression(target).clone();
         if let ExpressionKind::NameRef(_) = target_expression.kind {
             if let Some(&slot) = self.naming.resolutions.get(&target) {
@@ -1668,7 +1674,7 @@ impl<'db> Checker<'db, '_> {
             }
             self.recorded.insert(target, value_ty);
         } else {
-            self.write_replacement_target(target, value_ty);
+            self.write_replacement_target(target, value, value_ty);
         }
     }
 
@@ -1733,7 +1739,7 @@ impl<'db> Checker<'db, '_> {
     /// A replacement-form assignment (`x$field <- v`, `x[["name"]] <- v`,
     /// `x[[key]] <- v`, `names(x) <- v`) reads the base variable, applies the
     /// write, and writes the result back to the base's slot.
-    fn write_replacement_target(&mut self, target: ExprId, value_ty: Ty<'db>) {
+    fn write_replacement_target(&mut self, target: ExprId, value: ExprId, value_ty: Ty<'db>) {
         let base = self.replacement_base(target);
         self.infer_replacement_spine(target, base);
         let Some(base) = base else {
@@ -1745,9 +1751,58 @@ impl<'db> Checker<'db, '_> {
         let prior = self.infer(base);
         let prior = self.table.resolve(self.db, prior);
         let value_resolved = self.table.resolve(self.db, value_ty);
-        let written = self.replacement_written_type(target, base, prior, value_resolved);
+        let written = self.replacement_written_type(target, base, value, prior, value_resolved);
         if let Some(&slot) = self.naming.resolutions.get(&base) {
             self.environment.set(slot, EnvEntry::Mono(written));
+        }
+    }
+
+    /// Reports a field write that a nominal's representation does not admit:
+    /// a value the declared field type refuses, or a field the representation
+    /// does not carry. An opaque nominal (no representation) and a
+    /// non-record representation admit nothing statically, so both stay quiet.
+    fn check_nominal_field_write(
+        &mut self,
+        nominal: Ty<'db>,
+        field_name: &str,
+        value_expression: ExprId,
+        value: Ty<'db>,
+    ) {
+        let representation = self.structural(nominal);
+        let TyKind::Record(fields) = representation.kind(self.db).clone() else {
+            return;
+        };
+        let range = self.blame_range(value_expression);
+        match fields
+            .iter()
+            .find(|field| field.name.text(self.db) == field_name)
+        {
+            // An `Unknown` value is an absent fact, not a wrong one — the same
+            // tolerance every other check applies.
+            Some(field) => {
+                if !matches!(value.kind(self.db), TyKind::Unknown)
+                    && !self.table.compatible(self.db, value, field.ty)
+                {
+                    self.errors.push(TypeError {
+                        range,
+                        kind: TypeErrorKind::Mismatch {
+                            expected: field.ty,
+                            found: value,
+                        },
+                    });
+                }
+            }
+            None => self.errors.push(TypeError {
+                range,
+                kind: TypeErrorKind::FieldDoesNotExist {
+                    suggestion: crate::diagnostics::nearest_field_name(
+                        field_name,
+                        fields.iter().map(|field| field.name.text(self.db)),
+                    ),
+                    field: field_name.to_owned(),
+                    container: nominal,
+                },
+            }),
         }
     }
 
@@ -1820,6 +1875,7 @@ impl<'db> Checker<'db, '_> {
         &mut self,
         lhs: ExprId,
         base: ExprId,
+        value_expression: ExprId,
         prior: Ty<'db>,
         value: Ty<'db>,
     ) -> Ty<'db> {
@@ -1873,6 +1929,19 @@ impl<'db> Checker<'db, '_> {
                         optional: false,
                     }]),
                 ),
+                // A nominal's representation is fixed — that is what makes
+                // `@type` an invariant instead of a label — so this write is
+                // checked against it rather than applied to it, and the value
+                // keeps its nominal type either way. Retyping the field would
+                // leave a value still claiming the nominal while no longer
+                // matching its representation; leaving it alone silently (what
+                // the fall-through below used to do) left the checker believing
+                // the old field type and answering from it in both directions,
+                // accepting a call that must fail and rejecting one that cannot.
+                TyKind::Named(..) => {
+                    self.check_nominal_field_write(prior, &field_name, value_expression, value);
+                    prior
+                }
                 _ => prior,
             };
         }

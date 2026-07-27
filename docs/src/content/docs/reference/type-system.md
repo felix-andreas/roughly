@@ -256,6 +256,12 @@ slot's type reflects the update:
 - a **known-field** write — `x$field <- v` or `x[["literal"]] <- v` — on a record-like `x` sets
   that field's type to `v`'s type (adding the field if absent); a subsequent `x$field` reads the
   updated type. The same write on an **empty** `list()` starts a record-like `list{field: V}`.
+- the same write on a **nominal** `x` is **checked, not applied**. A nominal type's representation is
+  fixed — that is what makes `@type` an invariant rather than a label — so the write must satisfy it:
+  `v` is checked against the field's declared type, a field the representation does not declare is an
+  error, and `x` keeps its nominal type either way. This is the one write that reports rather than
+  retypes, because the alternative is a value that still claims a nominal type while no longer
+  matching its representation.
 - a **computed-key** write — `x[[key]] <- v` with a non-literal key — cannot name a field
   statically, so it refines the container's element type rather than a specific field:
   - an **empty** `list()` becomes a map-like `list[named: V]`

@@ -197,3 +197,85 @@ setMethod("deposit", "Account", function(account, amount) account)
 use <- function(account) deposit(account, 50)
 #++++
 use: <T> fn(account: T) -> Unknown
+
+#==== nominal_field_writes
+#---- a_write_the_representation_admits_keeps_the_nominal
+#: @type Person {list{name: character, age: integer}}
+
+#: @new Person
+ada <- list(name = "Ada", age = 36L)
+ada$age <- 40L
+still <- ada
+#++++
+ada: Person
+still: Person
+
+#---- a_write_the_representation_refuses_is_reported_at_the_value
+#: @type Person {list{name: character, age: integer}}
+
+#: @new Person
+ada <- list(name = "Ada", age = 36L)
+ada$age <- "not a number"
+#++++
+ada: Person
+118..132 error[type-mismatch] expected `integer`, found `character`
+
+#---- the_bracket_spelling_is_checked_the_same_way
+#: @type Person {list{name: character, age: integer}}
+
+#: @new Person
+ada <- list(name = "Ada", age = 36L)
+ada[["age"]] <- "not a number"
+#++++
+ada: Person
+123..137 error[type-mismatch] expected `integer`, found `character`
+
+#---- a_field_the_representation_does_not_carry_is_reported
+#: @type Person {list{name: character, age: integer}}
+
+#: @new Person
+ada <- list(name = "Ada", age = 36L)
+ada$email <- "ada@example.com"
+#++++
+ada: Person
+120..137 error[type-mismatch] field `email` does not exist in `Person`
+
+#---- a_refused_write_leaves_the_field_type_standing
+#: @type Person {list{name: character, age: integer}}
+
+#: fn(s: character) -> character
+want_chr <- function(s) s
+
+#: @new Person
+ada <- list(name = "Ada", age = 36L)
+reading <- want_chr(ada$age)
+#++++
+want_chr: fn(s: character) -> character
+ada: Person
+reading: Unknown
+187..194 error[type-mismatch] expected `character`, found `integer`
+
+#---- a_non_record_representation_admits_nothing_statically
+#: @type Celsius {double}
+
+#: @new Celsius
+temperature <- 20.0
+temperature$anything <- 1L
+#++++
+temperature: Celsius
+
+#---- a_structural_record_still_retypes_its_field
+# The contrast with the nominal cases above, in one item so the write and the
+# read share a frame: a structural record has no declared representation to
+# violate, so the write retypes the field and the later read sees the new type.
+#: fn(s: character) -> character
+want_chr <- function(s) s
+
+check <- function() {
+  record <- list(name = "Ada", age = 36L)
+  record$age <- "now a character"
+  want_chr(record$age)
+}
+#++++
+want_chr: fn(s: character) -> character
+check: fn() -> character

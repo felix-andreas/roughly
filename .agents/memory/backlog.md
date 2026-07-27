@@ -19,22 +19,22 @@ perfectly while blaming the wrong expression counts as a failure here.
 The four most serious claims were **re-verified independently** before filing; every one held, and two
 turned out worse than reported.
 
-### A. The checker gives a WRONG answer, not a skipped one — two confirmed cases
+### A. The checker gives a WRONG answer, not a skipped one — two confirmed cases (one fixed)
 
 `limitations.md` sells the whole trust story on one sentence: *"a gap means checks are **skipped**, not
-that wrong answers are produced."* Both of these break it, and both are silent under `strict = true`.
+that wrong answers are produced."* Both of these broke it, and both were silent under `strict = true`.
+The first is fixed; **the second is now the highest-value open item in the round.**
 
-1. **A field write through a nominal value is discarded, and the stale belief is then used both ways.**
-   Verified: after `ada$age <- "not a number"` on a `Person {list{name: character, age: integer}}`,
-   `double_it(ada$age)` (wants `integer`) is **accepted** and will crash at runtime, while
-   `want_chr(ada$age)` (wants `character`, and is correct) is **rejected** with ``expected `character`,
-   found `integer` ``. One line, a false negative and a false positive together. `ada$email <- "x"` is
-   also accepted without adding the field, and `[[` behaves the same. The *structural* case is correct
-   — `rec$age <- "nope"` does retype the field — so this is nominal-specific. `type-system.md` specifies
-   the write for record-like `x` and simply does not cover a nominal whose representation is record-like.
-   **This is the highest-value item in the round:** it is the only place found where the tool answers
-   wrongly rather than declining to answer, and it removes the point of `@type`, since an invariant
-   that holds only at the moment of construction is not an invariant.
+1. **FIXED — a field write through a nominal value was discarded, and the stale belief was used both
+   ways.** `replacement_written_type` handled `Record` and empty `Tuple` and let everything else fall
+   through to `_ => prior`, so a nominal kept its declared field types after a contradicting write. The
+   write is now **checked against the representation rather than applied to it**: a nominal's
+   representation is fixed, so a value the declared field type refuses is reported at the value, a
+   field the representation does not carry is reported by name, and the binding keeps its nominal type
+   either way — which is what makes the `@type` invariant hold past construction. Both spellings (`$`
+   and `[["literal"]]`) go through the one path; an opaque or non-record representation stays quiet
+   (R only warns and coerces for `x$f <- v` on an atomic, so there is nothing to refuse). Structural
+   records still retype, which is the contrast the report drew. Reference updated, seven fixtures.
 
 2. **A function-valued `if` without `else` drops the pre-branch arm — a soundness bug.** Verified
    against real R:
@@ -158,6 +158,31 @@ HM with generalization, an occurs check, per-parameter variance, working generic
 nominal distinctness, and no cascades outside the `@param` case. The gap is not the engine; it is that
 **diagnostics render the artifact unification left behind rather than the fact that failed**, and that
 the nominal story protects construction but nothing after it.
+
+## Open — a field write is lost across items in a package but not in a script
+
+Identical code, two answers. A structural record written at top level and read in a later top-level
+statement:
+
+```r
+#: list{name: character, age: integer}
+record <- list(name = "Ada", age = 36L)
+record$age <- "now a character"
+reading <- want_chr(record$age)      # wants character
+```
+
+As a **script** this is clean — the write retypes the field and the read sees `character`. In a
+**package** it reports ``expected `character`, found `integer` ``, so the write is lost at the item
+boundary and the read answers from the pre-write type. A package's `R/` files are sourced top-down,
+so the write really does happen first and the package answer is the false positive.
+
+Found while fixturing the nominal field-write fix, and pre-existing — the structural path is
+untouched by it. The write applies *within* one item either way (the same code inside a function body
+is clean in both kinds), so this is specifically the cross-item export: a statement item's
+`top_level_bindings` carries the binding's pre-write type rather than the written one. Check that
+against the conditional-slot model in the reference before changing it, since a *conditional* write
+(`if (flag) record$age <- ...`) genuinely must join rather than replace — the unconditional case is
+the one that should not.
 
 ## Open — diagnostic wording is not styled consistently
 
