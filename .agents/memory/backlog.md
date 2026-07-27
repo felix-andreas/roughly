@@ -506,44 +506,35 @@ below, ranked by how often a real user hits it.
 - Overload candidates when touched: `is`, `extends`, `grep(value =)`, `cor` (vector vs matrix — needs matrix nominals). `Date`/`POSIXct` arithmetic refuses loudly today — revisit if real code makes it noisy.
 - **A list operation over a RECORD still loses the field types.** `rev`/`unique`/`head`/`tail`/`Filter` now declare a `list[named: T]` candidate ahead of the plain list one, so a name survives and a field read is `T | NULL` instead of a missing-field error — but a fixed-shape input coerces to a name-keyed list on the way in, so the exact field types are gone and the read stays nullable. Only a shape-mirroring return ("the same record") fixes it, and the type language has no way for a stub to say that; `rev` is the case where the claim would be exactly right (it reorders and drops nothing), while `head`/`tail`/`Filter` genuinely may drop a name and are correctly nullable. Same family as the data.frame row-type and matrix-shape designs.
 
-## Open — CRASH: `ry check` panics on `rlang`
+## Open — `ry check` exhausts memory on a whole CRAN package
 
-**Highest-priority open bug.** `ry check` aborts with exit 101 on rlang, which sits under most of the
-tidyverse, so this reaches a large share of real R projects. It also reproduces when ~20 CRAN packages
-are checked as a single project.
+The `rlang` panic is FIXED (see the ledger), and fixing it uncovered a second,
+independent failure that the panic had been hiding by aborting first.
 
-Reproduction: extract rlang's CRAN sources and run `ry check rlang/` (163 `.R` files). The panic:
+`ry check` on rlang's **whole package directory** — 163 `.R` files, including the test tree — is
+killed by the OOM killer (exit 137) with 16 GB free. Its `R/` directory alone, 76 files, completes
+normally with 838 findings. So the cliff is somewhere between those two inputs, and it is not the
+cycle: with cycle recovery installed, analysis runs on and consumes everything available rather than
+stopping.
 
-```
-thread '<unnamed>' panicked at salsa-0.28.0/src/function/fetch.rs:176:21:
-dependency graph cycle when querying scc_schemes(Id(1800)), set cycle_fn/cycle_initial to fixpoint iterate.
-```
+This matters more than the file count suggests. The memory shape at scale was measured before as
+~300 MiB at 302K LoC, and rlang is far smaller than that, so something here is not linear — a
+plausible suspect is that the test tree puts many items in one namespace and inflates an SCC group,
+since group cost is members × rounds and both grow together. Measure the largest group's size before
+assuming.
 
-**The design anticipated this and the guard was never installed.** `scc_schemes` resolves cyclic
-package interfaces through one canonical fixpoint, and its own doc comment states that member checks
-"run directly — never through `item_check` — so no salsa cycle forms". The decision record adds that
-"salsa cycle recovery stays only as a backstop for edges the static graph cannot see" — but no
-`cycle_fn`/`cycle_initial` is configured on the query, so when such an edge does appear the backstop is
-a panic.
+Reproduce: extract rlang's CRAN sources and run `ry check rlang/`. Contrast with
+`ry check rlang/R/`, which succeeds.
 
-Likely mechanism, to confirm rather than assume: a member check resolves a name *outside* its own SCC
-group, which falls through the overlay to the ordinary global path and back into `item_check`, which
-re-enters `scc_schemes` for the same group. That is exactly an edge the static reference graph
-(`interface_sccs`) did not see, so the group is not as maximal as the fixpoint assumes.
+Also still open from the same investigation: **`targets` 1.12.0 (63,979 lines) takes 43.7 s** where a
+similarly sized ggplot2 takes 2.0 s — a ~20x outlier, R6-heavy code the obvious suspect, unprofiled.
 
-The fix is a cycle recovery whose fallback is the documented safe answer — the same one the round cap
-already uses when members will not converge, which is to pin them to `Unknown` rather than export a
-value that depends on which query arrived first. Refusing is sound here; guessing is not. Needs its own
-slice with a fixture built from a reduced repro, because it changes what a cyclic group exports.
-
-Two things found alongside it, both unconfirmed as to cause:
-
-- **A ~20x performance outlier.** `targets` 1.12.0 (63,979 lines) takes 43.7 s where ggplot2's 64,302
-  lines take 2.0 s. R6-heavy code is the obvious suspect; profile before believing it.
-- The `cargo install` spec was broken by the rename and is fixed — worth knowing the shape of the
-  mistake, since it recurs: the *package* is `ry-lang` while the *binary* is `ry`, so anything naming
-  the package (install specs, `-p` flags, `CARGO_PKG_NAME`) needs the long name and anything naming the
-  command needs the short one.
+**Missing regression coverage.** The cycle fix is verified against the real package but has no
+fixture: the failing input is 3,185 lines across four rlang files, and a synthetic case built from the
+suspected mechanism (an S3 method name the checker constructs, which the static reference graph cannot
+see) did **not** reproduce it. Until the exact missing edge is identified, the guard rests on the
+corpus suites. Finding it is worth a session on its own, because the same blind spot is what makes the
+SCC groups wrong in the first place.
 
 ## Open — the formatter is slower than the type checker
 

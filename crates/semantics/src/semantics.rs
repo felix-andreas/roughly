@@ -994,7 +994,11 @@ pub fn interface_sccs<'db>(db: &'db dyn Db, files: ProjectFiles) -> InterfaceScc
 /// order cannot matter either), and members still changing at the round cap
 /// pin to `Unknown`. Member checks run directly — never through `item_check`
 /// — so no salsa cycle forms.
-#[salsa::tracked(returns(ref))]
+#[salsa::tracked(
+    returns(ref),
+    cycle_fn = scc_schemes_recover,
+    cycle_initial = scc_schemes_initial
+)]
 pub fn scc_schemes<'db>(
     db: &'db dyn Db,
     files: ProjectFiles,
@@ -1049,6 +1053,63 @@ pub fn scc_schemes<'db>(
         *scheme = unknown_scheme.clone();
     }
     schemes
+}
+
+/// Every member pinned to `Unknown` — the seed the internal fixpoint starts
+/// from, and the answer it settles on when members will not converge.
+fn unknown_group_schemes<'db>(
+    db: &'db dyn Db,
+    files: ProjectFiles,
+    group: u32,
+) -> rustc_hash::FxHashMap<Item<'db>, types::TypeScheme<'db>> {
+    let unknown = types::TypeScheme::monomorphic(types::unknown(db));
+    interface_sccs(db, files)
+        .groups
+        .get(group as usize)
+        .map(|members| {
+            members
+                .iter()
+                .map(|&item| (item, unknown.clone()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn scc_schemes_initial<'db>(
+    db: &'db dyn Db,
+    _id: salsa::Id,
+    files: ProjectFiles,
+    group: u32,
+) -> rustc_hash::FxHashMap<Item<'db>, types::TypeScheme<'db>> {
+    unknown_group_schemes(db, files, group)
+}
+
+/// The backstop the group's own fixpoint cannot provide. `scc_schemes` assumes
+/// its group is maximal, so a member check only ever reads other members
+/// through the overlay — but a reference edge the static graph did not see
+/// (`interface_sccs` builds edges from names that appear in the source, so a
+/// name the checker *constructs*, such as an S3 method, is invisible to it)
+/// sends the check out through `global_scheme` and back into this same group.
+/// Without recovery salsa aborts the process; with it the group settles on the
+/// same `Unknown` the round cap already uses.
+fn scc_schemes_recover<'db>(
+    db: &'db dyn Db,
+    cycle: &salsa::Cycle,
+    last_provisional: &rustc_hash::FxHashMap<Item<'db>, types::TypeScheme<'db>>,
+    value: rustc_hash::FxHashMap<Item<'db>, types::TypeScheme<'db>>,
+    files: ProjectFiles,
+    group: u32,
+) -> rustc_hash::FxHashMap<Item<'db>, types::TypeScheme<'db>> {
+    // Refuse on the first disagreement rather than iterating. The group
+    // already runs its own bounded fixpoint internally, so letting salsa
+    // iterate this query too multiplies those rounds by its own cap — on a
+    // large group that is enough passes to exhaust memory, which is a worse
+    // failure than the panic this recovery exists to prevent.
+    if &value == last_provisional {
+        return value;
+    }
+    let _ = cycle;
+    unknown_group_schemes(db, files, group)
 }
 
 /// One member's exported scheme under the group's current-round table.
