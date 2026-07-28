@@ -18,7 +18,7 @@ use crate::hir::{
     Argument, AssignSpelling, BinaryOperator, ExprId, ExpressionKind, LiteralKind, Module,
     UnaryOperator,
 };
-use crate::infer::{Entry, InferenceTable, UnifyError};
+use crate::infer::{Entry, FunctionMismatch, InferenceTable, UnifyError};
 use crate::naming::{BindingId, ItemNaming};
 use crate::types::{
     Atomic, Constraint, FunctionType, InferenceVar, Name, RecordField, RestParameter, Ty, TyKind,
@@ -100,6 +100,16 @@ pub enum TypeErrorKind<'db> {
     ConstraintViolation {
         constraint: Constraint,
         found: Ty<'db>,
+    },
+    /// A function value does not fit an expected function type, and the reason
+    /// is one position in its signature. Its own variant rather than a mismatch
+    /// between the two whole signatures, because those say nothing about which
+    /// position failed — and a constraint does not survive into the rendered
+    /// type, so `fn(s: U) -> U` prints the same whether `U` accepts anything or
+    /// only numbers, which made the plain mismatch read as a call that should
+    /// have fit.
+    CallbackShape {
+        mismatch: Box<FunctionMismatch<'db>>,
     },
     /// No candidate of an overloaded stub name accepted the arguments; carries
     /// the first candidate's failure for a concrete lead.
@@ -4933,6 +4943,26 @@ impl<'db> Checker<'db, '_> {
                 kind: TypeErrorKind::ConstraintViolation {
                     constraint: Constraint::Numeric,
                     found: resolved_found,
+                },
+            });
+        }
+        // A function value rejected by an expected function type: name the
+        // parameter that failed. The two whole signatures leave the reader to
+        // diff them, and the residue a failed unification leaves behind can
+        // describe a call that should have fit — `fn(s: U) -> U` against
+        // `fn(character) -> T` looks satisfiable, because the constraint that
+        // actually refuses `character` is not part of the rendered type.
+        if let (TyKind::Function(found_function), TyKind::Function(expected_function)) = (
+            resolved_found.kind(self.db).clone(),
+            resolved_expected.kind(self.db).clone(),
+        ) && let Some(mismatch) =
+            self.table
+                .explain_function_mismatch(self.db, &found_function, &expected_function)
+        {
+            return Err(TypeError {
+                range,
+                kind: TypeErrorKind::CallbackShape {
+                    mismatch: Box::new(mismatch),
                 },
             });
         }

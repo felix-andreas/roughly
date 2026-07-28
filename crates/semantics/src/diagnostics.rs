@@ -7,6 +7,7 @@
 //! expected/found message), because a fresh renderer restarts the numbering.
 
 use crate::check::{OperandExpectation, TypeError, TypeErrorKind};
+use crate::infer::FunctionMismatch;
 use crate::types::{Atomic, Constraint, FunctionType, Name, Ty, TyKind, TypeScheme};
 use crate::{Db, DocumentKind, SourceFile, item_check, item_tree, parse};
 use syntax::TextRange;
@@ -1635,20 +1636,54 @@ fn render_type_error_message(db: &dyn Db, error: &TypeError<'_>) -> String {
         TypeErrorKind::AliasCycle { name } => {
             format!("Type alias `{name}` expands in a cycle.")
         }
-        TypeErrorKind::ConstraintViolation { constraint, found } => {
-            let expected_description = match constraint {
-                Constraint::Unconstrained => "a value",
-                Constraint::Numeric => "a numeric value (`integer` or `double`)",
-                Constraint::AtomicElement => {
-                    "an atomic value (`logical`, `integer`, `double`, `complex`, `character`, or `raw`)"
+        TypeErrorKind::ConstraintViolation { constraint, found } => format!(
+            "expected {}, found `{}`",
+            constraint_description(*constraint),
+            renderer.render(db, *found)
+        ),
+        // A constrained position has no type to show — the constraint is what
+        // refuses the value, so the message says what the body needs instead.
+        TypeErrorKind::CallbackShape { mismatch } => match mismatch.as_ref() {
+            FunctionMismatch::Parameter {
+                name,
+                passed,
+                accepts,
+                constraint,
+            } => {
+                let passed = renderer.render(db, *passed);
+                let position = match name {
+                    Some(name) => format!("its parameter `{name}`"),
+                    None => "its parameter".to_owned(),
+                };
+                match constraint {
+                    Some(constraint) => format!(
+                        "this function is passed `{passed}`, but {position} is used as {}",
+                        constraint_description(*constraint)
+                    ),
+                    None => format!(
+                        "this function is passed `{passed}`, but {position} accepts `{}`",
+                        renderer.render(db, *accepts)
+                    ),
                 }
-                Constraint::ScalarNumeric => "a scalar numeric value (`integer` or `double`)",
-            };
-            format!(
-                "expected {expected_description}, found `{}`",
-                renderer.render(db, *found)
-            )
-        }
+            }
+            FunctionMismatch::Return {
+                required,
+                returns,
+                constraint,
+            } => {
+                let required = renderer.render(db, *required);
+                match constraint {
+                    Some(constraint) => format!(
+                        "this function must return `{required}`, but its body produces {}",
+                        constraint_description(*constraint)
+                    ),
+                    None => format!(
+                        "this function must return `{required}`, but it returns `{}`",
+                        renderer.render(db, *returns)
+                    ),
+                }
+            }
+        },
         TypeErrorKind::NotAList { found } => {
             format!("expected a list, found `{}`", renderer.render(db, *found))
         }
@@ -1879,6 +1914,18 @@ impl<'db> TypeRenderer<'db> {
         } else {
             format!("{letter}{suffix}")
         }
+    }
+}
+
+/// What a constraint admits, in the same words wherever it is reported.
+fn constraint_description(constraint: Constraint) -> &'static str {
+    match constraint {
+        Constraint::Unconstrained => "a value",
+        Constraint::Numeric => "a numeric value (`integer` or `double`)",
+        Constraint::AtomicElement => {
+            "an atomic value (`logical`, `integer`, `double`, `complex`, `character`, or `raw`)"
+        }
+        Constraint::ScalarNumeric => "a scalar numeric value (`integer` or `double`)",
     }
 }
 

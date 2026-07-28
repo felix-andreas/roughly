@@ -193,16 +193,43 @@ which is rarer than it sounds. The failures are all "collapse to the outermost n
 
 ### E. Rendering drops information the message depends on
 
-8. **Binder constraints are dropped from every rendered type**, so `lapply(words, function(s) s + 1L)`
-   over a character list reports ``expected `fn(character) -> T`, found `fn(s: U) -> U` `` — which
-   describes a call that *should* fit, and never mentions `character`, `+`, or numeric. The reference
-   states the contract (`function(x) x + 1L` renders as `<T: numeric> fn(x: T) -> T`) and it is not met;
-   the constraint is enforced but invisible, so an acceptable and an unacceptable function print
-   identically. The good message already exists — annotating the lambda parameter produces a precise
-   ``expected a numeric value…, found `character` `` — so the fix is to check the callback body against
-   the instantiated parameter type rather than unify whole function types and print the residue. Same
-   root cause behind the `Reduce` and `Filter` reports and the "expected `list[T] | T[]`, found
-   `character[]`" message, which is false as printed.
+8. **FIXED — a rejected function now names the position that failed instead of printing both
+   signatures.** As filed: `lapply(words, function(s) s + 1L)` over a character list reported
+   ``expected `fn(character) -> T`, found `fn(s: U) -> U` ``, which describes a call that *should*
+   fit and never mentions `character`, `+`, or numeric. Confirmed the underlying claim directly —
+   `function(x) x + 1L` and `function(x) x` both render `fn(x: T) -> T` in a diagnostic, so an
+   acceptable and an unacceptable function are indistinguishable.
+
+   The premise was right but the diagnosis pointed at the renderer. A constraint belongs to the
+   *variable*, not to the type: it can only appear in a binder prefix, and a diagnostic renders a
+   monotype, so there is no place in `fn(s: U) -> U` for "U must be numeric" to go. Printing both
+   signatures is therefore the wrong shape for this failure whatever the renderer does.
+
+   What ships instead: `InferenceTable::explain_function_mismatch` re-walks the pairing and names the
+   one position that failed, and the finding says what that position needs rather than showing a type
+   it cannot show:
+
+   - a parameter — *this function is passed `character`, but its parameter `s` is used as a numeric
+     value (`integer` or `double`)*, or *…but its parameter `s` accepts `character`* when there is a
+     type to show
+   - the return — *this function must return `logical`, but its body produces a numeric value*
+
+   Both signatures are still printed for a shape disagreement (arity, optionality, rest parameter),
+   which is the case they genuinely explain, and a fixture pins that fallback.
+
+   The pairing rule is now one function (`pair_parameters`) shared by the compatibility verdict and
+   the explanation, so the two cannot drift.
+
+   The filed alternative — pushing the expected parameter type into the lambda body — was **not**
+   taken, and the reason is architectural: `CallArgument` inters each argument exactly once before
+   any signature matching, so an overload probe can re-match without re-running expression inference.
+   Bidirectional checking of a lambda argument would re-infer the body per candidate. Worth revisiting
+   as its own slice if callback diagnostics need to point *inside* the lambda; the position-naming
+   message covers the reported cases without it.
+
+   Same root cause confirmed gone for the `Filter` report and the "expected `list[T] | T[]`, found
+   `character[]`" one. Four fixtures. Across data.table/dplyr/ggplot2/shiny the finding *counts* are
+   unchanged and exactly two messages differ, both real corpus findings that now read clearly.
 9. **`(fn(A) -> B) | NULL` renders without its parentheses**, so it prints identically to
    `fn(A) -> (B | NULL)` — two different types. The docs name this exact form as the one that round-trips.
    Copying a type out of an error and back into an annotation silently changes it.

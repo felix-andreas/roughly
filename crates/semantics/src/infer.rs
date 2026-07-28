@@ -953,112 +953,79 @@ impl<'db> InferenceTable<'db> {
         expected: &FunctionType<'db>,
         depth: usize,
     ) -> bool {
-        // Arity is a range, not a number. An interface promises its callers
-        // every call shape from its required count up to everything it
-        // declares, and a function serves that interface when it accepts all
-        // of them. So it may declare MORE parameters than the interface ever
-        // passes, as long as the extras default — `mean(x, trim, na.rm)`
-        // serves a one-argument callback interface — and it may not require
-        // more than the interface supplies. Both directions are checked while
-        // pairing below, which knows which parameters are optional.
-        // Variadic compatibility is conservative: a variadic function is
-        // compatible only with another variadic (their rest elements are
-        // contravariant, like ordinary parameters), and the rest parameters
-        // must sit at the same formal position — the position decides which
-        // parameters callers may fill positionally. This over-rejects some
-        // safe pairings but never admits an unsound one.
-        match (&actual.variadic, &expected.variadic) {
-            (Some(actual_variadic), Some(expected_variadic)) => {
-                if actual_variadic.preceding_named != expected_variadic.preceding_named {
-                    return false;
-                }
-                if !self.compatible_probe(
-                    db,
-                    expected_variadic.element,
-                    actual_variadic.element,
-                    depth + 1,
-                ) {
-                    return false;
-                }
-            }
-            (None, None) => {}
-            _ => return false,
-        }
-        // Parameters pair by NAME where both sides name them (R matches call
-        // arguments against formal names regardless of order); unnamed
-        // parameters consume the remaining slots left to right. A named
-        // expected parameter with no same-named actual falls back to
-        // positional pairing.
-        let mut actual_parameters: Vec<(Option<crate::types::Name<'db>>, Ty<'db>, bool)> = actual
-            .positional
-            .iter()
-            .map(|&ty| (None, ty, false))
-            .collect();
-        actual_parameters.extend(
-            actual
-                .named
-                .iter()
-                .map(|field| (Some(field.name), field.ty, field.optional)),
-        );
-        let mut paired: Vec<Option<(Ty<'db>, bool)>> = vec![None; actual_parameters.len()];
-        let mut overflow = Vec::new();
-        for field in &expected.named {
-            match actual_parameters
-                .iter()
-                .position(|(name, ..)| *name == Some(field.name))
-            {
-                Some(index) if paired[index].is_none() => {
-                    paired[index] = Some((field.ty, field.optional));
-                }
-                _ => overflow.push((field.ty, field.optional)),
-            }
-        }
-        let mut positional_expected = expected
-            .positional
-            .iter()
-            .map(|&ty| (ty, false))
-            .chain(overflow);
-        for slot in paired.iter_mut() {
-            if slot.is_none() {
-                *slot = positional_expected.next();
-            }
-        }
-        // An expected parameter with no slot left is one the interface may
-        // pass and the function cannot receive — unless the function is
-        // variadic, whose rest parameter absorbs it (contravariantly, like
-        // every other parameter).
-        for (expected_parameter, _) in positional_expected {
-            let Some(rest) = &actual.variadic else {
-                return false;
-            };
-            if !self.compatible_probe(db, expected_parameter, rest.element, depth + 1) {
+        let Some(pairing) = pair_parameters(actual, expected) else {
+            return false;
+        };
+        for (expected_element, actual_element) in pairing.rest {
+            if !self.compatible_probe(db, expected_element, actual_element, depth + 1) {
                 return false;
             }
         }
-        for ((_, actual_parameter, actual_optional), slot) in
-            actual_parameters.into_iter().zip(paired)
-        {
-            let Some((expected_parameter, expected_optional)) = slot else {
-                // A parameter the interface never passes is fine when the
-                // function defaults it, and a missing argument otherwise.
-                if actual_optional {
-                    continue;
-                }
-                return false;
-            };
-            // An expected-optional parameter promises callers they may omit
-            // it, so the actual function must default it.
-            if expected_optional && !actual_optional {
-                return false;
-            }
+        for pair in pairing.parameters {
             // Parameters are contravariant: a function used where `expected`
             // is wanted must accept every argument that interface may pass.
-            if !self.compatible_probe(db, expected_parameter, actual_parameter, depth + 1) {
+            if !self.compatible_probe(db, pair.passed, pair.accepts, depth + 1) {
                 return false;
             }
         }
         // Return types stay covariant.
         self.compatible_probe(db, actual.ret, expected.ret, depth + 1)
+    }
+
+    /// Why `actual` does not serve `expected`, for a caller about to report
+    /// the failure. [`Self::compatible`] only answers yes or no, and two whole
+    /// signatures printed side by side leave the reader to find the position
+    /// that failed — worse, a parameter's constraint does not survive into the
+    /// rendered type at all, so an acceptable and an unacceptable function can
+    /// print identically. Returns `None` when the shapes disagree rather than
+    /// one pairing (arity, optionality, the rest parameter), which the whole
+    /// signatures do show.
+    pub fn explain_function_mismatch(
+        &mut self,
+        db: &'db dyn Db,
+        actual: &FunctionType<'db>,
+        expected: &FunctionType<'db>,
+    ) -> Option<FunctionMismatch<'db>> {
+        let pairing = pair_parameters(actual, expected)?;
+        for pair in pairing.parameters {
+            if self.compatible(db, pair.passed, pair.accepts) {
+                continue;
+            }
+            let accepts = self.resolve(db, pair.accepts);
+            return Some(FunctionMismatch::Parameter {
+                name: pair.name.map(|name| name.text(db).to_owned()),
+                passed: self.resolve(db, pair.passed),
+                constraint: self.variable_constraint(db, accepts),
+                accepts,
+            });
+        }
+        if !self.compatible(db, actual.ret, expected.ret) {
+            let returns = self.resolve(db, actual.ret);
+            return Some(FunctionMismatch::Return {
+                required: self.resolve(db, expected.ret),
+                constraint: self.variable_constraint(db, returns),
+                returns,
+            });
+        }
+        None
+    }
+
+    /// The constraint an unbound variable carries. This is the one fact the
+    /// rendered type cannot show: `fn(s: U) -> U` prints the same whether `U`
+    /// accepts anything or only numbers, which is why a plain mismatch between
+    /// two whole signatures can describe a call that should have fit.
+    fn variable_constraint(&self, db: &'db dyn Db, ty: Ty<'db>) -> Option<Constraint> {
+        let TyKind::Var(var) = ty.kind(db) else {
+            return None;
+        };
+        match self.entry(self.find(*var)) {
+            Entry::Unbound { constraint, .. }
+                if !matches!(constraint, Constraint::Unconstrained) =>
+            {
+                Some(*constraint)
+            }
+            _ => None,
+        }
     }
 
     /// Whether the resolved form of `ty` still contains an unbound inference
@@ -1127,6 +1094,151 @@ impl<'db> InferenceTable<'db> {
             _ => true,
         }
     }
+}
+
+/// The one position that keeps a function value from serving an expected
+/// function type, from [`InferenceTable::explain_function_mismatch`]. Each
+/// variant carries the constraint of its own side when that side is a
+/// constrained variable — the fact the rendered type drops.
+#[derive(Debug, Clone, PartialEq, Eq, salsa::SalsaValue)]
+pub enum FunctionMismatch<'db> {
+    /// A parameter: the interface passes a value the function will not take.
+    Parameter {
+        /// The function's own name for the parameter, when it has one.
+        name: Option<String>,
+        /// What the expected interface may pass into that position.
+        passed: Ty<'db>,
+        /// What the function's parameter accepts.
+        accepts: Ty<'db>,
+        constraint: Option<Constraint>,
+    },
+    /// The return: the function produces a value the interface will not take.
+    Return {
+        /// What the expected interface requires back.
+        required: Ty<'db>,
+        /// What the function produces.
+        returns: Ty<'db>,
+        constraint: Option<Constraint>,
+    },
+}
+
+/// How a call's arguments would land on a function's parameters, shared by the
+/// compatibility verdict and the explanation so there is one pairing rule.
+/// `None` when the two shapes cannot pair at all.
+struct Pairing<'db> {
+    parameters: Vec<ParameterPair<'db>>,
+    /// Expected parameters absorbed by the function's rest parameter, plus the
+    /// two rest elements themselves, as (passed, accepts) pairs.
+    rest: Vec<(Ty<'db>, Ty<'db>)>,
+}
+
+struct ParameterPair<'db> {
+    name: Option<Name<'db>>,
+    /// The expected interface's parameter type — what it may pass in.
+    passed: Ty<'db>,
+    /// The function's own parameter type — what it accepts. Parameters are
+    /// contravariant, so `passed` must fit `accepts`, not the other way round.
+    accepts: Ty<'db>,
+}
+
+/// Pairs a function's parameters with an expected interface's.
+///
+/// Arity is a range, not a number. An interface promises its callers every call
+/// shape from its required count up to everything it declares, and a function
+/// serves that interface when it accepts all of them. So it may declare MORE
+/// parameters than the interface ever passes, as long as the extras default —
+/// `mean(x, trim, na.rm)` serves a one-argument callback interface — and it may
+/// not require more than the interface supplies.
+///
+/// Variadic pairing is conservative: a variadic function pairs only with
+/// another variadic, and the rest parameters must sit at the same formal
+/// position — the position decides which parameters callers may fill
+/// positionally. This over-rejects some safe pairings but never admits an
+/// unsound one.
+fn pair_parameters<'db>(
+    actual: &FunctionType<'db>,
+    expected: &FunctionType<'db>,
+) -> Option<Pairing<'db>> {
+    let mut rest = Vec::new();
+    match (&actual.variadic, &expected.variadic) {
+        (Some(actual_variadic), Some(expected_variadic)) => {
+            if actual_variadic.preceding_named != expected_variadic.preceding_named {
+                return None;
+            }
+            rest.push((expected_variadic.element, actual_variadic.element));
+        }
+        (None, None) => {}
+        _ => return None,
+    }
+    // Parameters pair by NAME where both sides name them (R matches call
+    // arguments against formal names regardless of order); unnamed parameters
+    // consume the remaining slots left to right. A named expected parameter
+    // with no same-named actual falls back to positional pairing.
+    let mut actual_parameters: Vec<(Option<Name<'db>>, Ty<'db>, bool)> = actual
+        .positional
+        .iter()
+        .map(|&ty| (None, ty, false))
+        .collect();
+    actual_parameters.extend(
+        actual
+            .named
+            .iter()
+            .map(|field| (Some(field.name), field.ty, field.optional)),
+    );
+    let mut paired: Vec<Option<(Ty<'db>, bool)>> = vec![None; actual_parameters.len()];
+    let mut overflow = Vec::new();
+    for field in &expected.named {
+        match actual_parameters
+            .iter()
+            .position(|(name, ..)| *name == Some(field.name))
+        {
+            Some(index) if paired[index].is_none() => {
+                paired[index] = Some((field.ty, field.optional));
+            }
+            _ => overflow.push((field.ty, field.optional)),
+        }
+    }
+    let mut positional_expected = expected
+        .positional
+        .iter()
+        .map(|&ty| (ty, false))
+        .chain(overflow);
+    for slot in paired.iter_mut() {
+        if slot.is_none() {
+            *slot = positional_expected.next();
+        }
+    }
+    // An expected parameter with no slot left is one the interface may pass
+    // and the function cannot receive — unless the function is variadic, whose
+    // rest parameter absorbs it (contravariantly, like every other parameter).
+    for (expected_parameter, _) in positional_expected {
+        let variadic = actual.variadic.as_ref()?;
+        rest.push((expected_parameter, variadic.element));
+    }
+    let mut parameters = Vec::new();
+    for ((name, actual_parameter, actual_optional), slot) in
+        actual_parameters.into_iter().zip(paired)
+    {
+        let Some((expected_parameter, expected_optional)) = slot else {
+            // A parameter the interface never passes is fine when the function
+            // defaults it, and a missing argument otherwise.
+            if actual_optional {
+                continue;
+            }
+            return None;
+        };
+        // An expected-optional parameter promises callers they may omit it, so
+        // the actual function must default it.
+        if expected_optional && !actual_optional {
+            return None;
+        }
+        parameters.push(ParameterPair {
+            name,
+            passed: expected_parameter,
+            accepts: actual_parameter,
+        });
+    }
+    Some(Pairing { parameters, rest })
 }
 
 /// A definition's body with its parameters replaced by the given arguments

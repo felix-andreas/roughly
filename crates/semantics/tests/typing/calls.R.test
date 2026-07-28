@@ -360,6 +360,58 @@ checked <- function(x) paste0("bad: ", class(x)[1])
 fail_with: <T> fn(x: T) -> Unknown
 checked: <T> fn(x: T) -> character
 
+#---- a_callback_names_the_parameter_that_refuses_the_element
+# The two whole signatures cannot say this: the lambda's parameter is a
+# constrained variable, and a constraint does not survive into a rendered type,
+# so `fn(s: U) -> U` prints the same whether `U` takes anything or only numbers
+# — against `fn(character) -> T` it reads as a call that should have fit.
+f <- function() {
+  words <- list("a", "b")
+  lapply(words, function(s) s + 1L)
+}
+#++++
+f: Unknown
+368..386 error[type-mismatch] this function is passed `character`, but its parameter `s` is used as a numeric value (`integer` or `double`)
+
+#---- a_callback_names_the_return_that_the_interface_refuses
+f <- function() {
+  words <- list("a", "b")
+  Filter(function(s) s + 1L, words)
+}
+#++++
+f: Unknown
+53..71 error[type-mismatch] this function must return `logical`, but its body produces a numeric value (`integer` or `double`)
+
+#---- a_named_callback_parameter_reports_its_own_type
+#: fn(cb: fn(integer) -> integer) -> integer
+run <- function(cb) cb(1L)
+
+#: fn(s: character) -> integer
+bad <- function(s) nchar(s)
+
+out <- run(bad)
+#++++
+run: fn(cb: fn(integer) -> integer) -> integer
+bad: fn(s: character) -> integer
+out: Unknown
+144..147 error[type-mismatch] this function is passed `integer`, but its parameter `s` accepts `character`
+
+#---- a_shape_disagreement_still_shows_both_signatures
+# Arity is the one disagreement the two whole signatures do explain, so it keeps
+# the mismatch rather than naming a position that does not pair.
+#: fn(cb: fn(integer) -> integer) -> integer
+run <- function(cb) cb(1L)
+
+#: fn(a: integer, b: integer) -> integer
+two <- function(a, b) a + b
+
+out <- run(two)
+#++++
+run: fn(cb: fn(integer) -> integer) -> integer
+two: fn(a: integer, b: integer) -> integer
+out: Unknown
+300..303 error[type-mismatch] expected `fn(integer) -> integer`, found `fn(a: integer, b: integer) -> integer`
+
 #==== exported_constraints
 #---- higher_order_result_keeps_its_constraint_across_items
 invoke <- function(f) function(x) f(x + 1L)

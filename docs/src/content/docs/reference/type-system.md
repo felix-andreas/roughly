@@ -1737,6 +1737,13 @@ holds their meet, rendered `<T: scalar numeric>`: a scalar `integer` or `double`
   comparison against a non-numeric family leaves it unconstrained, because the system has no
   character-or-logical constraint
 
+A constraint belongs to the variable, not to the type it appears in, so it is visible in a binder
+prefix (`<T: numeric>`) and nowhere else. A finding that must talk about a constrained position
+therefore never prints the type — it says what the position needs, which is why passing a
+character-valued list to `lapply(words, function(s) s + 1L)` reports *its parameter `s` is used as a
+numeric value* rather than showing `fn(s: T) -> T`. See
+[Reporting a function that does not fit](#reporting-a-function-that-does-not-fit).
+
 Examples:
 
 - `function(x) x + 1L` infers as `<T: numeric> fn(x: T) -> T`
@@ -2427,6 +2434,27 @@ This over-rejects some safe pairings (for example a fixed function that happens 
 Because inference gives a `...` formal a rest parameter at its formal position (see
 [Inferred function types](#inferred-function-types)), an annotation with a rest parameter checks
 against a `function(…, ..., …)` definition like any other function annotation.
+
+#### Reporting a function that does not fit
+
+When a function value is rejected at a parameter position, the finding names **the one position in
+its signature that failed**, not the two whole signatures:
+
+- a **parameter** the interface passes a value the function will not take — *this function is passed
+  `character`, but its parameter `s` is used as a numeric value (`integer` or `double`)*, or
+  *…but its parameter `s` accepts `character`* when that parameter has a type to show
+- the **return** the function produces a value the interface will not take — *this function must
+  return `logical`, but its body produces a numeric value (`integer` or `double`)*
+
+The pairing is the one described above, so the position named is the position R's argument matcher
+would fill.
+
+Two whole signatures are printed only when the shapes cannot pair at all — a different arity, an
+optionality disagreement, a rest parameter on one side. That is the case the signatures do explain,
+and the only one: for a position mismatch they are actively misleading, because a
+[constraint](#numeric-inference-variables) is not part of a rendered type. `fn(s: T) -> T` prints
+the same whether `T` accepts anything or only numbers, so against an expected `fn(character) -> U`
+it describes a call that should have fit.
 
 ### Higher-order function types
 

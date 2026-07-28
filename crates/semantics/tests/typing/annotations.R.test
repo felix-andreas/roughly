@@ -554,7 +554,7 @@ run_cb <- function(cb) cb(1L)
 run_cb(function(x) x + 1L)
 #++++
 run_cb: fn(cb: fn(integer) -> NULL) -> NULL
-64..82 error[type-mismatch] expected `fn(integer) -> NULL`, found `fn(x: T) -> T`
+64..82 error[type-mismatch] this function must return `NULL`, but it returns `integer`
 
 #---- elided_callback_accepts_a_null_callback
 #: @param cb {fn(integer)}
@@ -578,7 +578,7 @@ run_cb <- function(cb) {
 run_cb(function(x) x + 1L)
 #++++
 run_cb: fn(cb: fn(integer) -> NULL) -> NULL
-81..99 error[type-mismatch] expected `fn(integer) -> NULL`, found `fn(x: T) -> T`
+81..99 error[type-mismatch] this function must return `NULL`, but it returns `integer`
 
 #==== placement
 #---- type_definition_below_top_level_is_refused
@@ -623,7 +623,7 @@ use_wider: fn() -> integer
 apply_wide: fn(callback: fn(x: integer | NULL) -> integer) -> integer
 narrow: fn(x: integer) -> integer
 use_narrow: Unknown
-421..427 error[type-mismatch] expected `fn(x: integer | NULL) -> integer`, found `fn(x: integer) -> integer`
+421..427 error[type-mismatch] this function is passed `integer | NULL`, but its parameter `x` accepts `integer`
 
 #---- variadic_and_fixed_arity_never_pair
 #: fn(callback: fn(...: integer) -> integer) -> integer
