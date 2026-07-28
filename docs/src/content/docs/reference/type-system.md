@@ -2178,14 +2178,29 @@ There may be at most one rest parameter. Its position is part of the signature a
 position of `...` in the R formal list: parameters written before it fill positionally, parameters
 written after it fill by name only (see [Function calls](#function-calls)).
 
-A declared function annotation must have a shape R's argument matcher can honor for the annotated
-definition, checked as a whole-signature mismatch when violated:
+**An annotation declares the types of a definition's parameters; it does not declare the parameter
+list.** R matches a call's arguments against the formals in the `function(...)` header, so those
+formals — their names, their order, their defaults, and where `...` sits — are the call interface,
+and an annotation cannot add, remove, or reorder them. Every parameter the annotation does not
+mention keeps its inferred type, so annotating one parameter of several is a supported partial form.
 
+Where the declared shape disagrees with the definition, **the definition wins at every call site**
+and the disagreement is reported once, at the definition. A call is never blamed for an annotation's
+mistake — the same rule as a [refused block](#annotations), reaching the case where the annotation
+parses cleanly and only its shape is wrong. These are the disagreements:
+
+- a declared parameter name that is not a formal — the annotation is describing a parameter the
+  function does not have
+- more declared parameter types than there are formals left to receive them
 - a declared optional `[name]` requires the actual formal to carry a default (callers may omit
   it); the reverse — an actual default on a parameter the annotation declares required — is fine
 - the rest parameter must sit at the same boundary in the annotation and the formal list,
   including existing on both sides or neither: a fixed annotation on a variadic function and a
   variadic annotation on a fixed function are both rejected
+
+The last three are reported as a whole-signature mismatch; the first names the parameter. In every
+case the body is still checked under the parameter types the annotation *does* pin down, so hover
+and navigation keep their facts.
 
 Additional rules:
 
@@ -2219,7 +2234,9 @@ from:
   literal whose body is checked against it — the return type is **inferred from the body**, exactly
   as it would be with no annotation at all. Annotating only the parameters is the common partial
   form (`@param u {integer}` on `add_one <- function(u) u + 1L` infers `fn(u: integer) -> integer`),
-  and it must not silently pin the return
+  and it must not silently pin the return. A return written as `Unknown` is the same thing said out
+  loud: `Unknown` records that nothing is known, so it never overrides a body that shows otherwise
+  (`Any` is the way to declare "do not check this")
 - in every position with **no body to infer from**, an elided return means `NULL`, matching R
   functions that are called for their side effects. This covers a nested function *type* (a callback
   parameter such as `@param cb {fn(integer)}`), a [trusted coercion](#trusted-coercions) or

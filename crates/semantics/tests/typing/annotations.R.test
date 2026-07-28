@@ -117,7 +117,7 @@ f: fn(x: integer) -> character
 #: fn(x: integer) -> integer
 f <- function(y) 1L
 #++++
-f: fn(x: integer) -> integer
+f: fn(y: Unknown) -> integer
 34..48 error[type-mismatch] this annotation names a parameter `x`, but the function does not define one — annotation parameter names must match the function's parameter names
 
 #---- rigid_refuses_undeclared_bound
@@ -375,28 +375,28 @@ f: <T> fn(x: T[], y: Id[]) -> integer[]
 #: fn(count: integer, [label]: character) -> integer
 double_count <- function(count, label) count + count
 #++++
-double_count: fn(count: integer, [label]: character) -> integer
+double_count: fn(count: integer, label: character) -> integer
 69..105 error[type-mismatch] expected `fn(count: integer, [label]: character) -> integer`, found `fn(count: integer, label: character) -> integer`
 
 #---- rest_position_must_match_the_formals
 #: fn(...: Any, x: integer) -> integer
 f <- function(x, ...) x
 #++++
-f: fn(...: Any, x: integer) -> integer
+f: fn(x: integer, ...: Any) -> integer
 44..62 error[type-mismatch] expected `fn(...: Any, x: integer) -> integer`, found `fn(x: integer, ...: Any) -> integer`
 
 #---- fixed_annotation_on_a_variadic_function_is_rejected
 #: fn(x: integer) -> integer
 f <- function(x, ...) x
 #++++
-f: fn(x: integer) -> integer
+f: fn(x: integer, ...: Any) -> integer
 34..52 error[type-mismatch] expected `fn(x: integer) -> integer`, found `fn(x: integer, ...: Any) -> integer`
 
 #---- variadic_annotation_on_a_fixed_function_is_rejected
 #: fn(x: integer, ...: Any) -> integer
 f <- function(x) x
 #++++
-f: fn(x: integer, ...: Any) -> integer
+f: fn(x: integer) -> integer
 44..57 error[type-mismatch] expected `fn(x: integer, ...: Any) -> integer`, found `fn(x: integer) -> integer`
 
 #---- matching_shapes_are_fine
@@ -404,6 +404,50 @@ f: fn(x: integer, ...: Any) -> integer
 render <- function(count, label = "x", ...) count
 #++++
 render: fn(count: integer, [label]: character, ...: Any) -> integer
+
+#---- a_phantom_parameter_does_not_reach_the_call_sites
+# The annotation names a parameter the function does not have. Adopting its
+# arity would tell four correct calls they are missing an argument, so the
+# exported signature keeps the formals and the disagreement reports once.
+#: @param missing_one {integer}
+#: @param x {integer}
+#: @returns {integer}
+f <- function(x) x + 1L
+a <- f(1L)
+b <- f(2L)
+#++++
+f: fn(x: integer) -> integer
+a: integer
+b: integer
+306..324 error[type-mismatch] this annotation names a parameter `missing_one`, but the function does not define one — annotation parameter names must match the function's parameter names
+
+#---- annotating_one_parameter_of_several_is_a_partial_form
+# The unannotated formal keeps the type its uses give it, and the call is
+# checked against both formals rather than against the one that was declared.
+#: @param x {integer}
+#: @returns {integer}
+f <- function(x, y) x + y
+value <- f(1L, 2L)
+#++++
+f: fn(x: integer, y: integer) -> integer
+value: integer
+
+#---- a_surplus_declared_type_has_no_formal_to_land_on
+#: fn(integer, integer) -> integer
+f <- function(x) x + 1L
+value <- f(1L)
+#++++
+f: fn(x: integer) -> integer
+value: integer
+40..58 error[type-mismatch] expected `fn(integer, integer) -> integer`, found `fn(x: integer) -> integer`
+
+#---- a_formal_tested_with_missing_is_optional_whatever_the_annotation_says
+#: fn([x]: integer) -> integer
+f <- function(x) if (missing(x)) 0L else x
+value <- f()
+#++++
+f: fn([x]: integer) -> integer
+value: integer
 
 #==== expression_level
 #---- new_on_a_local_assignment_constructs_the_nominal
@@ -509,7 +553,7 @@ out: Unknown
 run_cb <- function(cb) cb(1L)
 run_cb(function(x) x + 1L)
 #++++
-run_cb: fn(cb: fn(integer) -> NULL) -> Unknown
+run_cb: fn(cb: fn(integer) -> NULL) -> NULL
 64..82 error[type-mismatch] expected `fn(integer) -> NULL`, found `fn(x: T) -> T`
 
 #---- elided_callback_accepts_a_null_callback
@@ -517,13 +561,13 @@ run_cb: fn(cb: fn(integer) -> NULL) -> Unknown
 run_cb <- function(cb) cb(1L)
 run_cb(function(x) NULL)
 #++++
-run_cb: fn(cb: fn(integer) -> NULL) -> Unknown
+run_cb: fn(cb: fn(integer) -> NULL) -> NULL
 
 #---- elided_definition_return_still_infers
 #: fn(count: integer)
 f <- function(count) count
 #++++
-f: fn(count: integer) -> Unknown
+f: fn(count: integer) -> integer
 
 #---- nested_compact_callback_elides_to_null
 #: fn(cb: fn(integer)) -> NULL
@@ -550,13 +594,13 @@ value: integer
 #: fn(a: integer, b: character) -> character
 f <- function(b, a) paste0(b, a)
 #++++
-f: fn(a: integer, b: character) -> character
+f: fn(b: character, a: integer) -> character
 
 #---- annotation_may_not_rename_a_parameter
 #: fn(count: integer) -> integer
 f <- function(n) n
 #++++
-f: fn(count: integer) -> integer
+f: fn(n: integer) -> integer
 38..51 error[type-mismatch] this annotation names a parameter `count`, but the function does not define one — annotation parameter names must match the function's parameter names
 
 #---- callback_parameter_contravariance
@@ -604,7 +648,7 @@ use <- function() label(1.0)
 #++++
 label: fn(amount: double, [currency]: character) -> character
 use: fn() -> character
-291..359 error[type-mismatch] this annotation declares `currency` as required, but the function gives it a default — write `[currency]` to declare it optional, or drop the default
+300..359 error[type-mismatch] this annotation declares `currency` as required, but the function gives it a default — write `[currency]` to declare it optional, or drop the default
 
 #==== null_defaults
 #---- a_null_default_must_fit_the_declared_type

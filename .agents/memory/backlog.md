@@ -126,13 +126,52 @@ mistaken for a mere precision gap when read from one direction only.
    working at every other depth tried (block tail, `if` arm, `for` body, bare parentheses, binary
    operand), so argument position is the single hole.
 
-7. **A `@param` naming a non-existent parameter cascades onto correct call sites.** One bad
-   `@param missing_one` produced 5 errors: the primary says "**this** annotation names a parameter…"
-   while underlining the *function definition*, and the invalid annotation's arity is then adopted, so
-   four correct `f(1L)` calls are told they are missing an argument. Every caret in that output is on
-   code the user must not change. `type-system.md` states the governing principle — *"a broken
-   annotation never produces follow-on findings"* — for a list of shape violations that does not include
-   this one; the rule should cover it.
+7. **FIXED — an annotation declared the parameter LIST, not just the parameter types.** As filed: one
+   bad `@param missing_one` produced 5 errors, four of them telling correct `f(1L)` calls they were
+   missing an argument. Reproducing it showed the cascade was one symptom of a general defect — the
+   exported signature was the annotation as written, so *every* way the two sides can disagree about
+   arity was resolved in the annotation's favour and charged to the call sites:
+
+   | disagreement | before | R |
+   | --- | --- | --- |
+   | `@param` names a non-existent formal | 1 real error + 1 per call site | — |
+   | **only some formals annotated** | 1 error **per call site**, nothing at the definition | calls are fine |
+   | more declared types than formals | nothing at the definition, 1 error per call site | calls are fine |
+   | `[x]` declared optional, formal has no default | `f()` **accepted** | `argument "x" is missing` |
+   | `...` declared, formals fixed | `f(1, 2, 3)` **accepted** | `unused arguments` |
+
+   The partial-annotation row is the one that mattered most: annotating a single `@param` of several
+   turned every correct call into a finding, and that is the ordinary way to start annotating.
+
+   The fix is one rule, now in the reference: **an annotation declares the types of a definition's
+   parameters, never the parameter list.** R matches arguments against the `function(...)` header, so
+   `check_declared_function` builds the exported signature from the formals — their names, order,
+   optionality, and `...` position — and fills the types from the declaration, name-aware. Every
+   disagreement is reported once at the definition and never again at a call. Two of the five rows
+   were false *negatives*, so this also closes call shapes that R rejects and the checker accepted;
+   both were verified against R 4.3.3 rather than assumed.
+
+   Two things came with it, both required for the signature to be honest:
+
+   - **An undeclared formal keeps its inferred type.** It is a fresh variable like any unannotated
+     parameter, so the export edge (`close_scheme`) either generalizes it or erases it to `Unknown`.
+     Partial annotation now *adds* checking instead of removing it: `#: @param x {integer}` on
+     `function(x, y) x + y` infers `y: integer` and catches `f(1L, "no")`.
+   - **An elided return is inferred from the body**, which the reference already promised
+     (`fn(u: integer) -> integer`) and the implementation had never done — a fixture literally named
+     `elided_definition_return_still_infers` was blessed at `-> Unknown`. A written `-> Unknown` is
+     treated identically, because the reference says `Unknown` records "the checker could not tell"
+     and is "not an explicit escape hatch" — `Any` is the way to say *do not check this*.
+
+   Also folded in: `reconcile_declared_optionality` was a second, partial version of this
+   reconciliation reachable only from the item root, so nested definitions never got it; it is gone,
+   and its diagnostic now blames the function definition like its siblings instead of the whole
+   assignment. A formal tested with `missing(x)` now counts as optional against the annotation too,
+   which was a false positive on R's optional-without-default idiom.
+
+   Seven fixtures. Findings byte-identical across data.table, dplyr, ggplot2 and shiny (7,116
+   findings) — those packages carry no `#:` annotations, so that is a no-collateral-damage check, not
+   coverage.
 
 ### D. Placement: precise inside an expression, coarse at every compound boundary
 

@@ -370,12 +370,15 @@ pub fn check_item_with_annotation<'db>(
                 for (name, constraint) in &declared.binders {
                     context.rigid_constraints.insert(*name, *constraint);
                 }
-                context.check_declared_function(*value, &function);
-                // A formal with a default is optional in R, whatever the
-                // annotation says, so the exported scheme takes optionality
-                // from the code and the annotation's disagreement is reported
-                // once, here, instead of as a missing argument at every caller.
-                let declared = context.reconcile_declared_optionality(root, *value, declared);
+                // The exported scheme is the reconciled signature, not the
+                // annotation as written: R matches arguments against the
+                // definition's formals, so a shape the annotation got wrong is
+                // reported once at the definition instead of turning every
+                // correct call into a finding.
+                let declared = TypeScheme {
+                    binders: declared.binders,
+                    body: context.check_declared_function(*value, &function),
+                };
                 context.recorded.insert(root, declared.body);
                 scheme = Some(declared);
                 scheme_is_declared = true;
@@ -1246,10 +1249,13 @@ impl<'db> Checker<'db, '_> {
                         for (name, constraint) in &declared.binders {
                             self.rigid_constraints.insert(*name, *constraint);
                         }
-                        if let TyKind::Function(function) = declared.body.kind(self.db).clone() {
-                            self.check_declared_function(value, &function);
-                        }
-                        self.record(value, declared.body)
+                        let body = match declared.body.kind(self.db).clone() {
+                            TyKind::Function(function) => {
+                                self.check_declared_function(value, &function)
+                            }
+                            _ => declared.body,
+                        };
+                        self.record(value, body)
                     }
                     None => {
                         let value_ty = self.infer(value);
@@ -1347,8 +1353,8 @@ impl<'db> Checker<'db, '_> {
                     let TyKind::Function(function) = declared.body.kind(self.db).clone() else {
                         return self.unknown();
                     };
-                    self.check_declared_function(id, &function);
-                    return self.record(id, declared.body);
+                    let signature = self.check_declared_function(id, &function);
+                    return self.record(id, signature);
                 }
                 let parameters = parameters.clone();
                 self.table.level += 1;
@@ -3316,25 +3322,103 @@ impl<'db> Checker<'db, '_> {
         }
     }
 
-    /// Check a function definition against its declared annotation type:
-    /// formals get their declared types (name-aware: named declarations match
-    /// by name, positional declarations fill the rest in order; rigid binder
-    /// types refuse to bind), the body infers under them, and the result
-    /// checks against the declared return.
-    fn check_declared_function(&mut self, function_id: ExprId, declared: &FunctionType<'db>) {
+    /// Check a function definition against its declared annotation type and
+    /// return the signature its callers see.
+    ///
+    /// An annotation declares the *types* of a definition's parameters, never
+    /// the parameter list: R matches a call's arguments against the formals in
+    /// the `function(...)` header, so the returned signature always has the
+    /// definition's parameters, in the definition's order, with the
+    /// definition's optionality and `...` position. Declared types fill them
+    /// name-aware (named declarations match by name, positional declarations
+    /// fill the rest in order; rigid binder types refuse to bind), the body
+    /// infers under them, and the result checks against the declared return.
+    ///
+    /// Every way the two sides can disagree is therefore reported once, here,
+    /// and never again at a call site — a call must not be blamed for an
+    /// annotation's mistake.
+    fn check_declared_function(
+        &mut self,
+        function_id: ExprId,
+        declared: &FunctionType<'db>,
+    ) -> Ty<'db> {
         let expression = self.module.expression(function_id).clone();
         let ExpressionKind::Function { parameters, body } = &expression.kind else {
-            return;
+            return Ty::new(self.db, TyKind::Function(declared.clone()));
         };
         let range = expression.range;
 
+        // A formal the body tests with `missing(name)` is optional at call
+        // sites just as one with a default is — R's optional-without-default
+        // idiom — so it counts as optional on the definition's side of every
+        // comparison below.
+        let mut missing_tested = rustc_hash::FxHashSet::default();
+        self.collect_missing_tested(*body, &mut missing_tested);
+        let is_optional = |parameter: &crate::hir::Parameter| {
+            parameter.default.is_some() || missing_tested.contains(&parameter.name)
+        };
+
+        self.table.level += 1;
+        // One walk pairs formals with declared types the way R's matcher pairs
+        // a call's arguments with them, and builds the exported signature as
+        // it goes. What the annotation declares and this walk never consumes
+        // is the disagreement.
+        let mut positional_index = 0usize;
+        let mut used_named: Vec<bool> = vec![false; declared.named.len()];
+        let mut formal_types: Vec<(Ty<'db>, bool)> = Vec::with_capacity(parameters.len());
+        let mut signature = FunctionType {
+            positional: Vec::new(),
+            named: Vec::new(),
+            variadic: None,
+            ret: declared.ret,
+        };
+        for parameter in parameters {
+            if parameter.name == "..." {
+                signature.variadic = Some(RestParameter {
+                    element: declared
+                        .variadic
+                        .as_ref()
+                        .map_or_else(|| any(self.db), |rest| rest.element),
+                    preceding_named: signature.named.len(),
+                });
+                formal_types.push((self.fresh(Constraint::Unconstrained), false));
+                continue;
+            }
+            let declared_ty = if let Some(index) = declared
+                .named
+                .iter()
+                .position(|field| field.name.text(self.db) == parameter.name)
+            {
+                used_named[index] = true;
+                Some(declared.named[index].ty)
+            } else if positional_index < declared.positional.len() {
+                let ty = declared.positional[positional_index];
+                positional_index += 1;
+                Some(ty)
+            } else {
+                // Partial annotation is a supported form, so a formal the
+                // annotation leaves alone infers from its uses exactly as it
+                // would with no annotation at all: the export edge either
+                // generalizes the variable or erases it to `Unknown`.
+                None
+            };
+            let parameter_ty = declared_ty.unwrap_or_else(|| self.fresh(Constraint::Unconstrained));
+            formal_types.push((parameter_ty, declared_ty.is_some()));
+            signature.named.push(RecordField {
+                name: Name::new(self.db, parameter.name.clone()),
+                ty: parameter_ty,
+                optional: is_optional(parameter),
+            });
+        }
+
         // The declared shape must be one R's argument matcher can honor for
         // this definition: a declared optional `[name]` needs an actual
-        // default (callers may omit it), and the rest parameter must sit at
-        // the same boundary on both sides — including not existing on
-        // exactly one side. A violation reports the two shapes whole; the
-        // body still checks under the declared parameter types so hover and
-        // navigation keep their facts.
+        // default (callers may omit it), the rest parameter must sit at the
+        // same boundary on both sides — including not existing on exactly one
+        // side — and every declared type must have a formal to land on. A
+        // violation reports the two shapes whole; the body still checks under
+        // the declared parameter types so hover and navigation keep their
+        // facts.
         let dots_index = parameters.iter().position(|p| p.name == "...");
         let declared_preceding = declared.positional.len()
             + declared
@@ -3347,91 +3431,56 @@ impl<'db> Checker<'db, '_> {
             _ => true,
         };
         let optional_mismatch = parameters.iter().any(|parameter| {
-            parameter.default.is_none()
+            !is_optional(parameter)
                 && declared
                     .named
                     .iter()
                     .any(|field| field.optional && field.name.text(self.db) == parameter.name)
         });
-        if variadic_mismatch || optional_mismatch {
-            let mut found_named = Vec::new();
-            let mut found_variadic = None;
-            let mut positional_index = 0usize;
-            for parameter in parameters {
-                if parameter.name == "..." {
-                    found_variadic = Some(RestParameter {
-                        element: declared
-                            .variadic
-                            .as_ref()
-                            .map_or_else(|| any(self.db), |rest| rest.element),
-                        preceding_named: found_named.len(),
-                    });
-                    continue;
-                }
-                let ty = if let Some(field) = declared
-                    .named
-                    .iter()
-                    .find(|field| field.name.text(self.db) == parameter.name)
-                {
-                    field.ty
-                } else if positional_index < declared.positional.len() {
-                    let ty = declared.positional[positional_index];
-                    positional_index += 1;
-                    ty
-                } else {
-                    unknown(self.db)
-                };
-                found_named.push(RecordField {
-                    name: Name::new(self.db, parameter.name.clone()),
-                    ty,
-                    optional: parameter.default.is_some(),
-                });
-            }
-            let found = Ty::new(
-                self.db,
-                TyKind::Function(FunctionType {
-                    positional: Vec::new(),
-                    named: found_named,
-                    variadic: found_variadic,
-                    ret: declared.ret,
-                }),
-            );
-            let expected = Ty::new(self.db, TyKind::Function(declared.clone()));
+        let surplus_positional = positional_index < declared.positional.len();
+        if variadic_mismatch || optional_mismatch || surplus_positional {
             self.errors.push(TypeError {
                 range,
-                kind: TypeErrorKind::Mismatch { expected, found },
+                kind: TypeErrorKind::Mismatch {
+                    expected: Ty::new(self.db, TyKind::Function(declared.clone())),
+                    found: Ty::new(self.db, TyKind::Function(signature.clone())),
+                },
             });
         }
+        // A formal with a default is optional in R whatever the annotation
+        // says, so the signature above already took optionality from the code;
+        // saying so once here is what keeps it from resurfacing as a missing
+        // argument at every caller.
+        for field in &declared.named {
+            let name = field.name.text(self.db);
+            if !field.optional
+                && parameters
+                    .iter()
+                    .any(|parameter| parameter.name == name && is_optional(parameter))
+            {
+                self.errors.push(TypeError {
+                    range,
+                    kind: TypeErrorKind::AnnotationRequiredButDefaulted {
+                        name: name.to_owned(),
+                    },
+                });
+            }
+        }
+        // Declared named parameters the definition never declares.
+        for (index, field) in declared.named.iter().enumerate() {
+            if !used_named[index] {
+                self.errors.push(TypeError {
+                    range,
+                    kind: TypeErrorKind::AnnotationParameterMismatch {
+                        name: field.name.text(self.db).to_owned(),
+                    },
+                });
+            }
+        }
 
-        self.table.level += 1;
         let pending_mark = self.pending_enclosing_writes.len();
         let mark = self.environment.mark();
-        let mut positional_index = 0usize;
-        let mut used_named: Vec<bool> = vec![false; declared.named.len()];
-        for parameter in parameters {
-            let declared_ty = if let Some(index) = declared
-                .named
-                .iter()
-                .position(|field| field.name.text(self.db) == parameter.name)
-            {
-                used_named[index] = true;
-                Some(declared.named[index].ty)
-            } else if parameter.name == "..." {
-                None
-            } else if positional_index < declared.positional.len() {
-                let ty = declared.positional[positional_index];
-                positional_index += 1;
-                Some(ty)
-            } else if declared.variadic.is_some() {
-                None
-            } else {
-                // A formal the annotation does not declare infers from its
-                // uses; the annotation-side check below owns the mismatch
-                // report.
-                None
-            };
-            let declared = declared_ty.is_some();
-            let parameter_ty = declared_ty.unwrap_or_else(|| self.fresh(Constraint::Unconstrained));
+        for (parameter, (parameter_ty, declared)) in parameters.iter().zip(formal_types) {
             if let Some(slot) = self
                 .naming
                 .bindings
@@ -3488,21 +3537,6 @@ impl<'db> Checker<'db, '_> {
                 }
             }
         }
-        // Declared named parameters the definition never declares.
-        for (index, field) in declared.named.iter().enumerate() {
-            if !used_named[index]
-                && !parameters
-                    .iter()
-                    .any(|p| p.name == field.name.text(self.db))
-            {
-                self.errors.push(TypeError {
-                    range,
-                    kind: TypeErrorKind::AnnotationParameterMismatch {
-                        name: field.name.text(self.db).to_owned(),
-                    },
-                });
-            }
-        }
 
         self.return_frames.push(Vec::new());
         let trailing_ty = self.infer_body_with_capture_discovery(*body, pending_mark);
@@ -3514,8 +3548,12 @@ impl<'db> Checker<'db, '_> {
         // return (covariant, like an argument against a parameter), so a body
         // returning `integer` satisfies a declared `integer | NULL` — and an
         // alias-typed declaration checks through its expansion. An Unknown
-        // declared return (elided `->`) constrains nothing.
-        if !matches!(declared.ret.kind(self.db), TyKind::Unknown) {
+        // declared return (elided `->`) constrains nothing — it is inferred
+        // from the body instead, exactly as an unannotated definition's is, so
+        // annotating only the parameters does not silently drop the return.
+        if matches!(declared.ret.kind(self.db), TyKind::Unknown) {
+            signature.ret = self.join_early_returns(&early_returns, trailing_ty);
+        } else {
             // Each `return` is checked at its OWN site: reporting the union of
             // every return against the declaration would blame whichever
             // expression came last and leave the reader to work out which
@@ -3566,6 +3604,11 @@ impl<'db> Checker<'db, '_> {
         self.environment.rollback(mark);
         self.reapply_enclosing_writes(pending_mark);
         self.table.level -= 1;
+        // Not resolved: every type in here came from the annotation, so it
+        // holds no inference variables — and resolving would expand the
+        // aliases and nominals the author wrote, which are the whole point of
+        // declaring the signature.
+        Ty::new(self.db, TyKind::Function(signature))
     }
 
     /// Check a function body, re-running it once when the walk grew a
@@ -4215,56 +4258,6 @@ impl<'db> Checker<'db, '_> {
             self.record_strict_origin(id, StrictOriginKind::UnsupportedConstruct);
         }
         ret
-    }
-
-    /// The declared scheme with each parameter's optionality taken from the
-    /// function's formals: a formal with a default is optional in R, and no
-    /// annotation can change that. Every field the annotation declared required
-    /// while the code defaults it is reported against the definition.
-    fn reconcile_declared_optionality(
-        &mut self,
-        root: ExprId,
-        value: ExprId,
-        declared: TypeScheme<'db>,
-    ) -> TypeScheme<'db> {
-        let ExpressionKind::Function { parameters, .. } = &self.module.expression(value).kind
-        else {
-            return declared;
-        };
-        let defaulted: Vec<String> = parameters
-            .iter()
-            .filter(|parameter| parameter.default.is_some())
-            .map(|parameter| parameter.name.clone())
-            .collect();
-        if defaulted.is_empty() {
-            return declared;
-        }
-        let TyKind::Function(function) = declared.body.kind(self.db).clone() else {
-            return declared;
-        };
-        let mut corrected = function.clone();
-        let mut mismatches = Vec::new();
-        for field in &mut corrected.named {
-            let name = field.name.text(self.db);
-            if !field.optional && defaulted.iter().any(|formal| formal == name) {
-                field.optional = true;
-                mismatches.push(name.to_owned());
-            }
-        }
-        if mismatches.is_empty() {
-            return declared;
-        }
-        let range = self.blame_range(root);
-        for name in mismatches {
-            self.errors.push(TypeError {
-                range,
-                kind: TypeErrorKind::AnnotationRequiredButDefaulted { name },
-            });
-        }
-        TypeScheme {
-            binders: declared.binders,
-            body: Ty::new(self.db, TyKind::Function(corrected)),
-        }
     }
 
     /// One overload probe. `Ok` means the candidate fits and the bindings it
