@@ -106,6 +106,16 @@ pub fn parse_stage_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic>
 /// the file root and every braced block — are checked; `@type`/`@alias`
 /// definition blocks and `@strict` toggles stand alone, and a block already
 /// refused for its shape reports only that refusal.
+///
+/// A block inside a call's argument list is reported separately, because no
+/// statement can follow it there: the association walk sees an `ARGUMENT` node
+/// next, which is not an expression kind, so the block attaches to nothing —
+/// and the sequence walk never visits an argument list, so it said nothing
+/// either. A deliberately wrong type beside a lambda argument was accepted in
+/// silence. Every other position that looks like it might dangle does attach,
+/// measured against a no-annotation control: a braceless function body, a
+/// braceless `if` branch, and a parenthesised expression all apply their
+/// annotation, so none of them may be reported here.
 fn dangling_annotation_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
     let parsed = parse(db, file);
     let root = parsed.syntax_node();
@@ -150,6 +160,32 @@ fn dangling_annotation_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnos
             severity: Severity::Error,
             code: "annotation",
             message: message.to_owned(),
+            related: Vec::new(),
+        });
+    }
+    for node in root
+        .descendants()
+        .filter(|node| node.kind() == syntax::SyntaxKind::ANNOTATION)
+    {
+        if node.parent().map(|parent| parent.kind()) != Some(syntax::SyntaxKind::ARGUMENT_LIST) {
+            continue;
+        }
+        // A block that already failed to lower owns its own diagnostic; a
+        // placement error on top would report one mistake twice.
+        let annotation = crate::annotations::lower_annotation(db, &node);
+        if !annotation.errors.is_empty() || !annotation.typing_errors.is_empty() {
+            continue;
+        }
+        diagnostics.push(Diagnostic {
+            range: node.text_range(),
+            severity: Severity::Error,
+            code: "annotation",
+            // Deliberately not "move it up a line": annotating the enclosing
+            // statement types that statement, not the argument the block was
+            // aimed at, and a lambda parameter has no annotatable position at
+            // all. Lifting the function to its own binding is the only thing
+            // that actually types it.
+            message: "A `#:` typing comment annotates the statement that follows it, and an argument is not a statement, so this one annotates nothing. Give the value its own binding and annotate that.".to_owned(),
             related: Vec::new(),
         });
     }

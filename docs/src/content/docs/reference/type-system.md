@@ -40,6 +40,13 @@ apply:
 - a plain `#` comment between the block and the expression, or no expression following at all
   ("must be followed immediately by an expression")
 - a block with no content beyond the `#:` marker ("must include a type expression")
+- a block inside a **call's argument list**, such as one beside a lambda passed to `lapply`: an
+  argument is not a statement, so nothing there can be annotated ("an argument is not a statement")
+
+The remedy for the last one is to give the value its own binding and annotate that. Moving the block
+above the enclosing statement annotates that statement instead, and a lambda parameter has no
+annotatable position at all. Three positions that resemble it do attach, and are not errors: a
+braceless function body, a braceless `if` branch, and a parenthesised expression.
 
 A block consisting only of `@type` and `@alias` lines is instead a definition block.
 

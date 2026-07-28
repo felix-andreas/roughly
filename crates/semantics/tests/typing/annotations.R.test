@@ -657,3 +657,42 @@ guarded <- function(title = NULL) {
 unguarded: fn([title]: character | NULL) -> character
 guarded: fn([title]: character | NULL) -> character
 242..247 error[type-mismatch] expected a comparable value (numeric, `character`, or `logical`), found `character | NULL`
+
+#==== annotations_in_argument_lists
+#---- an_annotation_beside_a_lambda_argument_is_reported
+# An argument is not a statement, so the block attaches to nothing. It used to
+# say nothing either, which made a deliberately wrong type there invisible.
+xs <- list("a")
+mapped <- lapply(xs, #: fn(x: integer) -> integer
+  function(v) paste0(v, "!"))
+#++++
+xs: list{character}
+mapped: list[character]
+192..220 error[annotation] A `#:` typing comment annotates the statement that follows it, and an argument is not a statement, so this one annotates nothing. Give the value its own binding and annotate that.
+
+#---- the_same_holds_for_a_plain_value_argument
+xs <- list(1L)
+mapped <- lapply(xs, #: character
+  1L)
+#++++
+xs: list{integer}
+mapped: Unknown
+36..48 error[annotation] A `#:` typing comment annotates the statement that follows it, and an argument is not a statement, so this one annotates nothing. Give the value its own binding and annotate that.
+51..53 error[type-mismatch] expected `fn(integer) -> T`, found `integer`
+
+#---- a_braceless_function_body_does_attach_and_is_not_reported
+# The contrast, measured against a no-annotation control: these positions look
+# like they might dangle and do not — reporting them would be a false positive.
+annotated_body <- function(x)
+  #: character
+  x + 1L
+#++++
+annotated_body: Unknown
+208..214 error[type-mismatch] expected `character`, found `T`
+
+#---- a_parenthesised_expression_does_attach
+parenthesised <- ( #: character
+  1L )
+#++++
+parenthesised: Unknown
+34..36 error[type-mismatch] expected `character`, found `integer`
