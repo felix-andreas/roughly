@@ -931,6 +931,45 @@ took `rlang` from a 213-second death to a 9-second clean run and left `htmltools
 unchanged, with no cycle panic in its output. So this is an algorithm that is superlinear or
 non-terminating within a bounded working set. `mgcv` (37,253 lines) behaves the same way.
 
+### Localised and profiled; the fix is NOT where the time is spent
+
+**One file does it.** Timing each `htmltools/R/*.R` alone: every file completes under 900 ms except
+`tag_query.R` (1,563 lines), which alone exceeds 25 s. Start there, not with the package.
+
+**The shape.** `tagQuery_` defines a local closure `newTagQuery(selected)` that returns
+`structure(list(...))` whose ~40 fields are closures each calling `newTagQuery` again. So the record
+type is *self-referential through its own fields*, and the type expands per level rather than being
+folded. Prefix-bisection points at the line completing the first such method — but note prefix
+bisection is confounded here, because a truncated prefix has a syntax error and syntax errors suppress
+checking; the cliff is partly that the code became parseable.
+
+**Where the time goes**, from a symbolised sample of the running process:
+`semantics::types::substitute_rigid` recursing into `salsa::interned::…::intern`. Every instantiation
+of a scheme mentioning that type walks and re-interns the whole thing.
+
+**The time is NOT wasted work, which is the finding that matters.** Two candidate fixes in
+`substitute_rigid` were implemented and measured, and both were reverted:
+
+- returning `ty` unchanged when the substitution is empty (monomorphic instantiation);
+- a memoised per-interned-type `rigid_names` set, returning any subtree whose rigids are disjoint from
+  the substitution unchanged.
+
+Neither moved `tag_query.R` at all, and an interleaved A/B on 323K lines showed **no** difference
+(baseline 4.69–4.93 s, patched 4.69–4.75 s). So the substituted rigids genuinely pervade a genuinely
+enormous type: the walk is doing real work on a type that should never have grown that large.
+
+**So the fix belongs upstream of substitution — stop the self-referential record type from expanding.**
+That is the recursion-widening question (fold to a recursive nominal, or widen to `Unknown` past a size
+bound), which is a semantics design decision rather than an optimisation, and wants a decision record.
+A size bound on constructed types would also be a general safety net: nothing currently caps how large
+one type may get.
+
+**Measurement trap, learned here the hard way.** Do not A/B two binaries in separate blocks on this
+machine. A non-interleaved comparison showed baseline 9.6 s against patched 4.8 s — an apparent 2×
+win that was entirely load drift from a build still finishing during the baseline block. Interleaving
+the two binaries run-by-run showed the true difference: zero. Any perf claim here needs interleaved
+runs.
+
 Also still open from the same investigation: **`targets` 1.12.0 (63,979 lines) takes 43.7 s** where a
 similarly sized ggplot2 takes 2.0 s — a ~20x outlier, R6-heavy code the obvious suspect, unprofiled.
 A smaller sibling worth a look because it is cheap to profile: **`MASS` (5,951 lines) takes 6.5 s**,
