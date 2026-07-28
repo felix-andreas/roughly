@@ -206,7 +206,7 @@ nominal distinctness, and no cascades outside the `@param` case. The gap is not 
 **diagnostics render the artifact unification left behind rather than the fact that failed**, and that
 the nominal story protects construction but nothing after it.
 
-## Open — a field write is lost across items in a package but not in a script
+## FIXED — a field write was lost across items in a package but not in a script
 
 Identical code, two answers. A structural record written at top level and read in a later top-level
 statement:
@@ -225,11 +225,40 @@ so the write really does happen first and the package answer is the false positi
 
 Found while fixturing the nominal field-write fix, and pre-existing — the structural path is
 untouched by it. The write applies *within* one item either way (the same code inside a function body
-is clean in both kinds), so this is specifically the cross-item export: a statement item's
-`top_level_bindings` carries the binding's pre-write type rather than the written one. Check that
-against the conditional-slot model in the reference before changing it, since a *conditional* write
-(`if (flag) record$age <- ...`) genuinely must join rather than replace — the unconditional case is
-the one that should not.
+is clean in both kinds), so this is the cross-item export.
+
+**Diagnosed, not yet fixed.** The export is fine: naming does mint a `TopLevel` binding for a
+replacement target's base, so the writing statement item exports `record` with the written type in
+its `top_level_bindings`. The fault is precedence in `SalsaGlobals::scheme`, which resolves in this
+order:
+
+1. `script_definition` — position-aware, handles definitions *and* statement writers, and is the
+   reason scripts get this right. It is unreachable for a package, because `script_items` is only
+   populated for scripts.
+2. `package_definitions` — definition items only, no statement writers, no position.
+3. `conditional_slot_scheme` — where the statement writers actually live.
+
+A name with both a definition and later statement writes stops at (2), so every later write is
+invisible. `conditional_slot_items` already collects the writer; nothing ever asks it.
+
+The obvious repair — extend the position-aware same-file lookup to package files — has a constraint
+that must not be broken: `package_definitions` encodes "later files, and later assignments within one
+file, override earlier ones", so a same-file lookup that short-circuits would lose a later *file's*
+override. The two orderings have to compose rather than one replacing the other. The conditional case
+(`if (flag) record$age <- ...`) must still join rather than replace, which is what
+`conditional_slot_scheme` unions for.
+
+**Fixed by giving package files the position-aware lookup scripts already had.** `SalsaGlobals` built
+its ordered item list for scripts only; it is now built for both kinds, because a file is sourced
+top-down whichever it is. An **immediate** read consults the nearest earlier writer in its own file
+before the project-wide map, which is what makes the rewrite visible.
+
+The composition constraint is handled by splitting on the read kind rather than the document kind: a
+**deferred** read stands aside for a package and falls through to the project-wide winner, because a
+function body runs after the whole package is sourced, so a later file's override must win. In a
+script the closure runs once that file's frame has settled, so it still scans the file. Verified:
+forward references from a function body, mutual recursion, self-recursion, and a later file
+overriding an earlier one all still resolve correctly.
 
 ## Open — diagnostic wording is not styled consistently
 
@@ -240,9 +269,22 @@ argument` and `Use TRUE, not T, for Boolean values` are capitalised (the second 
 reviewer who noticed the page claims a finding "says the same thing" everywhere while the sample
 visibly disagrees with itself.
 
-Pick one style, write it into the diagnostics reference as a rule, and sweep. Lowercase fragment with
-no trailing period is the most common shape already and matches the surrounding tools' conventions;
-the lint messages are the outliers.
+**Measured before acting, and the proposed rule does not survive it.** Across 62 message literals in
+`diagnostics.rs`: 36 lowercase with no period, 14 lowercase with a period, 9 capitalised. So
+"lowercase fragment, no period" is the plurality but nothing like a convention — and it cannot be
+applied blanket, because the capitalised ones are capitalised for reasons: `R's $ operator` is a
+proper noun, and `I could not resolve …` / `I do not know the type …` / `I cannot construct an
+infinite type` are first-person sentences. Lowercasing those yields `r's` and `i could not`.
+
+The rule that actually fits the corpus is two-shape: a message that is a **complete sentence** is
+sentence-cased and ends with a period; a message that is a **fragment** (the expected/found family)
+is lowercase with none. Under that rule the real violations are far fewer than "five people wrote
+them" suggests — mostly sentences missing their period.
+
+**Sequencing constraint: do not sweep this while #89 is open.** That PR re-captures every rendered
+sample in the docs and on the landing page. Changing message text now invalidates those captures and
+makes a rebase that is already 16 files worse — the same problem this cycle advised the PR about.
+Land it after #89 merges or closes.
 
 ## Open — release-artifact versions have drifted apart
 

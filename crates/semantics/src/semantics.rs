@@ -1304,13 +1304,27 @@ fn refuse_check<'db>(db: &'db dyn Db, check: check::ItemCheck<'db>) -> check::It
 struct SalsaGlobals<'db> {
     db: &'db dyn Db,
     definitions: Option<&'db rustc_hash::FxHashMap<String, Item<'db>>>,
-    /// For an item in a script: the script's items in order plus the item's
-    /// own position. A script executes top-down, so an immediate read sees
-    /// the nearest EARLIER definition (before package globals), while a
-    /// deferred read — from inside a closure, which runs after the frame
-    /// settled — sees the LAST definition of the name anywhere in the
-    /// script, the item's own binding included (self-recursion).
-    script_items: Option<(Vec<Item<'db>>, usize)>,
+    /// The file's items in order plus this item's own position, for both
+    /// document kinds — a file is sourced top-down whichever it is.
+    ///
+    /// An **immediate** read therefore sees the nearest EARLIER writer in this
+    /// file, ahead of the project-wide winner. That covers a top-level
+    /// statement rewriting a name the file defined above it, which the
+    /// project-wide map cannot express: it holds definition items only, so a
+    /// later `record$age <- …` was invisible and the read answered from the
+    /// pre-write type.
+    ///
+    /// A **deferred** read — from inside a closure — differs by kind, because
+    /// what has finished running when the body executes differs. In a script
+    /// the closure runs once the file's frame has settled, so it sees the last
+    /// writer anywhere in that file, its own binding included (self-recursion).
+    /// In a package the function runs after the *whole package* is sourced, so
+    /// the answer is the project-wide winner and this scan must stand aside —
+    /// a later file's override would otherwise be lost.
+    frame_items: Option<(Vec<Item<'db>>, usize)>,
+    /// Whether this item's file is a script, which decides the deferred-read
+    /// rule above.
+    is_script: bool,
     /// The script file itself, for its file-local type declarations.
     script_file: Option<SourceFile>,
 }
@@ -1320,24 +1334,27 @@ impl<'db> SalsaGlobals<'db> {
         let definitions = ProjectFiles::try_get(db).map(|files| package_definitions(db, files));
         let file = *item.file(db);
         let is_script = *file.kind(db) == DocumentKind::Script;
-        let script_items = is_script.then(|| {
-            let items = item_tree(db, file);
-            let index = items
-                .iter()
-                .position(|&candidate| candidate == item)
-                .unwrap_or(items.len());
-            (items, index)
-        });
+        let items = item_tree(db, file);
+        let index = items
+            .iter()
+            .position(|&candidate| candidate == item)
+            .unwrap_or(items.len());
         SalsaGlobals {
             db,
             definitions,
-            script_items,
+            frame_items: Some((items, index)),
+            is_script,
             script_file: is_script.then_some(file),
         }
     }
 
-    fn script_definition(&self, name: &str, deferred: bool) -> Option<Item<'db>> {
-        let (items, index) = self.script_items.as_ref()?;
+    fn frame_definition(&self, name: &str, deferred: bool) -> Option<Item<'db>> {
+        let (items, index) = self.frame_items.as_ref()?;
+        // A package function body runs after every file is sourced, so the
+        // project-wide winner owns that answer, not this file's last writer.
+        if deferred && !self.is_script {
+            return None;
+        }
         let visible = if deferred {
             &items[..]
         } else {
@@ -1381,7 +1398,7 @@ impl<'db> SalsaGlobals<'db> {
 
 impl<'db> check::GlobalEnv<'db> for SalsaGlobals<'db> {
     fn scheme(&self, name: &str, deferred: bool) -> Option<types::TypeScheme<'db>> {
-        if let Some(item) = self.script_definition(name, deferred) {
+        if let Some(item) = self.frame_definition(name, deferred) {
             if *item.kind(self.db) == ItemKind::Statement {
                 let interned = types::Name::new(self.db, name.to_owned());
                 if let Some(scheme) = statement_binding_scheme(self.db, item, interned) {
@@ -1409,7 +1426,7 @@ impl<'db> check::GlobalEnv<'db> for SalsaGlobals<'db> {
     }
 
     fn defined_in_project(&self, name: &str, deferred: bool) -> bool {
-        self.script_definition(name, deferred).is_some()
+        self.frame_definition(name, deferred).is_some()
             || self
                 .definitions
                 .as_ref()
@@ -1419,7 +1436,7 @@ impl<'db> check::GlobalEnv<'db> for SalsaGlobals<'db> {
     fn overloads(&self, name: &str, deferred: bool) -> Option<Vec<types::TypeScheme<'db>>> {
         // A script-local or package definition wins over the stub set,
         // disabling per-call overload selection for that name.
-        if self.script_definition(name, deferred).is_some() {
+        if self.frame_definition(name, deferred).is_some() {
             return None;
         }
         if self

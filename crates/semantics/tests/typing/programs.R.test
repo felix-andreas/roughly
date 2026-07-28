@@ -248,3 +248,48 @@ wrong_optional: Unknown
 1992..2009 error[type-mismatch] expected `fn(LocalInput) -> Result`, found `fn(input: LocalInput) -> Item`
 2142..2164 error[type-mismatch] expected `LocalInput`, found `RemoteInput`
 2370..2378 error[type-mismatch] expected `fn(Result) -> Result`, found `fn(result: Result, item: Item) -> Result`
+
+#==== top_level_rewrites
+#---- a_later_top_level_write_is_visible_to_a_later_statement
+# A file is sourced top-down whichever kind it is, so a statement that rewrites
+# a field of a name defined above it is what the next statement reads. The
+# project-wide map holds definition items only, so this write used to be
+# invisible and the read answered from the pre-write type — in a package only,
+# while the identical script was correct.
+#: fn(s: character) -> character
+want_chr <- function(s) s
+
+#: list{name: character, age: integer}
+record <- list(name = "Ada", age = 36L)
+
+record$age <- "now a character"
+
+reading <- want_chr(record$age)
+#++++
+want_chr: fn(s: character) -> character
+record: list{name: character, age: integer}
+reading: character
+
+#---- a_function_body_sees_the_settled_value_not_the_pre_write_one
+#: list{age: integer}
+record <- list(age = 36L)
+
+record$age <- 40L
+
+#: fn() -> integer
+reader <- function() record$age
+#++++
+record: list{age: integer}
+reader: fn() -> integer
+
+#---- a_forward_reference_from_a_function_body_still_resolves
+# The deferred read must not be narrowed to "earlier items only": the body runs
+# after the file is sourced, so a name defined below it is in scope.
+#: fn() -> integer
+reader <- function() helper()
+
+#: fn() -> integer
+helper <- function() 1L
+#++++
+reader: fn() -> integer
+helper: fn() -> integer

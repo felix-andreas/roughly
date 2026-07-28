@@ -396,6 +396,7 @@ p: character
 p: Unknown
 0..1 warning[duplicate] Top-level binding `p` is overwritten by a later top-level binding in this package.
 12..13 warning[duplicate] Top-level binding `p` overwrites an earlier top-level binding in this package.
+17..18 error[type-mismatch] expected a numeric value (`integer` or `double`), found `character`
 
 #---- self_referential_first_writer_stays_tolerated
 x <- x + 1
