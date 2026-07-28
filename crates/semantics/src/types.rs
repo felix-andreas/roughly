@@ -231,27 +231,60 @@ pub fn substitute_rigid<'db>(
     ty: Ty<'db>,
     substitution: &rustc_hash::FxHashMap<Name<'db>, Ty<'db>>,
 ) -> Ty<'db> {
+    substitute_rigid_memo(db, ty, substitution, &mut rustc_hash::FxHashMap::default())
+}
+
+/// A type is a DAG, not a tree: interning means one subtree is reached by every
+/// path that mentions it, and a record whose fields all return that record is
+/// reached once per field per level. Substituting without a memo re-walks each
+/// shared subtree once per path, which is exponential in depth — measured at 278
+/// million calls in 40 seconds on one R file, where the same walk memoised
+/// finishes. The memo is per top-level call because the substitution is fixed
+/// for its duration, so a node's answer cannot depend on how it was reached.
+fn substitute_rigid_memo<'db>(
+    db: &'db dyn Db,
+    ty: Ty<'db>,
+    substitution: &rustc_hash::FxHashMap<Name<'db>, Ty<'db>>,
+    memo: &mut rustc_hash::FxHashMap<Ty<'db>, Ty<'db>>,
+) -> Ty<'db> {
+    if let Some(&done) = memo.get(&ty) {
+        return done;
+    }
+    let substituted = substitute_rigid_uncached(db, ty, substitution, memo);
+    memo.insert(ty, substituted);
+    substituted
+}
+
+fn substitute_rigid_uncached<'db>(
+    db: &'db dyn Db,
+    ty: Ty<'db>,
+    substitution: &rustc_hash::FxHashMap<Name<'db>, Ty<'db>>,
+    memo: &mut rustc_hash::FxHashMap<Ty<'db>, Ty<'db>>,
+) -> Ty<'db> {
     match ty.kind(db).clone() {
         TyKind::Rigid(name) => substitution.get(&name).copied().unwrap_or(ty),
         TyKind::Vector(inner) => Ty::new(
             db,
-            TyKind::Vector(substitute_rigid(db, inner, substitution)),
+            TyKind::Vector(substitute_rigid_memo(db, inner, substitution, memo)),
         ),
         TyKind::NamedVector(inner) => Ty::new(
             db,
-            TyKind::NamedVector(substitute_rigid(db, inner, substitution)),
+            TyKind::NamedVector(substitute_rigid_memo(db, inner, substitution, memo)),
         ),
-        TyKind::List(inner) => Ty::new(db, TyKind::List(substitute_rigid(db, inner, substitution))),
+        TyKind::List(inner) => Ty::new(
+            db,
+            TyKind::List(substitute_rigid_memo(db, inner, substitution, memo)),
+        ),
         TyKind::NamedList(inner) => Ty::new(
             db,
-            TyKind::NamedList(substitute_rigid(db, inner, substitution)),
+            TyKind::NamedList(substitute_rigid_memo(db, inner, substitution, memo)),
         ),
         TyKind::Tuple(items) => Ty::new(
             db,
             TyKind::Tuple(
                 items
                     .iter()
-                    .map(|&item| substitute_rigid(db, item, substitution))
+                    .map(|&item| substitute_rigid_memo(db, item, substitution, memo))
                     .collect(),
             ),
         ),
@@ -262,7 +295,7 @@ pub fn substitute_rigid<'db>(
                     .iter()
                     .map(|field| {
                         let mut field = field.clone();
-                        field.ty = substitute_rigid(db, field.ty, substitution);
+                        field.ty = substitute_rigid_memo(db, field.ty, substitution, memo);
                         field
                     })
                     .collect(),
@@ -274,30 +307,30 @@ pub fn substitute_rigid<'db>(
                 positional: function
                     .positional
                     .iter()
-                    .map(|&ty| substitute_rigid(db, ty, substitution))
+                    .map(|&ty| substitute_rigid_memo(db, ty, substitution, memo))
                     .collect(),
                 named: function
                     .named
                     .iter()
                     .map(|field| {
                         let mut field = field.clone();
-                        field.ty = substitute_rigid(db, field.ty, substitution);
+                        field.ty = substitute_rigid_memo(db, field.ty, substitution, memo);
                         field
                     })
                     .collect(),
                 variadic: function.variadic.as_ref().map(|rest| {
                     let mut rest = rest.clone();
-                    rest.element = substitute_rigid(db, rest.element, substitution);
+                    rest.element = substitute_rigid_memo(db, rest.element, substitution, memo);
                     rest
                 }),
-                ret: substitute_rigid(db, function.ret, substitution),
+                ret: substitute_rigid_memo(db, function.ret, substitution, memo),
             }),
         ),
         TyKind::Union(members) => union_of(
             db,
             members
                 .iter()
-                .map(|&member| substitute_rigid(db, member, substitution)),
+                .map(|&member| substitute_rigid_memo(db, member, substitution, memo)),
         ),
         TyKind::Named(name, arguments) => Ty::new(
             db,
@@ -305,7 +338,7 @@ pub fn substitute_rigid<'db>(
                 name,
                 arguments
                     .iter()
-                    .map(|&argument| substitute_rigid(db, argument, substitution))
+                    .map(|&argument| substitute_rigid_memo(db, argument, substitution, memo))
                     .collect(),
             ),
         ),

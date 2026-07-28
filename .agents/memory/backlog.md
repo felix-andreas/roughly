@@ -958,7 +958,26 @@ Neither moved `tag_query.R` at all, and an interleaved A/B on 323K lines showed 
 (baseline 4.69–4.93 s, patched 4.69–4.75 s). So the substituted rigids genuinely pervade a genuinely
 enormous type: the walk is doing real work on a type that should never have grown that large.
 
-**So the fix belongs upstream of substitution — stop the self-referential record type from expanding.**
+**Corrected by measurement: `substitute_rigid` WAS the hot path, and the earlier "no output" readings
+were an instrumentation artifact.** A counter printing to stderr through a pipe loses its output when
+`timeout` kills the process, so three separate probes read as silence and were taken as evidence the
+function was cold. Redirecting stderr to a file instead showed **278 million calls in 40 seconds**.
+Always redirect a probe to a file when the process under test will be killed, and always make the
+probe fire once on entry so its silence can be distinguished from its absence.
+
+**Fixed, and it is the DAG-as-tree bug.** Interning makes a type a DAG — one subtree is reached by
+every path mentioning it — and a record whose ~40 fields all return that record is reached once per
+field per level, so an unmemoised walk is exponential in depth. `substitute_rigid` now memoises per
+node for the duration of one top-level call, which is sound because the substitution is fixed for that
+call and a node's answer cannot depend on how it was reached. On the pathological file the walk drops
+from 278M calls to under 2M; interleaved on both corpora it wins every round by ~2%, with identical
+findings.
+
+**The hang is still open, and the memo did not fix it** — a second bottleneck now dominates
+`tag_query.R`. Re-sample the profile to find it; the sampler and the corrected probe method are the
+tools to use.
+
+**The remaining suspicion is unchanged — stop the self-referential record type from expanding.**
 That is the recursion-widening question (fold to a recursive nominal, or widen to `Unknown` past a size
 bound), which is a semantics design decision rather than an optimisation, and wants a decision record.
 A size bound on constructed types would also be a general safety net: nothing currently caps how large
