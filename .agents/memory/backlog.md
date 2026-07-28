@@ -977,7 +977,39 @@ findings.
 `tag_query.R`. Re-sample the profile to find it; the sampler and the corrected probe method are the
 tools to use.
 
-**The remaining suspicion is unchanged — stop the self-referential record type from expanding.**
+### The type's growth is now measured, and it is combinatorial, not iterative
+
+Instrumenting the captured-write join to report the **tree** size (paths, not distinct nodes) of each
+type it erases, largest-so-far only:
+
+```
+877 -> 8823 -> 104655 -> 104657 -> 1046623 -> 5000000 (probe ceiling)
+```
+
+Roughly ten times per step. So the type genuinely explodes, every walk over it is a symptom, and
+making individual walks cheaper cannot fix it — which matches the evidence, because each memoised
+walk simply hands the hot spot to the next one.
+
+**Six fixes have been implemented, measured, and reverted.** Recorded so none is tried a seventh time:
+
+1. `substitute_rigid` early-out on an empty substitution — no effect.
+2. `substitute_rigid` memoised disjoint-rigid skip — no effect.
+3. `substitute_rigid` matching by reference instead of cloning `TyKind` — no effect.
+4. `substitute_rigid` per-node memo — **kept** (278M calls to under 2M, ~2% on both corpora,
+   identical findings) but does **not** fix the hang.
+5. `erase_vars` as a tracked query — no effect on the hang, unmeasured on normal input, reverted.
+6. Capping how many times one captured slot's join may grow — no effect, and the *reason* is the
+   useful part: the cap is per slot, and each of the ~40 method slots grows only once or twice. The
+   explosion is the **product across slots**, not iteration within one, so no per-slot counter can
+   see it.
+
+**What that leaves.** The bound has to be on the size of a constructed type itself, applied where
+types are built, not on any one walk or any one join — nothing currently caps how large a single type
+may get. Widening past the bound to `Unknown` is the sound-by-refusal move the loop join already
+makes for a variable whose type keeps growing structurally. Computing the size cheaply needs care: the
+DAG is small while the tree is enormous, so a distinct-node count will not see the problem and a naive
+tree count is itself exponential — it wants a memoised size where `size(node) = 1 + sum(size(child))`,
+which is O(DAG) and yields the true tree magnitude.
 That is the recursion-widening question (fold to a recursive nominal, or widen to `Unknown` past a size
 bound), which is a semantics design decision rather than an optimisation, and wants a decision record.
 A size bound on constructed types would also be a general safety net: nothing currently caps how large
