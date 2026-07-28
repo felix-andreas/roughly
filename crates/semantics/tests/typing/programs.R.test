@@ -293,3 +293,16 @@ helper <- function() 1L
 #++++
 reader: fn() -> integer
 helper: fn() -> integer
+
+#==== self_referential_values
+#---- an_ordinary_record_of_closures_is_unaffected
+# The contrast: no self-reference, so nothing grows and the fields keep their
+# types.
+plain <- function() {
+  list(
+    double_it = function(x) x + x,
+    label = function(x) paste0(x, "!")
+  )
+}
+#++++
+plain: <T: numeric, U> fn() -> list{double_it: fn(x: T) -> T, label: fn(x: U) -> character}

@@ -226,6 +226,53 @@ pub fn union_of<'db>(db: &'db dyn Db, members: impl IntoIterator<Item = Ty<'db>>
 
 /// Replace rigid variables per the substitution, leaving unmapped ones
 /// intact — how schemes instantiate and how type-definition parameters apply.
+/// How many nodes a type has **as a tree** — counting each path separately —
+/// saturating at [`TYPE_SIZE_CEILING`].
+///
+/// Tree size, not distinct-node count, is the number that matters: interning
+/// makes a type a DAG, so a self-referential record shares its subtrees and its
+/// distinct-node count stays small while the tree it denotes grows by a factor
+/// of the field count per level. Anything walking that type without a memo pays
+/// the tree size, which is why one R file could grow a captured binding through
+/// 877, 8823, 104655 and 1046623 nodes and never finish.
+///
+/// Tracked, so the sum runs once per distinct type; computing it is O(the DAG)
+/// even though the answer describes the tree.
+#[salsa::tracked(returns(clone))]
+pub fn type_size<'db>(db: &'db dyn Db, ty: Ty<'db>) -> u64 {
+    fn sum<'db>(db: &'db dyn Db, types: impl Iterator<Item = Ty<'db>>) -> u64 {
+        types.fold(1, |total, ty| {
+            total
+                .saturating_add(type_size(db, ty))
+                .min(TYPE_SIZE_CEILING)
+        })
+    }
+    match ty.kind(db) {
+        TyKind::Vector(inner)
+        | TyKind::NamedVector(inner)
+        | TyKind::List(inner)
+        | TyKind::NamedList(inner) => sum(db, std::iter::once(*inner)),
+        TyKind::Tuple(items) | TyKind::Union(items) => sum(db, items.iter().copied()),
+        TyKind::Record(fields) => sum(db, fields.iter().map(|field| field.ty)),
+        TyKind::Named(_, arguments) => sum(db, arguments.iter().copied()),
+        TyKind::Function(function) => sum(
+            db,
+            function
+                .positional
+                .iter()
+                .copied()
+                .chain(function.named.iter().map(|field| field.ty))
+                .chain(function.variadic.iter().map(|rest| rest.element))
+                .chain(std::iter::once(function.ret)),
+        ),
+        _ => 1,
+    }
+}
+
+/// The point past which [`type_size`] stops counting. Well above any type real
+/// code produces and well below the sizes a self-referential value reaches.
+pub const TYPE_SIZE_CEILING: u64 = 100_000;
+
 pub fn substitute_rigid<'db>(
     db: &'db dyn Db,
     ty: Ty<'db>,
@@ -413,6 +460,44 @@ pub fn erase_vars<'db>(db: &'db dyn Db, ty: Ty<'db>) -> Ty<'db> {
             ),
         ),
         _ => ty,
+    }
+}
+
+#[cfg(test)]
+mod size_tests {
+    use super::*;
+    use crate::RootDatabase;
+
+    /// The ceiling exists to stop a *shared* type whose tree is enormous, so the
+    /// count has to follow paths rather than distinct nodes — a record holding
+    /// one subtree twice costs twice. Counting the graph instead would report a
+    /// self-referential value as small and never fire.
+    #[test]
+    fn size_counts_the_tree_not_the_shared_graph() {
+        let db = RootDatabase::default();
+        let leaf = scalar(&db, Atomic::Integer);
+        let pair = Ty::new(&db, TyKind::Tuple(vec![leaf, leaf]));
+        let nested = Ty::new(&db, TyKind::Tuple(vec![pair, pair]));
+
+        assert_eq!(type_size(&db, leaf), 1);
+        assert_eq!(type_size(&db, pair), 3, "one node plus two leaves");
+        assert_eq!(
+            type_size(&db, nested),
+            7,
+            "the shared pair is counted once per path, not once overall"
+        );
+    }
+
+    /// Doubling depth doubles the tree, so a value that refers to itself reaches
+    /// the ceiling quickly and saturates there instead of overflowing.
+    #[test]
+    fn size_saturates_at_the_ceiling() {
+        let db = RootDatabase::default();
+        let mut ty = scalar(&db, Atomic::Integer);
+        for _ in 0..64 {
+            ty = Ty::new(&db, TyKind::Tuple(vec![ty, ty]));
+        }
+        assert_eq!(type_size(&db, ty), TYPE_SIZE_CEILING);
     }
 }
 

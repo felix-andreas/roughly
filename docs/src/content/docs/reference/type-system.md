@@ -299,6 +299,13 @@ variable can be in:
   until this stabilizes; a variable whose type keeps growing structurally is widened to `Unknown`)
 - `repeat` runs at least once, so after the loop the variable has the body's resulting state (back
   edges still join inside the body)
+- **an expression whose type grows past a size ceiling takes `Unknown` instead.** The ceiling is on
+  the type read as a *tree*, counting each path separately, because that is what a consumer walking
+  it pays; sharing keeps the stored form small while the tree it denotes can grow by a factor of a
+  record's field count per level. A value that refers to itself does exactly that — a constructor
+  returning a record whose fields all return that record — and no real type approaches the ceiling.
+  This is the same sound-by-refusal move as the loop rule above: the checker declines to describe the
+  value rather than describing it at a size nothing can consume
 - joining equal types keeps the type; genuinely different types join into their union, exactly as
   `if ... else` result values do; joining with `Unknown` is `Unknown`
 

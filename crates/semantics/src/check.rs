@@ -1151,6 +1151,22 @@ fn flexible_comparison_operand<'db>(
 
 impl<'db> Checker<'db, '_> {
     fn record(&mut self, id: ExprId, ty: Ty<'db>) -> Ty<'db> {
+        // A self-referential value builds a type that grows by a factor of its
+        // field count per level, and every consumer downstream pays the tree it
+        // denotes rather than the graph it shares, so one such expression can
+        // stall the whole check. Past the ceiling the expression takes
+        // `Unknown` — sound by refusal, and the same move a loop makes for a
+        // variable whose type keeps growing structurally. Only composites are
+        // measured; a scalar cannot be oversized and must not pay for the ask.
+        let ty = if matches!(
+            ty.kind(self.db),
+            TyKind::Record(_) | TyKind::Function(_) | TyKind::Union(_) | TyKind::Tuple(_)
+        ) && crate::types::type_size(self.db, ty) >= crate::types::TYPE_SIZE_CEILING
+        {
+            self.unknown()
+        } else {
+            ty
+        };
         self.recorded.insert(id, ty);
         ty
     }
@@ -1725,9 +1741,13 @@ impl<'db> Checker<'db, '_> {
             Some(&existing) => existing,
             None => written,
         };
-        // The re-pass triggers only when this write actually GREW the join a
-        // closure already read (so a re-run's identical writes stay quiet and
-        // the pass count is bounded at two).
+        // A value that refers to itself grows this join by a factor of its own
+        // field count every pass instead of settling — measured climbing 877,
+        // 8823, 104655, 1046623 on a record whose fields all return that
+        // record. Nothing downstream can afford a type that size, since every
+        // walk over it pays the tree rather than the shared graph, so past the
+        // ceiling the join widens to `Unknown`: the same sound-by-refusal a
+        // loop makes for a variable whose type keeps growing structurally.
         let changed = self.capture_joins.get(&slot) != Some(&joined);
         self.capture_joins.insert(slot, joined);
         if changed && self.forward_captured.contains(&slot) {

@@ -922,7 +922,7 @@ Adjacent and still true: strict *does* report `Unknown` origins from unsupported
 `Any`-returning stub calls (`min()` on a classed value, `data.frame()`, `subset()`, `df$amount` all
 verified), and it *does* escalate genuinely-unresolved names from warning to error.
 
-## Open — `htmltools` and `mgcv` spin on CPU at flat memory
+## FIXED (htmltools) / Open (mgcv, and it is a DIFFERENT cause) — spinning on CPU at flat memory
 
 Checking `htmltools`'s package directory (7,669 lines) runs past **five minutes** at 100% CPU and
 **42 MB RSS**, measured at 182 seconds. Constant memory is the distinguishing fact: it rules out the
@@ -1003,9 +1003,23 @@ walk simply hands the hot spot to the next one.
    explosion is the **product across slots**, not iteration within one, so no per-slot counter can
    see it.
 
-**What that leaves.** The bound has to be on the size of a constructed type itself, applied where
-types are built, not on any one walk or any one join — nothing currently caps how large a single type
-may get. Widening past the bound to `Unknown` is the sound-by-refusal move the loop join already
+**FIXED, exactly there.** `type_size` is a tracked query counting a type **as a tree** — paths, not
+distinct nodes — saturating at a ceiling of 100,000, and `Checker::record` gives any composite past
+that ceiling `Unknown` instead. Tree size is the number that matters because a consumer walking a type
+pays the tree it denotes, while sharing keeps the stored graph small; a distinct-node count is blind to
+exactly the case this exists for. Only composites are measured, so scalars never pay for the ask.
+
+Results: `tag_query.R` **>200 s → 56 ms**, the whole `htmltools` package **>5 min → 129 ms**. Findings
+are byte-identical across 1,951 files of real CRAN sources (p18, MASS, ggplot2), and interleaved it is
+~7% *faster* on 323k lines, winning every round — the ceiling cuts off moderately oversized types too.
+`record` is the right site because every expression's inferred type passes through it; the capture-join
+site, tried first, fires only nine times on that file and bounding it changed nothing.
+
+**`mgcv` is NOT the same bug.** It still exceeds 200 s with this fix in place, so the shared-cause
+assumption in this item's title was wrong. It needs its own investigation, starting from the
+per-file timing sweep that localised `htmltools` to one file.
+
+**Remaining from the original item.** The bound has to be on the size of a constructed type itself — Widening past the bound to `Unknown` is the sound-by-refusal move the loop join already
 makes for a variable whose type keeps growing structurally. Computing the size cheaply needs care: the
 DAG is small while the tree is enormous, so a distinct-node count will not see the problem and a naive
 tree count is itself exponential — it wants a memoised size where `size(node) = 1 + sum(size(child))`,
