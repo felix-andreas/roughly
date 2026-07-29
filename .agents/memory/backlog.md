@@ -174,29 +174,83 @@ script the closure runs once that file's frame has settled, so it still scans th
 forward references from a function body, mutual recursion, self-recursion, and a later file
 overriding an earlier one all still resolve correctly.
 
-## Open — next simulated-user round: a syntax-error user (user directive)
+## Open — test-user round 4: the syntax-error user (user directive)
 
-Run this before the usual package-coverage or type-system rounds. One user whose whole job is to
-**break the parser on purpose** and judge what comes back: unclosed brackets and quotes, a stray
-`}`, a missing comma, `=` where `<-` belongs, an incomplete pipe, a half-typed function head, a
-`#:` block cut off mid-type — the shapes people actually produce mid-edit.
+One user breaking the parser on purpose across 17 cases — the shapes people actually produce
+mid-edit — judging **direction** and **readability** as separate verdicts. Every number below is from
+running the binary; R 4.3.3 was the referee wherever "is this even an error?" mattered.
 
-Two verdicts per case, judged separately, as in round 3:
+**The scoreboard: 9 of 17 cases are exactly right** — one finding, on the token that broke it, worded
+so an R user learns their own rule rather than the parser's state. Unclosed `{`, a stray `}`, an
+unterminated string, a missing comma between arguments, `if ()` with no condition, and both
+truncated-annotation cases (`fn(x: integer) ->`, `list{a: integer`) are all single precise findings.
+A broken statement correctly silences the semantic findings around it: a function missing its `}`
+mid-file produced *one* error and no noise from the three definitions after it. The model message is
+the `else` one — ``unexpected `else`: it must stay on the same line as the `if` branch it belongs to
+(or the `if` must be inside braces)`` — it explains R's rule and gives both fixes. That is the bar the
+rest should meet.
 
-- **Does the message point in the right direction?** A caret on the token that broke it, not on the
-  next token or the end of the file. A parse error reported on line 10 of a 9-line file is already
-  filed under §D and is exactly the failure this round is for.
-- **Is the message readable, or is it cryptic?** "expected a type, found `)`" tells a compiler
-  author what happened and tells an R user nothing. The bar is the wording elsewhere in the tool.
+### 1. An unclosed opener puts a false finding on EVERY following line
 
-Also worth counting: how many findings one mistake produces. The annotation grammar still emits 4
-findings for `fn([x] integer)` and 9 for `fn([1]: integer)`, all from one typo, and the R grammar
-has not been measured this way at all.
+The headline. Recovery does not resynchronise at the statement boundary: after reporting the unclosed
+`(`, the parser is still inside the argument list, so each following line reads as another argument.
 
-Write the findings into this file before fixing any of them, and move each one into
-`test-user-reports.md` as it closes.
+```r
+totals <- sum(c(1, 2, 3)      # the one real mistake
+a <- mean(c(1))               # "missing `,` between these arguments"
+b <- mean(c(2))               # "missing `,` between these arguments"
+c <- mean(c(3))               # "missing `,` between these arguments"
+```
 
-## Open — user reports (from the maintainer, not a simulated round)
+Measured: **5 findings, 4 of them on code the user must not change**, and it scales with the file —
+every subsequent line adds one. `[` does the same (`first <- values[1` blames the correct line after
+it). This is the worst finding of the round: one typo mid-file lights up everything below it, and the
+four false ones all read as confident, specific claims.
+
+### 2. A parse error is reported one line PAST the end of the file
+
+```r
+scale_by <- function(x,        # 3-line file
+value <- 42
+print(value)
+```
+
+The third finding is `expected a function body` at **4:1** — there is no line 4. With six lines it
+reports 7:1, so it is the EOF position rendered as `line_count + 1`. The human output prints an empty
+line under the caret; the `--output json` record carries `4:1-4:1`, which an editor cannot place — the
+squiggle is dropped or clamped somewhere wrong. Already suspected under §D; here is the repro.
+
+### 3. The annotation grammar cascades the same way, and further
+
+Measured in this frame: `fn([x] integer)` → **4 findings**, `fn([1]: integer)` → **9 findings**, one
+typo each, every one of them on the same line. Same root cause as §1 — no resynchronisation after the
+first failure — so the two should be fixed together rather than separately.
+
+### 4. Cryptic where the tool actually knows better
+
+``unexpected character `“` `` for a typographic quote pasted out of a document. Placement is perfect
+(both quotes flagged, exactly on them) but the message is the parser's vocabulary, not the user's: the
+tool knows precisely what happened and could say *this is a typographic quote; R needs a plain `"`*.
+Held up against the `else` message it is the clearest readability gap in the round.
+
+### 5. A dangling binary operator swallows the next statement, and the findings are correct-but-useless
+
+```r
+total <- 1 +
+label <- "next"
+print(label)
+```
+
+No syntax error — **and that is right**, R parses it (`total <- ((1 + label) <- "next")`) and fails at
+run time with `target of assignment expands to non-language object`. But what the user gets is two
+``I could not resolve `label` … Did you mean `labels`?`` warnings pointing at the two lines that look
+correct, and nothing anywhere about the dangling `+`. Both warnings are true under the real parse and
+neither is useful. This wants a lint — a binary operator left at end of line continuing onto the next
+statement — not a syntax error; R's own message at least names the collision.
+
+Move each finding into `test-user-reports.md` as it closes.
+
+## Open — user reports (from the maintainer, not a simulated round)## Open — user reports (from the maintainer, not a simulated round)
 
 ### FIXED — the REPL wrapped a table that fits
 
