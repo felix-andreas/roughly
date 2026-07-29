@@ -90,7 +90,7 @@ f <- function() {
 }
 #++++
 f: Unknown
-41..42 error[type-mismatch] this call passes 2 positional arguments, but the function only takes 1
+46..47 error[type-mismatch] this call passes 2 positional arguments, but the function only takes 1
 
 #---- missing_required
 f <- function() {

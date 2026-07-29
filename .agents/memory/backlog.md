@@ -177,19 +177,37 @@ mistaken for a mere precision gap when read from one direction only.
 
 Caret placement was found excellent for ordinary nesting (four-deep calls, multi-line arguments,
 lambdas, pipes) and the renderer is display-width aware while JSON stays in codepoints — both correct,
-which is rarer than it sounds. The failures are all "collapse to the outermost node":
+which is rarer than it sounds. The failures were all "collapse to the outermost node", and **four of
+the five are fixed** under one rule now in the reference (§Where a finding points): a finding
+underlines the smallest expression its message is about.
 
-- comparison operators (`<`, `==`, `>=`, `!=`) underline the whole binary expression, so the underlined
-  text contains both operand types and the message cannot be read; arithmetic and unary `-` get it right
-- a return-type mismatch with an `if`/`else` tail blames the whole construct, and the offending arm's
-  line is never rendered
-- `$` / `[[` underline the entire access chain rather than the bad key, even while the message names the
-  key and suggests a correction
-- surplus positional arguments blame the callee; a record mismatch is never attributed to the offending
-  field, printing two ~340-character near-identical type dumps to diff by eye (nested is worse — the
-  path is never named)
-- out-of-range ranges: a parse error reported on line 10 of a 9-line file; annotation ranges ending at
-  end-of-line spill onto the next line, so editors squiggle across the break
+- **FIXED** — comparison operators (`<`, `==`, `>=`, `!=`) underlined the whole binary expression, so
+  the underlined text contained both operand types and the message could not be read. They now blame
+  the right operand, which is the `found` half of `expected …, found …`, and is where arithmetic
+  already pointed. Worth recording: the *behaviour* is deliberate and correct — R coerces across
+  atomic families (`10L < "9"` is TRUE, comparing `"10" < "9"` as text) and the reference documents
+  the same-family rule as sound-by-refusal with that exact rationale, so only the caret was wrong.
+- **FIXED** — a return-type mismatch with an `if`/`else` tail blamed the whole construct, and the
+  offending arm's line was never rendered (the range clamps to the construct's first line). The
+  declared return is now checked against each expression that can produce the result — a block to
+  its tail, an `if`/`else` into both arms — and each failing one reports at its own site, the same
+  rule an explicit `return` follows. The whole body's type stays the verdict, so no finding is added
+  or dropped; when no single arm is at fault (an `if` with no `else` contributes an implicit `NULL`
+  belonging to no expression) the construct keeps the one finding.
+- **FIXED** — `$` / `[[` underlined the entire access chain rather than the bad key. Both now point
+  at the key, including a position (`x[[5L]]`). `ExpressionKind::Field` gained a `name_range`, the
+  same shape `CallArgument::name_range` already used for the same reason; `[[`'s key range came free
+  from the argument expression.
+- **FIXED (the surplus half)** — surplus positional arguments blamed the callee; they now blame the
+  first argument with no formal left to take it, which is the one the reader must remove. A
+  *missing* argument still blames the callee: there is no argument to point at. **Still open:** a
+  record mismatch is never attributed to the offending field, printing two ~340-character
+  near-identical type dumps to diff by eye (nested is worse — the path is never named). Same family
+  as the function-mismatch fix (§E.8), which named the failing parameter or return instead of
+  printing both signatures; a record wants the same treatment.
+- **Still open** — out-of-range ranges: a parse error reported on line 10 of a 9-line file;
+  annotation ranges ending at end-of-line spill onto the next line, so editors squiggle across the
+  break.
 
 ### E. Rendering drops information the message depends on
 

@@ -1305,11 +1305,17 @@ impl<'db> Checker<'db, '_> {
                 let arguments = arguments.clone();
                 self.infer_index(id, range, double, target, &arguments)
             }
-            ExpressionKind::Field { at, target, name } => {
+            ExpressionKind::Field {
+                at,
+                target,
+                name,
+                name_range,
+            } => {
                 let at = *at;
                 let target = *target;
                 let name = name.clone();
-                self.infer_field(id, range, at, target, name)
+                let name_range = name_range.unwrap_or(range);
+                self.infer_field(id, range, name_range, at, target, name)
             }
             // `pkg::name` resolves only through a namespace the stub corpus
             // knows (and, for `::`, actually exports the name); the scheme
@@ -1954,6 +1960,7 @@ impl<'db> Checker<'db, '_> {
                 at: false,
                 target,
                 name,
+                ..
             } if *target == base => name.clone(),
             ExpressionKind::Index {
                 double: true,
@@ -2676,7 +2683,7 @@ impl<'db> Checker<'db, '_> {
             Sequence => self.infer_colon(lhs, rhs),
             Less | Greater | LessEq | GreaterEq | Equal | NotEqual => self
                 .operator_method_result(range, operator, lhs, rhs)
-                .unwrap_or_else(|| self.infer_compare(range, lhs, rhs)),
+                .unwrap_or_else(|| self.infer_compare(lhs, rhs)),
             And2 | Or2 => {
                 self.expect_scalar_logical(lhs);
                 self.expect_scalar_logical(rhs);
@@ -3117,7 +3124,7 @@ impl<'db> Checker<'db, '_> {
     /// compared against a concrete numeric partner is constrained numeric,
     /// and the result is `logical` shaped element-wise (a vector member
     /// compares to `logical[]`).
-    fn infer_compare(&mut self, range: TextRange, lhs: ExprId, rhs: ExprId) -> Ty<'db> {
+    fn infer_compare(&mut self, lhs: ExprId, rhs: ExprId) -> Ty<'db> {
         let lhs_range = self.blame_range(lhs);
         let rhs_range = self.blame_range(rhs);
         let lhs_ty = self.infer(lhs);
@@ -3162,7 +3169,11 @@ impl<'db> Checker<'db, '_> {
             })
         {
             self.errors.push(TypeError {
-                range,
+                // The right operand, not the whole expression: the message
+                // takes the left side as the expectation, so underlining both
+                // leaves the reader unable to tell which type is which. This is
+                // where arithmetic already points.
+                range: rhs_range,
                 kind: TypeErrorKind::Mismatch {
                     expected: resolved_left,
                     found: resolved_right,
@@ -3583,14 +3594,16 @@ impl<'db> Checker<'db, '_> {
                     });
                 }
             }
-            // Blame the expression that produces the value — a block's tail
-            // expression — not the whole body; the block range stays only
-            // when there is no tail (an empty or semicolon-terminated body).
-            let blamed = match &self.module.expression(*body).kind {
-                ExpressionKind::Block {
-                    statements,
-                    trailing_semicolon: false,
-                } => statements.last().copied().unwrap_or(*body),
+            // Blame the expression that produces the value, not the whole
+            // body: a block's tail, and through an `if`/`else` tail, the arm
+            // that is actually wrong. A finding on the whole construct makes
+            // the reader work out which branch it means, and the offending
+            // line is not even rendered when the range is clamped to the
+            // construct's first line.
+            let mut leaves = Vec::new();
+            self.collect_tail_expressions(*body, &mut leaves);
+            let blamed = match leaves.as_slice() {
+                [single] => *single,
                 _ => *body,
             };
             let body_range = self.blame_range(blamed);
@@ -3602,13 +3615,42 @@ impl<'db> Checker<'db, '_> {
                 && !matches!(resolved_body.kind(self.db), TyKind::Unknown)
                 && !self.table.compatible(self.db, resolved_body, declared.ret)
             {
-                self.errors.push(TypeError {
-                    range: body_range,
-                    kind: TypeErrorKind::Mismatch {
-                        expected: declared.ret,
-                        found: resolved_body,
-                    },
-                });
+                // The whole body's type is the verdict; the leaves only decide
+                // where to point, and each one that fails on its own reports at
+                // its own site, exactly as each `return` does. When no single
+                // leaf is at fault — an `if` with no `else` contributes an
+                // implicit `NULL` that belongs to no expression — the tail
+                // keeps the one finding.
+                let culprits: Vec<(ExprId, Ty<'db>)> = leaves
+                    .iter()
+                    .filter(|&&leaf| leaf != blamed)
+                    .filter_map(|&leaf| {
+                        let ty = self.table.resolve(self.db, self.recorded_ty(leaf));
+                        (!matches!(ty.kind(self.db), TyKind::Unknown)
+                            && !self.table.compatible(self.db, ty, declared.ret))
+                        .then_some((leaf, ty))
+                    })
+                    .collect();
+                if culprits.is_empty() {
+                    self.errors.push(TypeError {
+                        range: body_range,
+                        kind: TypeErrorKind::Mismatch {
+                            expected: declared.ret,
+                            found: resolved_body,
+                        },
+                    });
+                } else {
+                    for (leaf, found) in culprits {
+                        let range = self.blame_range(leaf);
+                        self.errors.push(TypeError {
+                            range,
+                            kind: TypeErrorKind::Mismatch {
+                                expected: declared.ret,
+                                found,
+                            },
+                        });
+                    }
+                }
             }
         }
         self.environment.rollback(mark);
@@ -3619,6 +3661,38 @@ impl<'db> Checker<'db, '_> {
         // aliases and nominals the author wrote, which are the whole point of
         // declaring the signature.
         Ty::new(self.db, TyKind::Function(signature))
+    }
+
+    /// The type already inferred for an expression, `Unknown` when the walk
+    /// never recorded one.
+    fn recorded_ty(&self, id: ExprId) -> Ty<'db> {
+        self.recorded.get(&id).copied().unwrap_or(unknown(self.db))
+    }
+
+    /// Every expression whose value can become the enclosing function's result,
+    /// following a block to its tail and an `if`/`else` into both arms. An `if`
+    /// with no `else` also yields `NULL` on the untaken path, which belongs to
+    /// no expression, so it contributes its branch and nothing else.
+    fn collect_tail_expressions(&self, id: ExprId, into: &mut Vec<ExprId>) {
+        match &self.module.expression(id).kind {
+            ExpressionKind::Block {
+                statements,
+                trailing_semicolon: false,
+            } => match statements.last() {
+                Some(&tail) => self.collect_tail_expressions(tail, into),
+                None => into.push(id),
+            },
+            ExpressionKind::If {
+                then_branch,
+                else_branch: Some(else_branch),
+                ..
+            } => {
+                let (then_branch, else_branch) = (*then_branch, *else_branch);
+                self.collect_tail_expressions(then_branch, into);
+                self.collect_tail_expressions(else_branch, into);
+            }
+            _ => into.push(id),
+        }
     }
 
     /// Check a function body, re-running it once when the walk grew a
@@ -4578,7 +4652,12 @@ impl<'db> Checker<'db, '_> {
                 ArgumentTarget::Overflow => {
                     if !forwards_dots {
                         return vec![TypeError {
-                            range: callee_range,
+                            // The first argument with no formal left to take
+                            // it: that is the one the reader has to remove,
+                            // while the callee is the part of the call that is
+                            // right. A missing argument still blames the callee
+                            // — there is no argument to point at.
+                            range: argument.range,
                             kind: TypeErrorKind::ArityMismatch {
                                 expected: total,
                                 found: arguments.len(),
@@ -5159,7 +5238,12 @@ impl<'db> Checker<'db, '_> {
             let index = arguments[0]
                 .value
                 .map(|value| self.module.expression(value).kind.clone());
-            self.extract_result(id, range, subject, index.as_ref())
+            // A finding about the KEY points at the key, not at the whole
+            // access chain, which contains the subject too.
+            let key_range = arguments[0]
+                .value
+                .map_or(range, |value| self.blame_range(value));
+            self.extract_result(id, range, key_range, subject, index.as_ref())
         } else {
             self.subset_result(id, range, subject, index_types.first().copied())
         };
@@ -5191,6 +5275,7 @@ impl<'db> Checker<'db, '_> {
         &mut self,
         origin: ExprId,
         range: TextRange,
+        key_range: TextRange,
         subject: Ty<'db>,
         index: Option<&ExpressionKind>,
     ) -> Result<Ty<'db>, TypeError<'db>> {
@@ -5201,7 +5286,7 @@ impl<'db> Checker<'db, '_> {
             let mut results = Vec::with_capacity(members.len());
             for member in members {
                 let result = self
-                    .extract_result(origin, range, member, index)
+                    .extract_result(origin, range, key_range, member, index)
                     .map_err(|error| widen_error_container(error, subject))?;
                 results.push(result);
             }
@@ -5251,7 +5336,7 @@ impl<'db> Checker<'db, '_> {
                     return match fields.get(position) {
                         Some(field) => Ok(field.ty),
                         None => Err(TypeError {
-                            range,
+                            range: key_range,
                             kind: TypeErrorKind::PositionDoesNotExist {
                                 position: position + 1,
                                 container: subject,
@@ -5272,7 +5357,7 @@ impl<'db> Checker<'db, '_> {
                                     fields.iter().map(|field| field.name.text(self.db)),
                                 );
                                 Err(TypeError {
-                                    range,
+                                    range: key_range,
                                     kind: TypeErrorKind::FieldDoesNotExist {
                                         suggestion,
                                         field: name,
@@ -5426,6 +5511,7 @@ impl<'db> Checker<'db, '_> {
         &mut self,
         id: ExprId,
         range: TextRange,
+        name_range: TextRange,
         at: bool,
         target: ExprId,
         name: Option<String>,
@@ -5439,7 +5525,7 @@ impl<'db> Checker<'db, '_> {
             return self.unknown();
         };
         let subject = self.structural(target_ty);
-        match self.dollar_result(id, range, subject, &name) {
+        match self.dollar_result(id, range, name_range, subject, &name) {
             Ok(ty) => ty,
             Err(error) => {
                 self.errors.push(error);
@@ -5452,6 +5538,9 @@ impl<'db> Checker<'db, '_> {
         &mut self,
         origin: ExprId,
         range: TextRange,
+        // The field name's own range: a finding about the field points there,
+        // not at the whole access chain, which contains the subject too.
+        name_range: TextRange,
         subject: Ty<'db>,
         name: &str,
     ) -> Result<Ty<'db>, TypeError<'db>> {
@@ -5468,7 +5557,7 @@ impl<'db> Checker<'db, '_> {
             let mut results = Vec::with_capacity(members.len());
             let mut absent: Option<TypeError<'db>> = None;
             for member in members {
-                match self.dollar_result(origin, range, member, name) {
+                match self.dollar_result(origin, range, name_range, member, name) {
                     Ok(result) => results.push(result),
                     Err(error) if matches!(error.kind, TypeErrorKind::FieldDoesNotExist { .. }) => {
                         absent.get_or_insert(error);
@@ -5516,7 +5605,7 @@ impl<'db> Checker<'db, '_> {
                 match fields.iter().find(|field| field.name.text(self.db) == name) {
                     Some(field) => Ok(field.ty),
                     None => Err(TypeError {
-                        range,
+                        range: name_range,
                         kind: TypeErrorKind::FieldDoesNotExist {
                             suggestion: crate::diagnostics::nearest_field_name(
                                 name,
@@ -5529,7 +5618,7 @@ impl<'db> Checker<'db, '_> {
                 }
             }
             TyKind::Tuple(_) | TyKind::List(_) => Err(TypeError {
-                range,
+                range: name_range,
                 kind: TypeErrorKind::FieldDoesNotExist {
                     suggestion: None,
                     field: name.to_owned(),

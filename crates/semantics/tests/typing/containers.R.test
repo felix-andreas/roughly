@@ -165,7 +165,7 @@ f <- function() {
 }
 #++++
 f: Unknown
-40..46 error[type-mismatch] field `oops` does not exist in `list{a: integer}`
+42..46 error[type-mismatch] field `oops` does not exist in `list{a: integer}`
 
 #---- a_field_only_some_shapes_carry_reads_as_nullable
 # The accumulator idiom: R answers NULL for a name a list does not carry, so a
@@ -189,7 +189,7 @@ build <- function(escape) {
 }
 #++++
 build: Unknown
-186..197 error[type-mismatch] field `escpae` does not exist in `list{} | list{escape: logical}`. Did you mean `escape`?
+191..197 error[type-mismatch] field `escpae` does not exist in `list{} | list{escape: logical}`. Did you mean `escape`?
 
 #---- dollar_on_atomic_vector
 f <- function() {

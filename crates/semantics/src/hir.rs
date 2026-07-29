@@ -173,6 +173,10 @@ pub enum ExpressionKind {
         at: bool,
         target: ExprId,
         name: Option<String>,
+        /// The name token's own range, so a finding about the FIELD points at
+        /// the field rather than at the whole access chain it ends. Not
+        /// derivable from the expression's range without re-parsing.
+        name_range: Option<TextRange>,
     },
     /// `pkg::name` / `pkg:::name`.
     Namespace {
@@ -419,8 +423,19 @@ impl Lowering {
                 let mut children = Self::child_expressions(node);
                 let target = children.next();
                 let target = self.lower_optional(target, range);
-                let name = children.next().and_then(|child| field_name_text(&child));
-                self.allocate(ExpressionKind::Field { at, target, name }, range)
+                let name_node = children.next();
+                let name_range = name_node.as_ref().map(|child| child.text_range());
+                let name = name_node.and_then(|child| field_name_text(&child));
+                let name_range = name_range.filter(|_| name.is_some());
+                self.allocate(
+                    ExpressionKind::Field {
+                        at,
+                        target,
+                        name,
+                        name_range,
+                    },
+                    range,
+                )
             }
             SyntaxKind::NAMESPACE_EXPR => {
                 let internal = node

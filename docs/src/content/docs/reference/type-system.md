@@ -2583,6 +2583,24 @@ that wants the full guarantee can see exactly what the checker could not see.
 - this allows checking to continue even when the checker cannot model the construct precisely
 - whether an unsupported construct also produces a diagnostic is a construct-specific decision
 
+## Where a finding points
+
+A finding underlines **the smallest expression its message is about**, so the underlined text and the
+message agree. Concretely:
+
+- a binary operator blames the **operand** the message names, never the whole expression — an
+  arithmetic mismatch underlines the offending side, and a cross-family comparison underlines the
+  right operand, which is the `found` half of `expected …, found …`
+- a `$` or `[[` finding about a field or a position underlines **the key**, not the access chain,
+  which contains the subject too: `outer$inner$dep` reports `dep`
+- a **surplus** positional argument is underlined at the first argument with no formal left to take
+  it; a **missing** argument has no argument to point at, so it blames the callee
+- a declared return is checked against **each expression that can produce the result**, following a
+  block to its tail and an `if`/`else` into both arms, and each one that fails reports at its own
+  site — the same rule an explicit `return` follows. When no single expression is at fault (an `if`
+  with no `else` contributes an implicit `NULL` that belongs to none of them) the whole construct
+  keeps the one finding
+
 ## Syntax errors
 
 A file with syntax errors is still analyzed. Analysis is error-tolerant, with one governing rule:

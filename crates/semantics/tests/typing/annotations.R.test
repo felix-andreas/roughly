@@ -39,6 +39,49 @@ grade: fn(n: integer) -> integer
 80..86 error[type-mismatch] expected `integer`, found `character`
 119..123 error[type-mismatch] expected `integer`, found `NULL`
 
+#---- an_if_else_tail_blames_the_arm_not_the_construct
+# Blaming the whole `if` printed only its first line, so the offending arm was
+# never rendered at all.
+#: fn(flag: logical) -> integer
+pick <- function(flag) {
+  if (flag) {
+    1L
+  } else {
+    "wrong"
+  }
+}
+#++++
+pick: fn(flag: logical) -> integer
+197..204 error[type-mismatch] expected `integer`, found `character`
+
+#---- each_bad_arm_reports_its_own_site
+# The same rule the early returns follow.
+#: fn(flag: logical) -> integer
+pick <- function(flag) {
+  if (flag) {
+    "a"
+  } else {
+    "b"
+  }
+}
+#++++
+pick: fn(flag: logical) -> integer
+117..120 error[type-mismatch] expected `integer`, found `character`
+136..139 error[type-mismatch] expected `integer`, found `character`
+
+#---- an_if_with_no_else_keeps_the_whole_construct
+# The implicit `NULL` on the untaken path belongs to no expression, so no single
+# arm is at fault and the construct keeps the one finding.
+#: fn(flag: logical) -> integer
+pick <- function(flag) {
+  if (flag) {
+    1L
+  }
+}
+#++++
+pick: fn(flag: logical) -> integer
+199..221 error[type-mismatch] expected `integer`, found `integer | NULL`
+
 #==== nested_definitions
 #---- a_nested_annotation_pushes_parameter_types_into_the_body
 outer <- function() {

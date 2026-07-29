@@ -155,7 +155,7 @@ h <- function() 1L < "a"
 f: fn() -> logical
 g: fn() -> logical[]
 h: Unknown
-73..81 error[type-mismatch] expected `integer`, found `character`
+78..81 error[type-mismatch] expected `integer`, found `character`
 
 #---- logical_operands_promote_to_integer_in_arithmetic
 f <- function() TRUE + TRUE
@@ -178,7 +178,7 @@ f: fn() -> logical
 g: fn() -> logical[]
 h: fn() -> logical
 k: Unknown
-104..114 error[type-mismatch] expected `logical`, found `character`
+111..114 error[type-mismatch] expected `logical`, found `character`
 
 #---- date_arithmetic_dispatches_to_the_declared_operator_method
 #: fn(from: Date, until: Date) -> difftime
