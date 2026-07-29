@@ -72,7 +72,15 @@ Additional block rules:
 
 A block that violates a shape rule — form mixing, directive ordering, a duplicate or unknown type
 parameter, a non-nominal `@new` payload, the nesting caps below — is refused whole: it reports its
-error and carries no typing payload, so a broken annotation never produces follow-on findings.
+error and carries no typing payload, so a broken annotation never produces follow-on findings. **A
+block the annotation grammar could not read is refused the same way, and silently**, because the
+parse error has already said what was wrong: a second opinion drawn from a block nobody could read
+would be guessing. So a refused higher-rank annotation reports the refusal alone, and the annotated
+definition types as though it carried no annotation at all.
+
+The form rules above are about **`#:` lines**: one line commits to one form, and only whole lines are
+compared. A line that yields a second item did not parse as the form it committed to — the extra is
+what recovery salvaged, not another annotation — so it is a parse failure, not a form clash.
 
 Annotation types are capped at 128 nesting levels: a deeper type is refused for checking ("nested
 too deeply to check"), and past 160 levels the annotation shape itself is refused. The check-level
@@ -835,10 +843,20 @@ For now, universal binders are rank-1 only.
 - nested binders are not allowed inside other type expressions
 - higher-rank polymorphism is not supported for now
 
+A directive's `{...}` payload is not the outermost level: the expanded form declares its type
+parameters with `@forall`, and a named type declares them on its name (`@type Pair<T>`), so a binder
+inside `@param f {…}` or `@type Name {…}` is refused like any other nested one.
+
+A refused binder reports exactly once — the refusal itself. The type is then read as though the
+binder were not written, so the rest of the annotation still parses, and the block carries no typing
+payload (see [Annotations](#annotations)), so the names the binder would have bound are not reported
+as unknown types on top of it.
+
 Examples of not allowed forms:
 
 - `fn(f: <T> fn(T) -> T) -> integer`
 - `list{ value: <T> list[T] }`
+- `@param f {<T> fn(T) -> T}`
 
 Named type definitions use `#:` lines with directive syntax.
 

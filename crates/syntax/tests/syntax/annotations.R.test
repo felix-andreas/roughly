@@ -799,47 +799,48 @@ SOURCE_FILE@0..58
   ANNOTATION@0..38
     ANNOTATION_MARKER@0..2 "#:"
     WHITESPACE@2..3 " "
-    TYPE_FUNCTION@3..13
+    TYPE_FUNCTION@3..38
       NAME@3..5
         IDENT@3..5 "fn"
-      TYPE_PARAMETER_LIST@5..13
+      TYPE_PARAMETER_LIST@5..27
         L_PAREN@5..6 "("
-        TYPE_PARAMETER@6..13
+        TYPE_PARAMETER@6..26
           NAME@6..7
             IDENT@6..7 "f"
           COLON@7..8 ":"
           WHITESPACE@8..9 " "
-          TYPE_BINDER_LIST@9..12
-            LESS@9..10 "<"
-            TYPE_BINDER@10..11
-              NAME@10..11
-                IDENT@10..11 "T"
-            GREATER@11..12 ">"
+          ERROR@9..12
+            TYPE_BINDER_LIST@9..12
+              LESS@9..10 "<"
+              TYPE_BINDER@10..11
+                NAME@10..11
+                  IDENT@10..11 "T"
+              GREATER@11..12 ">"
           WHITESPACE@12..13 " "
-    TYPE_FUNCTION@13..26
-      NAME@13..15
-        IDENT@13..15 "fn"
-      TYPE_PARAMETER_LIST@15..21
-        L_PAREN@15..16 "("
-        TYPE_PARAMETER@16..20
-          NAME@16..17
-            IDENT@16..17 "x"
-          COLON@17..18 ":"
-          WHITESPACE@18..19 " "
-          TYPE_REF@19..20
-            IDENT@19..20 "T"
-        R_PAREN@20..21 ")"
-      WHITESPACE@21..22 " "
-      MINUS_GREATER@22..24 "->"
-      WHITESPACE@24..25 " "
-      TYPE_REF@25..26
-        IDENT@25..26 "T"
-    R_PAREN@26..27 ")"
-    WHITESPACE@27..28 " "
-    MINUS_GREATER@28..30 "->"
-    WHITESPACE@30..31 " "
-    TYPE_REF@31..38
-      IDENT@31..38 "integer"
+          TYPE_FUNCTION@13..26
+            NAME@13..15
+              IDENT@13..15 "fn"
+            TYPE_PARAMETER_LIST@15..21
+              L_PAREN@15..16 "("
+              TYPE_PARAMETER@16..20
+                NAME@16..17
+                  IDENT@16..17 "x"
+                COLON@17..18 ":"
+                WHITESPACE@18..19 " "
+                TYPE_REF@19..20
+                  IDENT@19..20 "T"
+              R_PAREN@20..21 ")"
+            WHITESPACE@21..22 " "
+            MINUS_GREATER@22..24 "->"
+            WHITESPACE@24..25 " "
+            TYPE_REF@25..26
+              IDENT@25..26 "T"
+        R_PAREN@26..27 ")"
+      WHITESPACE@27..28 " "
+      MINUS_GREATER@28..30 "->"
+      WHITESPACE@30..31 " "
+      TYPE_REF@31..38
+        IDENT@31..38 "integer"
   NEWLINE@38..39 "\n"
   BINARY_EXPR@39..58
     NAME@39..40
@@ -858,9 +859,6 @@ SOURCE_FILE@0..58
       LITERAL@56..58
         INTEGER@56..58 "1L"
 err: 9..10: higher-rank polymorphism is not supported: type parameter binders may only appear at the outermost level
-err: 13..15: expected `,` or `)` in this function type's parameters
-err: 26..27: expected a type, found `)`
-err: 28..30: expected a type, found `->`
 
 #---- unclosed_fn_paren
 #: fn(x: integer

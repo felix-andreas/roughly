@@ -441,7 +441,13 @@ impl Parser<'_> {
                     "expected a type inside `{{...}}` of `@{directive}`"
                 ));
             } else {
-                self.ann_type(end, true);
+                // A directive payload is not the outermost level of the
+                // annotation, so a binder here is refused like any other
+                // higher-rank position: `@forall` is where the expanded form
+                // declares type parameters, and `@type Name<T>` puts them on
+                // the name. Allowing them here accepted `@param f {<T> fn(T) ->
+                // T}` in silence and bound nothing.
+                self.ann_type(end, false);
             }
             self.ann_trivia(end);
             if self.at(SyntaxKind::R_BRACE) && self.pos < end {
@@ -559,8 +565,19 @@ impl Parser<'_> {
         match self.current() {
             Some(SyntaxKind::LESS) => {
                 self.error_here("higher-rank polymorphism is not supported: type parameter binders may only appear at the outermost level");
-                // Consume the binder list anyway to keep going.
+                // Recover by reading the type as if the binder were not there:
+                // consuming the binder alone leaves this position with no type
+                // at all, so the enclosing parameter list then fails on the
+                // type that follows and the one real finding arrives buried
+                // under three consequences of it. The refused binder keeps an
+                // `ERROR` wrapper so lowering can tell that this block was
+                // refused — its names bind nothing, and reporting each as an
+                // unknown type would blame the author twice for one mistake.
+                self.start(SyntaxKind::ERROR);
                 self.ann_binder_list(end);
+                self.finish();
+                self.ann_trivia(end);
+                self.ann_union(end);
                 return;
             }
             Some(SyntaxKind::L_PAREN) => {

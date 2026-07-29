@@ -110,25 +110,34 @@ error: expected a constraint name after `:`
   |        ^
 
 #---- higher_rank_refused
+# One finding, not four: recovery reads the type as if the binder were absent.
 #: fn(f: <T> fn(x: T) -> T) -> integer
 apply1 <- function(f) f(1L)
 #++++
 error: higher-rank polymorphism is not supported: type parameter binders may only appear at the outermost level
- --> 1:10
+ --> 2:10
   | #: fn(f: <T> fn(x: T) -> T) -> integer
   |          ^
-error: expected `,` or `)` in this function type's parameters
- --> 1:14
-  | #: fn(f: <T> fn(x: T) -> T) -> integer
-  |              ^^
-error: expected a type, found `)`
- --> 1:27
-  | #: fn(f: <T> fn(x: T) -> T) -> integer
-  |                           ^
-error: expected a type, found `->`
- --> 1:29
-  | #: fn(f: <T> fn(x: T) -> T) -> integer
-  |                             ^^
+
+#---- higher_rank_refused_in_a_return
+#: fn(n: integer) -> <T> fn(x: T) -> T
+make <- function(n) function(x) x
+#++++
+error: higher-rank polymorphism is not supported: type parameter binders may only appear at the outermost level
+ --> 1:22
+  | #: fn(n: integer) -> <T> fn(x: T) -> T
+  |                      ^
+
+#---- higher_rank_refused_in_a_directive_payload
+# A directive payload is not the outermost level; this was silently accepted.
+#: @param f {<T> fn(x: T) -> T}
+#: @returns {integer}
+apply1 <- function(f) f(1L)
+#++++
+error: higher-rank polymorphism is not supported: type parameter binders may only appear at the outermost level
+ --> 2:14
+  | #: @param f {<T> fn(x: T) -> T}
+  |              ^
 
 #==== type_arguments
 #---- unclosed_type_arguments

@@ -1078,7 +1078,7 @@ pub fn code_actions(db: &dyn Db, file: SourceFile, viewport: TextRange) -> Vec<C
             continue;
         };
         let annotated = item_annotation_syntax(db, item).is_some_and(|annotation| {
-            semantics::annotations::block_form_violation(&annotation.syntax_node()).is_none()
+            semantics::annotations::block_refusal(&annotation.syntax_node()).is_none()
         });
         for (index, expression) in hir.expressions.iter().enumerate() {
             let ExpressionKind::Assign { target, value, .. } = &expression.kind else {

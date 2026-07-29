@@ -53,7 +53,18 @@ pub fn parse_stage_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic>
         diagnostics.push(Diagnostic {
             range: error.range,
             severity: Severity::Error,
-            code: "syntax-error",
+            // The code says whose grammar was broken, not which stage noticed:
+            // `syntax-error` is R the parser could not read, `annotation` is a
+            // `#:` comment that is wrong. Keying it on the stage instead put a
+            // deliberate expressiveness limit like the higher-rank refusal
+            // under `syntax-error` while its siblings — an unknown constraint,
+            // a malformed block — report as `annotation` because lowering, not
+            // parsing, happened to catch them.
+            code: if error.in_annotation {
+                "annotation"
+            } else {
+                "syntax-error"
+            },
             message: error.message.clone(),
             related: Vec::new(),
         });

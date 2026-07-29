@@ -271,6 +271,30 @@ f <- function(x) x
 f: <T> fn(x: T) -> T
 7..17 error[annotation] unknown type-parameter constraint `frobnicate`; the available constraints are `numeric` and `atomic`.
 
+#---- a_refused_higher_rank_block_carries_no_payload
+# The parser refuses the binder and reads the type as if it were absent, which
+# leaves `T` with nothing to bind it. Lowering the block anyway reported `T` as
+# an unknown type once per occurrence — three findings for one mistake — so a
+# block holding a refused region carries no typing payload at all, and the
+# definition types as though it were unannotated.
+#: fn(f: <T> fn(x: T) -> T) -> integer
+apply1 <- function(f) f(1L)
+#++++
+apply1: <T> fn(f: fn(integer) -> T) -> T
+375..376 error[annotation] higher-rank polymorphism is not supported: type parameter binders may only appear at the outermost level
+
+#---- a_form_clash_is_not_reported_for_a_line_that_merely_failed_to_parse
+# `integer` is the unbraced type the `@param` could not take, not a second
+# compact annotation on its own line. Counting it as one claimed the block mixed
+# the two forms and told the author to add a blank line, which would not have
+# helped; the parser's own report is the whole story.
+#: @param count integer
+#: @returns {integer}
+f <- function(count) count + 1L
+#++++
+f: <T: numeric> fn(count: T) -> T
+304..311 error[annotation] expected `{TYPE}` after `@param`
+
 #---- applied_type_parameter_is_refused
 #: @alias Wrap<T> {list{v: T}}
 

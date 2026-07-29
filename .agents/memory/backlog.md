@@ -248,11 +248,49 @@ which is rarer than it sounds. The failures are all "collapse to the outermost n
    `fn(shout: logical) -> fn(x: T) -> T | fn(x: U) -> character`, which under the `->`-extends rule
    is not the type meant at all. One fixture pins both spellings, written as the rendered forms
    pasted back, so it fails if either stops round-tripping.
-10. **A rank-2 annotation produces 7 diagnostics and the first one is false** ("only one compact
-    annotation fits in a `#:` block" — there is one). The correct message, *"higher-rank polymorphism is
-    not supported"*, is buried second and coded `syntax-error` though it is a deliberate expressiveness
-    limit. Same misdiagnosis class: a braceless `@param count integer` reports a form clash that does not
-    exist, and prescribes a fix that would add a fourth error.
+10. **FIXED — a refused annotation reports once, and the report is the true one.** As filed, both
+    halves reproduced (5 findings for the rank-2 case, not 7): the first was the false *"only one
+    compact annotation fits in a `#:` block"* against a block holding exactly one, and the braceless
+    `@param count integer` claimed a form clash that did not exist. Both prescribed a blank line that
+    would not have helped. Three separate causes, and each is now closed:
+
+    - **The form classifier counted parser-recovery debris as block items.** Recovery re-parents the
+      pieces of a type it could not read to the block, so one line yielded three top-level types.
+      The rules are about *lines* — every one of them says "separate with a blank line" — so the
+      check now compares whole `#:` lines, a line's form being its first item's. A line carrying a
+      second item did not parse as the form it committed to, which is a parse failure, not a clash.
+    - **The refusal recovered by consuming the binder and stopping**, leaving the position with no
+      type at all, so the enclosing parameter list then failed on the type that followed: one real
+      finding under three consequences. It now reads the type as if the binder were absent.
+    - **A refused block still carried its typing payload**, so the names the binder would have bound
+      were reported as unknown types on top of the refusal. The parser marks a region it refused
+      with an `ERROR` node, and a block containing one carries no payload and reports nothing of its
+      own — the contract already said this for shape violations, and a parse failure is the same
+      situation.
+
+    Every rank-2 position now gives exactly one finding: parameter, return, list element, and
+    directive payload. That last one was **silently accepted** before — `ann_braced_type` allowed
+    binders, so `@param f {<T> fn(T) -> T}` parsed, bound nothing, and said nothing; a directive
+    payload is not the outermost level (`@forall` and `@type Name<T>` are where the expanded and
+    named forms declare parameters), so it is refused like any other nested binder.
+
+    The code moved too, and the docs page that documented the old behaviour is updated: **the code
+    says whose grammar was broken, not which stage noticed.** `syntax-error` is R the parser could
+    not read; `annotation` is a `#:` comment that is wrong. Keying it on the stage put this
+    deliberate limit under `syntax-error` while its siblings — an unknown constraint, a malformed
+    block — reported as `annotation` only because lowering happened to catch them. `SyntaxError`
+    already carried the `in_annotation` flag for exactly this distinction.
+
+    Two traps worth keeping, both found by breaking the suite: an `ANNOTATION_MARKER` is **not**
+    always a direct child of the block (a stitched line's marker lands inside whatever node was open
+    across the break), so line boundaries must be counted over all tokens; and a `<T>` binder list is
+    a *prefix* of the type after it, not an item, so counting it as one refuses every stub
+    declaration that has a binder — which silently emptied the whole stdlib corpus.
+
+    Noticed while fixturing, not fixed: the same cascade shape is visible in
+    `annotations-types.R.test` for `fn([x] integer)` (4 findings) and `fn([1]: integer)` (9). Those
+    are ordinary parser recovery rather than a deliberate refusal, so they need the recovery to
+    resynchronise at the parameter boundary; worth a look but a different mechanism.
 
 ### F. Smaller, but cheap
 

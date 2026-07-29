@@ -89,9 +89,10 @@ To go the other way: `[check] unused = false`, and any `[lint]` code set to `"of
 | Code | Severity | On by default | Triggered by |
 | --- | --- | --- | --- |
 | `syntax-error` | error | yes | Anything the R parser rejects. The message varies with the failure ("unclosed `(`; expected `)` to close the parameter list"); the code does not |
-| `syntax-error` | error | yes | A type expression inside a `#:` annotation that does not parse |
 
-A statement that fails to parse as R suppresses every name-resolution and typing finding overlapping it — the checker draws no conclusions from source it could not read. A broken annotation does not suppress anything.
+The code says **whose grammar was broken**, not which stage noticed: your R is `syntax-error`, your `#:` comment is `annotation`. So a type expression that does not parse, and a form the annotation grammar refuses deliberately such as a nested `<T>` binder, both report as `annotation` alongside the malformed-block findings below.
+
+A statement that fails to parse as R suppresses every name-resolution and typing finding overlapping it — the checker draws no conclusions from source it could not read. A broken annotation suppresses nothing outside its own block; inside it, the block carries no typing payload, so the refusal is the only finding.
 
 ### Name resolution
 
@@ -114,6 +115,7 @@ A statement that fails to parse as R suppresses every name-resolution and typing
 | --- | --- | --- | --- |
 | `annotation` | error | yes | A type name that is not a builtin, a declared `@type`/`@alias`, or a stub class. Adds `Did you mean` |
 | `annotation` | error | yes | A malformed block: `@forall` after `@param`, `@param` after `@return`, more than one `@return`, a duplicate type-parameter name, `@new` with no nominal, or an unknown constraint (only `numeric` and `atomic` exist) |
+| `annotation` | error | yes | A type expression the annotation grammar cannot read, or a form it refuses on purpose — a `<T>` binder anywhere but the outermost level of the block |
 | `annotation` | error | yes | A dangling `#:` — no expression on the next line, a blank line in between, or no type expression at all |
 | `annotation` | error | yes | A `#:` inside a call's argument list, where an argument is not a statement and nothing can be annotated |
 | `annotation` | error | yes | Type-argument arity: arguments applied to a non-generic, the wrong number of them, or a bare reference to a generic that needs them |

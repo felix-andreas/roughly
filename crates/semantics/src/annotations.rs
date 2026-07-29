@@ -96,11 +96,17 @@ pub fn lower_annotation<'db>(db: &'db dyn Db, node: &SyntaxNode) -> Annotation<'
         range: node.text_range(),
         ..Annotation::default()
     };
-    if let Some(message) = block_form_violation(node) {
-        annotation
-            .errors
-            .push((message.to_owned(), node.text_range()));
-        return annotation;
+    // A refused block carries no typing payload, so a broken annotation never
+    // produces follow-on findings.
+    match block_refusal(node) {
+        Some(BlockRefusal::FormMixing(message)) => {
+            annotation
+                .errors
+                .push((message.to_owned(), node.text_range()));
+            return annotation;
+        }
+        Some(BlockRefusal::Unparsed) => return annotation,
+        None => {}
     }
 
     // Expanded-form accumulation.
@@ -361,14 +367,70 @@ enum BlockForm {
     Definition,
 }
 
-/// Checks the block's items against the form-mixing rules and returns the
-/// refusal wording for the first violation. Directives own their payload
-/// types as nested children, so each top-level child is one block item —
-/// except a binder list, which belongs to the compact type following it.
-pub fn block_form_violation(node: &SyntaxNode) -> Option<&'static str> {
+/// Why a `#:` block carries no typing payload, from [`block_refusal`].
+pub enum BlockRefusal {
+    /// Two `#:` lines in the block commit to different forms; the wording tells
+    /// the reader which separation to make.
+    FormMixing(&'static str),
+    /// A line did not parse as the form it committed to. Silent: the parser has
+    /// already said what was wrong, and a second opinion from here would be
+    /// guessing at a block nobody could read.
+    Unparsed,
+}
+
+/// Checks the block's `#:` lines against the form-mixing rules.
+///
+/// **One `#:` line commits to one form, and only whole lines are compared.**
+/// The rules are about lines — every refusal here tells the reader to separate
+/// something with a blank line — and a line's form is the form of the first
+/// item on it.
+///
+/// A line carrying a *second* form item did not parse as the form it committed
+/// to: recovery re-parents the pieces of a type it could not read to the block,
+/// so `#: fn(f: <T> fn(T) -> T) -> integer` leaves three top-level types
+/// behind, and `#: @param count integer` leaves the unbraced type beside the
+/// directive. Reading those as separate block items claimed "only one compact
+/// annotation fits in a `#:` block" against a block holding exactly one, and
+/// prescribed a blank line that would not have helped.
+pub fn block_refusal(node: &SyntaxNode) -> Option<BlockRefusal> {
+    // The parser wraps a region it refused in `ERROR`, so the block has no
+    // trustworthy payload — a refused higher-rank binder, for instance, leaves
+    // its type parameters with nothing to bind them, and reporting each as an
+    // unknown type would blame the author twice for one mistake.
+    if node
+        .descendants()
+        .any(|descendant| descendant.kind() == SyntaxKind::ERROR)
+    {
+        return Some(BlockRefusal::Unparsed);
+    }
+    // Each `#:` keeps its own marker token, so the markers are the line
+    // boundaries. They are collected from every token in the block, not just
+    // its direct children: a stitched line's marker lands inside whatever node
+    // was still open across the break, so `#: fn(x: integer) -> integer` /
+    // `#: @return {integer}` keeps its second marker inside the function type.
+    let markers: Vec<syntax::TextSize> = node
+        .descendants_with_tokens()
+        .filter_map(|element| element.into_token())
+        .filter(|token| token.kind() == SyntaxKind::ANNOTATION_MARKER)
+        .map(|token| token.text_range().start())
+        .collect();
+    let line_of = |start: syntax::TextSize| markers.iter().filter(|&&at| at < start).count();
+
     let mut previous: Option<BlockForm> = None;
-    let mut children = node.children().peekable();
-    while let Some(child) = children.next() {
+    let mut current: Option<(usize, BlockForm)> = None;
+    // A `<T, U>` binder list is a prefix of the compact type that follows it,
+    // not an item of its own, so the pair is one item on its line.
+    let mut awaiting_bound_type = false;
+    for child in node.children() {
+        let line = line_of(child.text_range().start());
+        if current.is_some_and(|(at, _)| at != line) {
+            current = None;
+            awaiting_bound_type = false;
+        }
+        if awaiting_bound_type && is_type_kind(child.kind()) {
+            awaiting_bound_type = false;
+            continue;
+        }
         let form = match child.kind() {
             SyntaxKind::ANNOTATION_DIRECTIVE => match directive_name(&child).as_str() {
                 "type" | "alias" => BlockForm::Definition,
@@ -376,37 +438,33 @@ pub fn block_form_violation(node: &SyntaxNode) -> Option<&'static str> {
                 _ => BlockForm::Compact,
             },
             SyntaxKind::TYPE_BINDER_LIST => {
-                if children
-                    .peek()
-                    .is_some_and(|next| is_type_kind(next.kind()))
-                {
-                    children.next();
-                }
+                awaiting_bound_type = true;
                 BlockForm::Compact
             }
             kind if is_type_kind(kind) => BlockForm::Compact,
             _ => continue,
         };
-        match (previous, form) {
+        if current.is_some() {
+            return Some(BlockRefusal::Unparsed);
+        }
+        current = Some((line, form));
+        let mixing = match (previous, form) {
             (None, _)
             | (Some(BlockForm::Definition), BlockForm::Definition)
-            | (Some(BlockForm::Expanded), BlockForm::Expanded) => {}
-            (Some(BlockForm::Compact), BlockForm::Compact) => {
-                return Some(
-                    "only one compact annotation fits in a `#:` block — separate the annotations with a blank line so each gets its own block.",
-                );
-            }
-            (Some(BlockForm::Definition), _) | (_, BlockForm::Definition) => {
-                return Some(
-                    "`@type` and `@alias` declarations need their own `#:` block — separate them from other annotations with a blank line.",
-                );
-            }
+            | (Some(BlockForm::Expanded), BlockForm::Expanded) => None,
+            (Some(BlockForm::Compact), BlockForm::Compact) => Some(
+                "only one compact annotation fits in a `#:` block — separate the annotations with a blank line so each gets its own block.",
+            ),
+            (Some(BlockForm::Definition), _) | (_, BlockForm::Definition) => Some(
+                "`@type` and `@alias` declarations need their own `#:` block — separate them from other annotations with a blank line.",
+            ),
             (Some(BlockForm::Compact), BlockForm::Expanded)
-            | (Some(BlockForm::Expanded), BlockForm::Compact) => {
-                return Some(
-                    "a `#:` block uses either one compact annotation or `@param`/`@return` lines, not both — separate the two forms with a blank line.",
-                );
-            }
+            | (Some(BlockForm::Expanded), BlockForm::Compact) => Some(
+                "a `#:` block uses either one compact annotation or `@param`/`@return` lines, not both — separate the two forms with a blank line.",
+            ),
+        };
+        if let Some(message) = mixing {
+            return Some(BlockRefusal::FormMixing(message));
         }
         previous = Some(form);
     }
