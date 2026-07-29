@@ -78,6 +78,41 @@ error: missing `,` between these arguments
   | total <- sum(alpha
   |                   ^
 
+#---- an_unclosed_call_stops_at_the_next_statement
+# One finding, not five. Reading on adopted each following statement as another
+# argument — a confident "missing `,`" per line, scaling with the file — and the
+# adopted lines lost their definitions with it. A line that ASSIGNS is what
+# tells an unclosed opener from a forgotten comma; the case above keeps its
+# report because `beta)` is a fragment, not a statement.
+totals <- sum(c(1, 2, 3)
+a <- mean(c(1))
+b <- mean(c(2))
+c <- mean(c(3))
+#++++
+error: unclosed `(`; expected `)` to close it
+ --> 6:14
+  | totals <- sum(c(1, 2, 3)
+  |              ^
+
+#---- an_unclosed_subset_stops_at_the_next_statement
+first <- values[1
+second <- values[2]
+#++++
+error: unclosed `[`; expected `]` to close it
+ --> 1:16
+  | first <- values[1
+  |                ^
+
+#---- an_assignment_argument_on_its_own_line_is_still_an_argument
+# The comma makes it a continuation, so the boundary rule must not fire: this is
+# legal R and stays silent.
+value <- run(
+  1,
+  x <- 2
+)
+#++++
+no errors
+
 #---- call_separator_junk_still_recovers
 total <- sum(1; 2)
 #++++

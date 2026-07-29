@@ -190,10 +190,10 @@ the `else` one — ``unexpected `else`: it must stay on the same line as the `if
 (or the `if` must be inside braces)`` — it explains R's rule and gives both fixes. That is the bar the
 rest should meet.
 
-### 1. An unclosed opener puts a false finding on EVERY following line
+### 1. FIXED — an unclosed opener put a false finding on EVERY following line
 
-The headline. Recovery does not resynchronise at the statement boundary: after reporting the unclosed
-`(`, the parser is still inside the argument list, so each following line reads as another argument.
+Recovery did not stop at the statement boundary: after reporting the unclosed `(`, the parser was
+still inside the argument list, so each following line read as another argument.
 
 ```r
 totals <- sum(c(1, 2, 3)      # the one real mistake
@@ -202,10 +202,24 @@ b <- mean(c(2))               # "missing `,` between these arguments"
 c <- mean(c(3))               # "missing `,` between these arguments"
 ```
 
-Measured: **5 findings, 4 of them on code the user must not change**, and it scales with the file —
-every subsequent line adds one. `[` does the same (`first <- values[1` blames the correct line after
-it). This is the worst finding of the round: one typo mid-file lights up everything below it, and the
-four false ones all read as confident, specific claims.
+**5 findings, 4 of them on code the user must not change**, scaling with the file — and the adopted
+lines lost their own definitions too, so a later read of `a` came back `unresolved`. Now **one
+finding**, on the unclosed `(`. Same for `[`.
+
+**The rule is not "break at a line break", and two existing fixtures are why.** A list running onto
+the next line is ordinary R, and a *fragment* there really is a forgotten separator — `sum(alpha\n
+beta)` and `function(x\n y)` were both pinned reporting a missing comma, correctly, and a blanket
+line rule regressed both to a worse pair of findings. What separates the cases is whether the next
+line **assigns**: a line binding a name with `<-`/`<<-`/`=`, or opening with `if`/`for`/`while`/
+`repeat`, is the next statement, and adopting it is what does the damage. A comma before it still
+makes it an argument, so `run(1,\n  x <- 2)` stays silent.
+
+Two more things were needed beyond the predicate. The newline is consumed while parsing the element
+*before* the loop head, so the check has to scan backwards rather than watch trivia go by — a
+peek-based version looked right and never fired. And once the list breaks, the statement loop still
+saw a stray token where it wanted a newline and reported *again*, then recovered over the next line
+and swallowed it anyway: an unterminated list now marks the statement, and the boundary check neither
+re-reports nor recovers.
 
 ### 2. A parse error is reported one line PAST the end of the file
 

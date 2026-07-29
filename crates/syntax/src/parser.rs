@@ -36,6 +36,7 @@ pub(crate) fn parse(text: &str) -> Parse {
         depth: 0,
         in_annotation: false,
         statement_had_lexer_error: false,
+        statement_left_group_open: false,
     };
     parser.source_file();
     let green = parser.builder.finish();
@@ -64,6 +65,13 @@ struct Parser<'a> {
     /// The lexer's diagnostic is already precise, so the statement loop
     /// suppresses its own boundary report on top of it.
     statement_had_lexer_error: bool,
+    /// Whether the statement being parsed left an argument or parameter list
+    /// open. Its unclosed-opener error is the whole story, and the newline that
+    /// would have ended the statement was consumed inside the list as trivia —
+    /// so the boundary check neither reports again nor recovers, and the next
+    /// line is parsed as the statement it is instead of being swallowed with
+    /// its definitions.
+    statement_left_group_open: bool,
 }
 
 impl Parser<'_> {
@@ -234,6 +242,46 @@ impl Parser<'_> {
 
     /// Emit trivia into the tree. Newlines are consumed only when insignificant
     /// in the current context or explicitly allowed by `across_newlines`.
+    /// Whether the current token opens what is unmistakably a new statement: a
+    /// name bound by an assignment operator, or a keyword that can only begin
+    /// one.
+    ///
+    /// This is what separates an unclosed opener from a forgotten separator
+    /// when a list runs onto the next line. A genuine continuation reads as a
+    /// fragment — `beta)`, `y) x` — while a line that *assigns* is the next
+    /// statement, and adopting it into the list swallows its definition along
+    /// with every line after.
+    fn starts_new_statement(&self) -> bool {
+        match self.current() {
+            Some(
+                SyntaxKind::IF_KW
+                | SyntaxKind::FOR_KW
+                | SyntaxKind::WHILE_KW
+                | SyntaxKind::REPEAT_KW,
+            ) => true,
+            Some(SyntaxKind::IDENT | SyntaxKind::STRING) => matches!(
+                self.peek_significant(self.pos + 1, false)
+                    .map(|(kind, _)| kind),
+                Some(SyntaxKind::LESS_MINUS | SyntaxKind::LESS2_MINUS | SyntaxKind::EQ)
+            ),
+            _ => false,
+        }
+    }
+
+    /// Whether a line break separates the current token from the significant
+    /// one before it. Scans backwards: the newline is consumed while parsing
+    /// the element that precedes the loop head asking this, not at the head.
+    fn crossed_line(&self) -> bool {
+        for index in (0..self.pos).rev() {
+            match self.tokens[index].kind {
+                SyntaxKind::NEWLINE => return true,
+                SyntaxKind::WHITESPACE | SyntaxKind::COMMENT => continue,
+                _ => return false,
+            }
+        }
+        false
+    }
+
     fn eat_trivia(&mut self, across_newlines: bool) {
         loop {
             match self.current() {
@@ -924,6 +972,7 @@ impl Parser<'_> {
         loop {
             self.eat_trivia(true);
             self.statement_had_lexer_error = false;
+            self.statement_left_group_open = false;
             match self.current() {
                 Some(SyntaxKind::SEMICOLON) => {
                     self.bump();
@@ -961,6 +1010,7 @@ impl Parser<'_> {
             match self.current() {
                 None | Some(SyntaxKind::NEWLINE | SyntaxKind::SEMICOLON) => {}
                 Some(kind) if Some(kind) == terminator => {}
+                Some(_) if self.statement_left_group_open => continue,
                 Some(kind) => {
                     // A statement that already contains a lexer error owns
                     // this whole broken region; re-reporting its tail as
@@ -1473,6 +1523,8 @@ impl Parser<'_> {
                     self.eat_trivia(true);
                     if self.at(SyntaxKind::COMMA) {
                         self.bump();
+                    } else if self.crossed_line() && self.starts_new_statement() {
+                        break;
                     } else if matches!(
                         self.current(),
                         Some(SyntaxKind::IDENT | SyntaxKind::DOTS | SyntaxKind::DOTDOTI)
@@ -1511,6 +1563,7 @@ impl Parser<'_> {
                 open_range,
                 "unclosed `(`; expected `)` to close the parameter list",
             );
+            self.statement_left_group_open = true;
         }
         self.finish();
     }
@@ -1548,6 +1601,16 @@ impl Parser<'_> {
                         // report the missing `,` in the gap and keep parsing
                         // the list normally.
                         if Self::starts_expression(kind) {
+                            // A new statement on a later line is not a
+                            // forgotten comma: the opener was never closed, and
+                            // reading on adopts that statement and every one
+                            // after it as further arguments — one missing `)`
+                            // put a confident "missing `,`" on every following
+                            // line, scaling with the file, and cost the adopted
+                            // lines their definitions.
+                            if self.crossed_line() && self.starts_new_statement() {
+                                break;
+                            }
                             self.error_at(
                                 self.separator_gap(),
                                 "missing `,` between these arguments",
@@ -1589,6 +1652,7 @@ impl Parser<'_> {
                     closer.display()
                 ),
             );
+            self.statement_left_group_open = true;
         }
         self.finish();
     }

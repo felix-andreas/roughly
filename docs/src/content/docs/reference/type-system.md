@@ -2611,6 +2611,11 @@ conclusions from source that failed to parse.
   references resolve, and genuine type errors outside the broken region still surface
 - a broken statement contributes nothing — no names, no reads, no diagnostics beyond the syntax
   error covering it
+- **an unterminated argument or parameter list ends at the next statement**, so the mistake stays on
+  the line that made it. A list running onto the next line is ordinary R, and a fragment there
+  (`beta)`) really is a forgotten separator, reported as one — but a line that *assigns* is the next
+  statement, and adopting it would put a confident "missing `,`" on it and on every line after,
+  scaling with the file, while costing each adopted line its own definitions
 - a broken **assignment** whose name side is intact keeps its definition: the value degrades to a
   hole that types as `Unknown`, so dependents neither lose resolution nor see a wrong type while
   the value is mid-edit; the hole is not a strict-mode origin (the syntax error already marks it)
