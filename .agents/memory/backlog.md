@@ -198,21 +198,27 @@ Write the findings into this file before fixing any of them, and move each one i
 
 ## Open — user reports (from the maintainer, not a simulated round)
 
-### The REPL wraps a table that fits — REPRODUCED, cause found
+### FIXED — the REPL wrapped a table that fits
 
-`ry repl` never sets R's `width` option, so R keeps its default of **80 columns** whatever the
-terminal is, and `print()` wraps a table that would fit. Measured: a three-column `data.frame` with
-long column names splits after two columns, and `options(width = 200)` in the same session prints all
-three on one line. `getOption("width")` reads `80` in `ry repl` on a wide terminal; there is no
-`width` handling anywhere in the `repl` crate.
+`ry repl` never set R's `width` option, so R kept its default of **80 columns** whatever the terminal
+was and `print()` wrapped a table with room on screen. The width is now measured once at startup and
+applied with `R_ParseEvalString` in the window between `setup_Rmainloop()` and `run_Rmainloop()`.
+Verified end to end in a pty: a 200-column terminal gives `width` 200, a 100-column one gives 100,
+and an `.Rprofile` that sets 137 keeps 137 on a 200-column terminal — the profiles have been sourced
+by then, so only R's untouched default is replaced.
 
-The fix is to detect the terminal width at startup, set `options(width = …)` from it, and update it
-on `SIGWINCH` so a resized window keeps working. Workaround until then: `options(width = 200)`, or an
-`.Rprofile` line.
+**The first attempt fed `options(width = …)` through the ReadConsole hook, and it was wrong twice
+over** — recorded because the console feed looks like the obvious mechanism and there is already a
+`.Platform$GUI` fix using it. It costs a main-loop round trip, and a round trip taken before the
+editor's first prompt leaves the terminal in the state R found it in, so the next read
+desynchronises: two pre-existing pty tests began timing out and the suite went from 3.5 s to 94 s.
+Queuing the statement earlier, alongside the other pre-prompt input, did not help — the round trip
+itself is the problem, not its timing.
 
-Not established: whether stock interactive R would do better on a real terminal. In this sandbox
-plain `R` also reported 80 under a synthesised pty, so the comparison could not be made — it does not
-change the fix, which ry owns either way because it supplies the console.
+**Resize is not tracked, and closing that needs a different mechanism.** A stock terminal session
+handles `SIGWINCH` by calling `R_SetOptionWidth`, which R does not export; the console feed is the
+only other way in and is the thing that just proved unsafe between prompts. Worth revisiting if
+someone finds a third route.
 
 ### A variable is reported as unused — NEEDS A REPRO
 

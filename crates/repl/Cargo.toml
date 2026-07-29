@@ -8,6 +8,9 @@ publish = false
 path = "src/repl.rs"
 
 [dependencies]
+# Terminal size only. Pinned to reedline's own crossterm so the console and
+# the width probe cannot disagree about the terminal they share.
+crossterm = "0.28"
 dirs = "6"
 libloading = "0.8"
 nu-ansi-term.workspace = true

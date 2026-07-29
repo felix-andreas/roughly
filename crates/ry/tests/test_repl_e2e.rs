@@ -291,6 +291,38 @@ fn ctrl_c_interrupts_evaluation() {
 // Batch mode (`ry run`) needs no terminal: plain process spawns.
 
 #[test]
+fn the_terminal_width_reaches_r() {
+    if !r_available() {
+        return;
+    }
+    // R's own default is 80 columns whatever the terminal is, and it exports
+    // no setter — so without the console feeding `options(width = …)` in,
+    // every wide table wraps on a terminal that had room for it.
+    let mut session = ReplSession::start();
+    session.expect("ry R console");
+    session.send("cat(\"WIDTH:\", getOption(\"width\"), \"\\n\")\r");
+    session.expect("WIDTH: 120");
+    session.quit();
+}
+
+#[test]
+fn a_table_that_fits_is_printed_on_one_line() {
+    if !r_available() {
+        return;
+    }
+    // Three columns whose header is 92 characters: over R's default width, so
+    // this is the shape that used to split after the second column, and well
+    // under the 120 the session's terminal actually has.
+    let mut session = ReplSession::start();
+    session.expect("ry R console");
+    session.send(
+        "print(data.frame(a_reasonably_long_column=1L, another_long_column_name=2L, third_column_name_here=3L))\r",
+    );
+    session.expect("a_reasonably_long_column another_long_column_name third_column_name_here");
+    session.quit();
+}
+
+#[test]
 fn run_executes_a_file_and_exits_zero() {
     if !r_available() {
         return;

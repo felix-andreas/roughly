@@ -1415,6 +1415,7 @@ checksum = "caf4aa5b0f434c91fe5c7f1ecb6a5ece2130b02ad2a590589dda5146df959001"
 name = "repl"
 version = "0.3.0-alpha"
 dependencies = [
+ "crossterm",
  "dirs",
  "libc",
  "libloading",

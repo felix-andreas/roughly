@@ -30,6 +30,12 @@ pub struct RApi {
 
     setup_mainloop: unsafe extern "C" fn(),
     run_mainloop: unsafe extern "C" fn(),
+    /// `R_ParseEvalString(text, env)` — parses and evaluates one string. The
+    /// console cannot do this job: input fed through the read hook costs a
+    /// main-loop round trip, and one taken before the editor's first prompt
+    /// leaves the terminal half-configured.
+    parse_eval_string: unsafe extern "C" fn(*const c_char, *mut c_void) -> *mut c_void,
+    global_env: *mut *mut c_void,
     interrupts_pending: *mut c_int,
 
     #[cfg(unix)]
@@ -176,6 +182,8 @@ pub fn load() -> Result<RApi, ReplError> {
         initialize: symbol(library, &library_path, "Rf_initialize_R")?,
         setup_mainloop: symbol(library, &library_path, "setup_Rmainloop")?,
         run_mainloop: symbol(library, &library_path, "run_Rmainloop")?,
+        parse_eval_string: symbol(library, &library_path, "R_ParseEvalString")?,
+        global_env: symbol(library, &library_path, "R_GlobalEnv")?,
         running_as_main_program: symbol(library, &library_path, "R_running_as_main_program")?,
         signal_handlers: symbol(library, &library_path, "R_SignalHandlers")?,
         interactive: symbol(library, &library_path, "R_Interactive")?,
@@ -235,6 +243,8 @@ pub fn load() -> Result<RApi, ReplError> {
         r_home,
         setup_mainloop: symbol(library, &library_path, "setup_Rmainloop")?,
         run_mainloop: symbol(library, &library_path, "run_Rmainloop")?,
+        parse_eval_string: symbol(library, &library_path, "R_ParseEvalString")?,
+        global_env: symbol(library, &library_path, "R_GlobalEnv")?,
         interrupts_pending: symbol(library, &library_path, "R_interrupts_pending")?,
         cmdlineoptions: symbol(library, &library_path, "cmdlineoptions")?,
         def_params_ex: symbol(library, &library_path, "R_DefParamsEx")?,
@@ -400,6 +410,18 @@ impl RApi {
             (self.setup_mainloop)();
         }
         Ok(())
+    }
+
+    /// Evaluates one R statement in the global environment, outside the main
+    /// loop. Call it only between [`Self::initialize`] (which sources the
+    /// startup profiles) and [`Self::run_main_loop`]: R is fully set up, and
+    /// nothing the console does can be perturbed because no prompt has run.
+    /// Errors are R's to report; there is no value to hand back.
+    pub fn eval(&self, statement: &str) {
+        let Ok(text) = CString::new(statement) else {
+            return;
+        };
+        unsafe { (self.parse_eval_string)(text.as_ptr(), *self.global_env) };
     }
 
     /// Runs R's real REPL; returns when the session ends (`q()`, or EOF from

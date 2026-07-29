@@ -133,6 +133,20 @@ symbol by name, with per-symbol optionality:
   namespaces, `ls()` of the global env, frame columns) are fetched only while
   R is parked at a prompt, on the main thread, between reads — background
   threads never call into R.
+- **Terminal width is ours to set.** R's `width` option defaults to 80 columns
+  whatever the terminal is, and R exports no setter, so a table with room on
+  screen still wrapped. The width is measured once and applied with
+  `R_ParseEvalString` in the window between `setup_Rmainloop()` and
+  `run_Rmainloop()` — the profiles have been sourced, so a profile that chose a
+  width of its own is left alone (only R's untouched default is replaced), and
+  nothing the console does can be perturbed because no prompt has run yet.
+  Feeding `options(width = …)` through the ReadConsole hook instead is what the
+  first attempt did and it is wrong twice over: it costs a main-loop round
+  trip, and a round trip taken before the editor's first prompt leaves the
+  terminal in the state R found it in, which desynchronises the next read. A
+  **resize is not tracked** — a stock terminal session handles `SIGWINCH` by
+  calling `R_SetOptionWidth`, which is not exported, and the console is the
+  only other way in.
 - **Interrupts:** block SIGINT everywhere except the R thread; an interrupt
   request sets `R_interrupts_pending` (Unix via the signal, Windows via
   `UserBreak`) and R honors it at its next check; while waiting on input we

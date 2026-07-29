@@ -68,6 +68,24 @@ pub fn run(api: RApi, options: crate::RunOptions) -> Result<(), ReplError> {
     });
     install_sigint_handler();
     api.initialize(read_console, write_console_ex)?;
+    // R's `width` defaults to 80 columns whatever the terminal is, and R
+    // exports no setter, so a table that had room on screen still wrapped.
+    // Evaluated here rather than fed through the console: input arriving that
+    // way costs a main-loop round trip, and one taken before the editor's
+    // first prompt leaves the terminal in the state R found it in.
+    //
+    // `initialize` has already sourced the startup profiles, so a profile that
+    // chose a width of its own has run: only R's untouched default is
+    // replaced. A resize is not tracked — R has no setter to call from a
+    // signal handler, and the console is the only other way in.
+    if interactive
+        && let Ok((columns, _)) = crossterm::terminal::size()
+        && columns > 0
+    {
+        api.eval(&format!(
+            "if (isTRUE(getOption(\"width\") == 80L)) options(width = {columns}L)"
+        ));
+    }
     if interactive {
         eprintln!(
             "ry R console — R at {} (q() or Ctrl-D quits)",
