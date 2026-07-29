@@ -230,9 +230,24 @@ which is rarer than it sounds. The failures are all "collapse to the outermost n
    Same root cause confirmed gone for the `Filter` report and the "expected `list[T] | T[]`, found
    `character[]`" one. Four fixtures. Across data.table/dplyr/ggplot2/shiny the finding *counts* are
    unchanged and exactly two messages differ, both real corpus findings that now read clearly.
-9. **`(fn(A) -> B) | NULL` renders without its parentheses**, so it prints identically to
-   `fn(A) -> (B | NULL)` — two different types. The docs name this exact form as the one that round-trips.
-   Copying a type out of an error and back into an annotation silently changes it.
+9. **FIXED — a function member of a union renders with its grouping parentheses.** As filed:
+   `(fn(A) -> B) | NULL` printed identically to `fn(A) -> (B | NULL)`, two different types, so
+   copying a type out of a finding and back into an annotation silently changed it. The reference
+   already specified the fixed behaviour — *"the optional callback is written `(fn() -> integer) |
+   NULL`, which is also the form such a union renders as"* — the renderer simply joined members with
+   ` | ` and never parenthesized.
+
+   The rule is narrow and it is the only ambiguity in the grammar: `->` extends over a whole union,
+   so a function *inside* a union needs its parentheses back, and nowhere else does. Everything else
+   is delimited by a bracket, a comma, or a closing paren.
+
+   It reached more than the filed case. The nullable-callback finding — *this may be `NULL` here, so
+   calling it is not safe — its type is `fn(x: Any) -> character | NULL`* — was describing a function
+   that returns a nullable character while talking about a value that may itself be `NULL`, and now
+   reads `(fn(x: Any) -> character) | NULL`. A branch join of two function signatures printed
+   `fn(shout: logical) -> fn(x: T) -> T | fn(x: U) -> character`, which under the `->`-extends rule
+   is not the type meant at all. One fixture pins both spellings, written as the rendered forms
+   pasted back, so it fails if either stops round-tripping.
 10. **A rank-2 annotation produces 7 diagnostics and the first one is false** ("only one compact
     annotation fits in a `#:` block" — there is one). The correct message, *"higher-rank polymorphism is
     not supported"*, is buried second and coded `syntax-error` though it is a deliberate expressiveness
@@ -247,9 +262,36 @@ which is rarer than it sounds. The failures are all "collapse to the outermost n
 - `strict` only asks whether a binding *is* `Unknown`, not whether it *contains* one, so
   `fn(Unknown) -> integer` passes silently. Undercuts the "only way to keep a gap from looking like a
   pass" claim.
-- `logical` is accepted at a declared `integer` parameter but rejected at an inferred `numeric` one, so
-  the same function is accepted or rejected depending on whether the type was written down. R promotes
-  logical in arithmetic and the docs say so twice.
+- **NOT cheap, and the current refusal is the sound choice — measured, so do not "just widen the
+  constraint".** Filed as: `logical` is accepted at a declared `integer` parameter but rejected at an
+  inferred `numeric` one, so the same function is accepted or rejected depending on whether the type
+  was written down. Both halves reproduce (`bump <- function(x) x + 1L; bump(TRUE)` is refused; the
+  same body under `#: fn(n: integer) -> integer` accepts it), and R does promote — `TRUE + 1L` is
+  `2L`, and the checker's own arithmetic rules say so.
+
+  The obvious repair is to bind the numeric variable to `integer` when a `logical` argument arrives,
+  which is exactly R's promotion. It is wrong, and the counter-example is ordinary R:
+
+  ```r
+  bump    <- function(x) x + 1L          # R: bump(TRUE) is 2L, integer
+  checked <- function(x) { stopifnot(x + 1L > 0L); x }   # R: checked(TRUE) is TRUE, logical
+  ```
+
+  Both infer `<T: numeric> fn(x: T) -> …`, and one binding of `T` cannot be `integer` for the first
+  and `logical` for the second — so the promotion produces a *wrong return type*, which the project
+  ranks below a refusal ("a gap means checks are skipped, not that wrong answers are produced").
+  Verified against R 4.3.3.
+
+  Closing it properly needs the promotion to live in the type, not the binding — a scheme like
+  `<T: numeric> fn(x: T) -> promote(T)`, i.e. a type-level function the language does not have. Same
+  family as the next item, and they should be designed together.
+
+- **A numeric variable shared by two parameters refuses ordinary mixed arithmetic** (found while
+  measuring the item above). `add <- function(a, b) a + b` infers `<T: numeric> fn(a: T, b: T) -> T`,
+  tying both operands to one variable, so `add(1L, 1.5)` reports ``expected `integer`, found
+  `double` `` — R gives `2.5`. This is a false positive on about as plain a piece of R as exists, and
+  it is the same missing piece: the operand types need a numeric *join* (`integer` with `double` is
+  `double`), not unification.
 - `@new` is unrestricted project-wide, so `domain-modeling.md`'s *"the only door in"* and
   `concepts.md`'s *"provably came from there"* overstate it. Either add an encapsulation modifier or
   soften both sentences to "by convention".

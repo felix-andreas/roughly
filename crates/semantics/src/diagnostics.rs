@@ -1820,7 +1820,19 @@ impl<'db> TypeRenderer<'db> {
             TyKind::Union(members) => {
                 let members: Vec<String> = members
                     .iter()
-                    .map(|&member| self.render(db, member))
+                    .map(|&member| {
+                        // `->` extends over a whole union, so a function member
+                        // needs its grouping parentheses back or the rendered
+                        // type is a different type: without them
+                        // `(fn(A) -> B) | NULL` and `fn(A) -> (B | NULL)` print
+                        // the same, and copying one out of a finding into an
+                        // annotation silently changes it.
+                        let rendered = self.render(db, member);
+                        match member.kind(db) {
+                            TyKind::Function(_) => format!("({rendered})"),
+                            _ => rendered,
+                        }
+                    })
                     .collect();
                 members.join(" | ")
             }

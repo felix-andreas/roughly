@@ -86,7 +86,7 @@ pick <- function(shout) {
   fmt
 }
 #++++
-pick: <T, U> fn(shout: logical) -> fn(x: T) -> T | fn(x: U) -> character
+pick: <T, U> fn(shout: logical) -> (fn(x: T) -> T) | (fn(x: U) -> character)
 
 #---- a_function_conditionally_replaced_by_a_non_function_unions_too
 reverse <- function(flag) {
@@ -95,7 +95,7 @@ reverse <- function(flag) {
   f
 }
 #++++
-reverse: <T> fn(flag: logical) -> fn(x: T) -> T | integer
+reverse: <T> fn(flag: logical) -> (fn(x: T) -> T) | integer
 
 #---- calling_a_conditionally_reassigned_function_unions_the_returns
 pick <- function(shout) {
@@ -105,7 +105,7 @@ pick <- function(shout) {
 }
 apply_it <- function(shout) pick(shout)(1L)
 #++++
-pick: <T, U> fn(shout: logical) -> fn(x: T) -> T | fn(x: U) -> character
+pick: <T, U> fn(shout: logical) -> (fn(x: T) -> T) | (fn(x: U) -> character)
 apply_it: fn(shout: logical) -> integer | character
 
 #---- a_union_of_signatures_is_not_a_character
@@ -123,7 +123,7 @@ pick <- function(shout) {
 unsound <- function() want_chr(pick(FALSE)(1L))
 #++++
 want_chr: fn(s: character) -> character
-pick: <T, U> fn(shout: logical) -> fn(x: T) -> T | fn(x: U) -> character
+pick: <T, U> fn(shout: logical) -> (fn(x: T) -> T) | (fn(x: U) -> character)
 unsound: Unknown
 376..391 error[type-mismatch] expected `character`, found `integer | character`
 
@@ -135,6 +135,20 @@ plain <- function() {
 }
 #++++
 plain: <T> fn() -> fn(x: T) -> T
+
+#---- a_function_member_of_a_union_renders_with_its_grouping_parentheses
+# `->` extends over a whole union, so these are two different types and used to
+# render as the same string — copying one out of a finding and back into an
+# annotation silently changed it. Both annotations here are the rendered form,
+# pasted back, so the case fails if either stops round-tripping.
+#: (fn(integer) -> character) | NULL
+nullable_callback <- NULL
+
+#: fn(x: integer) -> character | NULL
+returns_nullable <- function(x) NULL
+#++++
+nullable_callback: (fn(integer) -> character) | NULL
+returns_nullable: fn(x: integer) -> character | NULL
 
 #==== returns
 #---- early_return_unions
