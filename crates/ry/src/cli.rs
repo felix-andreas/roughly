@@ -979,7 +979,11 @@ fn closes_a_snippet(line: &str, closing_rule: &str) -> bool {
         .is_some_and(|before| console::strip_ansi_codes(before).trim().is_empty())
 }
 
-/// How many horizontal bars miette's snippet-closing rule carries.
+/// How many horizontal bars miette's snippet-closing rule carries. Read off
+/// miette 7.6's `GraphicalReportHandler`, which hardcodes the width rather than
+/// exposing it on the theme — so an upgrade can move it. Nothing breaks
+/// silently if it does: the rule then stops matching and reappears under every
+/// snippet, which `check_draws_the_snippet_as_a_window` fails on.
 const CLOSING_RULE_WIDTH: usize = 4;
 
 /// A borrowed file behind a snippet, named for the snippet header.

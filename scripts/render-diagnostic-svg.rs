@@ -56,13 +56,13 @@ fn svg(text: &str) -> String {
         .map(parse_ansi)
         .filter(|spans| !spans.is_empty())
         .filter(|spans| {
-            // The "--> file:line:col" locus and the trailing "N problems in
-            // M files" run summary are terminal chrome, not the diagnostic
-            // itself — the image shows only the finding.
+            // The trailing "N problems in M files" run summary is terminal
+            // chrome, not the diagnostic — the image shows only the finding.
+            // The locus line stays: it opens the snippet frame the gutter
+            // hangs from, so dropping it would leave the snippet headless.
             let plain: String = spans.iter().map(|span| span.text.as_str()).collect();
             let plain = plain.trim();
-            !plain.starts_with("-->")
-                && !(plain.starts_with(|c: char| c.is_ascii_digit()) && plain.contains(" problem"))
+            !(plain.starts_with(|c: char| c.is_ascii_digit()) && plain.contains(" problem"))
         })
         .collect();
 
@@ -102,12 +102,20 @@ fn svg(text: &str) -> String {
     .fg {{ fill: #1f2328; }}
     .red {{ fill: #cf222e; }}
     .blue {{ fill: #0969da; }}
+    .cyan {{ fill: #1b7c83; }}
+    .magenta {{ fill: #8250df; }}
+    .green {{ fill: #1a7f37; }}
+    .yellow {{ fill: #9a6700; }}
     .dim {{ fill: #59636e; }}
     @media (prefers-color-scheme: dark) {{
       .bg {{ fill: #0d1117; stroke: #30363d; }}
       .fg {{ fill: #e6edf3; }}
       .red {{ fill: #ff7b72; }}
       .blue {{ fill: #79c0ff; }}
+      .cyan {{ fill: #76e3ea; }}
+      .magenta {{ fill: #d2a8ff; }}
+      .green {{ fill: #7ee787; }}
+      .yellow {{ fill: #e3b341; }}
       .dim {{ fill: #9198a1; }}
     }}
     text {{ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; font-size: 14px; white-space: pre; }}
@@ -126,10 +134,11 @@ fn svg(text: &str) -> String {
         for span in spans {
             let _ = write!(
                 out,
-                r#"<tspan x="{:.1}" class="{}"{}>{}</tspan>"#,
+                r#"<tspan x="{:.1}" class="{}"{}{}>{}</tspan>"#,
                 16.0 + column as f32 * 8.4,
                 span.class,
                 if span.bold { r#" font-weight="600""# } else { "" },
+                if span.underline { r#" text-decoration="underline""# } else { "" },
                 escape(&span.text)
             );
             column += span.text.chars().count();
@@ -144,14 +153,20 @@ struct Span {
     text: String,
     class: &'static str,
     bold: bool,
+    underline: bool,
 }
 
-/// Splits one line into coloured spans. Only the SGR codes the renderer emits
-/// are handled — bold, red, blue, and reset — because anything else would be a
-/// change in the renderer that this script should be updated alongside.
+/// Splits one line into coloured spans.
+///
+/// One escape carries several parameters — `\e[36;1;4m` is cyan, bold and
+/// underlined at once — so each is applied in turn rather than matched as a
+/// whole. Handling only the single-parameter forms left every compound one
+/// falling through to the default colour, which is a monochrome picture that
+/// still looks plausible: the reason the render is worth an eye after every
+/// change to the reporter's palette.
 fn parse_ansi(line: &str) -> Vec<Span> {
     let mut spans: Vec<Span> = Vec::new();
-    let (mut class, mut bold) = ("fg", false);
+    let (mut class, mut bold, mut underline) = ("fg", false, false);
     let mut current = String::new();
     let mut rest = line;
 
@@ -162,21 +177,28 @@ fn parse_ansi(line: &str) -> Vec<Span> {
         let Some(end) = rest[start..].find('m') else { break };
         let code = &rest[start + 2..start + end];
         if !current.is_empty() {
-            spans.push(Span { text: std::mem::take(&mut current), class, bold });
+            spans.push(Span { text: std::mem::take(&mut current), class, bold, underline });
         }
-        match code {
-            "0" => (class, bold) = ("fg", false),
-            "1" => bold = true,
-            "31" => class = "red",
-            "34" => class = "blue",
-            "2" | "90" => class = "dim",
-            _ => (),
+        for parameter in code.split(';') {
+            match parameter {
+                "0" | "" => (class, bold, underline) = ("fg", false, false),
+                "1" => bold = true,
+                "4" => underline = true,
+                "2" | "90" => class = "dim",
+                "31" => class = "red",
+                "32" => class = "green",
+                "33" => class = "yellow",
+                "34" => class = "blue",
+                "35" => class = "magenta",
+                "36" => class = "cyan",
+                _ => (),
+            }
         }
         rest = &rest[start + end + 1..];
     }
     current.push_str(rest);
     if !current.trim().is_empty() {
-        spans.push(Span { text: current, class, bold });
+        spans.push(Span { text: current, class, bold, underline });
     }
     spans
 }
