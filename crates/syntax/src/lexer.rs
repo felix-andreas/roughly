@@ -238,7 +238,7 @@ impl Lexer<'_> {
                 }
             }
             _ => {
-                self.error(format!("unexpected character `{first}`"), start);
+                self.error(unexpected_character_message(first), start);
                 ERROR_TOKEN
             }
         }
@@ -486,4 +486,47 @@ fn is_ident_start(c: char) -> bool {
 
 fn is_ident_continue(c: char) -> bool {
     c == '.' || c == '_' || c.is_alphanumeric()
+}
+
+/// What to say about a character R's grammar has no use for.
+///
+/// Most of these arrive by paste — from a document, a chat window, an editor
+/// with smart quotes on — and the lexer knows exactly which ASCII character was
+/// meant, so it says so instead of naming the codepoint and stopping. The
+/// invisible ones are named rather than quoted: printing a zero-width space
+/// between backticks shows the reader an empty pair and a caret over nothing.
+fn unexpected_character_message(character: char) -> String {
+    let ascii = |what: &str, instead: char| {
+        format!("`{character}` is {what}, not R syntax — use `{instead}` instead")
+    };
+    match character {
+        '\u{201c}' | '\u{201d}' | '\u{201e}' | '\u{00ab}' | '\u{00bb}' => {
+            ascii("a typographic quote", '"')
+        }
+        '\u{2018}' | '\u{2019}' | '\u{201a}' | '\u{2032}' => ascii("a typographic quote", '\''),
+        '\u{2013}' => ascii("an en dash", '-'),
+        '\u{2014}' => ascii("an em dash", '-'),
+        '\u{2212}' => ascii("a minus sign", '-'),
+        '\u{ff08}' => ascii("a full-width parenthesis", '('),
+        '\u{ff09}' => ascii("a full-width parenthesis", ')'),
+        '\u{ff0c}' => ascii("a full-width comma", ','),
+        '\u{ff1b}' => ascii("a full-width semicolon", ';'),
+        '\u{ff1a}' => ascii("a full-width colon", ':'),
+        '\u{00a0}' => invisible("a non-breaking space"),
+        '\u{202f}' => invisible("a narrow non-breaking space"),
+        '\u{2007}' | '\u{2009}' | '\u{200a}' | '\u{2002}' | '\u{2003}' => {
+            invisible("a typographic space")
+        }
+        '\u{3000}' => invisible("an ideographic space"),
+        '\u{200b}' | '\u{feff}' => {
+            "there is an invisible character here (a zero-width space) — delete it".to_owned()
+        }
+        _ => format!("unexpected character `{character}`"),
+    }
+}
+
+/// Whitespace that is not whitespace to R. Quoting it would show the reader a
+/// blank between backticks.
+fn invisible(what: &str) -> String {
+    format!("this is {what}, not an ordinary space — R needs a plain space here")
 }

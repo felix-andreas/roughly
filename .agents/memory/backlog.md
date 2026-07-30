@@ -257,12 +257,20 @@ consequence — `@type Point {list{x: double` reported only "expected `,` or `}`
 never that the `@type` brace was open. One structural report of that kind now gets through regardless,
 so that case reports both, outer first.
 
-### 4. Cryptic where the tool actually knows better
+### 4. FIXED — cryptic where the tool already knew better
 
-``unexpected character `“` `` for a typographic quote pasted out of a document. Placement is perfect
-(both quotes flagged, exactly on them) but the message is the parser's vocabulary, not the user's: the
-tool knows precisely what happened and could say *this is a typographic quote; R needs a plain `"`*.
-Held up against the `else` message it is the clearest readability gap in the round.
+``unexpected character `“` `` for a typographic quote pasted out of a document: placement was perfect,
+the wording was the parser's vocabulary. Measuring it found a whole family reported the same way —
+curly quotes both kinds, en/em dash and the real minus sign, full-width parentheses and punctuation,
+and the invisible ones.
+
+The invisible ones were the worst: a non-breaking space printed as ``unexpected character ` ` ``, a
+message pointing at what looks like ordinary whitespace and calling it unexpected.
+
+Each now names what the character is and what to write instead — *`–` is an en dash, not R syntax —
+use `-` instead* — and the invisible ones are **described rather than quoted**, because printing a
+zero-width space between backticks shows the reader an empty pair and a caret over nothing. A
+character with no known ASCII counterpart keeps the generic wording.
 
 ### 5. A dangling binary operator swallows the next statement, and the findings are correct-but-useless
 
