@@ -52,6 +52,13 @@ pub enum BindingKind {
     ForVariable,
 }
 
+/// What a read found: the slot it resolved to, and whether an unassigned path
+/// also reaches it.
+struct SlotRead {
+    slot: BindingId,
+    maybe_undefined: bool,
+}
+
 /// A dead store: an assignment whose written value no read reaches.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnusedAssignment {
@@ -361,6 +368,12 @@ impl Context<'_> {
                 // undeclared operator is not a reportable unresolved name.
                 if let Some(name) = special_name {
                     self.naming.quiet_operator_reads.insert(name.clone());
+                    // The set above is by name, which is what the cross-item
+                    // check for a package's own operator needs. A `%op%`
+                    // defined as a LOCAL slot needs the slot marked too, or its
+                    // definition reads as a dead store while the calls to it
+                    // sit right below.
+                    self.mark_slot_read(name);
                 }
                 match operator {
                     // A formula quotes its operands: names inside are model
@@ -761,18 +774,19 @@ impl Context<'_> {
             .insert(name.to_owned(), slot);
     }
 
-    fn resolve_read(&mut self, id: ExprId, name: &str) {
-        if name == "..." || name.starts_with("..") && name[2..].chars().all(|c| c.is_ascii_digit())
-        {
-            return;
-        }
-        // A slot resolves when a write can reach the read, or when the read
-        // crosses a function boundary (a capture: the closure runs after the
-        // frame has executed, so every frame write is observable). An
-        // unassignable slot does not shadow — the lookup falls outward,
-        // exactly like R's runtime.
+    /// The slot half of a read: find the name's slot and mark every write that
+    /// reaches it used. Separate from [`Self::resolve_read`] because a `%op%`
+    /// read has a name but no expression node of its own — the operator is a
+    /// token — so it can mark a slot used but has no id to resolve.
+    ///
+    /// A slot resolves when a write can reach the read, or when the read
+    /// crosses a function boundary (a capture: the closure runs after the
+    /// frame has executed, so every frame write is observable). An
+    /// unassignable slot does not shadow — the lookup falls outward, exactly
+    /// like R's runtime.
+    fn mark_slot_read(&mut self, name: &str) -> Option<SlotRead> {
         let function_depth = self.current_function_depth();
-        let resolved = self
+        let (depth, slot) = self
             .scopes
             .iter()
             .enumerate()
@@ -780,52 +794,65 @@ impl Context<'_> {
             .find_map(|(depth, scope)| {
                 let &slot = scope.slots.get(name)?;
                 (self.flow.contains_key(&slot) || depth < function_depth).then_some((depth, slot))
-            });
-        match resolved {
-            Some((depth, slot)) => {
+            })?;
+        match self.naming.bindings.get(&slot).map(|binding| binding.kind) {
+            Some(BindingKind::Parameter) => {
+                self.read_parameter_slots.insert(slot);
+            }
+            Some(BindingKind::TopLevel) => {
+                self.naming.used_top_level_names.insert(name.to_owned());
+            }
+            _ => {}
+        }
+        // Mark every reaching write used; an unassigned reaching path makes the
+        // read maybe-undefined.
+        let mut maybe_undefined = false;
+        if let Some(reaches) = self.flow.get(&slot) {
+            let reaches: Vec<Reach> = reaches.iter().copied().collect();
+            for reach in reaches {
+                match reach {
+                    Reach::Assignment(index) => {
+                        self.writes[index as usize].used = true;
+                    }
+                    Reach::Unassigned => maybe_undefined = true,
+                    Reach::Implicit => {}
+                }
+            }
+        }
+        if depth < self.current_function_depth() || self.deferred_depth > 0 {
+            // A read of an enclosing frame's slot from inside a function: a
+            // capture — every write of the name IN THAT FRAME stays observable
+            // (sequential rebindings are one runtime variable), so none of them
+            // is a dead store. A same-named binding in a DIFFERENT frame is not
+            // what this closure reads — a shadowed outer binding stays
+            // reportably dead.
+            self.naming.captured_slots.insert(slot);
+            let frame = self.scopes[depth].id;
+            for index in 0..self.writes.len() {
+                if self.writes[index].scope == frame && self.writes[index].name == *name {
+                    self.writes[index].used = true;
+                }
+            }
+        }
+        Some(SlotRead {
+            slot,
+            maybe_undefined,
+        })
+    }
+
+    fn resolve_read(&mut self, id: ExprId, name: &str) {
+        if name == "..." || name.starts_with("..") && name[2..].chars().all(|c| c.is_ascii_digit())
+        {
+            return;
+        }
+        match self.mark_slot_read(name) {
+            Some(SlotRead {
+                slot,
+                maybe_undefined,
+            }) => {
                 self.naming.resolutions.insert(id, slot);
-                match self.naming.bindings.get(&slot).map(|binding| binding.kind) {
-                    Some(BindingKind::Parameter) => {
-                        self.read_parameter_slots.insert(slot);
-                    }
-                    Some(BindingKind::TopLevel) => {
-                        self.naming.used_top_level_names.insert(name.to_owned());
-                    }
-                    _ => {}
-                }
-                // Mark every reaching write used; an unassigned reaching path
-                // makes the read maybe-undefined.
-                if let Some(reaches) = self.flow.get(&slot) {
-                    let reaches: Vec<Reach> = reaches.iter().copied().collect();
-                    let mut maybe_undefined = false;
-                    for reach in reaches {
-                        match reach {
-                            Reach::Assignment(index) => {
-                                self.writes[index as usize].used = true;
-                            }
-                            Reach::Unassigned => maybe_undefined = true,
-                            Reach::Implicit => {}
-                        }
-                    }
-                    if maybe_undefined && self.emit {
-                        self.naming.maybe_undefined.insert(id);
-                    }
-                }
-                if depth < self.current_function_depth() || self.deferred_depth > 0 {
-                    // A read of an enclosing frame's slot from inside a
-                    // function: a capture — every write of the name IN THAT
-                    // FRAME stays observable (sequential rebindings are one
-                    // runtime variable), so none of them is a dead store. A
-                    // same-named binding in a DIFFERENT frame is not what
-                    // this closure reads — a shadowed outer binding stays
-                    // reportably dead.
-                    self.naming.captured_slots.insert(slot);
-                    let frame = self.scopes[depth].id;
-                    for index in 0..self.writes.len() {
-                        if self.writes[index].scope == frame && self.writes[index].name == *name {
-                            self.writes[index].used = true;
-                        }
-                    }
+                if maybe_undefined && self.emit {
+                    self.naming.maybe_undefined.insert(id);
                 }
             }
             None => {

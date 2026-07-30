@@ -378,6 +378,22 @@ whole statement underlined.
 
 Backticks never needed this: `` `y` <- 1 `` lowers to a `NameRef` like any other name.
 
+**The corpus caught a consequence, and it was a real bug — an older one than this change.** Binding
+string targets took data.table from 4078 findings to 4079, and the extra one was a false `unused` on
+`%fin%`, a helper operator data.table defines *inside* `merge` and calls twice on the next two lines.
+The cause: a `%op%` read is recorded **by name** in `quiet_operator_reads`, which is what the
+cross-item check for a package's own operator needs, but it never reached the slot model — so a
+**local** operator definition had no read resolving to it and looked like a dead store. Backtick
+definitions were already exposed to this; the string change only made data.table's case visible.
+
+Fixed by extracting the slot half of a read (`mark_slot_read`) and calling it from the operator path
+too, which leaves `resolve_read` as the only place that maps an expression id. **Three more
+pre-existing false positives went with it**, each verified as a genuine use: `%+replace%` aliased from
+`ggplot2::` inside `theme_custom` (three copies — the vignette `.R` plus two `.qmd`), and `%NA_OR%`
+in shiny's `render-plot.R`, used four times below its definition. Corpus: data.table back to 4078
+exactly, dplyr unchanged, ggplot2 1318 → 1315, shiny 1045 → 1044. An unused local operator is still
+reported — marking the slot did not make the check blanket-quiet, and a fixture pins that.
+
 Move each finding into `test-user-reports.md` as it closes.
 
 ## Open — user reports (from the maintainer, not a simulated round)

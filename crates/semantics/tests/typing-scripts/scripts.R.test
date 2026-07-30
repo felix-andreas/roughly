@@ -319,6 +319,43 @@ print(1L)
 %unused%: <T, U> fn(a: T, b: U) -> T
 0..10 warning[unused] `%unused%` is assigned but never used.
 
+#---- a_local_operator_use_is_a_use
+# The operator name is a read, and it has to reach the SLOT, not just the
+# by-name set the cross-item check for a package's own operator uses. A helper
+# operator defined inside the function that needs it is ordinary R — real
+# packages alias a namespaced one this way — and the definition read as a dead
+# store while the calls to it sat two lines below.
+keep <- function(values, table) {
+  "%fin%" <- function(a, b) a %in% b
+  values[!(values %fin% table)]
+}
+print(keep(c(1L, 2L), 2L))
+#++++
+keep: <T, U> fn(values: T, table: U) -> Unknown
+
+#---- an_unused_local_operator_still_warns
+# Marking the slot must not make the check blanket-quiet for operators.
+dead <- function(x) {
+  "%unused%" <- function(a, b) a + b
+  x
+}
+print(dead(1L))
+#++++
+dead: <T> fn(x: T) -> T
+96..106 warning[unused] `%unused%` is assigned but never used.
+
+#---- a_local_alias_of_a_namespaced_operator_is_a_use
+# The shape packages actually write, and the one that was reported wrongly:
+# bring an operator into scope under its own name, then use it below.
+themed <- function(...) {
+  `%+replace%` <- ggplot2::`%+replace%`
+  base_theme(...) %+replace% overrides()
+}
+print(themed())
+#++++
+themed: fn(...: Any) -> Unknown
+190..211 warning[unresolved] unknown package namespace `ggplot2`.
+
 #---- masked_read_is_a_use
 x <- 1L
 out <- with(list(y = 2L), x + y)
