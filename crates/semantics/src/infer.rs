@@ -54,6 +54,12 @@ pub struct InferenceTable<'db> {
     /// The project's `@type` / `@alias` definitions: aliases expand during
     /// resolution, nominals project to their representation in compatibility.
     pub definitions: FxHashMap<Name<'db>, NamedDefinition<'db>>,
+    /// Classes that declare an arithmetic operator method, from the standard
+    /// library AND from the project's own sources. Operator dispatch resolves
+    /// such a method through the global scope, so the numeric constraint has to
+    /// consult the same set or it refuses a class whose `+` the checker itself
+    /// would have dispatched.
+    pub arithmetic_classes: FxHashSet<String>,
     /// Per-node resolve memo over the interned type DAG: without it, shared
     /// subtrees re-resolve once per occurrence and self-referential bindings
     /// walk an exponential tree. Entries are valid for one binding epoch
@@ -378,7 +384,7 @@ impl<'db> InferenceTable<'db> {
         let Entry::Unbound { level, constraint } = *self.entry(representative) else {
             unreachable!("bind target is always unbound after find");
         };
-        if let Some(error) = constraint_rejects(db, constraint, ty) {
+        if let Some(error) = constraint_rejects(db, &self.arithmetic_classes, constraint, ty) {
             return Err(error);
         }
         // Level-adjust free variables in `ty` up to this entry's level so
@@ -697,10 +703,12 @@ impl<'db> InferenceTable<'db> {
                 }
                 Ok(())
             }
-            Entry::Bound(ty) => match constraint_rejects(db, constraint, ty) {
-                Some(error) => Err(error),
-                None => Ok(()),
-            },
+            Entry::Bound(ty) => {
+                match constraint_rejects(db, &self.arithmetic_classes, constraint, ty) {
+                    Some(error) => Err(error),
+                    None => Ok(()),
+                }
+            }
             Entry::Redirect(_) => unreachable!("find returns a representative"),
         }
     }
@@ -1576,17 +1584,14 @@ fn nullable_single_member<'db>(db: &'db dyn Db, members: &[Ty<'db>]) -> Option<T
 /// is legal R — so rejecting it would refuse `add_days <- function(d, n) d + n`
 /// every date, matrix or plot in the language. The result may be imprecise
 /// (the variable takes the class), never a false rejection.
-fn declares_arithmetic(db: &dyn Db, class: &str) -> bool {
-    let Some(library) = crate::stubs::stubs(db) else {
-        return false;
-    };
-    ["+.", "-.", "*.", "/.", "Arith.", "Ops."]
-        .iter()
-        .any(|prefix| library.schemes.contains_key(&format!("{prefix}{class}")))
-}
+/// The prefixes R dispatches an arithmetic operator through, in the order
+/// [`Checker::operator_method_result`] tries them: the operator's own method,
+/// then its group generic, then `Ops`.
+pub const ARITHMETIC_METHOD_PREFIXES: [&str; 6] = ["+.", "-.", "*.", "/.", "Arith.", "Ops."];
 
 fn constraint_rejects<'db>(
     db: &'db dyn Db,
+    arithmetic_classes: &FxHashSet<String>,
     constraint: Constraint,
     ty: Ty<'db>,
 ) -> Option<UnifyError<'db>> {
@@ -1601,7 +1606,7 @@ fn constraint_rejects<'db>(
                 element.kind(db),
                 TyKind::Scalar(Atomic::Integer | Atomic::Double)
             ),
-            TyKind::Named(name, _) => declares_arithmetic(db, name.text(db)),
+            TyKind::Named(name, _) => arithmetic_classes.contains(name.text(db)),
             _ => false,
         },
         Constraint::AtomicElement => matches!(
@@ -1612,7 +1617,7 @@ fn constraint_rejects<'db>(
             TyKind::Scalar(Atomic::Integer | Atomic::Double) | TyKind::Any | TyKind::Unknown => {
                 true
             }
-            TyKind::Named(name, _) => declares_arithmetic(db, name.text(db)),
+            TyKind::Named(name, _) => arithmetic_classes.contains(name.text(db)),
             _ => false,
         },
     };

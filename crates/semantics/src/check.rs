@@ -276,6 +276,13 @@ pub trait GlobalEnv<'db> {
     fn type_definitions(&self) -> FxHashMap<Name<'db>, crate::annotations::NamedDefinition<'db>> {
         FxHashMap::default()
     }
+
+    /// Classes reachable here that declare an arithmetic operator method,
+    /// standard library and project sources alike — the same scope operator
+    /// dispatch resolves a method through.
+    fn arithmetic_classes(&self) -> rustc_hash::FxHashSet<String> {
+        rustc_hash::FxHashSet::default()
+    }
 }
 
 pub fn check_item<'db>(db: &'db dyn Db, module: &Module, naming: &ItemNaming) -> ItemCheck<'db> {
@@ -299,6 +306,7 @@ pub fn check_item_with_annotation<'db>(
     let mut table = InferenceTable::default();
     if let Some(globals) = globals {
         table.definitions = globals.type_definitions();
+        table.arithmetic_classes = globals.arithmetic_classes();
     }
     let mut context = Checker {
         db,

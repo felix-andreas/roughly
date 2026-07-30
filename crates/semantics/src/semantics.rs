@@ -1465,6 +1465,59 @@ impl<'db> check::GlobalEnv<'db> for SalsaGlobals<'db> {
         }
         definitions
     }
+
+    fn arithmetic_classes(&self) -> rustc_hash::FxHashSet<String> {
+        let mut classes = stub_arithmetic_classes(self.db);
+        if let Some(files) = ProjectFiles::try_get(self.db) {
+            classes.extend(project_arithmetic_classes(self.db, files).iter().cloned());
+        }
+        // A script's own definitions are visible to itself, the same way its
+        // `@type` declarations are. Every item counts, not just the ones above
+        // this one: a function body runs after the whole file is sourced.
+        if let Some((items, _)) = self.frame_items.as_ref() {
+            let names: Vec<String> = items
+                .iter()
+                .filter_map(|item| item.name(self.db).clone())
+                .collect();
+            classes.extend(arithmetic_classes_among(names.iter().map(String::as_str)));
+        }
+        classes
+    }
+}
+
+/// Classes the standard library gives an arithmetic operator method. Static for
+/// a given corpus, so it is computed once rather than per checked item.
+#[salsa::tracked(returns(clone))]
+fn stub_arithmetic_classes(db: &dyn Db) -> rustc_hash::FxHashSet<String> {
+    let Some(library) = stubs::stubs(db) else {
+        return rustc_hash::FxHashSet::default();
+    };
+    arithmetic_classes_among(library.schemes.keys().map(String::as_str))
+}
+
+/// The same, for the project's own sources: a package that defines `+.Money`
+/// makes `Money` arithmetic exactly as a stub would, and operator dispatch
+/// already resolves it through the global scope.
+#[salsa::tracked(returns(clone))]
+fn project_arithmetic_classes(db: &dyn Db, files: ProjectFiles) -> rustc_hash::FxHashSet<String> {
+    arithmetic_classes_among(package_definitions(db, files).keys().map(String::as_str))
+}
+
+/// The class each arithmetic method name is declared for.
+fn arithmetic_classes_among<'a>(
+    names: impl Iterator<Item = &'a str>,
+) -> rustc_hash::FxHashSet<String> {
+    let mut classes = rustc_hash::FxHashSet::default();
+    for name in names {
+        for prefix in infer::ARITHMETIC_METHOD_PREFIXES {
+            if let Some(class) = name.strip_prefix(prefix)
+                && !class.is_empty()
+            {
+                classes.insert(class.to_owned());
+            }
+        }
+    }
+    classes
 }
 
 /// A cyclic group's view of the world during its canonical fixpoint: member

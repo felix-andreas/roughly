@@ -1109,12 +1109,29 @@ set: wrapping a standard-library numeric function in one of your own throws the 
 is the fact-beats-guess rule — the `Any` fallback fits while binding nothing, so it beats every
 candidate that would narrow `x`.
 
-The rule is right in general and the fallback is load-bearing: `declares_arithmetic` lets a nominal
-with an `Arith.`/`+.` method satisfy the numeric constraint, so forcing `x` numeric would reject a
-user's S3 class that legitimately defines `abs.myclass`. Any fix has to keep that working, which is
-why this is a design slice and not a tweak — the candidate shape is "if every non-fallback candidate
-imposes the same constraint, imposing it is a fact rather than a guess", which needs a decision
-record and adversarial review before it is written.
+The rule is right in general and the fallback is load-bearing: a nominal with an `Arith.`/`+.` method
+satisfies the numeric constraint, so forcing `x` numeric would reject a user's S3 class that
+legitimately defines `abs.myclass`. Any fix has to keep that working, which is why this is a design
+slice and not a tweak — the candidate shape is "if every non-fallback candidate imposes the same
+constraint, imposing it is a fact rather than a guess", which needs a decision record and adversarial
+review before it is written.
+
+**Prerequisite FIXED, and it was a live false positive on its own.** The escape hatch above only half
+worked: `declares_arithmetic` consulted the **stub library alone**, while operator dispatch resolves a
+method through the global scope, which includes the project's own sources. So a package defining
+`+.Money` had its `+` dispatched correctly and its class *refused* by the numeric constraint —
+`bump <- function(x) x + 1L; bump(price)` reported ``expected a numeric value (`integer` or
+`double`), found `Money` `` on code R runs fine (checked: R prints 6). The set is now computed from
+stubs **and** the project (`GlobalEnv::arithmetic_classes`, memoized per corpus and per project;
+a script's own top level counts too, the way its `@type` declarations already do) and carried on the
+inference table beside `definitions`. A class that declares no arithmetic method is still refused —
+R halts on that one too, checked both ways. Measured on the corpus: no finding changes across
+data.table, dplyr, ggplot2 and shiny, so this loosening removed nothing that was load-bearing there;
+the fixtures are the coverage.
+
+Worth knowing for the design slice above: the escape hatch it depends on is only now actually
+general. Any measurement of "how often would constraining `x` reject real code" taken before this
+would have overstated the cost.
 
 ## Open — a misplaced config key was a silent no-op, and the class of bug is not closed
 

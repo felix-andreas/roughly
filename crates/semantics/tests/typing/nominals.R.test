@@ -279,3 +279,37 @@ check <- function() {
 #++++
 want_chr: fn(s: character) -> character
 check: fn() -> character
+
+#==== project_operator_methods
+#---- a_project_defined_operator_method_satisfies_the_numeric_constraint
+# Operator dispatch resolves `+.Money` through the global scope, which includes
+# the project's own sources — so the numeric constraint has to consult the same
+# scope. It consulted only the standard library, and refused a class whose `+`
+# the checker itself would have dispatched. R runs this: `bump(price)` is 6.
+#: @type Money {double}
+
+"+.Money" <- function(e1, e2) e1
+
+#: @new Money
+price <- 5
+
+bump <- function(x) x + 1L
+print(bump(price))
+#++++
++.Money: <T, U> fn(e1: T, e2: U) -> T
+price: Money
+bump: <T: numeric> fn(x: T) -> T
+
+#---- a_class_with_no_arithmetic_method_is_still_refused
+# The constraint must stay discriminating: R halts on this one too.
+#: @type Tag {character}
+
+#: @new Tag
+label <- "x"
+
+bump <- function(x) x + 1L
+print(bump(label))
+#++++
+label: Tag
+bump: <T: numeric> fn(x: T) -> T
+158..163 error[type-mismatch] expected a numeric value (`integer` or `double`), found `Tag`

@@ -1784,7 +1784,12 @@ indexable shape is future work.
 ### Numeric inference variables
 
 An unannotated value used as a numeric operand is constrained to be numeric rather than rejected.
-A numeric constraint restricts an inference variable to `integer` or `double` (any vector shape).
+A numeric constraint restricts an inference variable to `integer` or `double` (any vector shape), and
+to any **nominal that declares an arithmetic operator method** — `+.Class`, `Arith.Class` or
+`Ops.Class`, from the standard library or from your own sources alike (see
+[operator methods on a class](#operators)). Without that, a numeric constraint would refuse a class
+whose `+` the checker itself dispatches, and `function(x) x + 1L` would reject every `Date`, matrix
+and units-style class in the language.
 
 Two other bounds exist alongside it. The **atomic-element** bound restricts a variable to a scalar
 atomic type; it is introduced by using a type parameter as a vector element (`T[]` — see
@@ -1844,6 +1849,13 @@ A class that declares an operator but accepts no candidate for the operands at h
 the `type-mismatch` error ``+` is not defined between `Date` and `Date`` rather than falling back to
 the numeric rules — R rejects that expression too. A class that declares nothing falls through to
 the rules below unchanged, so an opaque nominal is still a type error under arithmetic.
+
+**Your own classes count, not only the standard library's.** A method declared anywhere the global
+scope reaches — a package's `R/` sources, or a script's own top level — makes its class arithmetic
+exactly as a shipped stub does. That matters beyond dispatch: it is also what lets the class satisfy
+a [numeric constraint](#numeric-inference-variables), so passing a `Money` to
+`function(x) x + 1L` is accepted when the project defines `+.Money`, and refused when it defines no
+arithmetic method at all — which is what R does in both cases.
 
 **`c()` dispatches too.** A class that declares a `c.Class` method keeps its class through
 concatenation, so `c(d1, d2)` on two `Date`s is a `Date` and a real error on the result is still
