@@ -46,10 +46,15 @@ Error: unexpected symbol in:
 ry reports what is missing, and points at the place it should go:
 
 ```text
-error[syntax-error]: missing `,` between these arguments
- --> a.R:2:20
-2 |   title = "Revenue"
-                       ^
+syntax-error
+
+  x missing `,` between these arguments
+   --[a.R:2:20]
+ 1 | config <- list(
+ 2 |   title = "Revenue"
+   |                    ^
+ 3 |   subtitle = "by quarter",
+ 4 |   width = 800
 ```
 
 The same comparison with a parenthesis left open:
@@ -65,10 +70,13 @@ Error: unexpected '{' in "if (x > 1 {"
 ```
 
 ```text
-error[syntax-error]: unclosed `(` in the `if` condition; expected a matching `)`
- --> a.R:1:4
-1 | if (x > 1 {
-       ^
+syntax-error
+
+  x unclosed `(` in the `if` condition; expected a matching `)`
+   --[a.R:1:4]
+ 1 | if (x > 1 {
+   |    ^
+ 2 |   y
 ```
 
 R's parser stops at the first error, because its job is to run your code. A parser written for
@@ -166,10 +174,14 @@ print(parse_count("12"))
 ```
 
 ```text
-error[type-mismatch]: expected a numeric value (`integer` or `double`), found `integer | character`
- --> parse.R:6:3
-6 |   count + 1L
-      ^^^^^
+type-mismatch
+
+  x expected a numeric value (`integer` or `double`), found `integer | character`
+   --[parse.R:6:3]
+ 5 |   }
+ 6 |   count + 1L
+   |   ^^^^^
+ 7 | }
 ```
 
 That took one line of configuration, no annotations, and no change to the code.

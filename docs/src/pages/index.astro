@@ -207,34 +207,54 @@ const analysisCode = {
 
 const analysisOutput = {
     lint: `<div class="tl"><span class="sh">$</span> ry check</div>
-<div class="tl msg"><span class="dwarn">warning[assignment-operator]</span><span class="dmsg">: Use &lt;-, not =, for assignment</span></div>
-<div class="tl"> <span class="darrow">--&gt;</span> R/sales.R:6:10</div>
-<div class="tl"><span class="dgutter">6 |</span>   ranked = sales[order(-sales$amount), ]</div>
-<div class="tl">             <span class="dcaret-warn">^</span></div>
+<div class="tl"><span class="dwarn">assignment-operator</span></div>
 <div class="tl gap"></div>
-<div class="tl msg"><span class="dwarn">warning[unresolved]</span><span class="dmsg">: I could not resolve \`nrwo\` in this package, its imports, or builtins. Did you mean \`nrow\`?</span></div>
-<div class="tl">  <span class="darrow">--&gt;</span> R/sales.R:11:11</div>
-<div class="tl"><span class="dgutter">11 |</span>   message(nrwo(sales), " rows in ", length(regions), " regions")</div>
-<div class="tl">               <span class="dcaret-warn">^^^^</span></div>
+<div class="tl msg"><span class="dwarn">  ! </span><span class="dmsg">Use &lt;-, not =, for assignment</span></div>
+<div class="tl"><span class="darrow">   --[R/sales.R:6:10]</span></div>
+<div class="tl"><span class="dgutter"> 5 |</span> top_regions &lt;- function(sales, n) {</div>
+<div class="tl"><span class="dgutter"> 6 |</span>   ranked = sales[order(-sales$amount), ]</div>
+<div class="tl"><span class="dgutter">   |</span>          <span class="dcaret-warn">^</span></div>
+<div class="tl"><span class="dgutter"> 7 |</span>   head(unique(ranked$region), n)</div>
 <div class="tl gap"></div>
-<div class="tl msg"><span class="dwarn">warning[boolean-shorthand]</span><span class="dmsg">: Use TRUE, not T, for Boolean values</span></div>
-<div class="tl">  <span class="darrow">--&gt;</span> R/sales.R:18:12</div>
-<div class="tl"><span class="dgutter">18 |</span> verbose &lt;- T</div>
-<div class="tl">                <span class="dcaret-warn">^</span></div>
+<div class="tl"><span class="dwarn">unresolved</span></div>
+<div class="tl gap"></div>
+<div class="tl msg"><span class="dwarn">  ! </span><span class="dmsg">I could not resolve \`nrwo\` in this package, its imports, or builtins. Did you mean \`nrow\`?</span></div>
+<div class="tl"><span class="darrow">    --[R/sales.R:11:11]</span></div>
+<div class="tl"><span class="dgutter"> 10 |</span> report &lt;- function(sales, regions) {</div>
+<div class="tl"><span class="dgutter"> 11 |</span>   message(nrwo(sales), &quot; rows in &quot;, length(regions), &quot; regions&quot;)</div>
+<div class="tl"><span class="dgutter">    |</span>           <span class="dcaret-warn">^^^^</span></div>
+<div class="tl"><span class="dgutter"> 12 |</span>   invisible(regions)</div>
+<div class="tl gap"></div>
+<div class="tl"><span class="dwarn">boolean-shorthand</span></div>
+<div class="tl gap"></div>
+<div class="tl msg"><span class="dwarn">  ! </span><span class="dmsg">Use TRUE, not T, for Boolean values</span></div>
+<div class="tl"><span class="darrow">    --[R/sales.R:18:12]</span></div>
+<div class="tl"><span class="dgutter"> 17 |</span> </div>
+<div class="tl"><span class="dgutter"> 18 |</span> verbose &lt;- T</div>
+<div class="tl"><span class="dgutter">    |</span>            <span class="dcaret-warn">^</span></div>
+<div class="tl"><span class="dgutter"> 19 |</span> if (verbose) report(sales, regions)</div>
 <div class="tl gap"></div>
 <div class="tl"><span class="dsum">3 problems in 1 file</span></div>`,
     types: `<div class="tl"><span class="sh">$</span> ry check</div>
-<div class="tl msg"><span class="derr">error[type-mismatch]</span><span class="dmsg">: expected \`character\`, found \`double\`</span></div>
-<div class="tl">  <span class="darrow">--&gt;</span> R/pricing.R:13:37</div>
-<div class="tl"><span class="dgutter">13 |</span>   net_of_fees(rows$amount, fee_rate(rows$amount))</div>
-<div class="tl">                                         <span class="dcaret-err">^^^^^^^^^^^</span></div>
+<div class="tl"><span class="derr">type-mismatch</span></div>
+<div class="tl gap"></div>
+<div class="tl msg"><span class="derr">  x </span><span class="dmsg">expected \`character\`, found \`double\`</span></div>
+<div class="tl"><span class="darrow">    --[R/pricing.R:13:37]</span></div>
+<div class="tl"><span class="dgutter"> 12 |</span> book_total &lt;- function(rows) {</div>
+<div class="tl"><span class="dgutter"> 13 |</span>   net_of_fees(rows$amount, fee_rate(rows$amount))</div>
+<div class="tl"><span class="dgutter">    |</span>                                     <span class="dcaret-err">^^^^^^^^^^^</span></div>
+<div class="tl"><span class="dgutter"> 14 |</span> }</div>
 <div class="tl gap"></div>
 <div class="tl"><span class="dsum">1 problem in 1 file</span></div>`,
     inference: `<div class="tl"><span class="sh">$</span> ry check</div>
-<div class="tl msg"><span class="derr">error[type-mismatch]</span><span class="dmsg">: expected a numeric value (\`integer\` or \`double\`), found \`character\`</span></div>
-<div class="tl">  <span class="darrow">--&gt;</span> R/booking.R:14:28</div>
-<div class="tl"><span class="dgutter">14 |</span> total &lt;- book_total(quote, "0.18")</div>
-<div class="tl">                                <span class="dcaret-err">^^^^^^</span></div>
+<div class="tl"><span class="derr">type-mismatch</span></div>
+<div class="tl gap"></div>
+<div class="tl msg"><span class="derr">  x </span><span class="dmsg">expected a numeric value (\`integer\` or \`double\`), found \`character\`</span></div>
+<div class="tl"><span class="darrow">    --[R/booking.R:14:28]</span></div>
+<div class="tl"><span class="dgutter"> 13 |</span> quote &lt;- list(region = &quot;north&quot;, amount = 1240.5)</div>
+<div class="tl"><span class="dgutter"> 14 |</span> total &lt;- book_total(quote, &quot;0.18&quot;)</div>
+<div class="tl"><span class="dgutter">    |</span>                            <span class="dcaret-err">^^^^^^</span></div>
+<div class="tl"><span class="dgutter"> 15 |</span> label &lt;- paste0(&quot;total: &quot;, total)</div>
 <div class="tl gap"></div>
 <div class="tl"><span class="dsum">1 problem in 1 file</span></div>`,
 };

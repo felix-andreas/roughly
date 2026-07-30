@@ -130,20 +130,26 @@ typing = true
 [format]
 indent = 4
 $ ry check .
-warning: ignoring config key `strict` — it belongs under `[check]`, and nothing outside a table sets it
-warning: ignoring unknown config key `check.stric` — check the spelling, or update ry
-warning: ignoring unknown config key `format.indent` — check the spelling, or update ry
+  ! ignoring config key `strict` — it belongs under `[check]`, and nothing outside a table sets it
+  ! ignoring unknown config key `check.stric` — check the spelling, or update ry
+  ! ignoring unknown config key `format.indent` — check the spelling, or update ry
 1 file checked, no problems
 ```
 
-A hard error names the file, the key, and the exact position:
+A hard error shows the offending line, so you do not have to count columns:
 
 ```console
 $ cat ry.toml
 [check]
 typing = "yes"
 $ ry check .
-error: invalid config in /home/you/project/ry.toml for `check.typing` at line 2, column 10: invalid type: string "yes", expected a boolean
+config
+
+  x invalid config for `check.typing`: invalid type: string "yes", expected a boolean
+   --[/home/you/project/ry.toml:2:10]
+ 1 | [check]
+ 2 | typing = "yes"
+   |          ^^^^^
 $ echo $?
 2
 ```

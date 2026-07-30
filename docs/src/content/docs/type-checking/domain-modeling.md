@@ -25,7 +25,13 @@ That is accepted. `pt@x` is declared `"numeric"` in the class definition, it is 
 mode reports it as an undetermined type:
 
 ```text
-error[strict]: strict mode: this expression has an undetermined type (`Unknown`)
+strict
+
+  x strict mode: this expression has an undetermined type (`Unknown`)
+   --[R/a.R:7:10]
+ 6 | 
+ 7 | want_chr(pt@x)
+   |          ^^^^
 ```
 
 R6 behaves the same way. This gap will not close soon: both systems build their objects at runtime
@@ -67,7 +73,13 @@ new_person("Ada", "36")
 ```
 
 ```text
-error[type-mismatch]: expected `integer`, found `character`
+type-mismatch
+
+  x expected `integer`, found `character`
+    --[R/a.R:10:19]
+  9 | 
+ 10 | new_person("Ada", "36")
+    |                   ^^^^
 ```
 
 The `@new` is **inside** the constructor, so the constructor is the only way in: everything
@@ -94,7 +106,13 @@ to_fahrenheit <- function(t) t
 ```
 
 ```text
-error[type-mismatch]: expected `Fahrenheit`, found `Celsius`
+type-mismatch
+
+  x expected `Fahrenheit`, found `Celsius`
+   --[R/a.R:6:30]
+ 5 | #: fn(t: Celsius) -> Fahrenheit
+ 6 | to_fahrenheit <- function(t) t
+   |                              ^
 ```
 
 Both are `double` underneath, and neither is interchangeable with the other. Two `character` ids,

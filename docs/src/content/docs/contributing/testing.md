@@ -141,7 +141,7 @@ gate.
 ### The CLI contract suite
 
 `crates/ry/tests/test_cli.rs` drives the real `ry` binary end to end: diagnostic
-rendering (1-based positions, gutters, carets), JSON Lines output, the documented exit-code
+rendering (1-based character positions, snippet windows, underlines), JSON Lines output, the documented exit-code
 contract (0 clean, 1 findings, 2 usage/configuration/IO errors), configuration discovery and
 failure, per-file `# typing:` directives, suppression comments, NAMESPACE validation, project
 stub overrides (including loader-problem reporting), data-masked evaluation, and the

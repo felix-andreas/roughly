@@ -41,10 +41,14 @@ apply_discount(100, 0.2)
 ```
 
 ```text
-warning[unresolved]: I could not resolve `ratee` in this package, its imports, or builtins. Did you mean `rate`?
- --> discount.R:2:11
-2 |   price * ratee
-              ^^^^^
+unresolved
+
+  ! I could not resolve `ratee` in this package, its imports, or builtins. Did you mean `rate`?
+   --[discount.R:2:11]
+ 1 | apply_discount <- function(price, rate) {
+ 2 |   price * ratee
+   |           ^^^^^
+ 3 | }
 
 1 problem in 1 file
 ```
@@ -68,10 +72,13 @@ apply_discount(100, "0.2")
 ```
 
 ```text
-error[type-mismatch]: expected `double`, found `character`
- --> discount.R:5:21
-5 | apply_discount(100, "0.2")
-                        ^^^^^
+type-mismatch
+
+  x expected `double`, found `character`
+   --[discount.R:5:21]
+ 4 | 
+ 5 | apply_discount(100, "0.2")
+   |                     ^^^^^
 ```
 
 Nothing was annotated. ry worked out that `rate` is a number because you multiply by it, and that
