@@ -549,7 +549,7 @@ make <- function() {
 }
 #++++
 make: Unknown
-81..96 error[type-mismatch] expected `character` for field `name`, found `integer`
+93..95 error[type-mismatch] expected `character` for field `name`, found `integer`
 
 #---- checked_annotation_on_a_local_binding
 f <- function() {

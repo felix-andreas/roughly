@@ -447,8 +447,13 @@ pub fn check_item_with_annotation<'db>(
                                 let range = module.expression(*value).range;
                                 let resolved_value = context.table.resolve(db, value_ty);
                                 if !context.table.compatible(db, resolved_value, expected) {
-                                    let kind = context.mismatch(expected, resolved_value);
-                                    context.errors.push(TypeError { range, kind });
+                                    let error = context.type_mismatch(
+                                        range,
+                                        expected,
+                                        resolved_value,
+                                        Some(*value),
+                                    );
+                                    context.errors.push(error);
                                 }
                             }
                             scheme_is_declared = true;
@@ -887,6 +892,10 @@ struct CallArgument<'db> {
     /// `None` is a positional hole (`f(, x)`).
     ty: Option<Ty<'db>>,
     range: TextRange,
+    /// The argument's value expression. A type carries no source ranges, so a
+    /// finding about one field of a record has to re-walk the expression that
+    /// produced the record to find that field's own range.
+    value: Option<ExprId>,
     /// The argument is a whole-number double literal (`1`, `2.0`) — eligible
     /// for the literal-as-integer courtesy.
     whole_double: bool,
@@ -1215,22 +1224,95 @@ impl<'db> Checker<'db, '_> {
     }
 
     /// A whole-type mismatch, narrowed to the one field when both sides are
-    /// records. Every site that reports two types side by side goes through
-    /// here, so the narrowing cannot be present at one and missing at another.
-    fn mismatch(&mut self, expected: Ty<'db>, found: Ty<'db>) -> TypeErrorKind<'db> {
+    /// records — in the message *and* in the range. Every site that reports two
+    /// types side by side goes through here, so the narrowing cannot be present
+    /// at one and missing at another.
+    ///
+    /// `value` is the expression the `found` type came from, when the caller
+    /// has it. A type carries no source ranges, so pointing at the field means
+    /// re-walking that expression alongside the field path.
+    fn type_mismatch(
+        &mut self,
+        range: TextRange,
+        expected: Ty<'db>,
+        found: Ty<'db>,
+        value: Option<ExprId>,
+    ) -> TypeError<'db> {
         let expected = self.table.resolve(self.db, expected);
         let found = self.table.resolve(self.db, found);
-        match self.table.explain_record_mismatch(self.db, found, expected) {
-            Some(mismatch) => TypeErrorKind::RecordShape {
+        let Some(mismatch) = self.table.explain_record_mismatch(self.db, found, expected) else {
+            return TypeError {
+                range,
+                kind: TypeErrorKind::Mismatch { expected, found },
+            };
+        };
+        let range = value
+            .and_then(|value| self.record_field_range(value, &mismatch))
+            .unwrap_or(range);
+        TypeError {
+            range,
+            kind: TypeErrorKind::RecordShape {
                 mismatch: Box::new(mismatch),
             },
-            None => TypeErrorKind::Mismatch { expected, found },
         }
+    }
+
+    /// Where the field a record mismatch names was written. A record type is
+    /// produced by a `list(...)` call and its fields are that call's tagged
+    /// arguments, so the path is walked against the expression that produced
+    /// the type.
+    ///
+    /// `None` whenever the expression is not that shape — a variable holding a
+    /// record has no field to point at — and the whole value stays the blame.
+    fn record_field_range(
+        &self,
+        value: ExprId,
+        mismatch: &RecordMismatch<'db>,
+    ) -> Option<TextRange> {
+        let (RecordMismatch::Field { path, .. }
+        | RecordMismatch::Missing { path, .. }
+        | RecordMismatch::Unexpected { path, .. }) = mismatch;
+        let (last, enclosing) = path.split_last()?;
+        let mut current = value;
+        for segment in enclosing {
+            current = self.tagged_argument(current, segment)?.value?;
+        }
+        match mismatch {
+            // Nothing at the path to point at, so the innermost list that
+            // should have carried the field is the finding.
+            RecordMismatch::Missing { .. } => Some(self.blame_range(current)),
+            RecordMismatch::Field { .. } => {
+                Some(self.blame_range(self.tagged_argument(current, last)?.value?))
+            }
+            // This message is about the NAME being one the type does not
+            // declare, so the name is what it underlines.
+            RecordMismatch::Unexpected { .. } => {
+                let argument = self.tagged_argument(current, last)?;
+                argument
+                    .name_range
+                    .or_else(|| argument.value.map(|value| self.blame_range(value)))
+            }
+        }
+    }
+
+    /// The tagged argument of a call with this name — a record's field as the
+    /// `list(...)` that built it wrote it.
+    fn tagged_argument(&self, call: ExprId, name: &str) -> Option<&Argument> {
+        let ExpressionKind::Call { arguments, .. } = &self.module.expression(call).kind else {
+            return None;
+        };
+        arguments
+            .iter()
+            .find(|argument| argument.name.as_deref() == Some(name))
     }
 
     fn report_unify(&mut self, range: TextRange, error: UnifyError<'db>) {
         let kind = match error {
-            UnifyError::Mismatch(expected, found) => self.mismatch(expected, found),
+            UnifyError::Mismatch(expected, found) => {
+                let error = self.type_mismatch(range, expected, found, None);
+                self.errors.push(error);
+                return;
+            }
             UnifyError::Occurs(variable, container) => TypeErrorKind::InfiniteType {
                 variable: Ty::new(self.db, TyKind::Var(variable)),
                 container: self.table.resolve(self.db, container),
@@ -1586,8 +1668,8 @@ impl<'db> Checker<'db, '_> {
             .compatible(self.db, resolved_value, declared.body)
         {
             let range = self.blame_range(value);
-            let kind = self.mismatch(declared.body, resolved_value);
-            self.errors.push(TypeError { range, kind });
+            let error = self.type_mismatch(range, declared.body, resolved_value, Some(value));
+            self.errors.push(error);
         }
         declared.body
     }
@@ -1866,7 +1948,7 @@ impl<'db> Checker<'db, '_> {
                 if !matches!(value.kind(self.db), TyKind::Unknown)
                     && !self.table.compatible(self.db, value, field.ty)
                 {
-                    let kind = self.mismatch(field.ty, value);
+                    let kind = self.type_mismatch(range, field.ty, value, None).kind;
                     self.errors.push(TypeError { range, kind });
                 }
             }
@@ -2748,6 +2830,7 @@ impl<'db> Checker<'db, '_> {
                 name_range: None,
                 ty: Some(left),
                 range: self.blame_range(lhs),
+                value: Some(lhs),
                 whole_double: self.is_whole_double(lhs),
                 forwards_dots: false,
             },
@@ -2756,6 +2839,7 @@ impl<'db> Checker<'db, '_> {
                 name_range: None,
                 ty: Some(right),
                 range: self.blame_range(rhs),
+                value: Some(rhs),
                 whole_double: self.is_whole_double(rhs),
                 forwards_dots: false,
             },
@@ -2798,6 +2882,7 @@ impl<'db> Checker<'db, '_> {
                 name_range: None,
                 ty: Some(left),
                 range: self.blame_range(lhs),
+                value: Some(lhs),
                 whole_double: self.is_whole_double(lhs),
                 forwards_dots: false,
             },
@@ -2806,6 +2891,7 @@ impl<'db> Checker<'db, '_> {
                 name_range: None,
                 ty: Some(right),
                 range: self.blame_range(rhs),
+                value: Some(rhs),
                 whole_double: self.is_whole_double(rhs),
                 forwards_dots: false,
             },
@@ -3554,6 +3640,7 @@ impl<'db> Checker<'db, '_> {
                             default_ty,
                             default_range,
                             whole_double,
+                            Some(default),
                         ) {
                             self.errors.push(error);
                         }
@@ -3588,7 +3675,9 @@ impl<'db> Checker<'db, '_> {
                     && !self.table.compatible(self.db, returned, declared.ret)
                 {
                     early_return_failed = true;
-                    let kind = self.mismatch(declared.ret, returned);
+                    let kind = self
+                        .type_mismatch(return_range, declared.ret, returned, None)
+                        .kind;
                     self.errors.push(TypeError {
                         range: return_range,
                         kind,
@@ -3633,7 +3722,9 @@ impl<'db> Checker<'db, '_> {
                     })
                     .collect();
                 if culprits.is_empty() {
-                    let kind = self.mismatch(declared.ret, resolved_body);
+                    let kind = self
+                        .type_mismatch(body_range, declared.ret, resolved_body, None)
+                        .kind;
                     self.errors.push(TypeError {
                         range: body_range,
                         kind,
@@ -3641,7 +3732,7 @@ impl<'db> Checker<'db, '_> {
                 } else {
                     for (leaf, found) in culprits {
                         let range = self.blame_range(leaf);
-                        let kind = self.mismatch(declared.ret, found);
+                        let kind = self.type_mismatch(range, declared.ret, found, None).kind;
                         self.errors.push(TypeError { range, kind });
                     }
                 }
@@ -4397,6 +4488,7 @@ impl<'db> Checker<'db, '_> {
                     name_range: argument.name_range,
                     ty,
                     range: argument_range,
+                    value: argument.value,
                     whole_double,
                     forwards_dots,
                 }
@@ -4603,8 +4695,13 @@ impl<'db> Checker<'db, '_> {
                 ArgumentTarget::Positional(slot) => {
                     if let Some(&expected) = function.positional.get(*slot)
                         && let Some(ty) = argument.ty
-                        && let Err(error) =
-                            self.check_argument(expected, ty, argument.range, argument.whole_double)
+                        && let Err(error) = self.check_argument(
+                            expected,
+                            ty,
+                            argument.range,
+                            argument.whole_double,
+                            argument.value,
+                        )
                     {
                         findings.push(error);
                     }
@@ -4612,8 +4709,13 @@ impl<'db> Checker<'db, '_> {
                 ArgumentTarget::Named(formal) => {
                     if let Some(expected) = function.named.get(*formal).map(|field| field.ty)
                         && let Some(ty) = argument.ty
-                        && let Err(error) =
-                            self.check_argument(expected, ty, argument.range, argument.whole_double)
+                        && let Err(error) = self.check_argument(
+                            expected,
+                            ty,
+                            argument.range,
+                            argument.whole_double,
+                            argument.value,
+                        )
                         && !self.forwarding_callback_probe(
                             expected,
                             ty,
@@ -4628,8 +4730,13 @@ impl<'db> Checker<'db, '_> {
                 ArgumentTarget::Rest => {
                     if let Some(element) = variadic_element
                         && let Some(ty) = argument.ty
-                        && let Err(error) =
-                            self.check_argument(element, ty, argument.range, argument.whole_double)
+                        && let Err(error) = self.check_argument(
+                            element,
+                            ty,
+                            argument.range,
+                            argument.whole_double,
+                            argument.value,
+                        )
                     {
                         findings.push(error);
                     }
@@ -4874,6 +4981,7 @@ impl<'db> Checker<'db, '_> {
                                         ty,
                                         argument.range,
                                         argument.whole_double,
+                                        None,
                                     )
                                     .is_err()
                             {
@@ -4889,6 +4997,7 @@ impl<'db> Checker<'db, '_> {
                                             ty,
                                             argument.range,
                                             argument.whole_double,
+                                            None,
                                         )
                                         .is_err()
                                 {
@@ -4949,7 +5058,7 @@ impl<'db> Checker<'db, '_> {
             };
             if let Some(argument_ty) = argument_ty
                 && self
-                    .check_argument(target, argument_ty, blame_range, whole_double)
+                    .check_argument(target, argument_ty, blame_range, whole_double, None)
                     .is_err()
             {
                 return false;
@@ -4978,6 +5087,7 @@ impl<'db> Checker<'db, '_> {
         found: Ty<'db>,
         range: TextRange,
         whole_double: bool,
+        value: Option<ExprId>,
     ) -> Result<(), TypeError<'db>> {
         let resolved_found = self.table.resolve(self.db, found);
         if matches!(resolved_found.kind(self.db), TyKind::Unknown) {
@@ -5039,10 +5149,7 @@ impl<'db> Checker<'db, '_> {
                 },
             });
         }
-        Err(TypeError {
-            range,
-            kind: self.mismatch(resolved_expected, resolved_found),
-        })
+        Err(self.type_mismatch(range, resolved_expected, resolved_found, value))
     }
 
     /// `@new Name` — nominal introduction: the value's structural type checks
@@ -5089,8 +5196,8 @@ impl<'db> Checker<'db, '_> {
                 // The value is checked against the representation, so the
                 // expected side names the shape the value must have — the
                 // nominal name alone would just restate the `@new` line.
-                let kind = self.mismatch(representation, resolved_value);
-                self.errors.push(TypeError { range, kind });
+                let error = self.type_mismatch(range, representation, resolved_value, Some(value));
+                self.errors.push(error);
             }
         }
         self.table.level -= 1;

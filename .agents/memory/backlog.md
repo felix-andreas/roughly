@@ -66,13 +66,16 @@ underlines the smallest expression its message is about.
   `Checker::mismatch`, so the narrowing cannot be present at one and missing at another; that also
   picked up the `@new` nominal path for free.
 
-  **Still open, and deliberately not done here: the caret.** The message names the field, but the
-  underline stays on the whole value, because a type carries no source ranges — `check_argument` has
-  the argument's `TextRange` and not its `ExprId`, so the field's own range is not reachable where the
-  comparison happens. This is the one documented exception to "a finding underlines the smallest
-  expression its message is about", noted as such in the reference. Closing it means threading the
-  value's `ExprId` into `CallArgument` and the other mismatch sites, then walking the HIR to find the
-  `list(...)` argument whose name matches the path's first segment. Worth doing; a slice of its own.
+  **The caret is FIXED too, so the documented exception is gone.** A type carries no source ranges, so
+  the field path is walked back against the expression that *built* the record — a `list(...)` call,
+  whose tagged arguments are its fields. The value's `ExprId` now rides on `CallArgument` (and reaches
+  `@new`, the declared-value checks and a parameter default), and the single `Checker::type_mismatch`
+  funnel returns the whole `TypeError` rather than just a kind, so the range narrows with the message
+  and cannot narrow at one site but not another. Which part gets the caret follows the message: the
+  offending **value** for a field whose type does not fit, the field's **name** for one the type does
+  not declare (that message is about the name), and the innermost list for a **missing** field, since
+  nothing at the path exists to point at. Where the walk finds nothing — a variable holding a record —
+  the whole value stays the blame and the message still names the field; pinned by a fixture.
 - **FIXED (the spill half)** — annotation ranges ending at end-of-line spilled onto the next line, so
   editors squiggled across the break. Measured on a file of six deliberately broken `#:` regions:
   **four of eight findings** ran from the end of one line to column 1 of the next. Cause: an error

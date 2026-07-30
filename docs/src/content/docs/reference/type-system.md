@@ -751,9 +751,13 @@ Two whole types are printed only when the failure is not about one field — a r
 non-record, or against `list[T]` — which is the case they do explain. For a single field they are two
 long near-identical strings to diff by eye, and for a nested one they never name the path at all.
 
-The finding is placed on the whole value, not on the field: a type carries no source ranges, so the
-field's own range is not available where the comparison happens. This is the one documented exception
-to [where a finding points](#where-a-finding-points).
+The finding is placed on **the field**, not on the whole value. A type carries no source ranges, so
+the field path is walked back against the expression that built the record — a `list(...)` call, whose
+tagged arguments are its fields — and the caret lands on what the message is about: the offending
+value for a field whose type does not fit, the field's **name** for one the type does not declare, and
+the innermost list that should have carried it for one that is missing (there is nothing at the path
+to point at). Where that walk finds nothing — a variable holding a record has no field expression —
+the whole value stays the blame and the message still names the field.
 
 #### Array-like lists
 
@@ -2651,6 +2655,9 @@ message agree. Concretely:
   site — the same rule an explicit `return` follows. When no single expression is at fault (an `if`
   with no `else` contributes an implicit `NULL` that belongs to none of them) the whole construct
   keeps the one finding
+- a [record field](#reporting-a-record-that-does-not-fit) underlines the field the message names,
+  found by walking the field path back against the `list(...)` that built the record, and falls back
+  to the whole value when the record did not come from one
 
 A finding's range also **never crosses a line break**. An error reported at the end of a line — the
 end of a `#:` region, most often — would otherwise blame the newline itself, whose span runs from the
@@ -2658,9 +2665,6 @@ end of one line to the start of the next, and an editor draws that as a squiggle
 pointing at neither line. Such a range collapses onto the last character of code on its own line,
 which is where the reader has to look anyway.
 
-The one exception is a [record field](#reporting-a-record-that-does-not-fit): the message names the
-field, and the path to it, but the underline stays on the whole value — a type carries no source
-ranges, so the field's own range is not available where the two types are compared.
 
 ## Syntax errors
 
