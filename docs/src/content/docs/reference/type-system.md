@@ -2035,6 +2035,13 @@ Examples:
 
 - `name <- expr` writes the type of `expr` into `name`'s variable slot in the current scope,
   creating the slot on the first write (see `Value names` for the slot model)
+- a **string** where the name belongs binds that name: `"x" <- 1` is `x <- 1`, and `` `x` <- 1 `` is
+  too. All three forms create the same slot and a later `x` resolves to it. The finding range for a
+  string target is the literal, quotes included, since that is what was written
+- an assignment target that is **not** a name — a computed value, or a number — is reported as a
+  `syntax-error`: R parses it and refuses it at run time. See
+  [diagnostic codes](/reference/diagnostic-codes#syntax) for the exact shapes and the one deliberate
+  exemption
 - if the assignment has an attached typing annotation, the assigned expression is checked using the annotation rules from this document
 - the assignment expression itself has the type of the assigned expression
 - a later assignment in the same scope writes the same variable: on a straight-line path the new

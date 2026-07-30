@@ -854,7 +854,11 @@ impl Context<'_> {
     ) {
         let target_expression = self.module.expression(target).clone();
         match &target_expression.kind {
-            ExpressionKind::NameRef(name) => {
+            // A string where a name belongs binds that name: `"x" <- 1` is
+            // `x <- 1` in R, and the literal already carries the name it
+            // spells with its quotes stripped. Backticks never reach here —
+            // `` `y` <- 1 `` lowers to a `NameRef` like any other name.
+            ExpressionKind::NameRef(name) | ExpressionKind::Literal(LiteralKind::String(name)) => {
                 let range = target_expression.range;
                 match spelling {
                     AssignSpelling::Super => {

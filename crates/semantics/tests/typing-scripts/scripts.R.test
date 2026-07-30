@@ -142,14 +142,31 @@ negated: integer
 0..7 warning[unused] `negated` is assigned but never used.
 14..22 error[syntax-error] this is a value, not a name, so nothing can be assigned to it
 
-#---- a_string_target_is_legal_r_and_stays_quiet
-# `"x" <- 1` binds `x` in R, so this is not the refused shape and must stay
-# quiet here. Typing does give it the binding; naming does not, so a later
-# `print(x)` still reports `x` unresolved — a separate gap, filed.
+#---- a_string_target_binds_the_name_it_spells
+# `"x" <- 1` is `x <- 1` in R — checked, R prints 1 — so the target is not the
+# refused shape, and the name it spells is a binding a later read resolves to.
+# The unused warning underlines `"x"`, quotes included: that is what was written.
 "x" <- 1L
+"limit" <- 10L
+print(limit)
 #++++
 x: integer
-220..229 warning[unused] `x` is assigned but never used.
+limit: integer
+244..247 warning[unused] `x` is assigned but never used.
+
+#---- a_string_target_works_with_super_assign_and_dotted_names
+# The name-target arm handles both spellings, so `<<-` and a name carrying `.`
+# follow from the same change rather than needing their own.
+outer <- function() {
+  "counter" <<- 1L
+}
+outer()
+"na.rm.default" <- TRUE
+print(counter)
+print(na.rm.default)
+#++++
+outer: fn() -> integer
+na.rm.default: logical
 
 #---- replacement_targets_stay_quiet
 v <- c(1, 2)

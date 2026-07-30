@@ -359,12 +359,24 @@ Two carve-outs the corpus forced, both worth remembering:
 A "line ends in an operator" lint was measured and rejected instead: **15,129 lines across data.table,
 dplyr, ggplot2 and shiny end in a continuation operator**, every one of them legal.
 
-### Found while doing that: a string assignment target creates no resolvable binding
+### FIXED — Found while doing that: a string assignment target created no resolvable binding
 
-`"x" <- 1L` is legal R and binds `x` — verified, R prints `1`. Typing gives it the binding (`x:
-integer`), but naming does not, so a later `print(x)` reports ``I could not resolve `x` ``. A false
-positive on legal, if unusual, R. Small and self-contained: `replacement_base` should treat a string
-literal target as the name it spells.
+`"x" <- 1L` is legal R and binds `x` — verified against R, which prints `1`. Typing gave it the
+binding (`x: integer`), but naming did not, so a later `print(x)` reported ``I could not resolve `x` ``:
+a false positive on legal, if unusual, R.
+
+The filed guess was that `replacement_base` should unwrap the string. **It should not, and that is the
+part worth keeping.** The replacement path *reads* the base before writing it (`names(v) <- x` reads
+`v`), and marks the write unreportable because a replacement is not a dead store. `"x" <- 1` is
+neither: it is a plain definition, identical to `x <- 1`. So the string literal joins the name-target
+arm by or-pattern instead — `ExpressionKind::NameRef(name) | ExpressionKind::Literal(LiteralKind::String(name))`
+— which the lowering makes exact, because `string_value` has already stripped the quotes and resolved
+escapes, so the payload *is* the name R binds. One pattern, and `<<-`, dotted names and the unused
+check all follow from it: the dead store now reports at the literal's own range (`"x"`, quotes
+included, which is what was written) instead of arriving from the item-level export path with the
+whole statement underlined.
+
+Backticks never needed this: `` `y` <- 1 `` lowers to a `NameRef` like any other name.
 
 Move each finding into `test-user-reports.md` as it closes.
 
