@@ -403,10 +403,36 @@ sentence-cased and ends with a period; a message that is a **fragment** (the exp
 is lowercase with none. Under that rule the real violations are far fewer than "five people wrote
 them" suggests — mostly sentences missing their period.
 
-**Sequencing constraint: do not sweep this while #89 is open.** That PR re-captures every rendered
-sample in the docs and on the landing page. Changing message text now invalidates those captures and
-makes a rebase that is already 16 files worse — the same problem this cycle advised the PR about.
-Land it after #89 merges or closes.
+**Unblocked** — the reporter change that re-captured every rendered sample has landed, so a message
+reworded here only invalidates the samples that quote it. Whichever samples they are must be
+re-captured in the same slice: there is still no harness for that (see the next item), so it is a
+manual pass over the pages named in the docs-sample item below.
+
+## Open — nothing verifies the rendered samples in the docs
+
+Roughly two dozen blocks across `features`, `getting-started`, `reference/{cli,configuration,diagnostic-codes}`,
+`type-checking/{tutorial,concepts,domain-modeling}`, `index.astro` and the README's generated
+`.github/diagnostic.svg` show real tool output. Nothing checks them, so they drift silently and the
+drift is only ever found by someone re-capturing by hand. Two things this proves rather than predicts:
+
+- A reporter change left every one of them stale for days, and the cost of re-capturing them by hand
+  is most of what made that change expensive to land.
+- A **parser** change — narrowing an unterminated argument list's boundary — silently falsified the
+  headline missing-comma sample in `features.md`, the very example chosen to show off the parser. It
+  was not noticed until the sample was re-run for an unrelated reason, and `main` had shipped it
+  wrong. This is the failure the "run the tool before claiming what it does" rule exists to prevent,
+  and it does not scale to prose that was true when written.
+
+**Shape of the fix.** Each sample needs its project (a `ry.toml`, one or more source files) and its
+command recorded next to it, so a harness can rebuild the project, run the command, and diff the
+captured block. Two candidate homes: a fixture-suite-style directory whose renderer output *is* the
+docs block, or front-matter/HTML comments in the pages naming a fixture directory. Prefer whichever
+lets the docs stay readable as prose — the samples are teaching material, not test data. The blocks
+that excerpt one finding out of several need a way to say so (a first-N-findings or a filter-by-code
+selector), because several pages legitimately do that.
+
+Until it exists, treat "changed a message or a blame range" as implying a manual sweep of the pages
+above, and say in the commit which ones were re-run.
 
 ## Open — release-artifact versions have drifted apart
 
