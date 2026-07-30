@@ -221,7 +221,7 @@ saw a stray token where it wanted a newline and reported *again*, then recovered
 and swallowed it anyway: an unterminated list now marks the statement, and the boundary check neither
 re-reports nor recovers.
 
-### 2. A parse error is reported one line PAST the end of the file
+### 2. FIXED — a parse error pointed off the code, at zero width
 
 ```r
 scale_by <- function(x,        # 3-line file
@@ -229,16 +229,33 @@ value <- 42
 print(value)
 ```
 
-The third finding is `expected a function body` at **4:1** — there is no line 4. With six lines it
-reports 7:1, so it is the EOF position rendered as `line_count + 1`. The human output prints an empty
-line under the caret; the `--output json` record carries `4:1-4:1`, which an editor cannot place — the
-squiggle is dropped or clamped somewhere wrong. Already suspected under §D; here is the repro.
+The third finding was `expected a function body` at `4:1-4:1`. **The claim first filed here was
+imprecise and is corrected:** with a trailing newline that line does exist (an editor counts the empty
+position after the last `\n`), so it is not unplaceable — it is **zero characters wide**, underlining
+nothing, on the blank line past the code, and pointing away from the construct that is actually
+incomplete.
 
-### 3. The annotation grammar cascades the same way, and further
+Two changes. The report now blames the `function` keyword, which is the construct that lacks a body —
+eight characters wide, on the code. And it is not reported at all when the parameter list never
+closed: that is the same mistake said twice, and the unclosed opener is the version worth reading.
+Case 6 is down from 3 findings to 2, and the two that remain are exactly R's own reasoning (R also
+reads `value` as a parameter, then chokes on `<-`).
 
-Measured in this frame: `fn([x] integer)` → **4 findings**, `fn([1]: integer)` → **9 findings**, one
-typo each, every one of them on the same line. Same root cause as §1 — no resynchronisation after the
-first failure — so the two should be fixed together rather than separately.
+### 3. FIXED — the annotation grammar reported every token it could not use
+
+Measured before: `fn([x] integer)` → **4 findings**, `fn([1]: integer)` → **9**, one typo each, five of
+the nine on the very same column. The type grammar cannot resynchronize the way the statement loop
+can — a `#:` region is one expression with no boundary inside it to restart at — so it reported and
+carried on.
+
+Now **one finding per region**: the first thing it cannot use. Both cases report exactly once, and two
+separate `#:` blocks still each report their own.
+
+One refinement was needed and is worth keeping: an **unclosed opener** is discovered at the *end* of
+the construct it names, so first-wins alone dropped the outermost truth in favour of an inner
+consequence — `@type Point {list{x: double` reported only "expected `,` or `}` in this list type" and
+never that the `@type` brace was open. One structural report of that kind now gets through regardless,
+so that case reports both, outer first.
 
 ### 4. Cryptic where the tool actually knows better
 

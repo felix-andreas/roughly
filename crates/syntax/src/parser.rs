@@ -35,6 +35,8 @@ pub(crate) fn parse(text: &str) -> Parse {
         groups: vec![0],
         depth: 0,
         in_annotation: false,
+        annotation_reported: false,
+        annotation_unclosed_reported: false,
         statement_had_lexer_error: false,
         statement_left_group_open: false,
     };
@@ -61,6 +63,20 @@ struct Parser<'a> {
     depth: u32,
     /// Whether errors are currently raised by the `#:` annotation grammar.
     in_annotation: bool,
+    /// Whether the `#:` region being parsed has already reported. The type
+    /// grammar cannot resynchronize the way the statement loop can — a region
+    /// is one expression, with no boundary inside it to restart at — so it
+    /// reported every token it could not use: nine findings for a single
+    /// mistyped optional parameter, all on one line. The first is the mistake;
+    /// the rest are its consequences.
+    annotation_reported: bool,
+    /// Whether the `#:` region has already reported an unclosed opener. Those
+    /// are discovered at the END of the construct they name, so the suppression
+    /// above would drop the outermost truth in favour of an inner consequence —
+    /// `@type Point {list{x: double` would say only "expected `,` or `}` in
+    /// this list type" and never that the `@type` brace is open. One such
+    /// structural report gets through regardless.
+    annotation_unclosed_reported: bool,
     /// Whether the statement being parsed consumed a lexer `ERROR_TOKEN`.
     /// The lexer's diagnostic is already precise, so the statement loop
     /// suppresses its own boundary report on top of it.
@@ -206,6 +222,33 @@ impl Parser<'_> {
     }
 
     fn error_at(&mut self, range: TextRange, message: impl Into<String>) {
+        if self.in_annotation {
+            if self.annotation_reported {
+                return;
+            }
+            self.annotation_reported = true;
+        }
+        self.push_error(range, message);
+    }
+
+    /// An unclosed opener inside a `#:` region: a structural fact about the
+    /// construct it names, so it reports even after the region's first finding
+    /// — see `annotation_unclosed_reported`. Outside a region this is an
+    /// ordinary error.
+    fn error_unclosed(&mut self, range: TextRange, message: impl Into<String>) {
+        if self.in_annotation {
+            if self.annotation_unclosed_reported {
+                return;
+            }
+            self.annotation_unclosed_reported = true;
+            self.annotation_reported = true;
+            self.push_error(range, message);
+            return;
+        }
+        self.error_at(range, message);
+    }
+
+    fn push_error(&mut self, range: TextRange, message: impl Into<String>) {
         let mut error = SyntaxError::new(message, range);
         error.in_annotation = self.in_annotation;
         self.errors.push(error);
@@ -302,6 +345,8 @@ impl Parser<'_> {
     fn annotation(&mut self) {
         self.start(SyntaxKind::ANNOTATION);
         self.in_annotation = true;
+        self.annotation_reported = false;
+        self.annotation_unclosed_reported = false;
         let end = self.annotation_region_end(self.pos);
         loop {
             self.ann_trivia(end);
@@ -501,7 +546,7 @@ impl Parser<'_> {
             if self.at(SyntaxKind::R_BRACE) && self.pos < end {
                 self.bump();
             } else {
-                self.error_at(
+                self.error_unclosed(
                     open_range,
                     format!("unclosed `{{` in `@{directive}`; expected a matching `}}`"),
                 );
@@ -638,7 +683,7 @@ impl Parser<'_> {
                 if self.at(SyntaxKind::R_PAREN) && self.pos < end {
                     self.bump();
                 } else {
-                    self.error_at(
+                    self.error_unclosed(
                         open_range,
                         "unclosed `(` in this type; expected a matching `)`",
                     );
@@ -774,7 +819,7 @@ impl Parser<'_> {
         if self.at(SyntaxKind::R_BRACKET) && self.pos < end {
             self.bump();
         } else {
-            self.error_at(
+            self.error_unclosed(
                 open_range,
                 "unclosed `[` in this list type; expected a matching `]`",
             );
@@ -799,7 +844,7 @@ impl Parser<'_> {
                 break;
             }
             if self.pos >= end {
-                self.error_at(
+                self.error_unclosed(
                     open_range,
                     "unclosed `{` in this list type; expected a matching `}`",
                 );
@@ -860,7 +905,7 @@ impl Parser<'_> {
                 break;
             }
             if self.pos >= end {
-                self.error_at(
+                self.error_unclosed(
                     open_range,
                     "unclosed `(` in this function type; expected a matching `)`",
                 );
@@ -1475,6 +1520,7 @@ impl Parser<'_> {
 
     fn function_def(&mut self) {
         self.start(SyntaxKind::FUNCTION_DEF);
+        let keyword_range = self.token_range(self.pos);
         self.bump();
         self.eat_trivia(true);
         if self.at(SyntaxKind::L_PAREN) {
@@ -1486,8 +1532,14 @@ impl Parser<'_> {
             ));
         }
         self.eat_trivia(true);
-        if !self.expression(0) {
-            self.error_here("expected a function body");
+        if !self.expression(0) && !self.statement_left_group_open {
+            // Blamed on the `function` keyword, not wherever the search for a
+            // body stopped: a header running to end of file left this on the
+            // blank line past the last statement, zero characters wide,
+            // underlining nothing and pointing away from the construct that is
+            // incomplete. And a parameter list that never closed is the whole
+            // story — a missing body is only its consequence.
+            self.error_at(keyword_range, "expected a function body");
         }
         self.finish();
     }

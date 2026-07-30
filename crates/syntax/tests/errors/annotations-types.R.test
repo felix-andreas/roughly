@@ -16,18 +16,6 @@ error: expected `,` or `)` in this function type's parameters
  --> 1:18
   | #: fn(x: integer y: double) -> double
   |                  ^
-error: expected a type, found `:`
- --> 1:19
-  | #: fn(x: integer y: double) -> double
-  |                   ^
-error: expected a type, found `)`
- --> 1:27
-  | #: fn(x: integer y: double) -> double
-  |                           ^
-error: expected a type, found `->`
- --> 1:29
-  | #: fn(x: integer y: double) -> double
-  |                             ^^
 
 #---- missing_return_type
 #: fn(x: integer) ->
@@ -56,14 +44,6 @@ error: expected `,` or `}` in this list type
  --> 1:20
   | #: list{a: integer b: double}
   |                    ^
-error: expected a type, found `:`
- --> 1:21
-  | #: list{a: integer b: double}
-  |                     ^
-error: expected a type, found `}`
- --> 1:29
-  | #: list{a: integer b: double}
-  |                             ^
 
 #---- unclosed_list_bracket
 #: list[integer
@@ -158,18 +138,6 @@ error: expected `:` after `[name]` in an optional parameter
  --> 1:11
   | #: fn([x] integer) -> integer
   |           ^^^^^^^
-error: expected `,` or `)` in this function type's parameters
- --> 1:11
-  | #: fn([x] integer) -> integer
-  |           ^^^^^^^
-error: expected a type, found `)`
- --> 1:18
-  | #: fn([x] integer) -> integer
-  |                  ^
-error: expected a type, found `->`
- --> 1:20
-  | #: fn([x] integer) -> integer
-  |                    ^^
 
 #---- optional_bad_name
 #: fn([1]: integer) -> integer
@@ -179,38 +147,6 @@ error: expected `[name]: TYPE` for an optional parameter
  --> 1:8
   | #: fn([1]: integer) -> integer
   |        ^
-error: expected `]` after the optional parameter name
- --> 1:8
-  | #: fn([1]: integer) -> integer
-  |        ^
-error: expected `:` after `[name]` in an optional parameter
- --> 1:8
-  | #: fn([1]: integer) -> integer
-  |        ^
-error: expected `,` or `)` in this function type's parameters
- --> 1:8
-  | #: fn([1]: integer) -> integer
-  |        ^
-error: expected a type, found number
- --> 1:8
-  | #: fn([1]: integer) -> integer
-  |        ^
-error: expected a type, found `]`
- --> 1:9
-  | #: fn([1]: integer) -> integer
-  |         ^
-error: expected a type, found `:`
- --> 1:10
-  | #: fn([1]: integer) -> integer
-  |          ^
-error: expected a type, found `)`
- --> 1:19
-  | #: fn([1]: integer) -> integer
-  |                   ^
-error: expected a type, found `->`
- --> 1:21
-  | #: fn([1]: integer) -> integer
-  |                     ^^
 
 #---- optional_unclosed_bracket
 #: fn([x: integer) -> integer

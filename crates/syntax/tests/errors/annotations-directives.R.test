@@ -25,10 +25,6 @@ error: expected a parameter name after `@param`
  --> 1:10
   | #: @param
   |          ^
-error: expected `{TYPE}` after `@param`
- --> 1:10
-  | #: @param
-  |          ^
 
 #---- param_missing_type
 #: @param x
@@ -72,10 +68,6 @@ error: expected a type after `@trust`
 x <- 1
 #++++
 error: expected a type name after `@type`
- --> 1:9
-  | #: @type
-  |         ^
-error: expected `{TYPE}` after `@type`
  --> 1:9
   | #: @type
   |         ^

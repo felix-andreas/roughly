@@ -21,7 +21,7 @@ SOURCE_FILE@0..19
         PARAMETER@17..18
           IDENT@17..18 "y"
         R_PAREN@18..19 ")"
-err: 19..19: expected a function body
+err: 5..13: expected a function body
 
 #---- function_no_body_inside_another_function_ts_error
 function(x = function()) {}
@@ -46,7 +46,7 @@ SOURCE_FILE@0..27
     BRACE_EXPR@25..27
       L_BRACE@25..26 "{"
       R_BRACE@26..27 "}"
-err: 23..24: expected a function body
+err: 13..21: expected a function body
 
 #---- not_a_call_subset_or_subset2_ts_error
 f

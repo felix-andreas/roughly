@@ -14,10 +14,6 @@ error: unclosed `(`; expected `)` to close the parameter list
  --> 1:14
   | f <- function(x, y
   |              ^
-error: expected a function body
- --> 1:19
-  | f <- function(x, y
-  |                   ^
 
 #---- function_parameter_separator
 f <- function(x y) x
@@ -48,9 +44,9 @@ error: expected a default value after `=`
 f <- function(x)
 #++++
 error: expected a function body
- --> 1:17
+ --> 1:6
   | f <- function(x)
-  |                 ^
+  |      ^^^^^^^^
 
 #---- lambda_bad_parameter
 g <- \(1) 1

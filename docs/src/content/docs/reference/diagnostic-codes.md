@@ -92,6 +92,8 @@ To go the other way: `[check] unused = false`, and any `[lint]` code set to `"of
 
 The code says **whose grammar was broken**, not which stage noticed: your R is `syntax-error`, your `#:` comment is `annotation`. So a type expression that does not parse, and a form the annotation grammar refuses deliberately such as a nested `<T>` binder, both report as `annotation` alongside the malformed-block findings below.
 
+**One mistake, one finding.** Recovery reports the first thing it cannot use and then stays quiet about the consequences: a `#:` region reports once (plus, at most, one unclosed opener, which is a structural fact about a construct rather than a per-token consequence), and an unterminated argument or parameter list ends at the next statement instead of adopting it. A function missing its body is not reported when its parameter list never closed — that is the same mistake said twice.
+
 A statement that fails to parse as R suppresses every name-resolution and typing finding overlapping it — the checker draws no conclusions from source it could not read. A broken annotation suppresses nothing outside its own block; inside it, the block carries no typing payload, so the refusal is the only finding.
 
 ### Name resolution

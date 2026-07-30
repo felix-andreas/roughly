@@ -504,7 +504,7 @@ SOURCE_FILE@0..14
       PARAMETER@12..13
         IDENT@12..13 "y"
       R_PAREN@13..14 ")"
-err: 14..14: expected a function body
+err: 0..8: expected a function body
 
 #---- lambda_function
 a <- \(arg) arg
