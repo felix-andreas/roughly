@@ -281,6 +281,36 @@ pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
                 related: Vec::new(),
             });
         }
+        for target in &naming.invalid_assignment_targets {
+            let range = TextRange::new(target.range.start() + offset, target.range.end() + offset);
+            // The dominant cause is a trailing operator pulling the next line
+            // in as its right-hand operand. It is that shape only when the
+            // line break falls AFTER the operator: a break before it (`a`
+            // newline `+ b`) is an ordinary continuation, and a multi-line
+            // left operand says nothing about where the operator sits.
+            let dangling_operator = target.operand_gap.is_some_and(|gap| {
+                file.text(db)
+                    .get(usize::from(gap.start() + offset)..usize::from(gap.end() + offset))
+                    .is_some_and(|between| {
+                        let through_operator = between.trim_end_matches(char::is_whitespace);
+                        between[through_operator.len()..].contains('\n')
+                    })
+            });
+            let hint = if dangling_operator {
+                " — the operator at the end of this line pulled the next line in as its right-hand side"
+            } else {
+                ""
+            };
+            diagnostics.push(Diagnostic {
+                range,
+                severity: Severity::Error,
+                code: "syntax-error",
+                message: format!(
+                    "this is a value, not a name, so nothing can be assigned to it{hint}"
+                ),
+                related: Vec::new(),
+            });
+        }
         for (expression, read) in &naming.namespace_reads {
             let Some(message) = namespace_read_message(db, read) else {
                 continue;

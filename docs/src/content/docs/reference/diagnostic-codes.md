@@ -89,6 +89,7 @@ To go the other way: `[check] unused = false`, and any `[lint]` code set to `"of
 | Code | Severity | On by default | Triggered by |
 | --- | --- | --- | --- |
 | `syntax-error` | error | yes | Anything the R parser rejects. The message varies with the failure ("unclosed `(`; expected `)` to close the parameter list"); the code does not |
+| `syntax-error` | error | yes | An assignment target R refuses — a computed value or a number where a name belongs (`1 + a <- 2`). R parses these and fails at run time, so the mistake is real but the parse looks clean; the commonest cause is a line ending in an operator that pulls the next line in as its right-hand side, which the message names when that is what happened. A `!`-headed target is deliberately exempt: `!` binds tighter than `<-`, so `expr(!!name <- value)` — building an assignment rather than performing one — has that same shape |
 
 The code says **whose grammar was broken**, not which stage noticed: your R is `syntax-error`, your `#:` comment is `annotation`. So a type expression that does not parse, and a form the annotation grammar refuses deliberately such as a nested `<T>` binder, both report as `annotation` alongside the malformed-block findings below.
 

@@ -88,6 +88,77 @@ count: Unknown
 98..101 error[type-mismatch] expected `character`, found `integer`
 
 #==== resolution
+#---- a_dangling_operator_reports_the_target_not_the_swallowed_names
+# The `+` makes the next line its right-hand operand, so `label <- "next"` is not
+# a definition at all — it is the target of an assignment, and R refuses it
+# ("target of assignment expands to non-language object"). Reading the target
+# reported `label` unresolved TWICE — both true under the real parse, neither
+# useful — while nothing named the operator. The target's own reads are
+# suppressed now, so the one below is the genuine read on the third line.
+total <- 1 +
+label <- "next"
+print(label)
+#++++
+total: character
+466..471 warning[unused] `total` is assigned but never used.
+475..484 error[syntax-error] this is a value, not a name, so nothing can be assigned to it — the operator at the end of this line pulled the next line in as its right-hand side
+501..506 warning[unresolved] I could not resolve `label` in this package, its imports, or builtins. Did you mean `labels`?
+
+#---- a_computed_assignment_target_is_reported_without_the_hint
+# Same mistake on one line: no continuation to mention.
+a <- 1L
+1 + a <- 2L
+#++++
+a: integer
+56..57 warning[unused] `a` is assigned but never used.
+64..69 error[syntax-error] this is a value, not a name, so nothing can be assigned to it
+
+#---- a_multiline_target_earns_no_hint_when_the_operator_starts_its_line
+# The target spans two lines, but the break falls BEFORE the operator, so no
+# line dangled: whatever went wrong here, the hint would misdescribe it.
+lead <- 1L
+lead
++ lead <- 2L
+#++++
+lead: integer
+166..172 error[syntax-error] this is a value, not a name, so nothing can be assigned to it
+
+#---- an_unquoted_assignment_target_stays_quiet
+# `!` binds tighter than `<-`, so `expr(!!name <- value)` — the ordinary way to
+# BUILD an assignment rather than perform one — parses as an assignment to
+# `!!name`. The refusal cannot tell that apart from a bare `!x <- 1` typo, and
+# the metaprogramming form is common in real packages while the typo is not, so
+# a `!`-headed target is deliberately left quiet.
+name <- 1L
+!!name <- 2L
+#++++
+name: integer
+
+#---- other_unary_targets_are_still_reported
+negated <- 1L
+-negated <- 2L
+#++++
+negated: integer
+0..7 warning[unused] `negated` is assigned but never used.
+14..22 error[syntax-error] this is a value, not a name, so nothing can be assigned to it
+
+#---- a_string_target_is_legal_r_and_stays_quiet
+# `"x" <- 1` binds `x` in R, so this is not the refused shape and must stay
+# quiet here. Typing does give it the binding; naming does not, so a later
+# `print(x)` still reports `x` unresolved — a separate gap, filed.
+"x" <- 1L
+#++++
+x: integer
+220..229 warning[unused] `x` is assigned but never used.
+
+#---- replacement_targets_stay_quiet
+v <- c(1, 2)
+names(v) <- c("a", "b")
+attr(v, "k") <- 1L
+#++++
+v: double[]
+42..43 warning[unused] `v` is assigned but never used.
+
 #---- use_before_any_definition_is_unresolved
 b <- a
 a <- 1L

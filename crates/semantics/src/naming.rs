@@ -21,7 +21,9 @@
 //! Deferred (structure already carries them): the nested-loop region memo and
 //! the unused-parameter lint.
 
-use crate::hir::{Argument, AssignSpelling, ExprId, ExpressionKind, Module, UnaryOperator};
+use crate::hir::{
+    Argument, AssignSpelling, ExprId, ExpressionKind, LiteralKind, Module, UnaryOperator,
+};
 use rustc_hash::FxHashMap;
 use std::collections::{BTreeMap, BTreeSet};
 use syntax::TextRange;
@@ -115,6 +117,23 @@ pub struct ItemNaming {
     /// Names written by `<<-` with no enclosing binding: R creates them in
     /// the global environment, so they resolve package-wide.
     pub super_globals: BTreeSet<String>,
+    /// Assignment targets R refuses to assign to — a computed value or a
+    /// number where a name belongs. R parses these and fails at run time
+    /// ("target of assignment expands to non-language object"), so nothing in
+    /// the parse marks them, and the reads inside such a target are suppressed:
+    /// they are the mistake's consequences, not findings of their own.
+    pub invalid_assignment_targets: Vec<InvalidAssignmentTarget>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InvalidAssignmentTarget {
+    pub range: TextRange,
+    /// For a computed target, the source between the two operands, which holds
+    /// the operator. A line break *after* the operator means the previous line
+    /// dangled and swallowed the next one — the commonest way to arrive here,
+    /// and worth naming in the message. Deciding that needs the source text,
+    /// which this pass does not have, so it carries the span instead.
+    pub operand_gap: Option<TextRange>,
 }
 
 /// Resolve one item's HIR. The item's own top-level assignment target (if any)
@@ -928,6 +947,32 @@ impl Context<'_> {
                     self.record_write_site(assignment, base_expression, &name, range, slot, false);
                     self.resolve_replacement_subscripts(target, base_expression);
                 }
+                // R accepts a name, a string (`"x" <- 1` binds `x`), and a
+                // replacement call bottoming out at one. A computed value or a
+                // number is refused — at run time, so the parse looks clean
+                // and the reads inside the target would otherwise be reported
+                // as though the author had written them deliberately. That is
+                // what a dangling operator on the previous line produces: the
+                // line below is swallowed as the target, and its names come
+                // back `unresolved` while nothing mentions the operator.
+                None if self.emit && refuses_assignment(&target_expression.kind) => {
+                    // Recovery can leave the operands out of order or
+                    // overlapping, in which case there is no gap to read.
+                    let operand_gap = match &target_expression.kind {
+                        ExpressionKind::Binary { lhs, rhs, .. } => {
+                            let start = self.module.expression(*lhs).range.end();
+                            let end = self.module.expression(*rhs).range.start();
+                            (start <= end).then(|| TextRange::new(start, end))
+                        }
+                        _ => None,
+                    };
+                    self.naming
+                        .invalid_assignment_targets
+                        .push(InvalidAssignmentTarget {
+                            range: target_expression.range,
+                            operand_gap,
+                        });
+                }
                 None => self.resolve(target),
             },
         }
@@ -1086,6 +1131,22 @@ fn join_flow(into: &mut FlowState, other: &FlowState) {
         if !other.contains_key(slot) {
             set.insert(Reach::Unassigned);
         }
+    }
+}
+
+/// Whether R refuses to assign to a target of this shape. Only the shapes it
+/// certainly refuses: a computed value, or a literal that is not a string. A
+/// parenthesised target is left alone — R's own handling of `(x) <- 1` is odd
+/// enough that refusing it here would be guessing. A `!`-headed target is left
+/// alone too: `!` binds tighter than `<-`, so metaprogramming that *builds* an
+/// assignment with the unquote operator — `expr(!!name <- value)` — parses as
+/// an assignment to `!!name`, and nothing is ever assigned there.
+fn refuses_assignment(kind: &ExpressionKind) -> bool {
+    match kind {
+        ExpressionKind::Binary { .. } => true,
+        ExpressionKind::Unary { operator, .. } => *operator != UnaryOperator::Not,
+        ExpressionKind::Literal(literal) => !matches!(literal, LiteralKind::String(_)),
+        _ => false,
     }
 }
 

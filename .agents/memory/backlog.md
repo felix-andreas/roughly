@@ -272,7 +272,7 @@ use `-` instead* — and the invisible ones are **described rather than quoted**
 zero-width space between backticks shows the reader an empty pair and a caret over nothing. A
 character with no known ASCII counterpart keeps the generic wording.
 
-### 5. A dangling binary operator swallows the next statement, and the findings are correct-but-useless
+### 5. FIXED — a dangling binary operator swallowed the next statement, and the findings were useless
 
 ```r
 total <- 1 +
@@ -280,16 +280,58 @@ label <- "next"
 print(label)
 ```
 
-No syntax error — **and that is right**, R parses it (`total <- ((1 + label) <- "next")`) and fails at
-run time with `target of assignment expands to non-language object`. But what the user gets is two
-``I could not resolve `label` … Did you mean `labels`?`` warnings pointing at the two lines that look
-correct, and nothing anywhere about the dangling `+`. Both warnings are true under the real parse and
-neither is useful. This wants a lint — a binary operator left at end of line continuing onto the next
-statement — not a syntax error; R's own message at least names the collision.
+No syntax error, and that is right: R parses it as `total <- ((1 + label) <- "next")` and fails at run
+time. But the user got two ``I could not resolve `label` `` warnings on the lines that look correct,
+and nothing anywhere about the dangling `+`.
+
+Filed as wanting a lint; **the cause turned out to be sharper than that.** R refuses the shape
+outright — `target of assignment expands to non-language object` — because the swallowed line became
+the *target* of an assignment, and `1 + label` is not something you can assign to. `resolve_assignment_target`
+had `_ => match self.replacement_base(target) { … None => self.resolve(target) }`, so an unassignable
+target was silently read as an ordinary expression and its names reported.
+
+Now reported where the mistake is, with the cause named when a trailing operator really is what
+pulled the next line in: *this is a value, not a name, so nothing can be assigned to it — the operator
+at the end of this line pulled the next line in as its right-hand side*. The target's own reads are
+suppressed, so the two misleading warnings are gone (a genuine later read of the name still reports).
+
+That clause is decided structurally, not by "the target spans a line": naming carries the span
+*between the two operands* (which is where the operator lives) and the hint fires only when the line
+break falls after it. A break before the operator (`a` newline `+ b`) is an ordinary continuation, and
+a multi-line left operand says nothing about where the operator sits — both would have been described
+wrongly by a plain contains-a-newline test.
+
+Deliberately narrow, because R accepts more than a bare name: only a **computed value** and a
+**non-string literal** are reported. `"x" <- 1` binds `x` in R and stays quiet; `` `y` <- 1 ``,
+`names(v) <- …`, `attr(v, "k") <- …`, `v[[1]] <- …` all stay quiet; a *parenthesised* target is left
+alone because R's own handling of `(x) <- 1` is odd enough that refusing it would be guessing. All
+checked against R 4.3.3.
+
+Two carve-outs the corpus forced, both worth remembering:
+
+- **A `!`-headed target is exempt.** `!` binds tighter than `<-`, so `expr(!!name <- value)` — building
+  an assignment rather than performing one — parses as an assignment to `!!name`. This was a real false
+  positive in dplyr (`expr(!!obj_sym <- !!get_expr(wrapper))`, whose authors ship
+  `utils::globalVariables("!<-")` to placate `R CMD check`). The refusal cannot tell it from a bare
+  `!x <- 1` typo, and the metaprogramming form is common while the typo is not. Other unary operators
+  are still reported.
+- **The operand-gap span needs a bounds check.** Error recovery can leave the operands out of order,
+  and `TextRange::new(lhs.end, rhs.start)` then panics. Caught by the `ide` fuzz suite, not by any
+  fixture — which is the argument for the day-one fuzz rule in one line.
+
+A "line ends in an operator" lint was measured and rejected instead: **15,129 lines across data.table,
+dplyr, ggplot2 and shiny end in a continuation operator**, every one of them legal.
+
+### Found while doing that: a string assignment target creates no resolvable binding
+
+`"x" <- 1L` is legal R and binds `x` — verified, R prints `1`. Typing gives it the binding (`x:
+integer`), but naming does not, so a later `print(x)` reports ``I could not resolve `x` ``. A false
+positive on legal, if unusual, R. Small and self-contained: `replacement_base` should treat a string
+literal target as the name it spells.
 
 Move each finding into `test-user-reports.md` as it closes.
 
-## Open — user reports (from the maintainer, not a simulated round)## Open — user reports (from the maintainer, not a simulated round)
+## Open — user reports (from the maintainer, not a simulated round)
 
 ### FIXED — the REPL wrapped a table that fits
 
