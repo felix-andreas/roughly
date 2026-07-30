@@ -1020,14 +1020,23 @@ impl<'db> InferenceTable<'db> {
     /// explanation cannot disagree with the verdict — and recurses while both
     /// sides are records, so the path reads outermost first. `None` when the
     /// failure is not about one field, which leaves the whole types to say so.
+    ///
+    /// Rolls the table back before returning. [`Self::compatible`] *keeps* the
+    /// bindings a `true` verdict made — that is how a generic parameter infers
+    /// its argument — so probing the fields that fit would otherwise leak those
+    /// bindings out of a reporting path and change a later verdict in the same
+    /// item. Explaining a failure must not alter what is being explained.
     pub fn explain_record_mismatch(
         &mut self,
         db: &'db dyn Db,
         actual: Ty<'db>,
         expected: Ty<'db>,
     ) -> Option<RecordMismatch<'db>> {
+        let snapshot = self.snapshot();
         let mut path = Vec::new();
-        self.walk_record_mismatch(db, actual, expected, &mut path)
+        let mismatch = self.walk_record_mismatch(db, actual, expected, &mut path);
+        self.rollback(snapshot);
+        mismatch
     }
 
     fn walk_record_mismatch(
