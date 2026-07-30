@@ -92,12 +92,37 @@ underlines the smallest expression its message is about.
 
 ### F. Smaller, but cheap
 
-- `do.call` returns `Any`, which disables checking *and* blinds `strict` — a hole in exactly the
-  higher-order code this checker is for. Corpus-authored `Any` where the docs say `Any` should appear
-  only when a user writes it.
-- `strict` only asks whether a binding *is* `Unknown`, not whether it *contains* one, so
-  `fn(Unknown) -> integer` passes silently. Undercuts the "only way to keep a gap from looking like a
-  pass" claim.
+- **Both of the entries that used to sit here were misdiagnosed, and the measurements are the
+  keepable part.** They read: "`do.call` returns `Any`, which disables checking *and* blinds `strict`
+  — corpus-authored `Any` where the docs say `Any` should appear only when a user writes it", and
+  "`strict` only asks whether a binding *is* `Unknown`, not whether it *contains* one". Checked
+  against the tool:
+
+  - **Changing `do.call`'s return from `Any` to `Unknown` produces no strict finding at all.** Tried
+    it: edited the stub, rebuilt, ran a strict project over `do.call(fun, args)`. Nothing. So `Any`
+    is not what blinds strict, and swapping it would have been a change with a false rationale in its
+    commit message.
+  - **Strict has no binding-level `Unknown` test to widen.** It reports *origins recorded at
+    construct sites* (`UnsupportedConstruct`, `UndeterminedReference`, `LoopWidened`,
+    `RecursiveUnknown`) — there is nothing that inspects a finished type, so "only asks whether it
+    *is* `Unknown`" describes a mechanism that does not exist.
+  - The gap the second entry was reaching for **is real**: `g <- f` closes to `g: fn(p: Unknown) -> Unknown`
+    (pinned by the `aliased_function_reference_exports_closed` fixture) and strict reports nothing,
+    so calls through `g` are unchecked and it looks like a pass.
+  - **`Any` is not corpus-authored by accident, and the docs were the wrong half.** The shipped stubs
+    declare **176** entries whose return is `Any` — across nine files, not just `base` — and
+    `-> Unknown` in **zero**, with the stub header naming each compromise. The reference bullet
+    claiming `Any` "should appear only because the user explicitly wrote it" was simply false, and is
+    fixed.
+  - The one behavioural difference between them, verified: `@if-unknown` coerces an `Unknown` and is
+    **refused** on an `Any` ("this is already `Any` — drop the annotation").
+
+  **What is actually open**, then: should strict report a binding whose exported type *contains*
+  `Unknown`? That is a design question, not a bug fix, and it needs volume measured before it is
+  chosen — strict already emits **2879 findings on dplyr and 2458 on shiny** with typing and strict
+  forced on, and `erase_residual_vars` gives every aliased function `Unknown` parameters, so a
+  containment sweep would fire on an idiom (`g <- f`) that ordinary R uses constantly. Decide it as a
+  design note with numbers, not as a one-line widening.
 - **NOT cheap, and the current refusal is the sound choice — measured, so do not "just widen the
   constraint".** Filed as: `logical` is accepted at a declared `integer` parameter but rejected at an
   inferred `numeric` one, so the same function is accepted or rejected depending on whether the type

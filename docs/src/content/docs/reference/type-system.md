@@ -802,7 +802,12 @@ Examples:
 - `Any` is the explicit escape hatch from static type checking
 - every type is compatible with `Any`
 - `Any` is compatible with every type
-- `Any` should appear only because the user explicitly wrote it
+- `Any` has two sources: **you wrote it**, or a **standard-library declaration** did. The shipped stub
+  corpus declares it deliberately and often — roughly 180 return positions — where a precise type
+  would reject calls R accepts or would need a feature the type grammar does not have yet. The stub
+  files name each compromise in their own header (a value-dependent result shape, a `T`-or-`NULL`
+  hybrid, arbitrary identifier-named arguments, a formal with a trailing dot). So `Any` in a hover or a
+  finding is not by itself a sign that something is wrong
 
 #### `Unknown`
 
@@ -813,8 +818,18 @@ Examples:
   is also why a gap in the checker's knowledge means checks are *skipped* rather than wrong: a value
   the checker could not type flows into a `double` parameter without complaint
 - `Unknown` differs from `Any` in intent, not in compatibility: `Any` is a declared "do not check
-  this", while `Unknown` records that the checker *could not tell*. Only `Unknown` is reported by
-  [strict mode](#strict-mode), which is the way to see where the checking stopped
+  this", while `Unknown` records that the checker *could not tell*. The one place that intent changes
+  behaviour is [`@if-unknown`](#unknown-only-coercions), which supplies a type where one is missing: it
+  applies to an `Unknown` and is **refused** on an `Any`, because overriding a deliberate escape hatch
+  is a different act from filling a gap
+- [Strict mode](#strict-mode) is the way to see where checking stopped, but it reports **the sites
+  where the checker gave up**, not types that happen to be `Unknown`. A construct it cannot model, a
+  reference with no known type, a binding that does not stabilize across a loop, a recursive
+  definition — each records its own origin, and that origin is the finding. A type is not reported for
+  being `Unknown`: a declaration whose return type *is* `Unknown` produces no strict finding at its
+  call sites, and an `Unknown` nested inside a larger type (the `fn(p: Unknown) -> Unknown` an aliased
+  generic closes to) is not reported either. Whether it should be is an open question, not a
+  guarantee this page makes
 - `Unknown` is not an explicit escape hatch
 - `Unknown` should remain visible in user-facing output and fixture expectations
 - `Unknown` is used to preserve progress and reduce cascading secondary diagnostics
