@@ -88,7 +88,13 @@ The literal has a fixed shape, so the checker knows the field is not there, inst
 `NULL` you get at runtime:
 
 ```text
-error[type-mismatch]: field `fullnme` does not exist in `list{fullname: character, age: integer}`. Did you mean `fullname`?
+type-mismatch
+
+  x field `fullnme` does not exist in `list{fullname: character, age: integer}`. Did you mean `fullname`?
+   --[R/a.R:2:8]
+ 1 | person <- list(fullname = "Ada", age = 36L)
+ 2 | person$fullnme
+   |        ^^^^^^^
 ```
 
 ## Functions
@@ -163,7 +169,13 @@ greet(list(name = "Bob", age = 40L))
 ```
 
 ```text
-error[type-mismatch]: expected `Person`, found `list{name: character, age: integer}`
+type-mismatch
+
+  x expected `Person`, found `list{name: character, age: integer}`
+    --[R/a.R:12:7]
+ 11 | 
+ 12 | greet(list(name = "Bob", age = 40L))
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 ```
 
 The list has exactly the right fields with exactly the right types, and it is still rejected.
@@ -206,7 +218,13 @@ to_fahrenheit(warm)
 ```
 
 ```text
-error[type-mismatch]: expected `Celsius`, found `Fahrenheit`
+type-mismatch
+
+  x expected `Celsius`, found `Fahrenheit`
+    --[R/a.R:15:15]
+ 14 | warm <- to_fahrenheit(freezing)
+ 15 | to_fahrenheit(warm)
+    |               ^^^^
 ```
 
 The last line converts an already-converted temperature. Both types are `double` underneath, and
@@ -230,7 +248,13 @@ A `#:` block does one thing: it declares types (`@type`, `@alias`) **or** it ann
 the next line. Running them together reports:
 
 ```text
-error[annotation]: `@type` and `@alias` declarations need their own `#:` block — separate them from other annotations with a blank line.
+annotation
+
+  x `@type` and `@alias` declarations need their own `#:` block — separate them from other annotations with a blank line.
+   --[R/a.R:1:1]
+ 1 | --> #: @type Row {list{id: integer}}
+ 2 | `-> #: fn(x: integer) -> integer
+ 3 |     f <- function(x) x
 ```
 
 Separate them with a blank line, as above.
