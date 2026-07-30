@@ -249,9 +249,34 @@ impl Parser<'_> {
     }
 
     fn push_error(&mut self, range: TextRange, message: impl Into<String>) {
-        let mut error = SyntaxError::new(message, range);
+        let mut error = SyntaxError::new(message, self.on_one_line(range));
         error.in_annotation = self.in_annotation;
         self.errors.push(error);
+    }
+
+    /// A blame range never crosses a line break. An error reported *at* the
+    /// current token blames that token, and at the end of a line — the end of a
+    /// `#:` region, most often — the current token is the newline itself, whose
+    /// span runs from the end of one line to the start of the next. An editor
+    /// draws that as a squiggle across the break, pointing at neither line.
+    ///
+    /// Such a range collapses onto the last character of code on its own line,
+    /// which is where the reader has to look anyway. Trailing whitespace is
+    /// skipped so the caret lands on the code and not beside it.
+    fn on_one_line(&self, range: TextRange) -> TextRange {
+        let text = &self.text[..usize::from(range.end()).min(self.text.len())];
+        let Some(break_offset) = text[usize::from(range.start())..]
+            .find('\n')
+            .map(|index| usize::from(range.start()) + index)
+        else {
+            return range;
+        };
+        let end = self.text[..break_offset].trim_end().len();
+        let start = self.text[..end]
+            .char_indices()
+            .next_back()
+            .map_or(end, |(index, _)| index);
+        TextRange::new(TextSize::from(start as u32), TextSize::from(end as u32))
     }
 
     /// The empty range just past the last significant token before the

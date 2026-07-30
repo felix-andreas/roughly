@@ -22,9 +22,9 @@ error: expected `,` or `)` in this function type's parameters
 step <- function(x) x
 #++++
 error: expected a return type after `->`
- --> 1:21
+ --> 1:20
   | #: fn(x: integer) ->
-  |                     ^
+  |                    ^
 
 #==== containers
 #---- unclosed_record_brace
@@ -32,9 +32,9 @@ error: expected a return type after `->`
 box <- list(a = 1L)
 #++++
 error: expected `,` or `}` in this list type
- --> 1:19
+ --> 1:18
   | #: list{a: integer
-  |                   ^
+  |                  ^
 
 #---- record_field_separator
 #: list{a: integer b: double}
@@ -60,9 +60,9 @@ error: unclosed `[` in this list type; expected a matching `]`
 value <- 1L
 #++++
 error: expected a type
- --> 1:13
+ --> 1:12
   | #: integer |
-  |             ^
+  |            ^
 
 #==== binders
 #---- unclosed_binder_list
@@ -125,9 +125,9 @@ error: higher-rank polymorphism is not supported: type parameter binders may onl
 wrapped <- make_box(1L)
 #++++
 error: expected `,` or `>` in the type argument list
- --> 1:15
+ --> 1:14
   | #: Box<integer
-  |               ^
+  |              ^
 
 #==== optional_parameters
 #---- optional_missing_colon

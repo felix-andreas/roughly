@@ -73,9 +73,22 @@ underlines the smallest expression its message is about.
   expression its message is about", noted as such in the reference. Closing it means threading the
   value's `ExprId` into `CallArgument` and the other mismatch sites, then walking the HIR to find the
   `list(...)` argument whose name matches the path's first segment. Worth doing; a slice of its own.
-- **Still open** — out-of-range ranges: a parse error reported on line 10 of a 9-line file;
-  annotation ranges ending at end-of-line spill onto the next line, so editors squiggle across the
-  break.
+- **FIXED (the spill half)** — annotation ranges ending at end-of-line spilled onto the next line, so
+  editors squiggled across the break. Measured on a file of six deliberately broken `#:` regions:
+  **four of eight findings** ran from the end of one line to column 1 of the next. Cause: an error
+  reported *at* the current token blames that token, and at the end of a region the current token is
+  the **newline**, whose span is exactly the break. A blame range now never crosses a line break — it
+  collapses onto the last character of code on its own line (`Parser::on_one_line`, applied in
+  `push_error` so the semantic range is right for the JSON, LSP and CLI paths alike, not patched in a
+  renderer). Trailing whitespace is skipped so the caret lands on code: "expected a type" for
+  `#: integer |` now points at the `|`, and "expected a return type after `->`" at the `>`. Twenty-nine
+  fixture expectations moved by one character, every one of them off the newline and onto code. The
+  rule is in the reference under §Where a finding points.
+
+  **Still open (the other half)** — a parse error reported past the end of the file. The originally
+  filed shape (line 10 of a 9-line file) did **not** reproduce: an unterminated `f <- function(x,` in a
+  one-line file now reports at `1:14-1:15`, in range. Either an earlier fix covered it or the note was
+  imprecise; needs a fresh repro before it can be worked, and should be re-derived rather than trusted.
 
 ### F. Smaller, but cheap
 

@@ -2637,6 +2637,12 @@ message agree. Concretely:
   with no `else` contributes an implicit `NULL` that belongs to none of them) the whole construct
   keeps the one finding
 
+A finding's range also **never crosses a line break**. An error reported at the end of a line — the
+end of a `#:` region, most often — would otherwise blame the newline itself, whose span runs from the
+end of one line to the start of the next, and an editor draws that as a squiggle across the break
+pointing at neither line. Such a range collapses onto the last character of code on its own line,
+which is where the reader has to look anyway.
+
 The one exception is a [record field](#reporting-a-record-that-does-not-fit): the message names the
 field, and the path to it, but the underline stays on the whole value — a type carries no source
 ranges, so the field's own range is not available where the two types are compared.

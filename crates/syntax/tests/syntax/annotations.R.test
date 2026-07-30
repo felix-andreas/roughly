@@ -739,7 +739,7 @@ SOURCE_FILE@0..20
     WHITESPACE@17..18 " "
     LITERAL@18..20
       INTEGER@18..20 "1L"
-err: 12..13: expected a type
+err: 11..12: expected a type
 
 #---- unclosed_generic
 #: Result<integer
@@ -765,7 +765,7 @@ SOURCE_FILE@0..25
     WHITESPACE@22..23 " "
     LITERAL@23..25
       INTEGER@23..25 "1L"
-err: 17..18: expected `,` or `>` in the type argument list
+err: 16..17: expected `,` or `>` in the type argument list
 
 #---- unknown_directive
 #: @frobnicate stuff
@@ -897,4 +897,4 @@ SOURCE_FILE@0..35
       WHITESPACE@33..34 " "
       NAME@34..35
         IDENT@34..35 "x"
-err: 16..17: expected `,` or `)` in this function type's parameters
+err: 15..16: expected `,` or `)` in this function type's parameters
