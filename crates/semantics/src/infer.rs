@@ -14,6 +14,7 @@
 
 use crate::Db;
 use crate::annotations::NamedDefinition;
+use crate::diagnostics::nearest_field_name;
 use crate::types::{
     Atomic, Constraint, FunctionType, InferenceVar, Name, Ty, TyKind, substitute_rigid, union_of,
 };
@@ -1010,6 +1011,94 @@ impl<'db> InferenceTable<'db> {
         None
     }
 
+    /// Which field keeps `actual` from serving `expected`, for a caller about
+    /// to report the failure. Two record types printed side by side are long
+    /// near-identical strings the reader has to diff by eye, and a nested one
+    /// never names the path at all.
+    ///
+    /// Pairs fields by name — the rule [`Self::compatible`] uses, so the
+    /// explanation cannot disagree with the verdict — and recurses while both
+    /// sides are records, so the path reads outermost first. `None` when the
+    /// failure is not about one field, which leaves the whole types to say so.
+    pub fn explain_record_mismatch(
+        &mut self,
+        db: &'db dyn Db,
+        actual: Ty<'db>,
+        expected: Ty<'db>,
+    ) -> Option<RecordMismatch<'db>> {
+        let mut path = Vec::new();
+        self.walk_record_mismatch(db, actual, expected, &mut path)
+    }
+
+    fn walk_record_mismatch(
+        &mut self,
+        db: &'db dyn Db,
+        actual: Ty<'db>,
+        expected: Ty<'db>,
+        path: &mut Vec<String>,
+    ) -> Option<RecordMismatch<'db>> {
+        let (TyKind::Record(actual_fields), TyKind::Record(expected_fields)) = (
+            self.resolve(db, actual).kind(db).clone(),
+            self.resolve(db, expected).kind(db).clone(),
+        ) else {
+            return None;
+        };
+        // Optionality is deliberately not compared: `compatible` does not
+        // either, so treating it as a difference here would explain a failure
+        // that something else caused.
+        for expected_field in &expected_fields {
+            let name = expected_field.name.text(db);
+            let Some(actual_field) = actual_fields
+                .iter()
+                .find(|field| field.name == expected_field.name)
+            else {
+                path.push(name.to_owned());
+                return Some(RecordMismatch::Missing {
+                    near: nearest_field_name(
+                        name,
+                        actual_fields.iter().map(|field| field.name.text(db)),
+                    ),
+                    path: std::mem::take(path),
+                });
+            };
+            if self.compatible(db, actual_field.ty, expected_field.ty) {
+                continue;
+            }
+            path.push(name.to_owned());
+            if let Some(inner) =
+                self.walk_record_mismatch(db, actual_field.ty, expected_field.ty, path)
+            {
+                return Some(inner);
+            }
+            return Some(RecordMismatch::Field {
+                expected: self.resolve(db, expected_field.ty),
+                found: self.resolve(db, actual_field.ty),
+                path: std::mem::take(path),
+            });
+        }
+        // A surplus field, checked only after every paired one: a wrong type in
+        // a field both sides declare is the likelier mistake, and a renamed
+        // field shows up as the missing half above with this one as its hint.
+        for actual_field in &actual_fields {
+            if expected_fields
+                .iter()
+                .any(|field| field.name == actual_field.name)
+            {
+                continue;
+            }
+            let name = actual_field.name.text(db);
+            path.push(name.to_owned());
+            return Some(RecordMismatch::Unexpected {
+                near: nearest_field_name(
+                    name,
+                    expected_fields.iter().map(|field| field.name.text(db)),
+                ),
+                path: std::mem::take(path),
+            });
+        }
+        None
+    }
+
     /// The constraint an unbound variable carries. This is the one fact the
     /// rendered type cannot show: `fn(s: U) -> U` prints the same whether `U`
     /// accepts anything or only numbers, which is why a plain mismatch between
@@ -1119,6 +1208,33 @@ pub enum FunctionMismatch<'db> {
         /// What the function produces.
         returns: Ty<'db>,
         constraint: Option<Constraint>,
+    },
+}
+
+/// The one field that keeps a record from serving an expected record type,
+/// from [`InferenceTable::explain_record_mismatch`]. `path` always ends in the
+/// field the finding is about and names its enclosing fields before it, so a
+/// nested failure reads `config.retries`.
+#[derive(Debug, Clone, PartialEq, Eq, salsa::SalsaValue)]
+pub enum RecordMismatch<'db> {
+    /// A field both sides declare, whose types do not fit.
+    Field {
+        path: Vec<String>,
+        expected: Ty<'db>,
+        found: Ty<'db>,
+    },
+    /// A field the expected type declares that the value does not have.
+    Missing {
+        path: Vec<String>,
+        /// A field the value does have whose name is a near miss — which is
+        /// how a renamed field reads, since it goes missing and turns up
+        /// misspelled at the same time.
+        near: Option<String>,
+    },
+    /// A field the value has that the expected type does not declare.
+    Unexpected {
+        path: Vec<String>,
+        near: Option<String>,
     },
 }
 

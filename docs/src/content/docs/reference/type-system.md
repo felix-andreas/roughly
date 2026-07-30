@@ -726,6 +726,35 @@ Examples:
 
 - `list(foo = 1L, bar = "foo")` infers as `list{foo: integer, bar: character}`
 
+Two record-like lists are compatible when they declare **the same field names** and each field's type
+is compatible with the field of that name on the other side. Fields are paired by name, so declaration
+order does not matter: `list(label = "a", id = 1L)` satisfies `list{id: integer, label: character}`.
+
+##### Reporting a record that does not fit
+
+When a record-like list is rejected, the finding names **the one field that failed**, not the two
+whole types:
+
+- a field both sides declare, whose types do not fit — *expected `logical` for field `active`, found
+  `character`*
+- a field the expected type declares that the value does not have — *expected a field `label` here,
+  which this list does not have*. When the value has a near-miss of that name, the finding says so
+  instead, because that is what a renamed field looks like: *expected a field `identifier` here, and
+  this list has `idenifier` instead — check the spelling*
+- a field the value has that the expected type does not declare — *this list has a field `extra`,
+  which is not expected here*
+
+Nested records name the **path**, outermost field first: a bad `count` inside a `retry` field reports
+*expected `integer` for field `retry.count`, found `character`*.
+
+Two whole types are printed only when the failure is not about one field — a record against a
+non-record, or against `list[T]` — which is the case they do explain. For a single field they are two
+long near-identical strings to diff by eye, and for a nested one they never name the path at all.
+
+The finding is placed on the whole value, not on the field: a type carries no source ranges, so the
+field's own range is not available where the comparison happens. This is the one documented exception
+to [where a finding points](#where-a-finding-points).
+
 #### Array-like lists
 
 An array-like list `list[T]` represents a list whose elements all share a common element type `T`. Array-like lists do not have fixed positional semantics and do not require element names to be statically known. They are normally introduced via annotations or by coercion from tuple-like, record-like, or map-like shapes when all values are compatible with `T`.
@@ -2600,6 +2629,10 @@ message agree. Concretely:
   site — the same rule an explicit `return` follows. When no single expression is at fault (an `if`
   with no `else` contributes an implicit `NULL` that belongs to none of them) the whole construct
   keeps the one finding
+
+The one exception is a [record field](#reporting-a-record-that-does-not-fit): the message names the
+field, and the path to it, but the underline stays on the whole value — a type carries no source
+ranges, so the field's own range is not available where the two types are compared.
 
 ## Syntax errors
 

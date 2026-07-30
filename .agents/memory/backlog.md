@@ -51,11 +51,28 @@ underlines the smallest expression its message is about.
   from the argument expression.
 - **FIXED (the surplus half)** — surplus positional arguments blamed the callee; they now blame the
   first argument with no formal left to take it, which is the one the reader must remove. A
-  *missing* argument still blames the callee: there is no argument to point at. **Still open:** a
-  record mismatch is never attributed to the offending field, printing two ~340-character
-  near-identical type dumps to diff by eye (nested is worse — the path is never named). Same family
-  as the function-mismatch fix (§E.8), which named the failing parameter or return instead of
-  printing both signatures; a record wants the same treatment.
+  *missing* argument still blames the callee: there is no argument to point at.
+- **FIXED** — a record mismatch printed two long near-identical type dumps to diff by eye, and a
+  nested one never named the path. It now names the one field that failed, the same treatment the
+  function-mismatch fix gave a signature: *expected `logical` for field `active`, found `character`*,
+  and `retry.count` for a nested one. A field the value lacks, and one it has that is not declared,
+  each say so; a **renamed** field is the interesting case, because it goes missing and turns up
+  misspelled at once, so the finding names both (*expected a field `identifier` here, and this list
+  has `idenifier` instead*) rather than reporting the absence alone. Pairs fields by name, which is
+  what `compatible` does, so the explanation cannot disagree with the verdict — and optionality is
+  deliberately not compared, because `compatible` does not either. Whole types are still printed when
+  the failure is not about one field (a record against a non-record, or against `list[T]`), which is
+  the case they do explain. Every site that reports two types side by side goes through one
+  `Checker::mismatch`, so the narrowing cannot be present at one and missing at another; that also
+  picked up the `@new` nominal path for free.
+
+  **Still open, and deliberately not done here: the caret.** The message names the field, but the
+  underline stays on the whole value, because a type carries no source ranges — `check_argument` has
+  the argument's `TextRange` and not its `ExprId`, so the field's own range is not reachable where the
+  comparison happens. This is the one documented exception to "a finding underlines the smallest
+  expression its message is about", noted as such in the reference. Closing it means threading the
+  value's `ExprId` into `CallArgument` and the other mismatch sites, then walking the HIR to find the
+  `list(...)` argument whose name matches the path's first segment. Worth doing; a slice of its own.
 - **Still open** — out-of-range ranges: a parse error reported on line 10 of a 9-line file;
   annotation ranges ending at end-of-line spill onto the next line, so editors squiggle across the
   break.

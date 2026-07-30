@@ -7,7 +7,7 @@
 //! expected/found message), because a fresh renderer restarts the numbering.
 
 use crate::check::{OperandExpectation, TypeError, TypeErrorKind};
-use crate::infer::FunctionMismatch;
+use crate::infer::{FunctionMismatch, RecordMismatch};
 use crate::types::{Atomic, Constraint, FunctionType, Name, Ty, TyKind, TypeScheme};
 use crate::{Db, DocumentKind, SourceFile, item_check, item_tree, parse};
 use syntax::TextRange;
@@ -1684,6 +1684,41 @@ fn render_type_error_message(db: &dyn Db, error: &TypeError<'_>) -> String {
         ),
         // A constrained position has no type to show — the constraint is what
         // refuses the value, so the message says what the body needs instead.
+        // Two record types differ in one field. Naming it, and printing only
+        // the two types at that position, is the whole point of the variant —
+        // the alternative is a pair of long strings to diff by eye.
+        TypeErrorKind::RecordShape { mismatch } => match mismatch.as_ref() {
+            RecordMismatch::Field {
+                path,
+                expected,
+                found,
+            } => format!(
+                "expected `{}` for field `{}`, found `{}`",
+                renderer.render(db, *expected),
+                path.join("."),
+                renderer.render(db, *found)
+            ),
+            RecordMismatch::Missing { path, near } => match near {
+                Some(near) => format!(
+                    "expected a field `{}` here, and this list has `{near}` instead — check the spelling",
+                    path.join(".")
+                ),
+                None => format!(
+                    "expected a field `{}` here, which this list does not have",
+                    path.join(".")
+                ),
+            },
+            RecordMismatch::Unexpected { path, near } => match near {
+                Some(near) => format!(
+                    "this list has a field `{}`, which is not expected here. Did you mean `{near}`?",
+                    path.join(".")
+                ),
+                None => format!(
+                    "this list has a field `{}`, which is not expected here",
+                    path.join(".")
+                ),
+            },
+        },
         TypeErrorKind::CallbackShape { mismatch } => match mismatch.as_ref() {
             FunctionMismatch::Parameter {
                 name,

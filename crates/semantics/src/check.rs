@@ -18,7 +18,7 @@ use crate::hir::{
     Argument, AssignSpelling, BinaryOperator, ExprId, ExpressionKind, LiteralKind, Module,
     UnaryOperator,
 };
-use crate::infer::{Entry, FunctionMismatch, InferenceTable, UnifyError};
+use crate::infer::{Entry, FunctionMismatch, InferenceTable, RecordMismatch, UnifyError};
 use crate::naming::{BindingId, ItemNaming};
 use crate::types::{
     Atomic, Constraint, FunctionType, InferenceVar, Name, RecordField, RestParameter, Ty, TyKind,
@@ -40,6 +40,13 @@ pub enum TypeErrorKind<'db> {
     Mismatch {
         expected: Ty<'db>,
         found: Ty<'db>,
+    },
+    /// Two record types that differ in one field. Its own variant rather than a
+    /// mismatch between the two whole types, because those print as long
+    /// near-identical strings the reader has to diff by eye — and a nested
+    /// difference is never attributed to a path at all.
+    RecordShape {
+        mismatch: Box<RecordMismatch<'db>>,
     },
     NotAFunction {
         found: Ty<'db>,
@@ -440,13 +447,8 @@ pub fn check_item_with_annotation<'db>(
                                 let range = module.expression(*value).range;
                                 let resolved_value = context.table.resolve(db, value_ty);
                                 if !context.table.compatible(db, resolved_value, expected) {
-                                    context.errors.push(TypeError {
-                                        range,
-                                        kind: TypeErrorKind::Mismatch {
-                                            expected: context.table.resolve(db, expected),
-                                            found: context.table.resolve(db, resolved_value),
-                                        },
-                                    });
+                                    let kind = context.mismatch(expected, resolved_value);
+                                    context.errors.push(TypeError { range, kind });
                                 }
                             }
                             scheme_is_declared = true;
@@ -1212,12 +1214,23 @@ impl<'db> Checker<'db, '_> {
         }
     }
 
+    /// A whole-type mismatch, narrowed to the one field when both sides are
+    /// records. Every site that reports two types side by side goes through
+    /// here, so the narrowing cannot be present at one and missing at another.
+    fn mismatch(&mut self, expected: Ty<'db>, found: Ty<'db>) -> TypeErrorKind<'db> {
+        let expected = self.table.resolve(self.db, expected);
+        let found = self.table.resolve(self.db, found);
+        match self.table.explain_record_mismatch(self.db, found, expected) {
+            Some(mismatch) => TypeErrorKind::RecordShape {
+                mismatch: Box::new(mismatch),
+            },
+            None => TypeErrorKind::Mismatch { expected, found },
+        }
+    }
+
     fn report_unify(&mut self, range: TextRange, error: UnifyError<'db>) {
         let kind = match error {
-            UnifyError::Mismatch(expected, found) => TypeErrorKind::Mismatch {
-                expected: self.table.resolve(self.db, expected),
-                found: self.table.resolve(self.db, found),
-            },
+            UnifyError::Mismatch(expected, found) => self.mismatch(expected, found),
             UnifyError::Occurs(variable, container) => TypeErrorKind::InfiniteType {
                 variable: Ty::new(self.db, TyKind::Var(variable)),
                 container: self.table.resolve(self.db, container),
@@ -1573,13 +1586,8 @@ impl<'db> Checker<'db, '_> {
             .compatible(self.db, resolved_value, declared.body)
         {
             let range = self.blame_range(value);
-            self.errors.push(TypeError {
-                range,
-                kind: TypeErrorKind::Mismatch {
-                    expected: self.table.resolve(self.db, declared.body),
-                    found: resolved_value,
-                },
-            });
+            let kind = self.mismatch(declared.body, resolved_value);
+            self.errors.push(TypeError { range, kind });
         }
         declared.body
     }
@@ -1858,13 +1866,8 @@ impl<'db> Checker<'db, '_> {
                 if !matches!(value.kind(self.db), TyKind::Unknown)
                     && !self.table.compatible(self.db, value, field.ty)
                 {
-                    self.errors.push(TypeError {
-                        range,
-                        kind: TypeErrorKind::Mismatch {
-                            expected: field.ty,
-                            found: value,
-                        },
-                    });
+                    let kind = self.mismatch(field.ty, value);
+                    self.errors.push(TypeError { range, kind });
                 }
             }
             None => self.errors.push(TypeError {
@@ -3585,12 +3588,10 @@ impl<'db> Checker<'db, '_> {
                     && !self.table.compatible(self.db, returned, declared.ret)
                 {
                     early_return_failed = true;
+                    let kind = self.mismatch(declared.ret, returned);
                     self.errors.push(TypeError {
                         range: return_range,
-                        kind: TypeErrorKind::Mismatch {
-                            expected: declared.ret,
-                            found: returned,
-                        },
+                        kind,
                     });
                 }
             }
@@ -3632,23 +3633,16 @@ impl<'db> Checker<'db, '_> {
                     })
                     .collect();
                 if culprits.is_empty() {
+                    let kind = self.mismatch(declared.ret, resolved_body);
                     self.errors.push(TypeError {
                         range: body_range,
-                        kind: TypeErrorKind::Mismatch {
-                            expected: declared.ret,
-                            found: resolved_body,
-                        },
+                        kind,
                     });
                 } else {
                     for (leaf, found) in culprits {
                         let range = self.blame_range(leaf);
-                        self.errors.push(TypeError {
-                            range,
-                            kind: TypeErrorKind::Mismatch {
-                                expected: declared.ret,
-                                found,
-                            },
-                        });
+                        let kind = self.mismatch(declared.ret, found);
+                        self.errors.push(TypeError { range, kind });
                     }
                 }
             }
@@ -5047,10 +5041,7 @@ impl<'db> Checker<'db, '_> {
         }
         Err(TypeError {
             range,
-            kind: TypeErrorKind::Mismatch {
-                expected: resolved_expected,
-                found: resolved_found,
-            },
+            kind: self.mismatch(resolved_expected, resolved_found),
         })
     }
 
@@ -5098,13 +5089,8 @@ impl<'db> Checker<'db, '_> {
                 // The value is checked against the representation, so the
                 // expected side names the shape the value must have — the
                 // nominal name alone would just restate the `@new` line.
-                self.errors.push(TypeError {
-                    range,
-                    kind: TypeErrorKind::Mismatch {
-                        expected: self.table.resolve(self.db, representation),
-                        found: resolved_value,
-                    },
-                });
+                let kind = self.mismatch(representation, resolved_value);
+                self.errors.push(TypeError { range, kind });
             }
         }
         self.table.level -= 1;
