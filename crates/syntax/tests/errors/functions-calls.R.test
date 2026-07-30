@@ -109,6 +109,24 @@ value <- run(
 #++++
 no errors
 
+#---- a_named_argument_on_the_next_line_is_a_forgotten_comma
+# `name = value` on the following line is a NAMED ARGUMENT, so the boundary rule
+# must not read it as the next statement — this is the ordinary forgotten comma
+# in a multi-line call, and it earns the report that names the missing `,`.
+# Treating `=` as an assignment gave this the unclosed-opener report instead,
+# then broke the rest of the call into top-level statements, which drew lint and
+# unused findings out of source that had not parsed: six findings for one comma.
+config <- list(
+  title = "Revenue"
+  subtitle = "by quarter",
+  width = 800
+)
+#++++
+error: missing `,` between these arguments
+ --> 8:20
+  |   title = "Revenue"
+  |                    ^
+
 #---- call_separator_junk_still_recovers
 total <- sum(1; 2)
 #++++

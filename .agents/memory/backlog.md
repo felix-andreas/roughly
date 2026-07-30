@@ -210,9 +210,29 @@ finding**, on the unclosed `(`. Same for `[`.
 the next line is ordinary R, and a *fragment* there really is a forgotten separator — `sum(alpha\n
 beta)` and `function(x\n y)` were both pinned reporting a missing comma, correctly, and a blanket
 line rule regressed both to a worse pair of findings. What separates the cases is whether the next
-line **assigns**: a line binding a name with `<-`/`<<-`/`=`, or opening with `if`/`for`/`while`/
-`repeat`, is the next statement, and adopting it is what does the damage. A comma before it still
-makes it an argument, so `run(1,\n  x <- 2)` stays silent.
+line **assigns**: a line binding a name with `<-`/`<<-`, or opening with `if`/`for`/`while`/`repeat`,
+is the next statement, and adopting it is what does the damage. A comma before it still makes it an
+argument, so `run(1,\n  x <- 2)` stays silent.
+
+**`=` was in that list at first, and that was wrong — it cost the commonest missing-comma case.**
+Inside an argument or parameter list `name = value` is a *named argument*, which is exactly what a
+multi-line call with a forgotten comma looks like. Counting it as a statement start gave
+
+```r
+config <- list(
+  title = "Revenue"
+  subtitle = "by quarter",
+  width = 800
+)
+```
+
+the unclosed-opener report instead of the one that names the missing `,`, then broke the rest of the
+call into top-level statements — which drew two `assignment-operator` findings and an `unused` out of
+source that had *not parsed*, contradicting the documented rule that a failed statement suppresses
+findings overlapping it. **Six findings for one comma**, and the one the docs promised was gone. R
+itself keeps consuming until the opener closes, so the named-argument reading is also the faithful
+one. Pinned now by a fixture on that exact snippet; the three original cases all use `<-` and were
+never affected, which is why nothing caught it.
 
 Two more things were needed beyond the predicate. The newline is consumed while parsing the element
 *before* the loop head, so the check has to scan backwards rather than watch trivia go by — a

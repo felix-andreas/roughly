@@ -283,17 +283,19 @@ impl Parser<'_> {
 
     // ---- trivia ----
 
-    /// Emit trivia into the tree. Newlines are consumed only when insignificant
-    /// in the current context or explicitly allowed by `across_newlines`.
     /// Whether the current token opens what is unmistakably a new statement: a
-    /// name bound by an assignment operator, or a keyword that can only begin
-    /// one.
+    /// name bound by `<-`/`<<-`, or a keyword that can only begin one.
     ///
     /// This is what separates an unclosed opener from a forgotten separator
     /// when a list runs onto the next line. A genuine continuation reads as a
     /// fragment — `beta)`, `y) x` — while a line that *assigns* is the next
     /// statement, and adopting it into the list swallows its definition along
     /// with every line after.
+    ///
+    /// `=` is deliberately not an assignment here. Inside an argument or
+    /// parameter list `name = value` is a named argument, which is what a line
+    /// missing its comma looks like — the far likelier reading, and the one R
+    /// itself takes, since it keeps consuming until the opener closes.
     fn starts_new_statement(&self) -> bool {
         match self.current() {
             Some(
@@ -305,7 +307,7 @@ impl Parser<'_> {
             Some(SyntaxKind::IDENT | SyntaxKind::STRING) => matches!(
                 self.peek_significant(self.pos + 1, false)
                     .map(|(kind, _)| kind),
-                Some(SyntaxKind::LESS_MINUS | SyntaxKind::LESS2_MINUS | SyntaxKind::EQ)
+                Some(SyntaxKind::LESS_MINUS | SyntaxKind::LESS2_MINUS)
             ),
             _ => false,
         }
@@ -325,6 +327,8 @@ impl Parser<'_> {
         false
     }
 
+    /// Emit trivia into the tree. Newlines are consumed only when insignificant
+    /// in the current context or explicitly allowed by `across_newlines`.
     fn eat_trivia(&mut self, across_newlines: bool) {
         loop {
             match self.current() {
