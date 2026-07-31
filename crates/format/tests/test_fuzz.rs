@@ -6,13 +6,14 @@
 //!      structured error;
 //!   2. idempotence — when `format` succeeds, formatting the output again
 //!      succeeds and reproduces it byte-for-byte;
-//!   3. determinism — the same input formats to the same result.
+//!   3. determinism — the same input formats to the same result;
+//!   4. preservation — the token kinds survive, so lost code is caught.
 //!
 //! Generators mirror the syntax-crate harness: valid-program seeds, byte-level
-//! seed mutations, token soup from an R-shaped alphabet, random bytes, and a
-//! corpus arm over real R files when the corpus is fetched. Byte noise mostly
-//! exercises the refusal path; the seeds and corpus files exercise the
-//! formatter body.
+//! seed mutations, token soup from an R-shaped alphabet, random bytes, every
+//! fixture case source in the repository, and a corpus arm over real R files
+//! when the corpus is fetched. Byte noise mostly exercises the refusal path;
+//! the seeds, fixture sources and corpus files exercise the formatter body.
 //!
 //! `FUZZ_ITERS` scales the per-generator budget (default 1500); runs are
 //! deterministic per seed. `fuzz_deep` multiplies everything for
@@ -194,6 +195,39 @@ fn fuzz_regressions_hold_invariants() {
     for input in REGRESSIONS {
         check_invariants(input);
     }
+}
+
+/// Every fixture case source in the repository, run through the battery. The
+/// fixture suites are the richest R corpus here and they grow with every slice,
+/// unlike the hand-written seed list — and they are in-tree, so this arm never
+/// skips the way the fetched-corpus arm does.
+#[test]
+fn fixture_sources_hold_invariants() {
+    let crates = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("the crate sits under crates/")
+        .to_owned();
+    let mut sources = 0usize;
+    for suite in [
+        "format/tests/format",
+        "semantics/tests/typing",
+        "semantics/tests/typing-scripts",
+        "semantics/tests/lints",
+        "syntax/tests/syntax",
+        "syntax/tests/errors",
+        "ide/tests/ide",
+    ] {
+        for file in syntax::testing::parse_fixture_files(&crates.join(suite)) {
+            for case in &file.cases {
+                check_invariants(&case.source);
+                sources += 1;
+            }
+        }
+    }
+    assert!(
+        sources > 100,
+        "expected the fixture corpus, found {sources}"
+    );
 }
 
 #[test]

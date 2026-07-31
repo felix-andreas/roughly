@@ -246,11 +246,21 @@ it orders files "exactly as the CLI and server do". The visible consequence: on 
 `analysis-stats` reports 3 diagnostics where `check` reports 0. One shared predicate, ≈−55 lines, and
 the instrument stops disagreeing with the product it measures.
 
-### Rename accepts `...` and `..1` as new names
+### Rename accepts `...` and `..1` as new names, and the identifier rule is written twice
 
-`is_valid_r_identifier` in the server hand-rolls the identifier rule and admits the dot-dot forms,
-which are not assignable names. The lexer already knows the rule exactly; call it instead of
-restating it (≈−60 lines).
+The server's `is_valid_r_identifier` restates a rule `syntax::is_syntactic_name` already owns —
+same reserved-word list, same start/continue classes, same `.5` exclusion — so call the lexer's
+instead of keeping a second copy (≈−60 lines).
+
+The dot-dot part of the finding as originally filed was **wrong and was checked against R**: `... <-
+1` and `..1 <- 1` both run, and `... <- 5` genuinely binds (`get("...")` returns 5), so these are not
+invalid assignment targets. The real defect is narrower and only about `..1`-style names: the
+assignment succeeds but the *read* cannot, because `..1` is resolved as a positional slot of an
+enclosing `...` rather than as a variable — `..1 <- 7; ..1` fails with ``..1 used in an incorrect
+context, no ... to look in``. So renaming a variable to `..1` silently turns every one of its reads
+into a runtime error, which rename must refuse; `...` is a legal name and refusing it needs a
+different justification (shadowing the forwarding mechanism) or none at all. Note that moving to
+`is_syntactic_name` does **not** fix this on its own — the lexer's rule accepts both spellings too.
 
 ### A dead-code batch, all of it hidden behind `let _ =`
 

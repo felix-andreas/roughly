@@ -2105,15 +2105,20 @@ fn is_closer(kind: AnnotationTokenKind) -> bool {
 }
 
 /// The fuzz invariant battery for one input: formatting never panics, is
-/// deterministic, and is idempotent whenever it succeeds (the output
-/// formats again, byte-identically). Shared by the in-tree property fuzzer
-/// and the coverage-guided `fuzz/` targets so the contract has one home.
+/// deterministic, preserves the code, and is idempotent whenever it succeeds
+/// (the output formats again, byte-identically). Shared by the in-tree property
+/// fuzzer and the coverage-guided `fuzz/` targets so the contract has one home.
 pub fn check_format_invariants(input: &str) {
     let first = format(input, Config::default());
     let again = format(input, Config::default());
     assert_eq!(first, again, "non-deterministic format for input {input:?}");
 
     if let Ok(output) = first {
+        assert_eq!(
+            significant_kinds(input),
+            significant_kinds(&output),
+            "formatting changed the code for input {input:?} (output {output:?})"
+        );
         match format(&output, Config::default()) {
             Ok(second) => assert_eq!(second, output, "format not idempotent for input {input:?}"),
             Err(error) => panic!(
@@ -2121,4 +2126,33 @@ pub fn check_format_invariants(input: &str) {
             ),
         }
     }
+}
+
+/// The token kinds formatting must preserve exactly, in order. This is the only
+/// invariant that can notice the formatter *deleting* code — determinism,
+/// idempotence and "the output formats again" all hold for a formatter that
+/// silently drops a statement.
+///
+/// Four kinds are excluded because the formatter is allowed to introduce or move
+/// them: it braces a single-statement body, splits a `;` chain into lines, and
+/// re-lays-out a `#:` block across markers. Nothing weaker works — token
+/// equality fails on those insertions and text equality fails on quote
+/// normalization, while this formulation holds across every fixture source and
+/// every fuzz input tried.
+fn significant_kinds(text: &str) -> Vec<SyntaxKind> {
+    syntax::lex(text)
+        .0
+        .into_iter()
+        .map(|token| token.kind)
+        .filter(|kind| {
+            !kind.is_trivia()
+                && !matches!(
+                    kind,
+                    SyntaxKind::L_BRACE
+                        | SyntaxKind::R_BRACE
+                        | SyntaxKind::SEMICOLON
+                        | SyntaxKind::ANNOTATION_MARKER
+                )
+        })
+        .collect()
 }

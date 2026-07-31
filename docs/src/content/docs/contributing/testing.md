@@ -90,19 +90,31 @@ On a panic the harness prints the generating inputs.
 ### The formatter fuzz harness
 
 `crates/format/tests/test_fuzz.rs` holds the formatter's arm of the same doctrine. On every
-input — valid-program seeds, byte-level seed mutations, token soup, random bytes, and real
-corpus files when fetched — it checks: never-panic (`format` either succeeds or refuses with a
-structured error), determinism, and **idempotence**: whenever formatting succeeds, formatting
-the output again must succeed and reproduce it byte-for-byte. The refusal path is part of the
+input — valid-program seeds, byte-level seed mutations, token soup, random bytes, every fixture
+case source in the repository, and real corpus files when fetched — it checks: never-panic
+(`format` either succeeds or refuses with a structured error), determinism, **preservation** of
+the code, and **idempotence**: whenever formatting succeeds, formatting the output again must
+succeed and reproduce it byte-for-byte. The refusal path is part of the
 property: a file with an R-grammar syntax error is refused, while errors raised by the `#:`
 annotation grammar (marked `in_annotation` by the parser) only send the affected block down
-the verbatim path. The invariant battery itself is exported as
+the verbatim path.
+
+Preservation is the one invariant that can notice the formatter *deleting* code — determinism,
+idempotence and "the output formats again" all hold for a formatter that silently drops a
+statement. It compares the non-trivia token **kind** sequence of input and output, excluding
+`{`, `}`, `;` and `#:`, which the formatter is allowed to introduce or move: it braces a
+single-statement body, splits a `;` chain into lines, and re-lays-out an annotation block across
+markers. Nothing weaker holds — token equality fails on those insertions and text equality fails
+on quote normalization.
+
+The invariant battery itself is exported as
 `format::check_format_invariants` (with `syntax::testing::check_parse_invariants` for the
 parser and `semantics::testing::check_semantics_input` for the semantic pipeline — the
 latter folds every lint under an everything-on configuration into the rendering, so the
 lint layer inherits the never-panic, determinism, geometry, and incremental invariants) so
-the coverage-guided targets below share the exact same contracts, and each harness's
-`fuzz_regressions_hold_invariants` pins every input those targets have ever broken.
+the coverage-guided targets below share the exact same contracts. The `format` and `semantics`
+harnesses additionally carry a `fuzz_regressions_hold_invariants` battery pinning inputs those
+targets have broken; `syntax` and `ide` have no such battery yet.
 
 ### Coverage-guided fuzzing
 
@@ -210,6 +222,10 @@ FIXTURE_FILTER=group__case cargo test -p semantics --test test_typing_fixtures -
 FIXTURE_FILTER=group__case cargo test -p format --test test_format_fixtures -- --nocapture
 FIXTURE_FILTER=group__case cargo test -p ide --test test_ide_fixtures -- --nocapture
 ```
+
+A filter that names no case in any suite fails rather than passing, because one test target drives
+several suites: a suite that does not hold the case skips quietly, but an id no suite holds is a
+typo, and a run of zero cases would otherwise report a pass.
 
 The default crate test command while iterating is `cargo test -p semantics` (analysis behavior);
 `just gate` runs the whole battery plus clippy and a formatting check before a change lands.

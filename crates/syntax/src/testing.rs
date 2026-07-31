@@ -27,8 +27,8 @@ pub struct FixtureFile {
 }
 
 /// Parse every `.test` fixture file under `suite_dir` (recursively), without
-/// running anything — for harnesses that reuse the corpus, like the
-/// cross-stack differential.
+/// running anything — for callers that want the corpus rather than a verdict,
+/// such as deciding whether a focused-run filter names a real case.
 pub fn parse_fixture_files(suite_dir: &Path) -> Vec<FixtureFile> {
     let mut paths = Vec::new();
     collect_fixture_files(suite_dir, &mut paths);
@@ -43,8 +43,6 @@ pub fn parse_fixture_files(suite_dir: &Path) -> Vec<FixtureFile> {
         .collect()
 }
 
-/// Run every `.test` fixture under `suite_dir` through `render`, comparing (or
-/// blessing) expectations. Panics with a readable report on mismatch.
 /// Reads an environment variable under its `RY_` name, falling back to the
 /// pre-rename `ROUGHLY_` spelling. Both are honoured so a developer's existing
 /// shell aliases and CI scripts keep working after the rename.
@@ -54,6 +52,8 @@ pub fn env_var(suffix: &str) -> Option<String> {
         .ok()
 }
 
+/// Run every `.test` fixture under `suite_dir` through `render`, comparing (or
+/// blessing) expectations. Panics with a readable report on mismatch.
 pub fn run_fixture_suite(suite_dir: &Path, render: &dyn Fn(&str) -> String) {
     let mut files = Vec::new();
     collect_fixture_files(suite_dir, &mut files);
@@ -68,6 +68,7 @@ pub fn run_fixture_suite(suite_dir: &Path, render: &dyn Fn(&str) -> String) {
     let bless = env_var("BLESS").is_some_and(|value| value == "1");
     let mut seen_ids = HashSet::new();
     let mut failures = Vec::new();
+    let mut matched = 0usize;
 
     for path in files {
         let text = std::fs::read_to_string(&path)
@@ -86,6 +87,7 @@ pub fn run_fixture_suite(suite_dir: &Path, render: &dyn Fn(&str) -> String) {
             if filter.as_deref().is_some_and(|filter| filter != case.id) {
                 continue;
             }
+            matched += 1;
             let rendered = normalize(&render(&case.source));
             let expected = normalize(&case.expected);
             if rendered == expected {
@@ -118,12 +120,42 @@ pub fn run_fixture_suite(suite_dir: &Path, render: &dyn Fn(&str) -> String) {
         }
     }
 
+    if let Some(filter) = &filter {
+        assert!(
+            matched > 0 || sibling_suite_holds(suite_dir, filter),
+            "FIXTURE_FILTER=`{filter}` names no fixture case in any suite — check the id.\n\
+             A filter that matches nothing would otherwise run zero cases and report a pass."
+        );
+    }
+
     assert!(
         failures.is_empty(),
         "{} fixture failure(s):\n\n{}\n(set RY_BLESS=1 to accept the new output)",
         failures.len(),
         failures.join("\n")
     );
+}
+
+/// Whether a suite next to `suite_dir` holds `id`. One test binary drives
+/// several suites, so a focused run naming one case leaves every other suite
+/// matching nothing — and "this case lives next door" is the only thing that
+/// distinguishes that ordinary skip from a mistyped id, which is otherwise
+/// indistinguishable from a passing run.
+fn sibling_suite_holds(suite_dir: &Path, id: &str) -> bool {
+    let Some(parent) = suite_dir.parent() else {
+        return false;
+    };
+    let Ok(entries) = std::fs::read_dir(parent) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        let path = entry.path();
+        path.is_dir()
+            && path != suite_dir
+            && parse_fixture_files(&path)
+                .iter()
+                .any(|file| file.cases.iter().any(|case| case.id == id))
+    })
 }
 
 fn collect_fixture_files(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -187,7 +219,6 @@ pub fn parse_fixture_file(path: &Path, text: String) -> FixtureFile {
     };
 
     for line in text.split_inclusive('\n') {
-        let line_start = offset;
         offset += line.len();
         let trimmed = line.trim_end_matches(['\n', '\r']);
         if let Some(name) = trimmed.strip_prefix("#====") {
@@ -218,7 +249,6 @@ pub fn parse_fixture_file(path: &Path, text: String) -> FixtureFile {
         } else if case.is_some() {
             source_lines.push(trimmed);
         }
-        let _ = line_start;
     }
     flush(
         &group,

@@ -43,7 +43,15 @@ MAKE CHANGES TO crates/format/tests/formatter.template.md INSTEAD";
                     }
                 })
                 .map(|content| format!("```r\n{content}```"))
-                .unwrap_or_else(|| text.to_owned())
+                // Falling back to the input here would publish unformatted R on
+                // the page as if the formatter had produced it — the one failure
+                // this generator exists to prevent.
+                .unwrap_or_else(|| {
+                    panic!(
+                        "template block has no `# name: directive` header line, so it would be \
+                         published unformatted:\n{text}"
+                    )
+                })
         })
         .replace(BEFORE, AFTER);
 

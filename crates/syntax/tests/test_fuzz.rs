@@ -366,34 +366,32 @@ fn run_edit_stream(steps: usize) {
     let mut buffer = String::from("f <- function(x, y) {\n  total <- x + y\n  total * 2\n}\n");
     let mut previous = syntax::parse(&buffer);
     for _ in 0..steps {
-        let before_len = buffer.len();
         let (deleted, inserted) = match rng.below(4) {
             0 if !buffer.is_empty() => {
-                let at = floor_char_boundary(&buffer, rng.below(buffer.len()));
-                let end = ceil_char_boundary(&buffer, (at + 1 + rng.below(3)).min(buffer.len()));
+                let at = buffer.floor_char_boundary(rng.below(buffer.len()));
+                let end = buffer.ceil_char_boundary((at + 1 + rng.below(3)).min(buffer.len()));
                 buffer.replace_range(at..end, "");
                 (at..end, 0usize)
             }
             1 => {
-                let at = floor_char_boundary(&buffer, rng.below(buffer.len() + 1));
+                let at = buffer.floor_char_boundary(rng.below(buffer.len() + 1));
                 let piece = ALPHABET[rng.below(ALPHABET.len())];
                 buffer.insert_str(at, piece);
                 (at..at, piece.len())
             }
             2 => {
-                let at = floor_char_boundary(&buffer, rng.below(buffer.len() + 1));
+                let at = buffer.floor_char_boundary(rng.below(buffer.len() + 1));
                 let ch = (0x20 + (rng.next() % 0x5F) as u8) as char;
                 buffer.insert(at, ch);
                 (at..at, ch.len_utf8())
             }
             _ => {
                 let seed = SEEDS[rng.below(SEEDS.len())];
-                let at = floor_char_boundary(&buffer, rng.below(buffer.len() + 1));
+                let at = buffer.floor_char_boundary(rng.below(buffer.len() + 1));
                 buffer.insert_str(at, seed);
                 (at..at, seed.len())
             }
         };
-        let _ = before_len;
         check_invariants(&buffer);
 
         // Splice-reparse equivalence: identical green tree AND identical
@@ -425,27 +423,11 @@ fn run_edit_stream(steps: usize) {
         // Keep the buffer bounded so the stream stays fast; resync the
         // baseline parse when truncating (an out-of-band "edit").
         if buffer.len() > 4096 {
-            let cut = floor_char_boundary(&buffer, 2048);
+            let cut = buffer.floor_char_boundary(2048);
             buffer.truncate(cut);
             previous = syntax::parse(&buffer);
         }
     }
-}
-
-fn floor_char_boundary(text: &str, mut at: usize) -> usize {
-    at = at.min(text.len());
-    while at > 0 && !text.is_char_boundary(at) {
-        at -= 1;
-    }
-    at
-}
-
-fn ceil_char_boundary(text: &str, mut at: usize) -> usize {
-    at = at.min(text.len());
-    while at < text.len() && !text.is_char_boundary(at) {
-        at += 1;
-    }
-    at
 }
 
 /// Deep nesting must be refused gracefully (diagnostic, no stack overflow).

@@ -76,18 +76,21 @@ fn fresh_output(source: &str, kind: DocumentKind) -> String {
 /// The full battery for one (source, edit) pair under one document kind.
 pub fn check_semantics_invariants(source: &str, edited_source: &str, kind: DocumentKind) {
     let first = fresh_output(source, kind);
-    let second = fresh_output(source, kind);
-    assert_eq!(
-        first, second,
-        "non-deterministic pipeline output for:\n{source}"
-    );
 
     let mut db = RootDatabase::default();
     crate::stubs::install_shipped_stubs(&db);
     let file = SourceFile::new(&db, source.to_owned(), kind);
     ProjectFiles::new(&db, vec![file]);
     let before = render_semantics(&db, file);
-    assert_eq!(before, first, "fresh databases disagree for:\n{source}");
+    // This IS the determinism check: `before` and `first` come from two
+    // independently built databases. A third build only bought a second
+    // comparison of the same pair, and each one costs a full re-parse of the
+    // shipped stubs (~113 ms against ~1.4 ms for the rest of a round), which is
+    // where this battery spends nearly all of its time.
+    assert_eq!(
+        before, first,
+        "non-deterministic pipeline output across fresh databases for:\n{source}"
+    );
     file.set_text(&mut db).to(edited_source.to_owned());
     let incremental = render_semantics(&db, file);
     let fresh = fresh_output(edited_source, kind);
@@ -117,10 +120,7 @@ pub fn check_semantics_input(input: &str) {
     };
     // The edit truncates at a hash-derived char boundary and continues with
     // a small live statement, driving the splice cache and re-validation.
-    let mut cut = (hash as usize >> 8) % (input.len() + 1);
-    while !input.is_char_boundary(cut) {
-        cut -= 1;
-    }
+    let cut = input.floor_char_boundary((hash as usize >> 8) % (input.len() + 1));
     let edited = format!("{}\nprobe <- 1L\n", &input[..cut]);
     check_semantics_invariants(input, &edited, kind);
 }
