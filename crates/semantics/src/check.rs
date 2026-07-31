@@ -273,13 +273,21 @@ pub trait GlobalEnv<'db> {
     /// it propagates an `Unknown` instead of re-originating one.
     fn defined_in_project(&self, name: &str, deferred: bool) -> bool;
 
-    /// The project's `@type` / `@alias` definitions by name.
-    fn type_definitions(&self) -> FxHashMap<Name<'db>, crate::annotations::NamedDefinition<'db>>;
+    /// The `@type` / `@alias` definitions visible to the item being checked.
+    ///
+    /// **Borrowed, and both of these are per-FILE facts.** A check consults them
+    /// once per item, so handing back an owned copy made every item in a project
+    /// pay for the whole project's table: at 2,000 items, typecheck rose from
+    /// 18 ms to 100 ms purely as the declaration count went 0 to 2,400. Neither
+    /// is ever mutated by a caller — both are pure lookups.
+    fn type_definitions(
+        &self,
+    ) -> &'db FxHashMap<Name<'db>, crate::annotations::NamedDefinition<'db>>;
 
     /// Classes reachable here that declare an arithmetic operator method,
     /// standard library and project sources alike — the same scope operator
     /// dispatch resolves a method through.
-    fn arithmetic_classes(&self) -> rustc_hash::FxHashSet<String>;
+    fn arithmetic_classes(&self) -> &'db rustc_hash::FxHashSet<String>;
 }
 
 pub fn check_item<'db>(db: &'db dyn Db, module: &Module, naming: &ItemNaming) -> ItemCheck<'db> {
@@ -302,8 +310,8 @@ pub fn check_item_with_annotation<'db>(
     CHECK_EXECUTIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let mut table = InferenceTable::default();
     if let Some(globals) = globals {
-        table.definitions = globals.type_definitions();
-        table.arithmetic_classes = globals.arithmetic_classes();
+        table.definitions = Some(globals.type_definitions());
+        table.arithmetic_classes = Some(globals.arithmetic_classes());
     }
     let mut context = Checker {
         db,
@@ -351,7 +359,7 @@ pub fn check_item_with_annotation<'db>(
         );
         let mut cycle = None;
         for ty in mentioned {
-            cycle = find_alias_cycle(db, &context.table.definitions, ty);
+            cycle = find_alias_cycle(db, context.table.definitions, ty);
             if cycle.is_some() {
                 break;
             }
@@ -5215,7 +5223,12 @@ impl<'db> Checker<'db, '_> {
         value_ty: Ty<'db>,
     ) -> TypeScheme<'db> {
         let range = self.blame_range(value);
-        let Some(definition) = self.table.definitions.get(&name).cloned() else {
+        let Some(definition) = self
+            .table
+            .definitions
+            .and_then(|table| table.get(&name))
+            .cloned()
+        else {
             return self.generalize(value_ty);
         };
         if definition.alias {
@@ -6181,9 +6194,11 @@ fn data_table_keeps_class(module: &Module, arguments: &[Argument]) -> bool {
 /// not expanded.
 fn find_alias_cycle<'db>(
     db: &'db dyn Db,
-    definitions: &FxHashMap<Name<'db>, crate::annotations::NamedDefinition<'db>>,
+    definitions: Option<&FxHashMap<Name<'db>, crate::annotations::NamedDefinition<'db>>>,
     ty: Ty<'db>,
 ) -> Option<String> {
+    // No declarations, no alias to cycle through.
+    let definitions = definitions?;
     let mut expanding = rustc_hash::FxHashSet::default();
     alias_cycle_walk(db, definitions, ty, &mut expanding)
 }

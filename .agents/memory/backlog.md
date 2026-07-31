@@ -390,13 +390,17 @@ the `BTreeMap` choice in the same pass: `resolutions`, `bindings`, `non_locals`,
 `namespace_reads` are pure lookups with no ordering requirement, and `BTreeMap::get` showed up under
 `infer_read`.
 
-### Per-item clones of project-wide tables
+### FIXED — per-item clones of project-wide tables
 
-`check_item_with_annotation` clones the whole project `@type`/`@alias` map and the arithmetic-class set
-per item and stores both owned on `InferenceTable`. Measured at 4,000 items against a varying project
-declaration count: 0 → 1.80 s, 1,600 → 1.97 s, 3,200 → 2.14 s, i.e. ~27 ns per entry per item. Modest
-at today's annotation density and growing exactly as the annotation story succeeds. `returns(ref)`
-plus a borrow on the table fixes it.
+`check_item_with_annotation` cloned the whole project `@type`/`@alias` map and the arithmetic-class set
+per item and stored both owned on `InferenceTable`. Both are per-*file* facts and both are pure
+lookups, so they are now memoized per-file tracked queries returning `&'db`, with the table holding
+`Option<&'db …>`.
+
+Measured interleaved at a fixed 2,000 items as the declaration count grows, typecheck goes
+0 → 18.0/18.3 ms, 600 → 32.0/19.4 ms, 2,400 → **71.3 ms cloned against 27.5 ms borrowed** (2.6×), and
+the residual growth after the fix is the real work of resolving more nominals rather than copying.
+Finding sets byte-identical on all four corpus packages and on `targets`; no package regressed.
 
 ### Suspected — `Checker::infer` deep-clones an `Expression` per call
 
@@ -596,6 +600,32 @@ workspace target over `parse_fixture_files`, the top-level `types/`, and `corpus
   faulty statements in one item yield 2/8/64/256. This is precisely the invariant a per-item or
   per-file finding cap breaks — the regression three adoption reviews called a blocker — and nothing
   guards it.
+
+### A timing-based scaling guard was attempted and does NOT discriminate — read this before retrying
+
+The idea below is right, but the obvious implementation does not work in the default battery, and the
+attempt is recorded with numbers so the next one starts further along.
+
+Normalizing by the growing unit is the first trap: per-*declaration* cost falls as declarations grow,
+because most of the run is fixed work, so that assertion passes against the very bug it targets. The
+sound method is a **four-corner interaction test** — measure (I, D), (2I, D), (I, 2D), (2I, 2D), and
+compare the last against the additive prediction, since a table copied per item is exactly the
+interaction term. Measured in debug at I=200, D=300:
+
+| | per-item copy present | after the fix |
+|---|---|---|
+| additive prediction | 699.7 ms | 663.2 ms |
+| actual (2I, 2D) | 717.2 ms | 641.5 ms |
+| interaction | **+17.5 ms** | −21.7 ms |
+
+A 39 ms swing on a 700 ms total is ~5%, indistinguishable from load noise. The signal only separates at
+sizes where the copy dominates — around 2,000 items × 2,400 declarations, which is where the release
+measurement showed 71 ms against 27 ms — and four corners at that size cost far more than a default
+suite should. An `#[ignore]`d witness was considered and rejected: the extended job that would run it
+does not currently run any of these suites, so it would be machinery nobody invokes.
+
+What would work is a structural assertion rather than a timing one — something that counts the copies
+directly — but nothing observable exists for it today.
 
 ### No witness measures one file with many top-level items
 

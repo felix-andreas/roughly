@@ -1359,6 +1359,42 @@ struct SalsaGlobals<'db> {
 /// paying for: a union of dozens of unrelated types is not a fact any diagnostic
 /// can use. Real conditional slots — a top-level `if`/`else` picking a default —
 /// have a handful of writers.
+/// The `@type` / `@alias` definitions one file sees: the project's, with the
+/// file's own layered on top when it is a script, because a script's
+/// declarations are visible to itself alone and shadow project-global names.
+///
+/// Per file and memoized, so the merge runs once instead of once per item
+/// checked in the file — the caller is a per-item check, and handing it an owned
+/// copy of the project table is what made a heavily annotated project quadratic.
+#[salsa::tracked(returns(ref))]
+fn visible_type_definitions<'db>(
+    db: &'db dyn Db,
+    file: SourceFile,
+) -> rustc_hash::FxHashMap<types::Name<'db>, annotations::NamedDefinition<'db>> {
+    let mut definitions = ProjectFiles::try_get(db)
+        .map(|files| project_type_definitions(db, files).clone())
+        .unwrap_or_default();
+    if *file.kind(db) == DocumentKind::Script {
+        for definition in file_type_definitions(db, file) {
+            definitions.insert(definition.name, definition);
+        }
+    }
+    definitions
+}
+
+/// The classes with an arithmetic operator method that one file sees: the
+/// shipped stubs, the project's own definitions, and the file's own top level.
+/// Memoized per file for the same reason as [`visible_type_definitions`].
+#[salsa::tracked(returns(ref))]
+fn visible_arithmetic_classes(db: &dyn Db, file: SourceFile) -> rustc_hash::FxHashSet<String> {
+    let mut classes = stub_arithmetic_classes(db);
+    if let Some(files) = ProjectFiles::try_get(db) {
+        classes.extend(project_arithmetic_classes(db, files).iter().cloned());
+    }
+    classes.extend(file_arithmetic_classes(db, file).iter().cloned());
+    classes
+}
+
 const CONDITIONAL_SLOT_JOIN_CAP: usize = 8;
 
 impl<'db> SalsaGlobals<'db> {
@@ -1490,33 +1526,12 @@ impl<'db> check::GlobalEnv<'db> for SalsaGlobals<'db> {
 
     fn type_definitions(
         &self,
-    ) -> rustc_hash::FxHashMap<types::Name<'db>, annotations::NamedDefinition<'db>> {
-        let mut definitions = ProjectFiles::try_get(self.db)
-            .map(|files| project_type_definitions(self.db, files).clone())
-            .unwrap_or_default();
-        // A script's own `@type` / `@alias` declarations are visible to
-        // itself (and only to itself), shadowing project-global names.
-        if self.is_script {
-            for definition in file_type_definitions(self.db, self.file) {
-                definitions.insert(definition.name, definition);
-            }
-        }
-        definitions
+    ) -> &'db rustc_hash::FxHashMap<types::Name<'db>, annotations::NamedDefinition<'db>> {
+        visible_type_definitions(self.db, self.file)
     }
 
-    fn arithmetic_classes(&self) -> rustc_hash::FxHashSet<String> {
-        let mut classes = stub_arithmetic_classes(self.db);
-        if let Some(files) = ProjectFiles::try_get(self.db) {
-            classes.extend(project_arithmetic_classes(self.db, files).iter().cloned());
-        }
-        // The file's own definitions count, and every item counts rather than
-        // only the ones above this one, because a function body runs after the
-        // whole file is sourced. Per FILE, not per item: this is consulted once
-        // for every item checked, so collecting the item names here walked the
-        // whole file each time — quadratic in a file's top-level items, the
-        // shape no file-count-based witness sees.
-        classes.extend(file_arithmetic_classes(self.db, self.file).iter().cloned());
-        classes
+    fn arithmetic_classes(&self) -> &'db rustc_hash::FxHashSet<String> {
+        visible_arithmetic_classes(self.db, self.file)
     }
 }
 
@@ -1599,7 +1614,7 @@ impl<'db> check::GlobalEnv<'db> for SccGlobals<'db, '_> {
 
     fn type_definitions(
         &self,
-    ) -> rustc_hash::FxHashMap<types::Name<'db>, annotations::NamedDefinition<'db>> {
+    ) -> &'db rustc_hash::FxHashMap<types::Name<'db>, annotations::NamedDefinition<'db>> {
         self.base.type_definitions()
     }
 
@@ -1607,7 +1622,7 @@ impl<'db> check::GlobalEnv<'db> for SccGlobals<'db, '_> {
     /// so this is the base answer — but it has to be *given*, not inherited: an
     /// empty set here makes `Date + 1` inside any recursive function fail the
     /// numeric constraint and collapse the whole scheme to `Unknown`.
-    fn arithmetic_classes(&self) -> rustc_hash::FxHashSet<String> {
+    fn arithmetic_classes(&self) -> &'db rustc_hash::FxHashSet<String> {
         self.base.arithmetic_classes()
     }
 }

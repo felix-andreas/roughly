@@ -51,15 +51,17 @@ pub struct InferenceTable<'db> {
     /// Previous values of entries mutated below a snapshot boundary.
     undo: Vec<(InferenceVar, Entry<'db>)>,
     pub level: u32,
-    /// The project's `@type` / `@alias` definitions: aliases expand during
+    /// The `@type` / `@alias` definitions visible here: aliases expand during
     /// resolution, nominals project to their representation in compatibility.
-    pub definitions: FxHashMap<Name<'db>, NamedDefinition<'db>>,
+    /// Borrowed from the memoized per-file table — see `GlobalEnv`. `None` when
+    /// the check runs with no globals at all, which reads as an empty table.
+    pub definitions: Option<&'db FxHashMap<Name<'db>, NamedDefinition<'db>>>,
     /// Classes that declare an arithmetic operator method, from the standard
     /// library AND from the project's own sources. Operator dispatch resolves
     /// such a method through the global scope, so the numeric constraint has to
     /// consult the same set or it refuses a class whose `+` the checker itself
     /// would have dispatched.
-    pub arithmetic_classes: FxHashSet<String>,
+    pub arithmetic_classes: Option<&'db FxHashSet<String>>,
     /// Per-node resolve memo over the interned type DAG: without it, shared
     /// subtrees re-resolve once per occurrence and self-referential bindings
     /// walk an exponential tree. Entries are valid for one binding epoch
@@ -140,7 +142,7 @@ impl<'db> InferenceTable<'db> {
         let TyKind::Named(name, arguments) = ty.kind(db) else {
             return false;
         };
-        match self.definitions.get(name) {
+        match self.definitions.and_then(|table| table.get(name)) {
             // A wrong argument count includes the bare use of a generic
             // (`Box` for a one-parameter `Box<T>`) — `@new` is unaffected,
             // its representation check infers arguments without the
@@ -329,7 +331,7 @@ impl<'db> InferenceTable<'db> {
                 // self-referential alias would re-enter through the SAME
                 // interned application; the expansion depth guard is the
                 // visiting stack's length bound.
-                if let Some(definition) = self.definitions.get(name)
+                if let Some(definition) = self.definitions.and_then(|table| table.get(name))
                     && definition.alias
                 {
                     if visiting.len() >= 64 {
@@ -363,7 +365,7 @@ impl<'db> InferenceTable<'db> {
         name: Name<'db>,
         arguments: &[Ty<'db>],
     ) -> Option<Ty<'db>> {
-        let definition = self.definitions.get(&name)?;
+        let definition = self.definitions.and_then(|table| table.get(&name))?;
         if definition.alias || matches!(definition.body.kind(db), TyKind::Unknown) {
             return None;
         }
@@ -384,7 +386,7 @@ impl<'db> InferenceTable<'db> {
         let Entry::Unbound { level, constraint } = *self.entry(representative) else {
             unreachable!("bind target is always unbound after find");
         };
-        if let Some(error) = constraint_rejects(db, &self.arithmetic_classes, constraint, ty) {
+        if let Some(error) = constraint_rejects(db, self.arithmetic_classes, constraint, ty) {
             return Err(error);
         }
         // Level-adjust free variables in `ty` up to this entry's level so
@@ -704,7 +706,7 @@ impl<'db> InferenceTable<'db> {
                 Ok(())
             }
             Entry::Bound(ty) => {
-                match constraint_rejects(db, &self.arithmetic_classes, constraint, ty) {
+                match constraint_rejects(db, self.arithmetic_classes, constraint, ty) {
                     Some(error) => Err(error),
                     None => Ok(()),
                 }
@@ -812,7 +814,7 @@ impl<'db> InferenceTable<'db> {
             {
                 let variances = self
                     .definitions
-                    .get(&actual_name)
+                    .and_then(|table| table.get(&actual_name))
                     .map(|definition| parameter_variances(db, definition))
                     .unwrap_or_default();
                 actual_arguments
@@ -1586,7 +1588,7 @@ fn nullable_single_member<'db>(db: &'db dyn Db, members: &[Ty<'db>]) -> Option<T
 /// (the variable takes the class), never a false rejection.
 fn constraint_rejects<'db>(
     db: &'db dyn Db,
-    arithmetic_classes: &FxHashSet<String>,
+    arithmetic_classes: Option<&FxHashSet<String>>,
     constraint: Constraint,
     ty: Ty<'db>,
 ) -> Option<UnifyError<'db>> {
@@ -1601,7 +1603,9 @@ fn constraint_rejects<'db>(
                 element.kind(db),
                 TyKind::Scalar(Atomic::Integer | Atomic::Double)
             ),
-            TyKind::Named(name, _) => arithmetic_classes.contains(name.text(db)),
+            TyKind::Named(name, _) => {
+                arithmetic_classes.is_some_and(|classes| classes.contains(name.text(db)))
+            }
             _ => false,
         },
         Constraint::AtomicElement => matches!(
@@ -1612,7 +1616,9 @@ fn constraint_rejects<'db>(
             TyKind::Scalar(Atomic::Integer | Atomic::Double) | TyKind::Any | TyKind::Unknown => {
                 true
             }
-            TyKind::Named(name, _) => arithmetic_classes.contains(name.text(db)),
+            TyKind::Named(name, _) => {
+                arithmetic_classes.is_some_and(|classes| classes.contains(name.text(db)))
+            }
             _ => false,
         },
     };
