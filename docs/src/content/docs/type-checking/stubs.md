@@ -29,10 +29,11 @@ Attaching a package ry has never heard of weakens the `unresolved` check across 
 bare name *could* be one of that package's exports, so unresolved names are tolerated rather than
 reported.
 
-One thing limits the damage: a near miss of a name your **own** project binds is still reported —
-`library(shiny)` cannot explain `repositry` sitting next to a `repository` parameter. Strict mode
-does not help here, because the tolerance is applied while names are resolved rather than through
-the type of the result.
+Two things limit the damage. A near miss of a name your **own** project binds is still reported —
+`library(shiny)` cannot explain `repositry` sitting next to a `repository` parameter. And
+[strict mode](/reference/type-system#strict-mode) reports every tolerated read, so you can see
+exactly how much the attachment switched off instead of reading a clean run as a clean bill of
+health.
 
 The fix is to declare the package yourself.
 

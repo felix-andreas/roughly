@@ -927,50 +927,34 @@ unknown key a hard error when the file is a *local* `ry.toml` while keeping the 
 compatibility only where it is actually needed. Decide it deliberately; the current forward-compat
 rationale (`config.rs`, `Config::unknown_keys`) is written down and is not obviously wrong.
 
-## Open — strict mode does not surface reads tolerated by an unknown attached package
+## FIXED — strict mode now surfaces reads tolerated by an unknown attached package
 
-The blanket tolerance is the one hole strict mode leaves open, and three docs pages had claimed the
-opposite ("`strict = true` makes every tolerated read visible"). Measured: with a
-`library(<package with no manifest>)` in the project, a read of a name nothing defines produces **no
-finding at all** under `[check] typing = true, strict = true` — verified across four shapes (bare
-read, call, call assigned then used, and the value used numerically; all report `no problems`).
+The blanket tolerance was the one hole strict mode left open, and three docs pages had claimed the
+opposite before saying plainly that it did not close it. With a `library(<package with no
+manifest>)` in the project, a read of a name nothing defines produced **no finding at all** under
+`[check] typing = true, strict = true`. That is the failure mode this project treats as worst: a
+clean run that reads as "I understood everything" while an unknown `library()` silently switched a
+whole class of checking off project-wide.
 
-The cause is a boundary rather than a bug: the tolerance is applied while names are resolved, and
-strict mode reports undetermined *types* at their origin. `type-system.md` explicitly excludes an
-unresolved-name reference from being a strict origin, because naming already reports it — but a
-*tolerated* read is precisely the case where naming does not, so it falls between the two layers.
+Closed by making the two streams share one decision instead of one of them guessing. The tolerance
+was a `continue` buried in a 65-line loop in `unresolved_diagnostics`; that loop is now
+`classify_non_local_read`, returning `Resolvable` / `Tolerated` / `Unresolved`. The ordinary check
+reports the last, strict reports the middle — so strict reports **exactly** the reads the ordinary
+check let through, and the two cannot drift. (Duplicating the tolerance rule into `strict_diagnostics`
+was the obvious alternative and is the shape that caused the arithmetic-constraint bug: two places
+deciding the same thing from different sources.)
 
-This matters because it is the failure mode this project treats as worst: a clean strict run that
-reads as "I understood everything" while an unknown `library()` silently switched a whole class of
-checking off project-wide. Until it is closed the docs say so plainly — `limitations.md` and
-`stubs.md` state that strict does not close it, and that declaring the package is what does.
+Verified end to end rather than reasoned: strict on reports each tolerated read; strict **off** is
+still silent, which is the whole point of the tolerance; a near miss of a name the project itself
+binds was never tolerated and stays an `unresolved` finding; and the remedy the message names — a
+`stubs/<pkg>.Rtypes` — actually closes it.
 
-**Located, so the next attempt does not have to re-find it.** Re-verified still open: three
-undetermined reads (bare, called, used numerically) under a `library(someunknownpkg)` with
-`typing = true, strict = true` report `no problems`. The tolerance is exactly one guard in
-`unresolved_diagnostics` — `if project_typo.is_none() && metadata::imports_every_name(db) { continue }`
-— and everything above it is "this name really is resolvable", so **the tolerated set is precisely the
-reads that reach that guard and take it**. The `continue` is where a strict origin belongs.
-
-Three things a fix has to settle, none of them hard but all of them load-bearing:
-
-- **Which layer emits it.** Strict origins are recorded in the checker and keyed by `ExprId`; this
-  decision lives in the naming-diagnostics stream. Emitting the `strict` finding at the guard keeps
-  one decision point (the alternative duplicates the tolerance rule into `strict_diagnostics`, which
-  is the shape that just caused a bug elsewhere — dispatch and the numeric constraint reading
-  different scopes).
-- **How it is gated.** `file_diagnostics` does not know whether strict is on; the caller filters by
-  code (`"type-mismatch" => typing_enabled`). So emit unconditionally and add `"strict" =>
-  strict_enabled` to that filter, which is the pattern already in use.
-- **The fixture harness gates strict differently and this needs checking first.**
-  `testing.rs` chains `strict_diagnostics` *unconditionally* into every suite's output, yet the
-  non-strict suites show no strict findings today (`f: <T> fn(node: T) -> Unknown` in
-  `containers.R.test` has none). Understand why before adding an emitter, or a mass re-bless of
-  unrelated suites is the first thing that happens.
-
-Adjacent and still true: strict *does* report `Unknown` origins from unsupported constructs and from
-`Any`-returning stub calls (`min()` on a classed value, `data.frame()`, `subset()`, `df$amount` all
-verified), and it *does* escalate genuinely-unresolved names from warning to error.
+**This cannot be a fixture, and finding that out cost a blessed pair of them that tested nothing.**
+The tolerance keys on `PackageMetadata`, a salsa input only a real project sets, so a single-file
+fixture never triggers it — the two fixtures written first blessed as ordinary `unresolved` warnings
+while their comments claimed to be testing strict. They were deleted; the test lives in the CLI
+suite (`strict_reports_a_read_the_attached_package_tolerance_silenced`), which builds real projects,
+and asserts all three behaviours above.
 
 ## FIXED (htmltools) / Open (mgcv, and it is a DIFFERENT cause) — spinning on CPU at flat memory
 

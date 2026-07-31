@@ -24,8 +24,9 @@ strict = true
 It reports every place a value became `Unknown`, and every call whose result the shipped
 declarations could not describe — `min()` on a classed value, say, where the corpus ends the
 overload set with a permissive fallback. It is how you find out how much of a file is actually being
-checked, and it keeps a gap from looking like a pass. The one thing it does not surface is the
-attached-package tolerance described [below](#non-standard-evaluation).
+checked, and it keeps a gap from looking like a pass — including the attached-package tolerance
+described [below](#non-standard-evaluation), which it reports as an undetermined read rather than
+leaving silent.
 
 ## Data frames
 
@@ -89,9 +90,10 @@ Three things narrow the hole:
    the one in `tests/testthat.R` is harmless.
 
 The way to close it is a two-line [`stubs/<pkg>.Rtypes`](/type-checking/stubs), which also silences
-the unknown-namespace warning. Strict mode does not close it: the tolerance is applied while names
-are resolved, and strict mode reports undetermined *types*, so a tolerated read produces no finding
-in either mode.
+the unknown-namespace warning. **Strict mode surfaces it**: a tolerated read is genuinely
+undetermined, so under `[check] strict` each one is reported where it is read, naming the package
+declaration as the fix. It stays silent in ordinary runs — that silence is the point of the
+tolerance, since without it every export of an unstubbed `library()` would be a false `unresolved`.
 
 A project's own `%op%` is deliberately left opaque: it may be an NSE wrapper whose right operand is
 quoted rather than evaluated (magrittr's `%>%` is the canonical case), and checking that as an

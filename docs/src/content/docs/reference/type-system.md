@@ -2712,6 +2712,15 @@ Strict mode is an opt-in check controlled by the `[check] strict` switch (defaul
 - it adds diagnostics at `Unknown` origins and escalates unresolved references
 - the typecheck phase already runs to produce the inferred types; strict mode reads those types
   and reports the places where the checker genuinely could not determine one
+- it also reports a read that the **attached-package tolerance** silenced. Attaching a package whose
+  exports cannot be known makes every otherwise-unresolved name tolerated, which is right for an
+  ordinary run — without it each of that package's exports would be a false `unresolved` — but it
+  switches a whole class of checking off project-wide, and a clean run would otherwise be
+  indistinguishable from one that never happened. Such a read is genuinely undetermined, so strict
+  names it and points at the [package declaration](/type-checking/stubs) that closes it. The
+  classification is shared with the ordinary `unresolved` check, so these are exactly the reads that
+  check let through — a near miss of a name your own project binds was never tolerated and stays an
+  `unresolved` finding
 
 ### Unresolved references escalate to errors
 

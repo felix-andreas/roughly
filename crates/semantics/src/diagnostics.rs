@@ -338,60 +338,18 @@ pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
         // frame settled, so any slot in the document resolves it, including
         // the enclosing statement's own target (self-recursion).
         for (expression, name) in &naming.non_locals {
-            // Guards ordered cheapest first: the file-local resolutions
-            // (masked reads, the document's own frame slots) before the
-            // project- and corpus-wide ones — in a script-heavy workspace
-            // most non-local reads are cross-statement reads that the frame
-            // slots resolve.
-            if check.masked_reads.contains(expression) {
+            let NonLocalRead::Unresolved { suggestion } =
+                classify_non_local_read(db, file, item_index, &check, &naming, expression, name)
+            else {
                 continue;
-            }
-            if let Some(&earliest) = frame_slot_positions(db, file).get(name)
-                && (earliest < item_index || naming.deferred_non_locals.contains(expression))
-            {
-                continue;
-            }
-            if R6_INJECTED_BINDINGS.contains(&name.as_str()) && *file_defines_r6_class(db, file) {
-                continue;
-            }
-            if crate::package_scheme_exists(db, name)
-                || super_globals(db, file).contains(name)
-                || declared_global_variable(db, name)
-                || crate::metadata::imported_by_name(db, name)
-            {
-                continue;
-            }
-            // A near-miss of a name the project itself binds is reported even
-            // under the blanket tolerance an unknowable export set earns.
-            // `library(shiny)` cannot explain `repositry` in a function whose
-            // parameter is `repository`, and `library(testthat)` cannot explain
-            // `validte_url` in a project that defines `validate_url`: a name one
-            // edit away from a binding of your own is a typo, not somebody
-            // else's export. Locals and parameters of the enclosing item count
-            // as well as the project's top-level definitions — a typo of a name
-            // in lexical scope on the same line is the case a user is least
-            // willing to see missed.
-            let project_typo = project_definition_suggestion(db, name).or_else(|| {
-                nearest_name(
-                    name,
-                    naming
-                        .bindings
-                        .values()
-                        .map(|binding| binding.name.as_str()),
-                )
-                .map(str::to_owned)
-            });
-            if project_typo.is_none() && crate::metadata::imports_every_name(db) {
-                continue;
-            }
+            };
             let expression_range = module.expression(*expression).range;
             let range = TextRange::new(
                 expression_range.start() + offset,
                 expression_range.end() + offset,
             );
             let display = display_name(name);
-            let suggestion = project_typo
-                .or_else(|| unresolved_suggestion(db, name))
+            let suggestion = suggestion
                 .map(|nearest| format!(" Did you mean `{nearest}`?"))
                 .unwrap_or_default();
             diagnostics.push(Diagnostic {
@@ -416,6 +374,80 @@ pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
 
     diagnostics.sort_by_key(|diagnostic| (diagnostic.range.start(), diagnostic.range.end()));
     diagnostics
+}
+
+/// What resolution made of one non-local read.
+///
+/// Two diagnostic streams depend on this and must not disagree, so the
+/// classification lives in one place: the ordinary check reports what nothing
+/// explains, and strict mode reports what an unknowable export set silenced —
+/// which is *exactly* the set the ordinary check let through.
+enum NonLocalRead {
+    /// Something resolves it after all, so it is not a finding at all.
+    Resolvable,
+    /// Nothing in the project or the corpus defines it, and an attached package
+    /// whose export set cannot be known earned it silence.
+    Tolerated,
+    /// Nothing defines it and nothing excuses it.
+    Unresolved { suggestion: Option<String> },
+}
+
+/// Guards ordered cheapest first: the file-local resolutions (masked reads, the
+/// document's own frame slots) before the project- and corpus-wide ones — in a
+/// script-heavy workspace most non-local reads are cross-statement reads that
+/// the frame slots resolve.
+fn classify_non_local_read(
+    db: &dyn Db,
+    file: SourceFile,
+    item_index: usize,
+    check: &crate::check::ItemCheck<'_>,
+    naming: &crate::naming::ItemNaming,
+    expression: &crate::hir::ExprId,
+    name: &str,
+) -> NonLocalRead {
+    if check.masked_reads.contains(expression) {
+        return NonLocalRead::Resolvable;
+    }
+    if let Some(&earliest) = frame_slot_positions(db, file).get(name)
+        && (earliest < item_index || naming.deferred_non_locals.contains(expression))
+    {
+        return NonLocalRead::Resolvable;
+    }
+    if R6_INJECTED_BINDINGS.contains(&name) && *file_defines_r6_class(db, file) {
+        return NonLocalRead::Resolvable;
+    }
+    if crate::package_scheme_exists(db, name)
+        || super_globals(db, file).contains(name)
+        || declared_global_variable(db, name)
+        || crate::metadata::imported_by_name(db, name)
+    {
+        return NonLocalRead::Resolvable;
+    }
+    // A near-miss of a name the project itself binds is reported even under the
+    // blanket tolerance an unknowable export set earns. `library(shiny)` cannot
+    // explain `repositry` in a function whose parameter is `repository`, and
+    // `library(testthat)` cannot explain `validte_url` in a project that defines
+    // `validate_url`: a name one edit away from a binding of your own is a typo,
+    // not somebody else's export. Locals and parameters of the enclosing item
+    // count as well as the project's top-level definitions — a typo of a name in
+    // lexical scope on the same line is the case a user is least willing to see
+    // missed.
+    let project_typo = project_definition_suggestion(db, name).or_else(|| {
+        nearest_name(
+            name,
+            naming
+                .bindings
+                .values()
+                .map(|binding| binding.name.as_str()),
+        )
+        .map(str::to_owned)
+    });
+    if project_typo.is_none() && crate::metadata::imports_every_name(db) {
+        return NonLocalRead::Tolerated;
+    }
+    NonLocalRead::Unresolved {
+        suggestion: project_typo.or_else(|| unresolved_suggestion(db, name)),
+    }
 }
 
 /// Errors for `#:` type references no vocabulary declares: a name in an
@@ -1513,6 +1545,58 @@ pub fn strict_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
     use crate::hir::ExpressionKind;
 
     let mut diagnostics = Vec::new();
+    // The blanket tolerance is the one hole strict mode used to leave open: an
+    // attached package whose export set cannot be known silences every name
+    // nothing defines, so a whole class of checking switched off project-wide
+    // and the run still read as "I understood everything". Such a read IS
+    // undetermined, which is what strict mode is for. The classification is
+    // shared with the ordinary check, so this reports exactly the reads that
+    // one let through.
+    let broken_ranges: Vec<TextRange> = parse(db, file)
+        .errors()
+        .iter()
+        .filter(|error| !error.in_annotation)
+        .map(|error| error.range)
+        .collect();
+    for (item_index, span) in crate::item_spans(db, file).iter().enumerate() {
+        if broken_ranges
+            .iter()
+            .any(|error| error.start() <= span.range.end() && span.range.start() <= error.end())
+        {
+            continue;
+        }
+        let item = span.item;
+        let offset = span.range.start();
+        let (Some(check), Some(module), Some(naming)) = (
+            item_check(db, item),
+            crate::item_hir(db, item),
+            crate::item_naming(db, item),
+        ) else {
+            continue;
+        };
+        for (expression, name) in &naming.non_locals {
+            if !matches!(
+                classify_non_local_read(db, file, item_index, &check, &naming, expression, name),
+                NonLocalRead::Tolerated
+            ) {
+                continue;
+            }
+            let expression_range = module.expression(*expression).range;
+            diagnostics.push(Diagnostic {
+                range: TextRange::new(
+                    expression_range.start() + offset,
+                    expression_range.end() + offset,
+                ),
+                severity: Severity::Error,
+                code: "strict",
+                message: format!(
+                    "strict mode: nothing this project can see defines `{}` — it is silent only because an attached package's exports are unknown. Declare the package with a `.Rtypes` stub to check it",
+                    display_name(name)
+                ),
+                related: Vec::new(),
+            });
+        }
+    }
     for span in crate::item_spans(db, file) {
         let item = span.item;
         let offset = span.range.start();

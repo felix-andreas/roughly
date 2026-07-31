@@ -1182,6 +1182,67 @@ fn typing_on_and_strict_directives_opt_single_files_in() {
     assert!(!report.contains("plain.R"), "report:\n{report}");
 }
 
+// An attached package whose export set cannot be known silences every name
+// nothing defines. That is deliberate — without it a `library()` the corpus has
+// no stubs for turns every one of its exports into a false `unresolved` — but it
+// switched a whole class of checking off project-wide while the run still read
+// as "I understood everything". Strict mode reports those reads, because a
+// tolerated read IS undetermined, and names the remedy the docs give.
+//
+// This cannot be a fixture: the tolerance keys on `PackageMetadata`, a salsa
+// input only a real project sets, so a single-file fixture never triggers it.
+#[test]
+fn strict_reports_a_read_the_attached_package_tolerance_silenced() {
+    let sources = [
+        (
+            "R/a.R",
+            "library(someunknownpkg)
+
+bare <- mystery_thing
+print(bare)
+",
+        ),
+        (
+            "ry.toml",
+            "[check]
+typing = true
+strict = true
+",
+        ),
+    ];
+    let directory = project(&sources);
+    let output = ry(directory.path(), &["check"]);
+    assert_eq!(exit_code(&output), 1);
+    let report = stderr(&output);
+    assert!(
+        report.contains("nothing this project can see defines `mystery_thing`"),
+        "strict surfaces the tolerated read:\n{report}"
+    );
+
+    // Without strict the tolerance still holds: this is the whole reason the
+    // hole existed, and closing it must not start reporting in ordinary runs.
+    let lenient = project(&[
+        sources[0],
+        (
+            "ry.toml",
+            "[check]
+typing = true
+",
+        ),
+    ]);
+    let output = ry(lenient.path(), &["check"]);
+    assert_eq!(exit_code(&output), 0, "{}", stderr(&output));
+
+    // And the remedy the message names actually closes it.
+    let declared = project(&[
+        sources[0],
+        sources[1],
+        ("stubs/someunknownpkg.Rtypes", "mystery_thing : integer\n"),
+    ]);
+    let output = ry(declared.path(), &["check"]);
+    assert_eq!(exit_code(&output), 0, "{}", stderr(&output));
+}
+
 // A typo'd directive value is a diagnostic, not a silent no-op.
 #[test]
 fn unknown_typing_directive_value_is_reported() {
