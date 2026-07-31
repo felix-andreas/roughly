@@ -259,37 +259,81 @@ provides. Care is needed to reproduce miette's `SpanContents` exactly — data, 
 line count — and the character-column re-count must stay, since it is what keeps the human header
 agreeing with the JSON record for the same finding.
 
-### The package-document path costs 9× wall and 16× memory over the script path
+### The package-path cost is test-block writes entering the package namespace — root cause found, one part fixed
 
-The same 1,550 files / 277,586 lines / 14,771 items, one project, measured both ways: as package
+The review framed this as the interface fixpoint being superlinear in the size of the cyclic
+definition group. **It is not.** Profiled on `targets` 1.12.0, where `ry check` took 16.6 s on the JSON
+path (so not the reporter): `analysis-stats` attributes 16,341 ms of the 16,681 ms typecheck to **one
+245-line file**, `R/class_active.R`. The instrument could only say this after the document-kind fix
+above; before that it measured a different program.
+
+What it scales with is not the file count. 284 package files cost 0.35 s; adding 238 *unrelated* package
+files costs 0.37 s; adding the 238 `tests/testthat` files costs 16.6 s, and reclassifying those same
+files as scripts brings it back to 0.99 s. Bisecting by test-file count: 0 → 384 ms, 30 → 1.6 s,
+60 → 3.7 s, 120 → 9.7 s, 238 → 22 s, about 90 ms per added test file.
+
+The mechanism, from per-item execution counts and times: query executions grow only 3.6× while wall
+time grows 25×, so it is not re-execution volume — one statement item was re-executed 139 times and its
+own cost grew with the file count. Writes inside a `test_that`/`tar_test` block bind at the **item's top
+level**, because a bare `{...}` is not a scope, so `conditional_slot_items` publishes every one of them
+as a package-namespace conditional slot. A cross-file (deferred) read of a common local name like `out`
+or `envir` then joins over every conditional writer of that name project-wide — hundreds of statement
+items across 238 files — and each join needs that item's check, which drags in the R6 record type.
+
+Two things ruled out by direct experiment, so nobody repeats them: it is **not** the fixpoint round cap
+(setting `SCHEME_ROUND_CAP` from 16 to 2 changed 9,690 ms to 9,760 ms) and **not** the type-size ceiling
+(lowering `TYPE_SIZE_CEILING` from 100,000 to 2,000 changed nothing).
+
+**Fixed here:** the quoting-form part. `quote`/`substitute`/`bquote`/`expression` arguments were binding
+their assignments, so `quote(x <- 1)` published `x` and every quoted call was type-checked. That alone
+takes `targets` from 16.6 s to 9.9 s and removes 151 findings, all false positives (139 arity and type
+errors reported against calls inside `quote({...})` — code R does not run there — and 12 unresolved
+reads of names mentioned in a quotation). See the type-system reference for the contract.
+
+**Still open, and it is a semantics design question rather than an optimisation.** The remaining ~10 s is
+ordinary (unquoted) writes inside test blocks. Scoping a block argument the way `local` is scoped takes
+`targets` to 0.89 s — 18.6× — but it cannot be done bluntly, and R decides the question by callee, which
+was checked rather than assumed:
+
+- `suppressWarnings({v <- 1})`, `invisible`, `system.time`, `try`, `withCallingHandlers` — the block's
+  write **does** bind outward, because a promise is forced in the caller's frame. A blanket rule would
+  manufacture false `unresolved` findings on `try({cfg <- read()}); use(cfg)`.
+- `local({v <- 1})` and the `eval(substitute(b), new.env())` pattern that `test_that` uses — it does
+  **not** bind.
+
+So the rule has to key on the callee, and the honest options are a known-verb list (testthat's
+`test_that`/`describe`/`it`, matching the existing `library`/`on.exit`/`local` precedent) or a stub
+annotation in the vein of `@masked`. A verb list alone is not enough for real projects: `targets` wraps
+`test_that` in its own `tar_test`, and hardcoding a package's private wrapper is not a rule. Whichever
+is chosen, one blocker comes with it, measured: scoping those blocks adds 87 `unused` warnings to
+`targets`, a mix of genuine dead stores (`expect_silent(tmp <- f(x))`) and cases that only look dead
+because a name is used in a nested closure. That needs its own answer before the change can land.
+
+### Memory, and the rest of the package-path measurements
+
+A synthetic 1,550 files / 277,586 lines / 14,771 items, one project, measured both ways: as package
 documents under `R/` it is **55.9 s and 5,488 MiB peak** (typecheck alone 48.0 s and +5,177 MiB); with
 the identical files at the project root, so they are scripts, **5.95 s and 343 MiB**. Superlinear in
 file count within the package shape — 400 files 6.1 s, 800 files 10.8 s, 1,550 files 68 s, with RSS
-722 MiB to 5,488 MiB over the last step.
+722 MiB to 5,488 MiB over the last step. Whether this is the same conditional-slot cause as `targets`
+was not established; the synthetic generator's shape is not recorded here, so re-derive it before
+treating these numbers as a second instance.
 
-The real instance is `targets` 1.12.0, already in this backlog as a 43.7 s outlier: `ry check .` is
-17.6 s, of which 17.25 s is provably inside `item_check`. Renaming `tests/testthat` to `tests/tt`, so
-its 324 test files become scripts rather than package documents, drops it to **1.15 s** — 15× from the
-classification alone. Other packages move much less as-package versus as-script (ggplot2 1.70/1.21,
-dplyr 0.72/0.58, shiny 0.65/0.59), so the cost is superlinear in the size of the cyclic group and
-`targets`' R6-heavy suite is what makes it bite.
+Other packages move much less as-package versus as-script (ggplot2 1.70/1.21, dplyr 0.72/0.58, shiny
+0.65/0.59), which fits the cause above: they have far fewer test-block writes landing in the namespace.
 
 Sampling puts the time in **salsa cycle bookkeeping** around `statement_binding_scheme` and
 `item_check` — `collect_all_cycle_heads::collect_recursive`,
 `MemoHeader::flatten_cycle_head_dependencies`, and `CycleHeads::contains` doing a linear scan. On four
 cores, 54 of 72 sampled thread stacks were in `DependencyGraph::block_on`, and `targets` gets **no
 parallel speedup at all** (17.43/17.81 s on one core against 17.43/16.99 s on four, where ggplot2
-gets 1.15×).
+gets 1.15×). Read that as a symptom of the enormous conditional-slot joins rather than as an
+independent finding — the joins are what create the cycles being booked.
 
-This contradicts the architecture page, which says salsa's cycle recovery "remains only as a backstop
-for reference edges the static graph cannot see" — at scale the backstop is carrying the load,
-because `interface_sccs` derives its edges from names appearing in an item's source and so cannot see
-constructed or R6-style references. It also contradicts the memory note of ~300 MiB at 302K LoC: that
-holds for the script shape (343 MiB at 278K LoC) and is 16× off for the package shape. Direction, not
-yet prototyped: find the edges `interface_sccs` misses and bring `statement_binding_scheme` inside the
-canonical fixpoint instead of relying on recovery. For reference, memory attribution in the healthy
-shape is parse +82 MiB, lower+naming +158 MiB, typecheck +47 MiB, diagnostics +28 MiB — HIR and
-naming dominate resident memory at rest, not interned types.
+The memory note of ~300 MiB at 302K LoC holds for the script shape (343 MiB at 278K LoC) and is 16× off
+for the package shape. For reference, memory attribution in the healthy shape is parse +82 MiB,
+lower+naming +158 MiB, typecheck +47 MiB, diagnostics +28 MiB — HIR and naming dominate resident memory
+at rest, not interned types.
 
 ### FIXED — a per-item query re-derived the whole file
 
@@ -1475,10 +1519,10 @@ win that was entirely load drift from a build still finishing during the baselin
 the two binaries run-by-run showed the true difference: zero. Any perf claim here needs interleaved
 runs.
 
-Also still open from the same investigation: **`targets` 1.12.0 (63,979 lines) takes 43.7 s** where a
-similarly sized ggplot2 takes 2.0 s — a ~20x outlier, R6-heavy code the obvious suspect, unprofiled.
-A smaller sibling worth a look because it is cheap to profile: **`MASS` (5,951 lines) takes 6.5 s**,
-roughly 900 lines/second where the corpus average is ~50,000.
+Both outliers from the same investigation are now accounted for. **`MASS` is closed** — it took 6.5 s
+and now takes 0.31 s and 0.36 s, from the operand-inference fix; the R6 suspicion was wrong, it was
+arithmetic chains. **`targets`** was the other, and its cause is the conditional-slot finding above,
+where the remaining half is written up; R6 was a suspect there too and is likewise not the cause.
 
 **Missing end-to-end coverage for both cycle fixes.** Neither has a fixture. The failing inputs are
 whole CRAN packages, and synthetic cases built from the suspected mechanisms did not reproduce

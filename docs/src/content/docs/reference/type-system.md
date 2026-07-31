@@ -180,6 +180,15 @@ environment semantics: a scope holds one variable per name, and assignment mutat
   argument is positional and a bare identifier; a string argument, a named first argument
   (`library(package = pkg)`), or a qualified callee is an ordinary call, and rebinding `library`
   to a user function does not change the quoting (the same limitation as `local`)
+- `quote(expr)`, `substitute(expr)`, `bquote(expr)`, and `expression(expr)` build an expression
+  instead of running it, so **an assignment written inside one binds nothing**: `quote(x <- 1)`
+  leaves `x` undefined, and a later read of it is reported, matching R's `object 'x' not found`.
+  Nothing inside the quotation is judged either — it is code the program does not run at that
+  point, so a call there is not checked for arity or argument types, and a name it mentions need
+  not exist (naming a variable a quotation is about to create is ordinary metaprogramming). The
+  names it mentions are still *read*, because `eval` may run the expression later, so a write those
+  names refer to stays live rather than becoming a false "assigned but never used". Same syntactic
+  rule and same limitation as `local` above
 
 At a package document's top level, conditionally executed assignments (inside a top-level `if`,
 `for`, `while`, or `repeat`) are not package-visible, but within the same document they behave

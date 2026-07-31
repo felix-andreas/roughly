@@ -173,6 +173,7 @@ pub fn resolve_item_with_masked_verbs(
         emit: true,
         quiet_depth: 0,
         deferred_depth: 0,
+        quoted_depth: 0,
         naming: ItemNaming::default(),
     };
     if let Some(root) = module.root {
@@ -265,6 +266,14 @@ struct Context<'a> {
     /// the final value of the names it mentions, so it keeps every write of
     /// those names alive.
     deferred_depth: u32,
+    /// Non-zero inside a quoting form's argument (`quote`, `substitute`,
+    /// `bquote`, `expression`), which R never evaluates — so an assignment
+    /// written there binds NOTHING. Reads are still walked and kept alive,
+    /// because `eval` may run the expression later; only the binding is
+    /// withheld. Treating a quoted assignment as a binding hid real
+    /// `unresolved` findings: `quote(x <- 1)` followed by a read of `x` is an
+    /// `object 'x' not found` error in R and reported clean here.
+    quoted_depth: u32,
     naming: ItemNaming,
 }
 
@@ -455,6 +464,39 @@ impl Context<'_> {
                         }
                     }
                     self.deferred_depth -= 1;
+                    return;
+                }
+                // A quoting form builds an expression instead of running it,
+                // so nothing inside it binds. Verified against R: `quote`,
+                // `substitute`, `bquote` and `expression` all leave the name
+                // in `quote(x <- 1)` unbound. Reads are still walked, and
+                // walked as deferred, because `eval` may run the expression
+                // later — so a write the quoted code mentions stays alive
+                // rather than turning into a false "assigned but never used".
+                // The rule is syntactic, like the `library`/`on.exit` ones
+                // above: a locally defined function of the same name is an
+                // ordinary call.
+                let quoting_form = matches!(
+                    &self.module.expression(*callee).kind,
+                    ExpressionKind::NameRef(name)
+                        if matches!(
+                            name.as_str(),
+                            "quote" | "substitute" | "bquote" | "expression"
+                        ) && !self.naming.resolutions.contains_key(callee)
+                );
+                if quoting_form {
+                    // Quiet as well: a name inside a quoted expression need not
+                    // exist yet — `quote(x <- 1)` is how metaprogramming names
+                    // a variable it is about to create — so an unresolved read
+                    // there is not a reportable finding, only the read of it
+                    // afterwards is.
+                    self.quoted_depth += 1;
+                    self.deferred_depth += 1;
+                    self.quiet_depth += 1;
+                    self.resolve_arguments(arguments);
+                    self.quiet_depth -= 1;
+                    self.deferred_depth -= 1;
+                    self.quoted_depth -= 1;
                     return;
                 }
                 // A masking call evaluates the arguments its `...` absorbs
@@ -879,6 +921,14 @@ impl Context<'_> {
         target: ExprId,
         spelling: AssignSpelling,
     ) {
+        // A quoting form's argument is data, not code: R builds the expression
+        // and binds nothing, so neither does this. The target still resolves as
+        // a read where it names something that exists, which is what an editor
+        // needs inside `quote(x <- f(y))`.
+        if self.quoted_depth > 0 {
+            self.resolve(target);
+            return;
+        }
         let target_expression = self.module.expression(target).clone();
         match &target_expression.kind {
             // A string where a name belongs binds that name: `"x" <- 1` is

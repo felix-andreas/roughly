@@ -525,3 +525,44 @@ keep <- 1.0
 #++++
 keep: double
 56..60 warning[unused] `keep` is assigned but never used.
+
+#==== quoting_forms
+#---- a_quoted_assignment_binds_nothing
+# `quote` builds an expression instead of running it, so R leaves the name
+# unbound — `quote(target <- 1)` followed by a read of `target` is an
+# `object 'target' not found` error. Treating the quoted write as a binding
+# made that read report clean, which is a missed finding rather than a wrong
+# type. The name inside the quotation stays silent: naming a variable a
+# quotation is about to create is what metaprogramming does.
+built <- quote(target <- 1)
+print(target)
+print(built)
+#++++
+built: Any
+467..473 warning[unresolved] I could not resolve `target` in this package, its imports, or builtins.
+
+#---- quoted_code_is_not_judged
+# Quoted code is data: R does not run the call, so checking it reports errors
+# against a call the program never makes. 139 of these came out of one real
+# package's test suite, every one against an expression inside `quote({...})`.
+takes_two <- function(a, b) a + b
+quoted <- quote({ takes_two(1) })
+direct <- takes_two(1)
+#++++
+takes_two: <T: numeric> fn(a: T, b: T) -> T
+quoted: Any
+direct: Unknown
+267..273 warning[unused] `quoted` is assigned but never used.
+301..307 warning[unused] `direct` is assigned but never used.
+311..320 error[type-mismatch] this call supplies 1 argument, but the function requires 2 — a required argument is missing
+
+#---- a_quoted_read_still_keeps_a_write_alive
+# `eval` may run the quotation later, so a name it mentions is read — dropping
+# that would turn every `expr <- quote(f(x)); eval(expr)` into a false
+# "assigned but never used" on `x`.
+value <- 1L
+expression_to_run <- quote(print(value))
+eval(expression_to_run)
+#++++
+value: integer
+expression_to_run: Any
