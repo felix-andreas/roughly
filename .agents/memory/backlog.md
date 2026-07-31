@@ -703,20 +703,39 @@ below, ranked by how often a real user hits it.
   without changing any argument type, so no overload set can discriminate them — typing only their
   *parameters* (leaving the return `Any`) is the reachable win, at the cost of rejecting R's
   function-name-as-string form (`sapply(x, "length")`, already rejected for `lapply`).
-- **The three object systems, measured (S3 partial, S4 and R6 recognition-only).** S3 *operator*
-  dispatch is real (`+.Date`, `Arith.X`, `Ops.X` method names are built and dispatched, and the
-  linter knows `generic.class` names), but `UseMethod` is not modelled — a generic call is `Unknown`
-  — and `structure(list(...), class = "dog")` produces a plain record, so the class attribute is
-  data. S4 is untyped end to end: `setClass`/`setGeneric`/`setMethod`/`new` are `Any` stubs, `x@slot`
-  has no type, a slot typo against a class declared two lines above is silent
-  (`setClass("A", representation(x = "numeric")); new("A", y = 1)`), and — the one *active* false
-  positive of the three — `setGeneric("f", ...)` does not define `f`, so every call to a project's
-  own S4 generic reports `unresolved`. R6 has no stub at all (`R6::R6Class` reports `unknown package
-  namespace R6`); method bodies resolve `self`/`private`/`super` as a special case, but the class,
-  its fields and its methods are `Unknown`, so `obj$typo()` is silent and completion after `self$`
-  offers every record field in the workspace. All three are recognized structurally by the IDE
-  outline (`classify_symbol_call`), which is where the type-side work can start. Fix order by pain:
-  the `setGeneric` false positive, then an R6 stub, then S4 slot types, then `UseMethod`.
+- **The three object systems (S3 partial, S4 and R6 recognition-only). Re-measured, and two of the
+  four claims this entry used to make were stale — including the one it ranked first.**
+
+  - **`setGeneric` is FIXED and was already fixed when this said otherwise.** The entry claimed
+    "`setGeneric("f", ...)` does not define `f`, so every call to a project's own S4 generic reports
+    `unresolved`", and ranked it the top fix. It does not reproduce: `set_generic_target` binds the
+    name, handles the `methods::setGeneric` form and the `name =` argument, and a control probe in the
+    same file confirms the `unresolved` check was live (`definitely_not_defined` reported; `area` did
+    not). Anyone who took the ranking at face value would have spent a cycle fixing a non-bug.
+  - **R6 was mischaracterised.** "R6 has no stub at all (`R6::R6Class` reports `unknown package
+    namespace R6`)" — R6 *does* ship an export manifest and is a conditional namespace, so it resolves
+    as soon as the project declares it (`DESCRIPTION` `Imports: R6`) or attaches it (`library(R6)`);
+    both verified clean. The message appears only for `R6::` in a project that declares neither, which
+    is the documented rule for *any* undeclared namespace and is deliberate. What is actually missing
+    is **typed** declarations — the class, its fields and its methods are `Unknown`, so `obj$typo()` is
+    silent and completion after `self$` offers every record field in the workspace.
+  - **Still true: an S4 slot typo is silent.** `setClass("A", representation(x = "numeric"))` then
+    `new("A", y = 1)` reports nothing; R halts with ``invalid name for slot of class "A": y``. `x@slot`
+    has no type either, and `setClass`/`setMethod`/`new` are `Any` stubs.
+  - **Still true: `UseMethod` is not modelled** — a generic call is `Unknown` — and
+    `structure(list(...), class = "dog")` produces a plain record, so the class attribute is data. S3
+    *operator* dispatch is real (`+.Date`, `Arith.X`, `Ops.X` are built and dispatched, and the linter
+    knows `generic.class` names).
+
+  All three systems are recognized structurally by the IDE outline (`classify_symbol_call`), which is
+  where the type-side work can start. **Revised fix order, cheapest real win first: the S4 slot-name
+  check**, then R6 class typing, then S4 slot types, then `UseMethod`.
+
+  The slot check is bounded — `setClass` names the slots, `new("Class", ...)` names its arguments —
+  but **`contains =` is the trap**: a subclass legitimately takes its parent's slots, verified against
+  R (`setClass("C", contains = "P", …); new("C", x = 1, y = 2)` runs), so a check that does not follow
+  the inheritance chain turns correct code into a false positive. `representation(...)` and the
+  `slots =` form both need reading, and a class assembled dynamically must fall back to silence.
 - **Matrix SHAPE is still untracked.** `%*%`/`%o%`/`%x%` now return the `matrix` nominal and the class
   has its arithmetic and comparison methods, so matrix expressions type and compose — but
   `matrix`/`t`/`solve`/`dim`/`crossprod`/`diag`/`apply` still return `Any`, so a transposed dimension
