@@ -22,8 +22,6 @@ turned out worse than reported.
 Only the **open** findings are below; the closed ones, with what each measurement actually showed, are
 in `test-user-reports.md`.
 
-### C. Annotations that validate themselves and then enforce nothing
-
 ### D. Placement: precise inside an expression, coarse at every compound boundary
 
 Caret placement was found excellent for ordinary nesting (four-deep calls, multi-line arguments,
@@ -232,234 +230,14 @@ script the closure runs once that file's frame has settled, so it still scans th
 forward references from a function body, mutual recursion, self-recursion, and a later file
 overriding an earlier one all still resolve correctly.
 
-## Open — test-user round 4: the syntax-error user (user directive)
-
-One user breaking the parser on purpose across 17 cases — the shapes people actually produce
-mid-edit — judging **direction** and **readability** as separate verdicts. Every number below is from
-running the binary; R 4.3.3 was the referee wherever "is this even an error?" mattered.
-
-**The scoreboard: 9 of 17 cases are exactly right** — one finding, on the token that broke it, worded
-so an R user learns their own rule rather than the parser's state. Unclosed `{`, a stray `}`, an
-unterminated string, a missing comma between arguments, `if ()` with no condition, and both
-truncated-annotation cases (`fn(x: integer) ->`, `list{a: integer`) are all single precise findings.
-A broken statement correctly silences the semantic findings around it: a function missing its `}`
-mid-file produced *one* error and no noise from the three definitions after it. The model message is
-the `else` one — ``unexpected `else`: it must stay on the same line as the `if` branch it belongs to
-(or the `if` must be inside braces)`` — it explains R's rule and gives both fixes. That is the bar the
-rest should meet.
-
-### 1. FIXED — an unclosed opener put a false finding on EVERY following line
-
-Recovery did not stop at the statement boundary: after reporting the unclosed `(`, the parser was
-still inside the argument list, so each following line read as another argument.
-
-```r
-totals <- sum(c(1, 2, 3)      # the one real mistake
-a <- mean(c(1))               # "missing `,` between these arguments"
-b <- mean(c(2))               # "missing `,` between these arguments"
-c <- mean(c(3))               # "missing `,` between these arguments"
-```
-
-**5 findings, 4 of them on code the user must not change**, scaling with the file — and the adopted
-lines lost their own definitions too, so a later read of `a` came back `unresolved`. Now **one
-finding**, on the unclosed `(`. Same for `[`.
-
-**The rule is not "break at a line break", and two existing fixtures are why.** A list running onto
-the next line is ordinary R, and a *fragment* there really is a forgotten separator — `sum(alpha\n
-beta)` and `function(x\n y)` were both pinned reporting a missing comma, correctly, and a blanket
-line rule regressed both to a worse pair of findings. What separates the cases is whether the next
-line **assigns**: a line binding a name with `<-`/`<<-`, or opening with `if`/`for`/`while`/`repeat`,
-is the next statement, and adopting it is what does the damage. A comma before it still makes it an
-argument, so `run(1,\n  x <- 2)` stays silent.
-
-**`=` was in that list at first, and that was wrong — it cost the commonest missing-comma case.**
-Inside an argument or parameter list `name = value` is a *named argument*, which is exactly what a
-multi-line call with a forgotten comma looks like. Counting it as a statement start gave
-
-```r
-config <- list(
-  title = "Revenue"
-  subtitle = "by quarter",
-  width = 800
-)
-```
-
-the unclosed-opener report instead of the one that names the missing `,`, then broke the rest of the
-call into top-level statements — which drew two `assignment-operator` findings and an `unused` out of
-source that had *not parsed*, contradicting the documented rule that a failed statement suppresses
-findings overlapping it. **Six findings for one comma**, and the one the docs promised was gone. R
-itself keeps consuming until the opener closes, so the named-argument reading is also the faithful
-one. Pinned now by a fixture on that exact snippet; the three original cases all use `<-` and were
-never affected, which is why nothing caught it.
-
-Two more things were needed beyond the predicate. The newline is consumed while parsing the element
-*before* the loop head, so the check has to scan backwards rather than watch trivia go by — a
-peek-based version looked right and never fired. And once the list breaks, the statement loop still
-saw a stray token where it wanted a newline and reported *again*, then recovered over the next line
-and swallowed it anyway: an unterminated list now marks the statement, and the boundary check neither
-re-reports nor recovers.
-
-### 2. FIXED — a parse error pointed off the code, at zero width
-
-```r
-scale_by <- function(x,        # 3-line file
-value <- 42
-print(value)
-```
-
-The third finding was `expected a function body` at `4:1-4:1`. **The claim first filed here was
-imprecise and is corrected:** with a trailing newline that line does exist (an editor counts the empty
-position after the last `\n`), so it is not unplaceable — it is **zero characters wide**, underlining
-nothing, on the blank line past the code, and pointing away from the construct that is actually
-incomplete.
-
-Two changes. The report now blames the `function` keyword, which is the construct that lacks a body —
-eight characters wide, on the code. And it is not reported at all when the parameter list never
-closed: that is the same mistake said twice, and the unclosed opener is the version worth reading.
-Case 6 is down from 3 findings to 2, and the two that remain are exactly R's own reasoning (R also
-reads `value` as a parameter, then chokes on `<-`).
-
-### 3. FIXED — the annotation grammar reported every token it could not use
-
-Measured before: `fn([x] integer)` → **4 findings**, `fn([1]: integer)` → **9**, one typo each, five of
-the nine on the very same column. The type grammar cannot resynchronize the way the statement loop
-can — a `#:` region is one expression with no boundary inside it to restart at — so it reported and
-carried on.
-
-Now **one finding per region**: the first thing it cannot use. Both cases report exactly once, and two
-separate `#:` blocks still each report their own.
-
-One refinement was needed and is worth keeping: an **unclosed opener** is discovered at the *end* of
-the construct it names, so first-wins alone dropped the outermost truth in favour of an inner
-consequence — `@type Point {list{x: double` reported only "expected `,` or `}` in this list type" and
-never that the `@type` brace was open. One structural report of that kind now gets through regardless,
-so that case reports both, outer first.
-
-### 4. FIXED — cryptic where the tool already knew better
-
-``unexpected character `“` `` for a typographic quote pasted out of a document: placement was perfect,
-the wording was the parser's vocabulary. Measuring it found a whole family reported the same way —
-curly quotes both kinds, en/em dash and the real minus sign, full-width parentheses and punctuation,
-and the invisible ones.
-
-The invisible ones were the worst: a non-breaking space printed as ``unexpected character ` ` ``, a
-message pointing at what looks like ordinary whitespace and calling it unexpected.
-
-Each now names what the character is and what to write instead — *`–` is an en dash, not R syntax —
-use `-` instead* — and the invisible ones are **described rather than quoted**, because printing a
-zero-width space between backticks shows the reader an empty pair and a caret over nothing. A
-character with no known ASCII counterpart keeps the generic wording.
-
-### 5. FIXED — a dangling binary operator swallowed the next statement, and the findings were useless
-
-```r
-total <- 1 +
-label <- "next"
-print(label)
-```
-
-No syntax error, and that is right: R parses it as `total <- ((1 + label) <- "next")` and fails at run
-time. But the user got two ``I could not resolve `label` `` warnings on the lines that look correct,
-and nothing anywhere about the dangling `+`.
-
-Filed as wanting a lint; **the cause turned out to be sharper than that.** R refuses the shape
-outright — `target of assignment expands to non-language object` — because the swallowed line became
-the *target* of an assignment, and `1 + label` is not something you can assign to. `resolve_assignment_target`
-had `_ => match self.replacement_base(target) { … None => self.resolve(target) }`, so an unassignable
-target was silently read as an ordinary expression and its names reported.
-
-Now reported where the mistake is, with the cause named when a trailing operator really is what
-pulled the next line in: *this is a value, not a name, so nothing can be assigned to it — the operator
-at the end of this line pulled the next line in as its right-hand side*. The target's own reads are
-suppressed, so the two misleading warnings are gone (a genuine later read of the name still reports).
-
-That clause is decided structurally, not by "the target spans a line": naming carries the span
-*between the two operands* (which is where the operator lives) and the hint fires only when the line
-break falls after it. A break before the operator (`a` newline `+ b`) is an ordinary continuation, and
-a multi-line left operand says nothing about where the operator sits — both would have been described
-wrongly by a plain contains-a-newline test.
-
-Deliberately narrow, because R accepts more than a bare name: only a **computed value** and a
-**non-string literal** are reported. `"x" <- 1` binds `x` in R and stays quiet; `` `y` <- 1 ``,
-`names(v) <- …`, `attr(v, "k") <- …`, `v[[1]] <- …` all stay quiet; a *parenthesised* target is left
-alone because R's own handling of `(x) <- 1` is odd enough that refusing it would be guessing. All
-checked against R 4.3.3.
-
-Two carve-outs the corpus forced, both worth remembering:
-
-- **A `!`-headed target is exempt.** `!` binds tighter than `<-`, so `expr(!!name <- value)` — building
-  an assignment rather than performing one — parses as an assignment to `!!name`. This was a real false
-  positive in dplyr (`expr(!!obj_sym <- !!get_expr(wrapper))`, whose authors ship
-  `utils::globalVariables("!<-")` to placate `R CMD check`). The refusal cannot tell it from a bare
-  `!x <- 1` typo, and the metaprogramming form is common while the typo is not. Other unary operators
-  are still reported.
-- **The operand-gap span needs a bounds check.** Error recovery can leave the operands out of order,
-  and `TextRange::new(lhs.end, rhs.start)` then panics. Caught by the `ide` fuzz suite, not by any
-  fixture — which is the argument for the day-one fuzz rule in one line.
-
-A "line ends in an operator" lint was measured and rejected instead: **15,129 lines across data.table,
-dplyr, ggplot2 and shiny end in a continuation operator**, every one of them legal.
-
-### FIXED — Found while doing that: a string assignment target created no resolvable binding
-
-`"x" <- 1L` is legal R and binds `x` — verified against R, which prints `1`. Typing gave it the
-binding (`x: integer`), but naming did not, so a later `print(x)` reported ``I could not resolve `x` ``:
-a false positive on legal, if unusual, R.
-
-The filed guess was that `replacement_base` should unwrap the string. **It should not, and that is the
-part worth keeping.** The replacement path *reads* the base before writing it (`names(v) <- x` reads
-`v`), and marks the write unreportable because a replacement is not a dead store. `"x" <- 1` is
-neither: it is a plain definition, identical to `x <- 1`. So the string literal joins the name-target
-arm by or-pattern instead — `ExpressionKind::NameRef(name) | ExpressionKind::Literal(LiteralKind::String(name))`
-— which the lowering makes exact, because `string_value` has already stripped the quotes and resolved
-escapes, so the payload *is* the name R binds. One pattern, and `<<-`, dotted names and the unused
-check all follow from it: the dead store now reports at the literal's own range (`"x"`, quotes
-included, which is what was written) instead of arriving from the item-level export path with the
-whole statement underlined.
-
-Backticks never needed this: `` `y` <- 1 `` lowers to a `NameRef` like any other name.
-
-**The corpus caught a consequence, and it was a real bug — an older one than this change.** Binding
-string targets took data.table from 4078 findings to 4079, and the extra one was a false `unused` on
-`%fin%`, a helper operator data.table defines *inside* `merge` and calls twice on the next two lines.
-The cause: a `%op%` read is recorded **by name** in `quiet_operator_reads`, which is what the
-cross-item check for a package's own operator needs, but it never reached the slot model — so a
-**local** operator definition had no read resolving to it and looked like a dead store. Backtick
-definitions were already exposed to this; the string change only made data.table's case visible.
-
-Fixed by extracting the slot half of a read (`mark_slot_read`) and calling it from the operator path
-too, which leaves `resolve_read` as the only place that maps an expression id. **Three more
-pre-existing false positives went with it**, each verified as a genuine use: `%+replace%` aliased from
-`ggplot2::` inside `theme_custom` (three copies — the vignette `.R` plus two `.qmd`), and `%NA_OR%`
-in shiny's `render-plot.R`, used four times below its definition. Corpus: data.table back to 4078
-exactly, dplyr unchanged, ggplot2 1318 → 1315, shiny 1045 → 1044. An unused local operator is still
-reported — marking the slot did not make the check blanket-quiet, and a fixture pins that.
-
-Move each finding into `test-user-reports.md` as it closes.
-
 ## Open — user reports (from the maintainer, not a simulated round)
 
-### FIXED — the REPL wrapped a table that fits
+### REPL resize is not tracked
 
-`ry repl` never set R's `width` option, so R kept its default of **80 columns** whatever the terminal
-was and `print()` wrapped a table with room on screen. The width is now measured once at startup and
-applied with `R_ParseEvalString` in the window between `setup_Rmainloop()` and `run_Rmainloop()`.
-Verified end to end in a pty: a 200-column terminal gives `width` 200, a 100-column one gives 100,
-and an `.Rprofile` that sets 137 keeps 137 on a 200-column terminal — the profiles have been sourced
-by then, so only R's untouched default is replaced.
-
-**The first attempt fed `options(width = …)` through the ReadConsole hook, and it was wrong twice
-over** — recorded because the console feed looks like the obvious mechanism and there is already a
-`.Platform$GUI` fix using it. It costs a main-loop round trip, and a round trip taken before the
-editor's first prompt leaves the terminal in the state R found it in, so the next read
-desynchronises: two pre-existing pty tests began timing out and the suite went from 3.5 s to 94 s.
-Queuing the statement earlier, alongside the other pre-prompt input, did not help — the round trip
-itself is the problem, not its timing.
-
-**Resize is not tracked, and closing that needs a different mechanism.** A stock terminal session
-handles `SIGWINCH` by calling `R_SetOptionWidth`, which R does not export; the console feed is the
-only other way in and is the thing that just proved unsafe between prompts. Worth revisiting if
-someone finds a third route.
+The width fix itself is closed and archived in `test-user-reports.md`. What stays open: a stock
+terminal session handles `SIGWINCH` by calling `R_SetOptionWidth`, which R does not export, and the
+console feed is the only other way in — the mechanism already shown to desynchronise the editor when
+used between prompts. Worth revisiting if someone finds a third route.
 
 ### A variable is reported as unused — NEEDS A REPRO
 
@@ -1164,10 +942,31 @@ unresolved-name reference from being a strict origin, because naming already rep
 
 This matters because it is the failure mode this project treats as worst: a clean strict run that
 reads as "I understood everything" while an unknown `library()` silently switched a whole class of
-checking off project-wide. The fix is presumably to record tolerated reads as strict origins (they
-are genuinely undetermined), which needs naming to hand the origin to the strict stream. Until then
-the docs say so plainly — `limitations.md` and `stubs.md` now state that strict does not close it,
-and that declaring the package is what does.
+checking off project-wide. Until it is closed the docs say so plainly — `limitations.md` and
+`stubs.md` state that strict does not close it, and that declaring the package is what does.
+
+**Located, so the next attempt does not have to re-find it.** Re-verified still open: three
+undetermined reads (bare, called, used numerically) under a `library(someunknownpkg)` with
+`typing = true, strict = true` report `no problems`. The tolerance is exactly one guard in
+`unresolved_diagnostics` — `if project_typo.is_none() && metadata::imports_every_name(db) { continue }`
+— and everything above it is "this name really is resolvable", so **the tolerated set is precisely the
+reads that reach that guard and take it**. The `continue` is where a strict origin belongs.
+
+Three things a fix has to settle, none of them hard but all of them load-bearing:
+
+- **Which layer emits it.** Strict origins are recorded in the checker and keyed by `ExprId`; this
+  decision lives in the naming-diagnostics stream. Emitting the `strict` finding at the guard keeps
+  one decision point (the alternative duplicates the tolerance rule into `strict_diagnostics`, which
+  is the shape that just caused a bug elsewhere — dispatch and the numeric constraint reading
+  different scopes).
+- **How it is gated.** `file_diagnostics` does not know whether strict is on; the caller filters by
+  code (`"type-mismatch" => typing_enabled`). So emit unconditionally and add `"strict" =>
+  strict_enabled` to that filter, which is the pattern already in use.
+- **The fixture harness gates strict differently and this needs checking first.**
+  `testing.rs` chains `strict_diagnostics` *unconditionally* into every suite's output, yet the
+  non-strict suites show no strict findings today (`f: <T> fn(node: T) -> Unknown` in
+  `containers.R.test` has none). Understand why before adding an emitter, or a mass re-bless of
+  unrelated suites is the first thing that happens.
 
 Adjacent and still true: strict *does* report `Unknown` origins from unsupported constructs and from
 `Any`-returning stub calls (`min()` on a classed value, `data.frame()`, `subset()`, `df$amount` all
