@@ -201,6 +201,12 @@ type (`for (i in 1:3) total <- i` then `report <- function() total` types `repor
 `fn() -> integer`), in scripts under the same sequential/deferred visibility as named
 definitions.
 
+Past **eight** conditional writers of one name the slot is `Unknown` instead of the join. A name
+written at that many top levels has no useful joined type — a union of dozens of unrelated types is
+not a fact a check can act on — and computing it costs one item check per writer at every read of
+the name, which is what made a package's own test suite cost several seconds. Real conditional
+slots, a top-level `if`/`else` picking a default, are far below the bound.
+
 ### Package imports (`NAMESPACE` and `DESCRIPTION`)
 
 Hosts read the package's `NAMESPACE` and `DESCRIPTION` files at the package root; their facts

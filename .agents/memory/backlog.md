@@ -290,10 +290,21 @@ takes `targets` from 16.6 s to 9.9 s and removes 151 findings, all false positiv
 errors reported against calls inside `quote({...})` — code R does not run there — and 12 unresolved
 reads of names mentioned in a quotation). See the type-system reference for the contract.
 
-**Still open, and it is a semantics design question rather than an optimisation.** The remaining ~10 s is
-ordinary (unquoted) writes inside test blocks. Scoping a block argument the way `local` is scoped takes
-`targets` to 0.89 s — 18.6× — but it cannot be done bluntly, and R decides the question by callee, which
-was checked rather than assumed:
+**FIXED, and the design question turned out not to be on the critical path.** The remaining cost was the
+*join*, not the binding: `conditional_slot_scheme` called `statement_binding_scheme` for every writer of
+a name, unbounded, from a per-item read — so a name written at 238 documents' top levels made every read
+of it pay for all of them. Bounding the join at eight writers and widening past that to `Unknown` takes
+`targets` from 7.14 s to 0.74 s interleaved (**9.7×**, and 16.6 s → 0.74 s together with the quoting fix)
+with **byte-identical finding sets** on `targets` and all four corpus packages, and no regression
+elsewhere (dplyr 0.47→0.40 s, ggplot2 1.21→1.08 s, shiny and data.table flat). The bound is honest on its
+own terms: a union of dozens of unrelated types is not a fact a check can use, and real conditional slots
+have a handful of writers. Contract in the type-system reference; fixtures pin both sides of the bound.
+
+**Still open as a semantics question, but no longer blocking performance.** Writes inside a
+`test_that`/`tar_test` block still enter the package namespace, which is wrong for those callees — a
+correctness matter now, not a speed one. Scoping a block argument the way `local` is scoped also reaches
+0.89 s, but it cannot be done bluntly, and R decides the question by callee, which was checked rather
+than assumed:
 
 - `suppressWarnings({v <- 1})`, `invisible`, `system.time`, `try`, `withCallingHandlers` — the block's
   write **does** bind outward, because a promise is forced in the caller's frame. A blanket rule would
@@ -311,13 +322,14 @@ because a name is used in a nested closure. That needs its own answer before the
 
 ### Memory, and the rest of the package-path measurements
 
-A synthetic 1,550 files / 277,586 lines / 14,771 items, one project, measured both ways: as package
-documents under `R/` it is **55.9 s and 5,488 MiB peak** (typecheck alone 48.0 s and +5,177 MiB); with
-the identical files at the project root, so they are scripts, **5.95 s and 343 MiB**. Superlinear in
-file count within the package shape — 400 files 6.1 s, 800 files 10.8 s, 1,550 files 68 s, with RSS
-722 MiB to 5,488 MiB over the last step. Whether this is the same conditional-slot cause as `targets`
-was not established; the synthetic generator's shape is not recorded here, so re-derive it before
-treating these numbers as a second instance.
+A review-authored synthetic of 1,550 files / 277,586 lines / 14,771 items reported **55.9 s and
+5,488 MiB peak** as package documents against **5.95 s and 343 MiB** as scripts, superlinear in file
+count (400 files 6.1 s, 800 files 10.8 s, 1,550 files 68 s). **That does not reproduce, and the
+generator's shape was never recorded.** A fresh synthetic package of 1,500 files / 42,000 lines /
+10,500 items — five functions plus a shared top-level conditional write per file, the shape the fixed
+join punishes hardest — costs **0.49 s and 111 MiB peak** after the bound, and 0.85 s before it. Treat
+the old figures as unverified unless someone reconstructs the generator; the shape that demonstrably
+cost is the unbounded join, and it is fixed.
 
 Other packages move much less as-package versus as-script (ggplot2 1.70/1.21, dplyr 0.72/0.58, shiny
 0.65/0.59), which fits the cause above: they have far fewer test-block writes landing in the namespace.

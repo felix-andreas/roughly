@@ -1349,6 +1349,18 @@ struct SalsaGlobals<'db> {
     file: SourceFile,
 }
 
+/// How many conditional writers of one name still get joined. Past this the
+/// slot is `Unknown`, the sound-by-refusal move used for a loop variable whose
+/// type keeps growing.
+///
+/// Two reasons for a bound. The join costs one item check per writer, and it is
+/// reached from a per-item read, so a name written at many documents' top level
+/// makes every read of it pay for all of them. And the answer stops being worth
+/// paying for: a union of dozens of unrelated types is not a fact any diagnostic
+/// can use. Real conditional slots — a top-level `if`/`else` picking a default —
+/// have a handful of writers.
+const CONDITIONAL_SLOT_JOIN_CAP: usize = 8;
+
 impl<'db> SalsaGlobals<'db> {
     fn for_item(db: &'db dyn Db, item: Item<'db>) -> SalsaGlobals<'db> {
         let definitions = ProjectFiles::try_get(db).map(|files| package_definitions(db, files));
@@ -1395,11 +1407,15 @@ impl<'db> SalsaGlobals<'db> {
     }
 
     /// The joined scheme of a package-level conditional slot: every
-    /// statement item writing the name contributes its settled binding type.
+    /// statement item writing the name contributes its settled binding type,
+    /// up to [`CONDITIONAL_SLOT_JOIN_CAP`].
     fn conditional_slot_scheme(&self, name: &str) -> Option<types::TypeScheme<'db>> {
         let files = ProjectFiles::try_get(self.db)?;
         let writers = conditional_slot_items(self.db, files).get(name)?;
         let interned = types::Name::new(self.db, name.to_owned());
+        if writers.len() > CONDITIONAL_SLOT_JOIN_CAP {
+            return Some(types::TypeScheme::monomorphic(types::unknown(self.db)));
+        }
         let mut schemes: Vec<types::TypeScheme<'db>> = writers
             .iter()
             .filter_map(|&item| statement_binding_scheme(self.db, item, interned))

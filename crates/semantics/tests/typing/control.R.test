@@ -387,6 +387,36 @@ report <- function() total
 #++++
 report: fn() -> integer
 
+#---- a_few_conditional_writers_still_join
+# Under the join cap the slot's type is the union of every writer, which is what
+# makes a conditional default useful to a reader.
+if (Sys.getenv("MODE") == "fast") mode <- 1L
+if (Sys.getenv("MODE") == "named") mode <- "fast"
+report <- function() mode
+#++++
+report: fn() -> integer | character
+
+#---- many_conditional_writers_widen_to_unknown
+# The join costs one item check per writer and is reached from a per-item read,
+# so a name written at many top levels made every read of it pay for all of
+# them: one real package's test suite drove this to 7.1 s of a 7.8 s run. Past
+# the cap the slot is `Unknown` — a union of dozens of unrelated types is not a
+# fact a diagnostic can use anyway.
+flag <- TRUE
+if (flag) shared <- 1L
+if (flag) shared <- 2L
+if (flag) shared <- 3L
+if (flag) shared <- 4L
+if (flag) shared <- 5L
+if (flag) shared <- 6L
+if (flag) shared <- 7L
+if (flag) shared <- 8L
+if (flag) shared <- 9L
+report <- function() shared
+#++++
+flag: logical
+report: fn() -> Unknown
+
 #---- loop_carried_read_starts_from_the_outer_binding
 p <- "word"
 while (TRUE) p <- p - 1L
