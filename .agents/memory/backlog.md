@@ -298,12 +298,28 @@ selector), because several pages legitimately do that.
 Until it exists, treat "changed a message or a blame range" as implying a manual sweep of the pages
 above, and say in the commit which ones were re-run.
 
-## Open — release-artifact versions have drifted apart
+## FIXED — release-artifact versions had drifted apart
 
-`Cargo.toml` is `0.3.0-alpha`, `editors/code/package.json` is `0.3.0`, `editors/zed/extension.toml` is
-`0.2.4-alpha`. The VS Code number may be deliberate — the Marketplace rejects a prerelease suffix — but
-Zed's is simply stale, and nothing keeps the three in step. Decide whether one source of truth is
-possible (a release script that stamps all three) or record why not.
+`Cargo.toml` was `0.3.0-alpha`, `editors/code/package.json` `0.3.0`, `editors/zed/extension.toml`
+`0.2.4-alpha`, and nothing kept the three in step.
+
+**Decided: one source of truth with two mechanical derivations, enforced by a test rather than a
+script.** The workspace `Cargo.toml` version is the truth; the Zed manifest carries it verbatim, the
+VS Code manifest carries it with any prerelease suffix removed (that manifest's version has to be a
+plain `major.minor.patch`). Both derivations are mechanical, so a mismatch is always a stale file and
+never a judgement call.
+
+A *stamping script* was considered and not written. A script only helps if someone runs it, and the
+workspace CI that would is still staged in `.github/pending-ci.yml` awaiting a human `git mv` — while
+`cargo test` runs on every slice. So the enforcement is two tests in
+`crates/ry/tests/test_release_metadata.rs`, and the assertion message names the exact line to write.
+Confirmed by running it against the drift before fixing it: it failed with
+``editors/zed/extension.toml is stale: write `version = "0.3.0-alpha"` `` and simultaneously confirmed
+the VS Code number was already correct — so the "may be deliberate" guess about that one was right.
+Zed stamped to `0.3.0-alpha`; both tests green.
+
+Its own file rather than an addition to `test_cli.rs`, which is explicitly the *binary's* behaviour
+contract (rendering, JSON, exit codes) — shipped-artifact metadata is a different component.
 
 Related and user-owned: the extension is published as `felix-andreas.roughly`, and
 `felix-andreas.ry` is a 404, so every README and docs link that the rename swept to the new identifier
