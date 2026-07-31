@@ -1584,11 +1584,6 @@ fn nullable_single_member<'db>(db: &'db dyn Db, members: &[Ty<'db>]) -> Option<T
 /// is legal R — so rejecting it would refuse `add_days <- function(d, n) d + n`
 /// every date, matrix or plot in the language. The result may be imprecise
 /// (the variable takes the class), never a false rejection.
-/// The prefixes R dispatches an arithmetic operator through, in the order
-/// [`Checker::operator_method_result`] tries them: the operator's own method,
-/// then its group generic, then `Ops`.
-pub const ARITHMETIC_METHOD_PREFIXES: [&str; 6] = ["+.", "-.", "*.", "/.", "Arith.", "Ops."];
-
 fn constraint_rejects<'db>(
     db: &'db dyn Db,
     arithmetic_classes: &FxHashSet<String>,

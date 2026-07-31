@@ -1098,12 +1098,41 @@ fn operator_spelling(operator: BinaryOperator) -> Option<&'static str> {
     })
 }
 
+/// The operators R groups as `Arith`. **One list, two consumers**: this decides
+/// what [`operator_group`] calls arithmetic, and the method-name prefixes the
+/// numeric constraint admits are built from it by
+/// [`arithmetic_method_prefixes`]. Restating the set instead let `^`, `%%` and
+/// `%/%` be dispatched here while the constraint refused the very class that
+/// declared them.
+const ARITHMETIC_OPERATORS: [BinaryOperator; 7] = [
+    BinaryOperator::Add,
+    BinaryOperator::Subtract,
+    BinaryOperator::Multiply,
+    BinaryOperator::Divide,
+    BinaryOperator::Power,
+    BinaryOperator::Modulo,
+    BinaryOperator::IntegerDivide,
+];
+
+/// The method names that make a class arithmetic, in the order
+/// [`Checker::operator_method_result`] tries them: each operator's own method,
+/// then the group generic, then `Ops`.
+pub fn arithmetic_method_prefixes() -> impl Iterator<Item = String> {
+    ARITHMETIC_OPERATORS
+        .iter()
+        .filter_map(|&operator| operator_spelling(operator))
+        .map(|spelling| format!("{spelling}."))
+        .chain(["Arith.".to_owned(), "Ops.".to_owned()])
+}
+
 /// R's S3 operator group for an operator: a class may declare one method for
 /// the whole group instead of one per operator.
 fn operator_group(operator: BinaryOperator) -> Option<&'static str> {
     use BinaryOperator::*;
+    if ARITHMETIC_OPERATORS.contains(&operator) {
+        return Some("Arith");
+    }
     Some(match operator {
-        Add | Subtract | Multiply | Divide | Power | Modulo | IntegerDivide => "Arith",
         Less | Greater | LessEq | GreaterEq | Equal | NotEqual => "Compare",
         _ => return None,
     })

@@ -1507,10 +1507,11 @@ fn project_arithmetic_classes(db: &dyn Db, files: ProjectFiles) -> rustc_hash::F
 fn arithmetic_classes_among<'a>(
     names: impl Iterator<Item = &'a str>,
 ) -> rustc_hash::FxHashSet<String> {
+    let prefixes: Vec<String> = check::arithmetic_method_prefixes().collect();
     let mut classes = rustc_hash::FxHashSet::default();
     for name in names {
-        for prefix in infer::ARITHMETIC_METHOD_PREFIXES {
-            if let Some(class) = name.strip_prefix(prefix)
+        for prefix in &prefixes {
+            if let Some(class) = name.strip_prefix(prefix.as_str())
                 && !class.is_empty()
             {
                 classes.insert(class.to_owned());
