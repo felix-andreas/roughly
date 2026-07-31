@@ -248,6 +248,13 @@ pub enum StrictOriginKind {
 
 /// Resolver for names that are not item-local: package globals and the stdlib
 /// stub corpus.
+///
+/// **No method has a default body, deliberately.** Every implementor answers
+/// every question, so adding a fact here is a compile error at each one rather
+/// than a silent fallback. A defaulted `arithmetic_classes` was exactly that
+/// silent fallback: the cyclic group's view inherited an empty set, so a
+/// recursive function doing `Date + 1` failed the numeric constraint and
+/// exported `Unknown` while its non-recursive twin typed fine.
 pub trait GlobalEnv<'db> {
     /// The scheme a read of `name` sees. `deferred` marks a read from inside
     /// a nested function: the closure runs after its document frame settled,
@@ -258,31 +265,21 @@ pub trait GlobalEnv<'db> {
     /// The full ordered overload-candidate set of a name, `None` when the name
     /// has at most one candidate or a package/local definition wins over the
     /// stub set. `deferred` as in [`GlobalEnv::scheme`].
-    fn overloads(&self, name: &str, deferred: bool) -> Option<Vec<TypeScheme<'db>>> {
-        let _ = (name, deferred);
-        None
-    }
+    fn overloads(&self, name: &str, deferred: bool) -> Option<Vec<TypeScheme<'db>>>;
 
     /// Whether the name is defined by an item of THIS project (a script
     /// statement, a package definition) rather than by a stub or an import.
     /// A project definition has its own attributable site, so a reference to
     /// it propagates an `Unknown` instead of re-originating one.
-    fn defined_in_project(&self, name: &str, deferred: bool) -> bool {
-        let _ = (name, deferred);
-        false
-    }
+    fn defined_in_project(&self, name: &str, deferred: bool) -> bool;
 
     /// The project's `@type` / `@alias` definitions by name.
-    fn type_definitions(&self) -> FxHashMap<Name<'db>, crate::annotations::NamedDefinition<'db>> {
-        FxHashMap::default()
-    }
+    fn type_definitions(&self) -> FxHashMap<Name<'db>, crate::annotations::NamedDefinition<'db>>;
 
     /// Classes reachable here that declare an arithmetic operator method,
     /// standard library and project sources alike — the same scope operator
     /// dispatch resolves a method through.
-    fn arithmetic_classes(&self) -> rustc_hash::FxHashSet<String> {
-        rustc_hash::FxHashSet::default()
-    }
+    fn arithmetic_classes(&self) -> rustc_hash::FxHashSet<String>;
 }
 
 pub fn check_item<'db>(db: &'db dyn Db, module: &Module, naming: &ItemNaming) -> ItemCheck<'db> {

@@ -313,3 +313,20 @@ print(bump(label))
 label: Tag
 bump: <T: numeric> fn(x: T) -> T
 158..163 error[type-mismatch] expected a numeric value (`integer` or `double`), found `Tag`
+
+#---- a_recursive_function_keeps_the_arithmetic_classes
+# A cyclic group is checked through its own view of the world, and that view has
+# to carry every fact the ordinary one does. It inherited an EMPTY arithmetic-class
+# set, so `Date + 1` inside any recursive function failed the numeric constraint
+# and collapsed the whole scheme to `Unknown` — while the identical
+# non-recursive function typed fine. The pair is the point: they must agree.
+shift <- function(x) x + 1
+recursive <- function(k) {
+  if (k > 0) recursive(k - 1)
+  shift(Sys.Date())
+}
+not_recursive <- function() shift(Sys.Date())
+#++++
+shift: <T: numeric> fn(x: T) -> double
+recursive: <T: numeric> fn(k: T) -> double
+not_recursive: fn() -> double

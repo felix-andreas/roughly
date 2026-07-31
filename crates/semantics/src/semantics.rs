@@ -1553,6 +1553,14 @@ impl<'db> check::GlobalEnv<'db> for SccGlobals<'db, '_> {
     ) -> rustc_hash::FxHashMap<types::Name<'db>, annotations::NamedDefinition<'db>> {
         self.base.type_definitions()
     }
+
+    /// Which classes are arithmetic does not depend on the group being solved,
+    /// so this is the base answer — but it has to be *given*, not inherited: an
+    /// empty set here makes `Date + 1` inside any recursive function fail the
+    /// numeric constraint and collapse the whole scheme to `Unknown`.
+    fn arithmetic_classes(&self) -> rustc_hash::FxHashSet<String> {
+        self.base.arithmetic_classes()
+    }
 }
 
 /// Kind + name of one top-level statement, mirroring R assignment spellings:
