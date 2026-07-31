@@ -230,6 +230,114 @@ script the closure runs once that file's frame has settled, so it still scans th
 forward references from a function body, mutual recursion, self-recursion, and a later file
 overriding an earlier one all still resolve correctly.
 
+## Open — performance & memory review
+
+An independent review that profiled before proposing. Its first finding is fixed (operands of an
+arithmetic or comparison operator were inferred twice per level, so a nested chain cost
+2^operators); these are the rest, in the order it recommended. Every number was taken on a 4-vCPU
+container with other work running, so treat them as upper bounds, and note that all in-container
+timings are effectively ≤2-core numbers.
+
+### The package-document path costs 9× wall and 16× memory over the script path
+
+The same 1,550 files / 277,586 lines / 14,771 items, one project, measured both ways: as package
+documents under `R/` it is **55.9 s and 5,488 MiB peak** (typecheck alone 48.0 s and +5,177 MiB); with
+the identical files at the project root, so they are scripts, **5.95 s and 343 MiB**. Superlinear in
+file count within the package shape — 400 files 6.1 s, 800 files 10.8 s, 1,550 files 68 s, with RSS
+722 MiB to 5,488 MiB over the last step.
+
+The real instance is `targets` 1.12.0, already in this backlog as a 43.7 s outlier: `ry check .` is
+17.6 s, of which 17.25 s is provably inside `item_check`. Renaming `tests/testthat` to `tests/tt`, so
+its 324 test files become scripts rather than package documents, drops it to **1.15 s** — 15× from the
+classification alone. Other packages move much less as-package versus as-script (ggplot2 1.70/1.21,
+dplyr 0.72/0.58, shiny 0.65/0.59), so the cost is superlinear in the size of the cyclic group and
+`targets`' R6-heavy suite is what makes it bite.
+
+Sampling puts the time in **salsa cycle bookkeeping** around `statement_binding_scheme` and
+`item_check` — `collect_all_cycle_heads::collect_recursive`,
+`MemoHeader::flatten_cycle_head_dependencies`, and `CycleHeads::contains` doing a linear scan. On four
+cores, 54 of 72 sampled thread stacks were in `DependencyGraph::block_on`, and `targets` gets **no
+parallel speedup at all** (17.43/17.81 s on one core against 17.43/16.99 s on four, where ggplot2
+gets 1.15×).
+
+This contradicts the architecture page, which says salsa's cycle recovery "remains only as a backstop
+for reference edges the static graph cannot see" — at scale the backstop is carrying the load,
+because `interface_sccs` derives its edges from names appearing in an item's source and so cannot see
+constructed or R6-style references. It also contradicts the memory note of ~300 MiB at 302K LoC: that
+holds for the script shape (343 MiB at 278K LoC) and is 16× off for the package shape. Direction, not
+yet prototyped: find the edges `interface_sccs` misses and bring `statement_binding_scheme` inside the
+canonical fixpoint instead of relying on recovery. For reference, memory attribution in the healthy
+shape is parse +82 MiB, lower+naming +158 MiB, typecheck +47 MiB, diagnostics +28 MiB — HIR and
+naming dominate resident memory at rest, not interned types.
+
+### A per-item query re-derives the whole file, the live instance of the documented quadratic
+
+`SalsaGlobals::arithmetic_classes` collects a `Vec<String>` of every item name in the file and
+re-scans it once per item check, reached from `check_item_with_annotation`. Sampling `ry check` on
+8,000 items in one file put 7 of 14 samples at that call site and 6 of 14 inside
+`arithmetic_classes_among`. One file of N items: 1,000 → 0.28 s, 2,000 → 0.61 s, 4,000 → 2.15 s,
+8,000 → 6.22 s (284 → 778 µs per item). Holding the item count at 8,000 and spreading them over more
+files: 1 file 5.76 s, 20 files 0.52 s, 80 files 0.42 s — **11× purely from packing them into one
+file**.
+
+The guard is also wrong against its own comment: it says "a script's own definitions", but `for_item`
+sets `frame_items` unconditionally, so package documents run it too — redundantly, since their names
+are already in `project_arithmetic_classes`. Prototyped fix: drop the package branch and memoize the
+script case as a `#[salsa::tracked(returns(ref))]` per-file query. That made it linear (8× items → 8×
+time, 10.9× faster at 8,000 items) with unique finding sets identical on six packages.
+
+### The formatter is *not* slower than the type checker — it is single-threaded
+
+On an identical file set (ggplot2's 339 files, 64,302 lines, 2.0 MiB), single-threaded on both sides:
+`fmt --check` 1.01–1.02 s against `check` 2.26 s on one core. The formatter is **half** the type
+checker's cost, not double. The backlog's earlier comparison pitted a parallel command against a
+sequential one — `check` fans out over `available_parallelism()`, `fmt` is a plain `for` loop over
+files (`taskset -c 0` and `-c 0-3` give the formatter the same 1.0 s, confirming it).
+
+What is true: format is 113 ms parse plus ~890 ms render, so the render is ~8× the parse (1.9–2.0
+MiB/s against ~18 MiB/s for parsing). Actionable: fan `fmt` out the way `check` already does. The
+render's 8× was not localized and needs its own profile before anyone touches it.
+
+### `returns(clone)` on the two hottest per-item queries
+
+`item_hir` and `item_naming` are `returns(clone)`, and `ItemNaming` is entirely `BTreeMap`/`BTreeSet`,
+so each clone is a node-by-node allocation walk. Measured with all memos warm, so the time is pure
+clone: on a 277K-line project's 14,771 items, `item_naming` 54.2 ms and `item_hir` **152.9 ms** per
+full pass (`item_tree` 1.9 ms); on ggplot2's 2,736 items, 12.2 and 24.0 ms. There are 23 `item_hir`
+and 29 `item_naming` call sites, several on the cold pass plus every IDE read, so at 3–5 fetches per
+item that is roughly 8–13% of the script-shape cold pass — estimated, not measured end to end.
+`returns(ref)` plus borrowing at the call sites removes state rather than adding it. Worth revisiting
+the `BTreeMap` choice in the same pass: `resolutions`, `bindings`, `non_locals`, `quiet_reads` and
+`namespace_reads` are pure lookups with no ordering requirement, and `BTreeMap::get` showed up under
+`infer_read`.
+
+### Per-item clones of project-wide tables
+
+`check_item_with_annotation` clones the whole project `@type`/`@alias` map and the arithmetic-class set
+per item and stores both owned on `InferenceTable`. Measured at 4,000 items against a varying project
+declaration count: 0 → 1.80 s, 1,600 → 1.97 s, 3,200 → 2.14 s, i.e. ~27 ns per entry per item. Modest
+at today's annotation density and growing exactly as the annotation story succeeds. `returns(ref)`
+plus a borrow on the table fixes it.
+
+### Suspected — `Checker::infer` deep-clones an `Expression` per call
+
+`let expression = self.module.expression(id).clone();` sits on the checker's hottest path, cloning
+`NameRef(String)`, `Call{arguments: Vec<Argument>}` and `Binary{special_name: Option<String>}` per
+node, while most arms then re-extract only `Copy` fields — the clone exists only to release the borrow
+on `self.module`. It appeared in the profile solely as `drop_in_place` and malloc/free frames, so its
+cost was never isolated. Measure before acting.
+
+### Judged fast enough — do not invent work here
+
+Single-package cold analysis (ggplot2 68K lines 1.9 s / 88 MiB peak; mgcv 37K lines 1.3 s / 72 MiB
+after the chain fix; targets 64K lines 1.4 s as the instrument classifies it), with parse only 2–7% of
+the pass at ~0.9 µs/line. `item_spans` identity is clean — `item_span_positions` is a memoized index
+so `item_span_range` is an O(1) probe, and `item_spans` itself is consumed per file; the quadratic
+above is a different query, not a regression of that one. Incrementality genuinely holds: every
+project reported zero item rechecks per keystroke and zero resolve steps, with edited-file diagnostics
+at 2.5 ms median on ggplot2 and **21.3 ms median at 277,586 lines**, inside the stated bar. And rowan
+re-anchoring is not the quadratic — `child_or_token_at_range` is a binary search.
+
 ## Open — abstraction & duplication review
 
 An independent review looking for duplicated sources of truth and abstractions that earn nothing. Two
@@ -1222,7 +1330,16 @@ while their comments claimed to be testing strict. They were deleted; the test l
 suite (`strict_reports_a_read_the_attached_package_tolerance_silenced`), which builds real projects,
 and asserts all three behaviours above.
 
-## FIXED (htmltools) / Open (mgcv, and it is a DIFFERENT cause) — spinning on CPU at flat memory
+## FIXED (htmltools, and now mgcv too — a THIRD cause) — spinning on CPU at flat memory
+
+**`mgcv` is closed, and it was neither of the causes below.** It was the exponential re-inference of
+arithmetic operands: `R/gamlss.r` holds machine-written symbolic derivatives, one statement with 248
+arithmetic operators, and each level re-walked both operand subtrees. Measured on the release binary:
+before, `ry check /tmp/pkgbench/mgcv` did not finish in 180 s; after, 1.98 s and 2.01 s. The fix is in
+`infer_binary`, and the finding is written up in the performance review section above. The rest of this
+entry is the `htmltools` history, kept for the self-referential-record analysis it contains.
+
+
 
 Checking `htmltools`'s package directory (7,669 lines) runs past **five minutes** at 100% CPU and
 **42 MB RSS**, measured at 182 seconds. Constant memory is the distinguishing fact: it rules out the
@@ -1315,9 +1432,9 @@ are byte-identical across 1,951 files of real CRAN sources (p18, MASS, ggplot2),
 `record` is the right site because every expression's inferred type passes through it; the capture-join
 site, tried first, fires only nine times on that file and bounding it changed nothing.
 
-**`mgcv` is NOT the same bug.** It still exceeds 200 s with this fix in place, so the shared-cause
-assumption in this item's title was wrong. It needs its own investigation, starting from the
-per-file timing sweep that localised `htmltools` to one file.
+**`mgcv` was NOT the same bug, and it is now closed** — see the head of this entry. The shared-cause
+assumption in this item's title was wrong twice over: the cause turned out to be exponential
+re-inference of arithmetic operands, not type growth at all.
 
 **Remaining from the original item.** The bound has to be on the size of a constructed type itself — Widening past the bound to `Unknown` is the sound-by-refusal move the loop join already
 makes for a variable whose type keeps growing structurally. Computing the size cheaply needs care: the
@@ -1348,23 +1465,15 @@ several members' pins to interact. What is pinned instead is the structural prop
 (`refusal_is_idempotent` in `semantics.rs`), which is the part that can be tested without
 reproducing the cycle. The end-to-end guard rests on the corpus suites.
 
-## Open — the formatter is slower than the type checker
+## REFUTED — the formatter is NOT slower than the type checker; it is single-threaded
 
-Measured on a release build over 3,835 files / 703,289 lines / 30 MiB of real CRAN sources, in a
-throttled container (so treat the absolute numbers as an upper bound, and see the parallel-cold-pass
-note before drawing conclusions about scaling):
-
-- `ry check .` with `typing = true` — 5.6 s, 5.8 s, 6.0 s
-- `ry fmt --check .` — 10.1 s, 9.9 s
-
-**Formatting costs roughly twice what parsing, naming, inference, type checking and lint assembly cost
-together, which is backwards.** `fmt --check` should be the cheaper command: it parses and renders, but
-it never builds an item tree, never resolves a name, and never runs inference. Worth an
-`analysis-stats`-style phase breakdown before assuming a cause — plausible candidates are that
-`--check` renders every file to a string and compares whole buffers rather than short-circuiting on the
-first difference, that it is single-threaded where `check` fans out, or that the render path allocates
-per node. Whichever it is, it is the kind of thing a user notices, because `fmt` is the command they
-run most often.
+The premise was a measurement error, and the correction is in the performance review section above:
+`ry check .` fans out over `available_parallelism()` while `ry fmt` is a plain `for` loop over files,
+so the original 5.6 s versus 10.1 s compared a parallel command against a sequential one. On an
+identical file set with both single-threaded, the formatter costs **half** what the type checker does
+(1.01 s against 2.26 s on one core). What remains open is the actionable part — fan `fmt` out the way
+`check` already does — plus an unlocalized fact worth a profile of its own: the render is ~8× the
+parse (1.9 MiB/s against ~18 MiB/s).
 
 ## Open — editor & polish
 

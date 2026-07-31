@@ -259,3 +259,15 @@ f: <T: numeric> fn(x: T) -> T
 f <- function(x) x / 2
 #++++
 f: <T: numeric> fn(x: T) -> double
+
+#---- a_long_arithmetic_chain_checks_in_linear_time
+# Both operands of an arithmetic or comparison operator infer once, at the
+# operator. Inferring them again in the numeric fallback made each level of a
+# nested chain re-walk both subtrees, so a chain of n operators cost 2^n, and
+# machine-written symbolic derivatives in real sources reach 248 operators in a
+# single statement. This case costs 0.15s with one walk and 184s with two, so a
+# regression shows up as a suite that suddenly takes minutes on one case rather
+# than as a failure — the hard guard belongs with the per-item scaling witness.
+f <- function(x) x + x + x + x + x + x + x + x + x + x + x + x + x + x + x + x + x + x + x + x + x + x + x + x + x
+#++++
+f: <T: numeric> fn(x: T) -> T

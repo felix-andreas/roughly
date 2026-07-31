@@ -2792,17 +2792,32 @@ impl<'db> Checker<'db, '_> {
             return self.record(id, result);
         }
         match operator {
-            Add | Subtract | Multiply | Modulo | IntegerDivide => self
-                .operator_method_result(range, operator, lhs, rhs)
-                .unwrap_or_else(|| self.infer_binary_numeric(range, lhs, rhs, false)),
-            // `/` and `^` always produce doubles.
-            Divide | Power => self
-                .operator_method_result(range, operator, lhs, rhs)
-                .unwrap_or_else(|| self.infer_binary_numeric(range, lhs, rhs, true)),
+            Add | Subtract | Multiply | Modulo | IntegerDivide | Divide | Power | Less
+            | Greater | LessEq | GreaterEq | Equal | NotEqual => {
+                // Both operands infer exactly once, here, before any candidate
+                // probe: inference writes environment and recorded-type state
+                // that a probe snapshot does not reverse.
+                //
+                // Inferring them again in the fallback is what made a nested
+                // chain cost 2^operators — each level re-walked both subtrees,
+                // so one machine-written symbolic derivative (they reach 248
+                // operators in a single statement) never finished, and every
+                // finding inside such a chain was reported twice over.
+                let left = self.infer(lhs);
+                let right = self.infer(rhs);
+                self.operator_method_result(range, operator, lhs, rhs, left, right)
+                    .unwrap_or_else(|| match operator {
+                        Less | Greater | LessEq | GreaterEq | Equal | NotEqual => {
+                            self.infer_compare(lhs, rhs, left, right)
+                        }
+                        // `/` and `^` always produce doubles.
+                        Divide | Power => {
+                            self.infer_binary_numeric(range, lhs, rhs, left, right, true)
+                        }
+                        _ => self.infer_binary_numeric(range, lhs, rhs, left, right, false),
+                    })
+            }
             Sequence => self.infer_colon(lhs, rhs),
-            Less | Greater | LessEq | GreaterEq | Equal | NotEqual => self
-                .operator_method_result(range, operator, lhs, rhs)
-                .unwrap_or_else(|| self.infer_compare(lhs, rhs)),
             And2 | Or2 => {
                 self.expect_scalar_logical(lhs);
                 self.expect_scalar_logical(rhs);
@@ -2901,15 +2916,12 @@ impl<'db> Checker<'db, '_> {
         operator: BinaryOperator,
         lhs: ExprId,
         rhs: ExprId,
+        left: Ty<'db>,
+        right: Ty<'db>,
     ) -> Option<Ty<'db>> {
         let globals = self.globals?;
         let spelling = operator_spelling(operator)?;
         let group = operator_group(operator)?;
-        // Both operands infer exactly once, here, before any candidate probe:
-        // inference writes environment and recorded-type state that a probe
-        // snapshot does not reverse.
-        let left = self.infer(lhs);
-        let right = self.infer(rhs);
         let arguments = [
             CallArgument {
                 name: None,
@@ -3037,12 +3049,12 @@ impl<'db> Checker<'db, '_> {
         range: TextRange,
         lhs: ExprId,
         rhs: ExprId,
+        lhs_ty: Ty<'db>,
+        rhs_ty: Ty<'db>,
         always_double: bool,
     ) -> Ty<'db> {
         let lhs_range = self.blame_range(lhs);
         let rhs_range = self.blame_range(rhs);
-        let lhs_ty = self.infer(lhs);
-        let rhs_ty = self.infer(rhs);
         let resolved_left = self.structural(lhs_ty);
         let resolved_right = self.structural(rhs_ty);
         let left = self.classify_numeric_operand(resolved_left);
@@ -3247,11 +3259,15 @@ impl<'db> Checker<'db, '_> {
     /// compared against a concrete numeric partner is constrained numeric,
     /// and the result is `logical` shaped element-wise (a vector member
     /// compares to `logical[]`).
-    fn infer_compare(&mut self, lhs: ExprId, rhs: ExprId) -> Ty<'db> {
+    fn infer_compare(
+        &mut self,
+        lhs: ExprId,
+        rhs: ExprId,
+        lhs_ty: Ty<'db>,
+        rhs_ty: Ty<'db>,
+    ) -> Ty<'db> {
         let lhs_range = self.blame_range(lhs);
         let rhs_range = self.blame_range(rhs);
-        let lhs_ty = self.infer(lhs);
-        let rhs_ty = self.infer(rhs);
         let resolved_left = self.structural(lhs_ty);
         let resolved_right = self.structural(rhs_ty);
         if matches!(resolved_left.kind(self.db), TyKind::Any | TyKind::Unknown)
