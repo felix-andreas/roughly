@@ -218,7 +218,6 @@ pub fn check(
         );
 
         let r_path = root.join("R");
-        let testthat_path = root.join("tests").join("testthat");
         let mut used_tokens = BTreeSet::new();
         let mut checked: Vec<(PathBuf, String)> = Vec::with_capacity(paths.len());
         // Which of the project's files the command actually asked about.
@@ -269,7 +268,7 @@ pub fn check(
         let mut project = Vec::with_capacity(checked.len());
         for index in ordered {
             let (path, source) = &checked[index];
-            let kind = if shares_a_namespace(path, &r_path, &testthat_path) {
+            let kind = if shares_a_namespace(path, &root) {
                 DocumentKind::Package
             } else {
                 DocumentKind::Script
@@ -336,7 +335,7 @@ pub fn check(
                             let Some(file) = files[index] else {
                                 continue;
                             };
-                            for item in semantics::item_tree(&db, file) {
+                            for &item in semantics::item_tree(&db, file) {
                                 let _ = semantics::item_naming(&db, item);
                             }
                         }
@@ -576,8 +575,20 @@ const VENDORED_DIRECTORIES: [&str; 5] = ["renv", "packrat", "revdep", ".Rproj.us
 /// is the documented way to share a fixture. Analysing those separately reported
 /// every helper as unused *and* every use of one as unresolved, two findings per
 /// helper on a package that is perfectly correct.
-fn shares_a_namespace(path: &Path, r_path: &Path, testthat_path: &Path) -> bool {
-    path.starts_with(r_path) || path.parent().is_some_and(|parent| parent == testthat_path)
+///
+/// **Every surface that assigns a [`DocumentKind`] must call this**, or it
+/// analyses a different program than the others. Three copies of the rule
+/// existed and one of them counted `R/` alone, which is why `analysis-stats`
+/// reported three findings on a testthat package where `check` reported none —
+/// an instrument disagreeing with the product it exists to measure. Note that
+/// this is not the *ordering* key: package files sort ahead of scripts by
+/// `R/`-membership alone, so a testthat file shares the namespace while still
+/// sorting after every `R/` file.
+pub(crate) fn shares_a_namespace(path: &Path, root: &Path) -> bool {
+    path.starts_with(root.join("R"))
+        || path
+            .parent()
+            .is_some_and(|parent| parent == root.join("tests").join("testthat"))
 }
 
 pub(crate) fn collect_r_files(

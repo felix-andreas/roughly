@@ -229,7 +229,7 @@ fn global_hover_definition(
         .copied()
         .or_else(|| {
             files.files(db).iter().find_map(|&file| {
-                item_tree(db, file).into_iter().find(|item| {
+                item_tree(db, file).iter().copied().find(|item| {
                     matches!(*item.kind(db), ItemKind::Function | ItemKind::Value)
                         && item.name(db).as_deref() == Some(name)
                 })
@@ -427,7 +427,7 @@ pub struct InlayHint {
 /// nothing rather than noise.
 pub fn inlay_hints(db: &dyn Db, file: SourceFile, viewport: Option<TextRange>) -> Vec<InlayHint> {
     let mut hints = Vec::new();
-    for item in item_tree(db, file) {
+    for &item in item_tree(db, file) {
         let Some(node) = item_node(db, item) else {
             continue;
         };
@@ -855,7 +855,7 @@ pub fn completion(
                 }
             }
             for &project_file in files.files(db) {
-                for item in item_tree(db, project_file) {
+                for &item in item_tree(db, project_file) {
                     let kind = match *item.kind(db) {
                         ItemKind::Function => CompletionKind::Function,
                         ItemKind::Value => CompletionKind::Variable,
@@ -1030,7 +1030,7 @@ pub fn code_actions(db: &dyn Db, file: SourceFile, viewport: TextRange) -> Vec<C
     }
 
     let mut all_annotation_edits = Vec::new();
-    for item in item_tree(db, file) {
+    for &item in item_tree(db, file) {
         let Some(node) = item_node(db, item) else {
             continue;
         };
@@ -1262,7 +1262,7 @@ pub struct DocumentSymbol {
 /// `#:` comments), in source order.
 pub fn document_symbols(db: &dyn Db, file: SourceFile) -> Vec<DocumentSymbol> {
     let mut symbols = Vec::new();
-    for item in item_tree(db, file) {
+    for &item in item_tree(db, file) {
         let Some(node) = item_node(db, item) else {
             continue;
         };
@@ -2925,7 +2925,7 @@ fn target_at<'db>(
 /// matching the occurrence walk's notion of a declaration.
 fn global_declaration_exists(db: &dyn Db, files: ProjectFiles, name: &str) -> bool {
     files.files(db).iter().any(|file| {
-        item_tree(db, *file).into_iter().any(|item| {
+        item_tree(db, *file).iter().copied().any(|item| {
             item_naming(db, item).is_some_and(|naming| {
                 naming
                     .bindings
@@ -2975,7 +2975,7 @@ fn occurrences(db: &dyn Db, files: ProjectFiles, target: &Target<'_>) -> Vec<Occ
         }
         Target::Global(name) => {
             for &file in files.files(db) {
-                for item in item_tree(db, file) {
+                for &item in item_tree(db, file) {
                     let Some(node) = item_node(db, item) else {
                         continue;
                     };
@@ -3133,7 +3133,7 @@ fn position_in_item(db: &dyn Db, file: SourceFile, offset: TextSize) -> Option<P
     // offset (typing at the end of the last statement) still belongs to it,
     // unless the next item starts there.
     let mut touching: Option<PositionedItem<'_>> = None;
-    for item in item_tree(db, file) {
+    for &item in item_tree(db, file) {
         let Some(node) = item_node(db, item) else {
             continue;
         };

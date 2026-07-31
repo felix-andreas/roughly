@@ -204,7 +204,11 @@ pub enum ItemKind {
 /// The ordered items of a file. This is the invalidation barrier between a
 /// file's text and per-item work: it carries structure and identity only — no
 /// spans, no bodies — so edits inside one body leave it equal and cut off.
-#[salsa::tracked(returns(clone))]
+///
+/// Borrowed, not cloned: per-item work consults this once per item, so cloning
+/// the whole vector here allocated a copy of the file's item list for every
+/// item in the file — quadratic in a file's top-level items.
+#[salsa::tracked(returns(ref))]
 pub fn item_tree<'db>(db: &'db dyn Db, file: SourceFile) -> Vec<Item<'db>> {
     let parse = parse(db, file);
     let root = parse.syntax_node();
@@ -311,6 +315,21 @@ pub(crate) fn item_span_range<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<s
     let file = *item.file(db);
     let index = *item_span_positions(db, file).get(&item)?;
     item_spans(db, file).get(index).map(|span| span.range)
+}
+
+/// Each item's index in `item_tree` — a lookup index over that one source of
+/// truth, so the per-item read rules can ask where an item sits without
+/// scanning the file's item list once per item.
+#[salsa::tracked(returns(ref))]
+fn item_tree_positions<'db>(
+    db: &'db dyn Db,
+    file: SourceFile,
+) -> rustc_hash::FxHashMap<Item<'db>, usize> {
+    item_tree(db, file)
+        .iter()
+        .enumerate()
+        .map(|(index, &item)| (item, index))
+        .collect()
 }
 
 /// Each item's index in `item_spans` — a lookup index over that one source of
@@ -694,7 +713,7 @@ pub fn conditional_slot_items<'db>(
         if *file.kind(db) != DocumentKind::Package {
             continue;
         }
-        for item in item_tree(db, file) {
+        for &item in item_tree(db, file) {
             if *item.kind(db) != ItemKind::Statement {
                 continue;
             }
@@ -769,7 +788,7 @@ pub fn package_definitions<'db>(
         if *file.kind(db) != DocumentKind::Package {
             continue;
         }
-        for item in item_tree(db, file) {
+        for &item in item_tree(db, file) {
             if matches!(*item.kind(db), ItemKind::Function | ItemKind::Value)
                 && let Some(name) = item.name(db).clone()
             {
@@ -831,7 +850,7 @@ pub fn s3_generics(db: &dyn Db, file: SourceFile) -> FxHashSet<String> {
 #[salsa::tracked(returns(ref))]
 fn file_s3_generics(db: &dyn Db, file: SourceFile) -> FxHashSet<String> {
     let mut generics = FxHashSet::default();
-    for item in item_tree(db, file) {
+    for &item in item_tree(db, file) {
         if let Some(name) = item.name(db).clone()
             && item_interface_reads(db, item).contains("UseMethod")
         {
@@ -903,7 +922,7 @@ pub fn interface_sccs<'db>(db: &'db dyn Db, files: ProjectFiles) -> InterfaceScc
         if *file.kind(db) != DocumentKind::Package {
             continue;
         }
-        for item in item_tree(db, file) {
+        for &item in item_tree(db, file) {
             if !matches!(*item.kind(db), ItemKind::Function | ItemKind::Value)
                 || item.name(db).is_none()
             {
@@ -1321,12 +1340,13 @@ struct SalsaGlobals<'db> {
     /// In a package the function runs after the *whole package* is sourced, so
     /// the answer is the project-wide winner and this scan must stand aside —
     /// a later file's override would otherwise be lost.
-    frame_items: Option<(Vec<Item<'db>>, usize)>,
+    frame_items: Option<(&'db [Item<'db>], usize)>,
     /// Whether this item's file is a script, which decides the deferred-read
     /// rule above.
     is_script: bool,
-    /// The script file itself, for its file-local type declarations.
-    script_file: Option<SourceFile>,
+    /// The item's own file, for the facts that are per-file rather than
+    /// per-item: its type declarations and its arithmetic classes.
+    file: SourceFile,
 }
 
 impl<'db> SalsaGlobals<'db> {
@@ -1335,16 +1355,18 @@ impl<'db> SalsaGlobals<'db> {
         let file = *item.file(db);
         let is_script = *file.kind(db) == DocumentKind::Script;
         let items = item_tree(db, file);
-        let index = items
-            .iter()
-            .position(|&candidate| candidate == item)
+        // Looked up, not scanned for: this runs once per checked item, so a
+        // linear search here is quadratic in a file's top-level items.
+        let index = item_tree_positions(db, file)
+            .get(&item)
+            .copied()
             .unwrap_or(items.len());
         SalsaGlobals {
             db,
             definitions,
             frame_items: Some((items, index)),
             is_script,
-            script_file: is_script.then_some(file),
+            file,
         }
     }
 
@@ -1458,8 +1480,8 @@ impl<'db> check::GlobalEnv<'db> for SalsaGlobals<'db> {
             .unwrap_or_default();
         // A script's own `@type` / `@alias` declarations are visible to
         // itself (and only to itself), shadowing project-global names.
-        if let Some(file) = self.script_file {
-            for definition in file_type_definitions(self.db, file) {
+        if self.is_script {
+            for definition in file_type_definitions(self.db, self.file) {
                 definitions.insert(definition.name, definition);
             }
         }
@@ -1471,16 +1493,13 @@ impl<'db> check::GlobalEnv<'db> for SalsaGlobals<'db> {
         if let Some(files) = ProjectFiles::try_get(self.db) {
             classes.extend(project_arithmetic_classes(self.db, files).iter().cloned());
         }
-        // A script's own definitions are visible to itself, the same way its
-        // `@type` declarations are. Every item counts, not just the ones above
-        // this one: a function body runs after the whole file is sourced.
-        if let Some((items, _)) = self.frame_items.as_ref() {
-            let names: Vec<String> = items
-                .iter()
-                .filter_map(|item| item.name(self.db).clone())
-                .collect();
-            classes.extend(arithmetic_classes_among(names.iter().map(String::as_str)));
-        }
+        // The file's own definitions count, and every item counts rather than
+        // only the ones above this one, because a function body runs after the
+        // whole file is sourced. Per FILE, not per item: this is consulted once
+        // for every item checked, so collecting the item names here walked the
+        // whole file each time — quadratic in a file's top-level items, the
+        // shape no file-count-based witness sees.
+        classes.extend(file_arithmetic_classes(self.db, self.file).iter().cloned());
         classes
     }
 }
@@ -1501,6 +1520,19 @@ fn stub_arithmetic_classes(db: &dyn Db) -> rustc_hash::FxHashSet<String> {
 #[salsa::tracked(returns(clone))]
 fn project_arithmetic_classes(db: &dyn Db, files: ProjectFiles) -> rustc_hash::FxHashSet<String> {
     arithmetic_classes_among(package_definitions(db, files).keys().map(String::as_str))
+}
+
+/// The same, for one file's own top-level definitions — a script's are visible
+/// only to itself, and a package file's are already in the project-wide set but
+/// are cheap to include, which keeps this correct even where `ProjectFiles` is
+/// not set. Memoized per file because the caller runs once per checked item.
+#[salsa::tracked(returns(ref))]
+fn file_arithmetic_classes(db: &dyn Db, file: SourceFile) -> rustc_hash::FxHashSet<String> {
+    arithmetic_classes_among(
+        item_tree(db, file)
+            .iter()
+            .filter_map(|item| item.name(db).as_deref()),
+    )
 }
 
 /// The class each arithmetic method name is declared for.

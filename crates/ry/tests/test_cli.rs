@@ -704,6 +704,43 @@ fn testthat_files_share_one_namespace_with_their_helpers() {
 }
 
 #[test]
+fn the_analysis_instrument_measures_the_same_program_as_check() {
+    // `analysis-stats` exists to say where `check` spends its time, so it has to
+    // analyse what `check` analyses. It classified documents by `R/` alone while
+    // `check` also counts `tests/testthat/`, and on this project that made the
+    // instrument report three findings where the product reported none — the
+    // helper as unused, and each use of it as unresolved.
+    let directory = project(&[
+        (
+            "DESCRIPTION",
+            "Package: tth\nVersion: 0.1\nSuggests: testthat\n",
+        ),
+        ("ry.toml", "[check]\ntyping = true\n"),
+        ("R/add.R", "add_one <- function(n) n + 1L\n"),
+        (
+            "tests/testthat/helper-input.R",
+            "make_input <- function() list(n = 1L)\n",
+        ),
+        (
+            "tests/testthat/test-add.R",
+            "test_that(\"adds\", {\n  expect_equal(add_one(make_input()$n), 2L)\n})\n",
+        ),
+    ]);
+    let check = ry(directory.path(), &["check"]);
+    assert!(
+        stdout(&check).contains("no problems"),
+        "expected a clean project: {}",
+        stdout(&check)
+    );
+    let stats = ry(directory.path(), &["debug", "analysis-stats", "."]);
+    assert!(
+        stdout(&stats).contains("(0 diagnostics)"),
+        "the instrument disagrees with `check` about this project: {}",
+        stdout(&stats)
+    );
+}
+
+#[test]
 fn a_configured_exclude_does_not_lose_the_vendored_directory_skip() {
     // `renv/activate.R` alone is a thousand generated lines, so vendored
     // directories are always skipped. A project that also configures its own

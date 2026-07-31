@@ -238,6 +238,27 @@ arithmetic or comparison operator were inferred twice per level, so a nested cha
 container with other work running, so treat them as upper bounds, and note that all in-container
 timings are effectively ≤2-core numbers.
 
+### The human reporter is quadratic — findings × file length — and dominates `check` on a noisy file
+
+Found while measuring the per-item quadratic below, and **not** in either review, because both measured
+through `analysis-stats` or JSON output, which never touch this path. On one file of 8,000 items where
+every item reports, `analysis-stats` puts the whole cold pass at 452.6 ms and `--output json` finishes
+in 550 ms, while plain `ry check` takes 10,527 ms. So 95% of the wall clock is the reporter.
+
+It scales as findings × file length, not findings × offset. Two 20,501-line projects with the same 500
+findings — crowded into the first 500 lines versus spread evenly — cost 6.9 s and 8.0 s, so position
+barely matters; and per-finding cost tracks file size directly (0.39 ms per finding on a 2,000-line
+file, 1.3 ms on an 8,000-line one, a 3.4× rise for 4× the text). `--min-severity error`, which
+suppresses the rendering, costs the same as JSON, which confirms it is the rendering rather than
+assembly or suppression parsing.
+
+The likely site is `NamedText`'s `read_span` delegating to miette's `SourceCode for str`, which walks
+the source to locate a span's lines; doing that once per finding gives exactly this shape. The fix is
+to answer `read_span` from a per-file `LineIndex` built once, which `crates/ry/src/position.rs` already
+provides. Care is needed to reproduce miette's `SpanContents` exactly — data, span, line, column and
+line count — and the character-column re-count must stay, since it is what keeps the human header
+agreeing with the JSON record for the same finding.
+
 ### The package-document path costs 9× wall and 16× memory over the script path
 
 The same 1,550 files / 277,586 lines / 14,771 items, one project, measured both ways: as package
@@ -270,21 +291,23 @@ canonical fixpoint instead of relying on recovery. For reference, memory attribu
 shape is parse +82 MiB, lower+naming +158 MiB, typecheck +47 MiB, diagnostics +28 MiB — HIR and
 naming dominate resident memory at rest, not interned types.
 
-### A per-item query re-derives the whole file, the live instance of the documented quadratic
+### FIXED — a per-item query re-derived the whole file
 
-`SalsaGlobals::arithmetic_classes` collects a `Vec<String>` of every item name in the file and
-re-scans it once per item check, reached from `check_item_with_annotation`. Sampling `ry check` on
-8,000 items in one file put 7 of 14 samples at that call site and 6 of 14 inside
-`arithmetic_classes_among`. One file of N items: 1,000 → 0.28 s, 2,000 → 0.61 s, 4,000 → 2.15 s,
-8,000 → 6.22 s (284 → 778 µs per item). Holding the item count at 8,000 and spreading them over more
-files: 1 file 5.76 s, 20 files 0.52 s, 80 files 0.42 s — **11× purely from packing them into one
-file**.
+Three per-item costs that were each O(items in the file), so the analysis path was quadratic in a
+file's top-level items: `SalsaGlobals::arithmetic_classes` collected a `Vec<String>` of every item name
+and re-scanned it, `item_tree` was `returns(clone)` so the whole item list was cloned per item, and
+`for_item` found an item's index by linear search. Now a memoized per-file query, a borrow, and a
+memoized position index.
 
-The guard is also wrong against its own comment: it says "a script's own definitions", but `for_item`
-sets `frame_items` unconditionally, so package documents run it too — redundantly, since their names
-are already in `project_arithmetic_classes`. Prototyped fix: drop the package branch and memoize the
-script case as a `#[salsa::tracked(returns(ref))]` per-file query. That made it linear (8× items → 8×
-time, 10.9× faster at 8,000 items) with unique finding sets identical on six packages.
+Measured on the analysis path with interleaved runs (`--output json`, so the reporter quadratic above
+does not contaminate it): 2,000 items 566 ms → 160 ms, 8,000 items 7,045 ms → 600 ms. That is quadratic
+(4× items, 12.5× time) becoming linear (4× items, 3.75× time), **11.7× at 8,000 items**. Unique corpus
+records byte-identical on all four packages.
+
+Worth knowing why the review's own numbers for this looked different: it reported the fixed case as
+0.07/0.13/0.26/0.56 s while its baselines were 0.28/0.61/2.15/6.22 s, but the fixed figures match the
+JSON path and the baselines match human output — the reporter quadratic sat inside the comparison.
+Measure both sides through the same output mode.
 
 ### The formatter is *not* slower than the type checker — it is single-threaded
 
@@ -344,15 +367,15 @@ An independent review looking for duplicated sources of truth and abstractions t
 findings from it are already fixed (a `GlobalEnv` fact that could be silently forgotten, and an
 operator list restated in two places); these are the rest.
 
-### Three copies decide what a package file is, and they disagree
+### FIXED — three copies decided what a package file is, and they disagreed
 
-`crates/ry/src/cli.rs`'s `shares_a_namespace`, the server's `is_package_path`, and `crates/ry/src/stats.rs`
-each answer "does this file share a namespace with its siblings". The first two count `R/` **and**
-`tests/testthat/` — testthat sources that directory into one environment, which is the documented way
-to share a fixture between test files. `stats.rs` counts `R/` only, directly under a comment claiming
-it orders files "exactly as the CLI and server do". The visible consequence: on a testthat package
-`analysis-stats` reports 3 diagnostics where `check` reports 0. One shared predicate, ≈−55 lines, and
-the instrument stops disagreeing with the product it measures.
+`cli.rs`'s `shares_a_namespace`, the server's `is_package_path` and `stats.rs` each answered "does this
+file share a namespace with its siblings". The first two counted `R/` **and** `tests/testthat/`;
+`stats.rs` counted `R/` only, directly under a comment claiming it ordered files "exactly as the CLI and
+server do". Confirmed before fixing: on a testthat package `analysis-stats` reported 3 diagnostics
+where `check` reported 0. Now one predicate, called from all three, with the sorting key kept separate
+from the classification — collapsing those two questions into one flag is what caused it. Pinned by a
+CLI test that fails against the old instrument (2 diagnostics) and passes now.
 
 ### Rename accepts `...` and `..1` as new names, and the identifier rule is written twice
 

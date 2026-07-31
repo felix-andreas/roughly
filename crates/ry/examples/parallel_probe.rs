@@ -128,7 +128,7 @@ fn parallel_check<D: semantics::Db + Clone + Send>(
                 let db = db.clone();
                 scope.spawn(move || {
                     for &file in chunk_files {
-                        for item in semantics::item_tree(&db, file) {
+                        for &item in semantics::item_tree(&db, file) {
                             let _ = semantics::item_naming(&db, item);
                         }
                     }
@@ -232,7 +232,7 @@ fn main() {
             let db = db.clone();
             scope.spawn(move || {
                 for &file in chunk_files {
-                    for item in semantics::item_tree(&db, file) {
+                    for &item in semantics::item_tree(&db, file) {
                         let _ = semantics::item_naming(&db, item);
                     }
                 }
@@ -271,7 +271,7 @@ fn main() {
             let db = db.clone();
             scope.spawn(move || {
                 for &file in chunk_files {
-                    for item in semantics::item_tree(&db, file) {
+                    for &item in semantics::item_tree(&db, file) {
                         let _ = semantics::item_naming(&db, item);
                     }
                 }
@@ -304,7 +304,7 @@ fn main() {
             let db = db.clone();
             scope.spawn(move || {
                 for &file in chunk_files {
-                    for item in semantics::item_tree(&db, file) {
+                    for &item in semantics::item_tree(&db, file) {
                         let _ = semantics::item_naming(&db, item);
                     }
                 }
@@ -317,7 +317,7 @@ fn main() {
     let mut nodes: Vec<semantics::Item> = Vec::new();
     let mut position = std::collections::HashMap::new();
     for &file in &files {
-        for item in semantics::item_tree(&db, file) {
+        for &item in semantics::item_tree(&db, file) {
             if item.name(&db).is_some() {
                 position.insert(item, nodes.len());
                 nodes.push(item);

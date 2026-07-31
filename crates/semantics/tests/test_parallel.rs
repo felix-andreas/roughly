@@ -216,7 +216,7 @@ fn cyclic_group_answers_are_forcing_order_independent() {
         });
         let phased = build(&|db, files| {
             for &file in files {
-                for item in semantics::item_tree(db, file) {
+                for &item in semantics::item_tree(db, file) {
                     let _ = semantics::item_check(db, item);
                 }
             }

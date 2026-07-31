@@ -213,7 +213,7 @@ fn dangling_annotation_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnos
 #[salsa::tracked(returns(ref))]
 fn frame_slot_positions(db: &dyn Db, file: SourceFile) -> rustc_hash::FxHashMap<String, usize> {
     let mut positions = rustc_hash::FxHashMap::default();
-    for (index, item) in item_tree(db, file).into_iter().enumerate() {
+    for (index, &item) in item_tree(db, file).iter().enumerate() {
         let Some(naming) = crate::item_naming(db, item) else {
             continue;
         };
@@ -723,7 +723,7 @@ const ANNOTATION_PRIMITIVES: &[&str] = &[
 #[salsa::tracked(returns(ref))]
 fn top_level_name_sites(db: &dyn Db, file: SourceFile) -> Vec<(String, TextRange)> {
     let mut sites = Vec::new();
-    for item in item_tree(db, file) {
+    for &item in item_tree(db, file) {
         if !matches!(
             *item.kind(db),
             crate::ItemKind::Function | crate::ItemKind::Value
@@ -756,7 +756,7 @@ fn top_level_name_sites(db: &dyn Db, file: SourceFile) -> Vec<(String, TextRange
 #[salsa::tracked(returns(ref))]
 fn top_level_binding_names(db: &dyn Db, file: SourceFile) -> Vec<String> {
     let mut names = Vec::new();
-    for item in item_tree(db, file) {
+    for &item in item_tree(db, file) {
         if !matches!(
             *item.kind(db),
             crate::ItemKind::Function | crate::ItemKind::Value
@@ -1070,7 +1070,7 @@ fn namespace_read_message(db: &dyn Db, read: &crate::naming::NamespaceRead) -> O
 #[salsa::tracked(returns(ref))]
 fn super_globals(db: &dyn Db, file: SourceFile) -> std::collections::BTreeSet<String> {
     let mut names = std::collections::BTreeSet::new();
-    for item in item_tree(db, file) {
+    for &item in item_tree(db, file) {
         if let Some(naming) = crate::item_naming(db, item) {
             names.extend(naming.super_globals.iter().cloned());
         }
@@ -1091,7 +1091,7 @@ fn file_global_variable_declarations(
 ) -> std::collections::BTreeSet<String> {
     use crate::hir::{ExpressionKind, LiteralKind};
     let mut declared = std::collections::BTreeSet::new();
-    for item in item_tree(db, file) {
+    for &item in item_tree(db, file) {
         let Some(module) = crate::item_hir(db, item) else {
             continue;
         };

@@ -788,16 +788,8 @@ impl Worker {
         lsp_types::Url::from_file_path(path).expect("tracked paths convert to URIs")
     }
 
-    /// Whether a document shares one namespace with its siblings. `R/` does —
-    /// the package environment — and so does `tests/testthat/`, which testthat
-    /// sources into one environment (`helper-*.R` first, then the tests), the
-    /// documented way to share a fixture between test files.
     fn is_package_path(&self, path: &Path) -> bool {
-        if path.starts_with(self.workspace_root.join("R")) {
-            return true;
-        }
-        let testthat = self.workspace_root.join("tests").join("testthat");
-        path.parent().is_some_and(|parent| parent == testthat)
+        crate::cli::shares_a_namespace(path, &self.workspace_root)
     }
 
     fn is_stub_document(path: &Path) -> bool {

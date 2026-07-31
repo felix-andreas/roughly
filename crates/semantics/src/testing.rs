@@ -19,7 +19,7 @@ use salsa::Setter as _;
 /// invariants cover the lint layer too. Asserts range geometry inline.
 pub fn render_semantics(db: &RootDatabase, file: SourceFile) -> String {
     let mut output = String::new();
-    for item in item_tree(db, file) {
+    for &item in item_tree(db, file) {
         if !matches!(*item.kind(db), ItemKind::Function | ItemKind::Value) {
             continue;
         }

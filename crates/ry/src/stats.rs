@@ -73,9 +73,15 @@ pub fn analysis_stats(target: Option<&Path>) -> Result<(), CommandError> {
     // then scripts. The `[check] exclude` scope applies identically.
     let exclude = crate::cli::exclude_matcher(&config, &target)?;
     let r_path = root.join("R");
-    let mut entries: Vec<(bool, usize, String, PathBuf)> = Vec::new();
+    let mut entries: Vec<(bool, bool, usize, String, PathBuf)> = Vec::new();
     for path in crate::cli::collect_r_files(&target, exclude.as_ref())? {
-        let is_package = path.starts_with(&r_path);
+        // Sorting and classification are different questions, and collapsing
+        // them into one flag is what made this instrument measure a different
+        // program than `check`: package files sort ahead of scripts by
+        // `R/`-membership, while sharing a namespace also covers
+        // `tests/testthat/`.
+        let sorts_first = path.starts_with(&r_path);
+        let is_package = crate::cli::shares_a_namespace(&path, &root);
         let rank = path
             .file_name()
             .and_then(|name| collate_rank.get(name.to_string_lossy().as_ref()))
@@ -86,14 +92,14 @@ pub fn analysis_stats(target: Option<&Path>) -> Result<(), CommandError> {
             .unwrap_or(&path)
             .to_string_lossy()
             .replace('\\', "/");
-        entries.push((is_package, rank, key, path));
+        entries.push((sorts_first, is_package, rank, key, path));
     }
     entries.sort_by(|left, right| {
         right
             .0
             .cmp(&left.0)
-            .then_with(|| left.1.cmp(&right.1))
             .then_with(|| left.2.cmp(&right.2))
+            .then_with(|| left.3.cmp(&right.3))
     });
     if entries.is_empty() {
         crate::cli::error(&format!("no R files under {}", target.display()));
@@ -122,7 +128,7 @@ pub fn analysis_stats(target: Option<&Path>) -> Result<(), CommandError> {
     let mut records: Vec<FileRecord> = Vec::with_capacity(entries.len());
     let mut package_count = 0usize;
     let mut load_total = Duration::ZERO;
-    for (is_package, _, _, path) in entries {
+    for (_, is_package, _, _, path) in entries {
         let source = match std::fs::read_to_string(&path) {
             Ok(source) => source,
             Err(error) => {
@@ -178,7 +184,7 @@ pub fn analysis_stats(target: Option<&Path>) -> Result<(), CommandError> {
     let mut item_count = 0usize;
     for record in &records {
         let start = Instant::now();
-        for item in semantics::item_tree(&db, record.file) {
+        for &item in semantics::item_tree(&db, record.file) {
             item_count += 1;
             let _ = semantics::item_hir(&db, item);
             let _ = semantics::item_naming(&db, item);
@@ -189,7 +195,7 @@ pub fn analysis_stats(target: Option<&Path>) -> Result<(), CommandError> {
     let mut typecheck_total = Duration::ZERO;
     for record in &mut records {
         let start = Instant::now();
-        for item in semantics::item_tree(&db, record.file) {
+        for &item in semantics::item_tree(&db, record.file) {
             let _ = semantics::item_check(&db, item);
         }
         record.typecheck = start.elapsed();

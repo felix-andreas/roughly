@@ -62,7 +62,7 @@ fn stats_new_stack() {
         parse_time += phase.elapsed();
         let phase = Instant::now();
         for &file in &files {
-            for item in semantics::item_tree(&db, file) {
+            for &item in semantics::item_tree(&db, file) {
                 let _ = semantics::item_hir(&db, item);
                 let _ = semantics::item_naming(&db, item);
             }
@@ -70,7 +70,7 @@ fn stats_new_stack() {
         lower_time += phase.elapsed();
         let phase = Instant::now();
         for &file in &files {
-            for item in semantics::item_tree(&db, file) {
+            for &item in semantics::item_tree(&db, file) {
                 let _ = semantics::item_check(&db, item);
             }
         }
