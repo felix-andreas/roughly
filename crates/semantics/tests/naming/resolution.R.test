@@ -1,0 +1,164 @@
+#==== shadowing
+#---- a_parameter_shadows_an_outer_binding
+x <- 1L
+f <- function(x) x
+#++++
+# x
+  b0 x top-level 0..1
+  0..1 x <- b0
+# f
+  b0 x parameter 14..15
+  b1 f top-level 0..1
+  0..1 f <- b1
+  17..18 x -> b0
+
+#---- an_inner_local_shadows_the_parameter_for_later_reads
+f <- function(x) {
+  before <- x
+  x <- x + 1L
+  after <- x
+  before + after
+}
+#++++
+# f
+  b0 x parameter 14..15
+  b1 before local 21..27
+  b2 after local 49..54
+  b3 f top-level 0..1
+  0..1 f <- b3
+  21..27 before <- b1
+  31..32 x -> b0
+  35..36 x <- b0
+  40..41 x -> b0
+  49..54 after <- b2
+  58..59 x -> b0
+  62..68 before -> b1
+  71..76 after -> b2
+
+#---- a_closure_capture_marks_the_slot
+make <- function() {
+  total <- 0L
+  function(n) total + n
+}
+#++++
+# make
+  b0 total local 23..28
+  b1 n parameter 46..47
+  b2 make top-level 0..4
+  0..4 make <- b2
+  23..28 total <- b0 captured
+  49..54 total -> b0 captured
+  57..58 n -> b1
+
+#---- reads_of_one_slot_before_and_after_a_rewrite_are_indistinguishable_by_type
+# Both reads of `x` are integer either way, so a resolution pointing at the
+# wrong occurrence changes no type and fires no diagnostic — the typing suites
+# cannot see it. This suite states the binding directly, which is the whole
+# reason it exists.
+f <- function(x) {
+  first <- x
+  x <- 99L
+  second <- x
+  first + second
+}
+#++++
+# f
+  b0 x parameter 14..15
+  b1 first local 21..26
+  b2 second local 45..51
+  b3 f top-level 0..1
+  0..1 f <- b3
+  21..26 first <- b1
+  30..31 x -> b0
+  34..35 x <- b0
+  45..51 second <- b2
+  55..56 x -> b0
+  59..64 first -> b1
+  67..73 second -> b2
+
+#==== non_locals
+#---- a_read_with_no_lexical_slot_is_a_non_local
+f <- function() undefined_helper(1L)
+#++++
+# f
+  b0 f top-level 0..1
+  0..1 f <- b0
+  16..32 undefined_helper -> non-local deferred
+
+#---- a_read_from_inside_a_closure_is_deferred
+outer <- function() {
+  function() later_defined
+}
+#++++
+# outer
+  b0 outer top-level 0..5
+  0..5 outer <- b0
+  35..48 later_defined -> non-local deferred
+
+#---- a_namespace_read_records_its_package
+f <- function() stats::median(1:3)
+#++++
+# f
+  b0 f top-level 0..1
+  0..1 f <- b0
+  16..29 stats::median -> namespace
+
+#==== scopes
+#---- a_for_variable_gets_its_own_binding_kind
+f <- function(items) {
+  for (element in items) print(element)
+}
+#++++
+# f
+  b0 items parameter 14..19
+  b1 element for-variable 30..37
+  b2 f top-level 0..1
+  0..1 f <- b2
+  41..46 items -> b0
+  48..53 print -> non-local deferred
+  54..61 element -> b1
+
+#---- a_super_assignment_with_no_enclosing_slot_is_a_global
+f <- function() {
+  counter <<- 1L
+}
+#++++
+# f
+  b0 f top-level 0..1
+  0..1 f <- b0
+  20..27 counter -> non-local
+  super-globals: counter
+
+#---- a_local_block_scopes_its_writes
+f <- function() {
+  inner <- local({
+    hidden <- 1L
+    hidden + 1L
+  })
+  inner
+}
+#++++
+# f
+  b0 inner local 20..25
+  b1 hidden local 41..47
+  b2 f top-level 0..1
+  0..1 f <- b2
+  20..25 inner <- b0
+  41..47 hidden <- b1
+  58..64 hidden -> b1
+  77..82 inner -> b0
+
+#---- a_conditional_write_leaves_a_later_read_maybe_undefined
+f <- function(flag) {
+  if (flag) value <- 1L
+  value
+}
+#++++
+# f
+  b0 flag parameter 14..18
+  b1 value local 34..39
+  b2 f top-level 0..1
+  0..1 f <- b2
+  28..32 flag -> b0
+  34..39 value <- b1
+  48..53 value -> b1 maybe-undefined
