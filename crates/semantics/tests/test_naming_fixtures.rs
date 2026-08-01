@@ -181,8 +181,10 @@ fn assignment_targets(module: &Module) -> std::collections::BTreeSet<ExprId> {
 }
 
 /// The name an expression spells, for the resolution lines. A resolution can
-/// sit on an assignment target as well as a read, and both are `NameRef` after
-/// lowering — a string target has already had its quotes stripped.
+/// sit on an assignment target as well as a read, and a target is usually a
+/// `NameRef`. A quoted target is the exception: `"x" <- 1` binds `x`, but
+/// lowering keeps the string literal, so the occurrence renders as its
+/// expression kind while the binding line above it carries the stripped name.
 fn name_at(module: &Module, expression: ExprId) -> String {
     match &module.expression(expression).kind {
         semantics::hir::ExpressionKind::NameRef(name) => name.clone(),

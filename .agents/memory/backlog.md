@@ -1660,6 +1660,184 @@ re-bless.
   by `assignment__a_walrus_lowers_to_a_call_because_it_binds_nothing`, whose header shows the
   disagreement.
 
+## Open — naming fidelity (found by testing name resolution directly, in `crates/semantics/tests/naming/`)
+
+Found by rendering `ItemNaming` instead of reading resolution off a downstream type or diagnostic.
+Ordered by severity. The first four were re-verified against the shipping binary on a throwaway
+project before being written down here.
+
+- **`<<-` inside `local()` misses the enclosing function frame, and produces a wrong TYPE, not just a
+  wrong binding.** `naming.rs` bounds the super-assignment search at `current_function_depth()`; with
+  scopes `[TopLevel, Function(f), Local]` that is `1`, so the range `0..1` skips `f`'s frame at index
+  1. The bound should be `self.scopes.len() - 1` — everything strictly outside the current scope —
+  which coincides with the current expression whenever the current scope *is* the function frame.
+  Verified: `function() { v <- 1L; local({ v <<- "two" }); v }` types `fn() -> integer` while the
+  closure spelling of the same thing types `fn() -> integer | character`. R returns `"two"`, so the
+  `local` form silently drops the write and states a type R contradicts. Naming renders the write as
+  `v -> non-local` plus `super-globals: v`.
+- **`with(data = frame, expr)` — a named data argument breaks positional masking.** The positional
+  counter in the masking walk is not advanced past arguments already matched by name, so `expr` lands
+  in the data slot and its column reads resolve as ordinary names. Verified: `with(frame, column_a)`
+  is clean and `with(data = frame, column_a)` reports a false `unresolved` on `column_a`.
+- **`base::with(frame, expr)` masks nothing.** The `Namespace` arm of the masking-family match
+  consults only stub-declared `@masked` verbs and never the base family (`with`/`within`/`subset`/
+  `transform`). Verified: same false `unresolved`, for a spelling R masks identically.
+- **`switch` is walked as an ordinary call, so its branches are sequential writes.** Verified:
+  `switch(key, a = { r <- 1L }, b = { r <- 2L }); r` reports a false `unused` on the first branch's
+  write, which is live whenever `key == "a"`. It also misses the `maybe-undefined` on `r` (R: `object
+  'r' not found` when no branch matches), though that half is invisible today — see the docs mismatch
+  below. `reference/type-system.md` documents `switch` as fully checked control flow; naming does not
+  fork and join it.
+- **`repeat`'s post-loop state wrongly includes the never-assigned path.** `repeat { x <- 1L; break }`
+  followed by a read of `x` marks the read `maybe-undefined`. `loop_body` joins end-of-body with
+  start-of-body to model the back edge and then reuses that as the *exit* state, so `Unassigned` from
+  the first iteration survives even when `may_skip` is false. The loop-head state is correct; only the
+  exit state is wrong. Blast radius is the typing join, not a diagnostic. The legacy case
+  `maybe_undefined.R.test::repeat_body_introduction_is_defined_after_loop` was withheld from the port
+  rather than blessed wrong.
+- **A write-only `<<-` reports its initializer unused, and deleting it changes behaviour.**
+  `make_flag <- function() { flag <- FALSE; function() flag <<- TRUE }` gives a false `unused flag` —
+  but the initializer is what makes `<<-` find a slot at all, and removing it sends the write to the
+  global environment. The read path retroactively marks a frame's writes used (`mark_slot_read`); the
+  `<<-` target path does not.
+- **Rebinding `local` makes the rebinding itself read as a dead store.** The `Local` HIR node carries
+  no callee expression, so nothing reads a user-defined `local` and a false `unused local` fires. The
+  docs sanction treating the syntactic call as the construct; they do not mention that the shadowing
+  definition then reports as dead.
+- **Docs/implementation mismatch: the "might be undefined" warning does not exist.**
+  `reference/type-system.md` says a read reachable with no prior write "warns that the name might be
+  undefined (introduced only in conditionally executed code)", and the frozen stack emitted exactly
+  that. Nothing in `crates/` produces the message; `maybe_undefined` only feeds cross-item liveness
+  and typing. Either implement it or correct the reference — it is a contract page.
+- **`library`/`require`/`help` quoting ignores local shadowing, unlike every sibling recognizer.**
+  `quote`, `on.exit` and the masking family all guard with `!resolutions.contains_key(callee)`; the
+  attach family does not. The docs call this a limitation, but the inconsistency lives inside one
+  function.
+
+Renderer gaps in the naming suite itself, none of them a product bug:
+
+- **A replacement base renders as a read (`->`) though it is also the write**, because
+  `assignment_targets` collects only `ExpressionKind::Assign { target }` and for `x$field <- v` the
+  target is the `Field` node, not the base name.
+- **An *unresolved* replacement base renders two contradictory lines at one span** — both
+  `u -> b0` and `u -> non-local deferred`, because the base expression id lands in `resolutions` and
+  in `non_locals`. Both underlying facts are right (unresolved read plus slot-creating write); the
+  rendering is what is wrong, and this is the shape where the missing write/read distinction becomes
+  actively misleading. No case covers it yet.
+- **`quote(x <- 1L)` mints a vestigial slot.** `premint_frame_assignments` walks call arguments
+  without knowing about quoting, so a `b0 x local` binding appears that nothing writes and nothing
+  resolves to. Harmless; a premint fix should re-bless the case that pins it.
+
+## Open — fuzzing oracle-strength review (measured, and it found two live bugs)
+
+The third of three independent fuzzing reviews, asking the complementary question to the other two:
+not *what inputs do we feed* or *what does it cost*, but **what can be wrong while every arm stays
+green**. Method: injected-bug experiments against a byte-copy of `crates/` built as its own workspace,
+so the shipping `test_fuzz` targets ran verbatim against mutated code. Baseline and restored-copy
+controls both green. Oracle corpus = 1,967 mined legacy-corpus programs + 1,192 fixture sources.
+
+### LIVE BUG — the type renderer prints types that cannot be written back, and one that means something else
+
+Every user-visible rendering of a type — hover, inlay hints, `expected X, found Y` — goes through
+`TypeRenderer`, and nothing checks that the string it produces is readable by the `#:` grammar or that
+it denotes the type it came from. The oracle is the type system's own contract: `#: TYPE` asserts the
+value is compatible with `TYPE`, and the checker just proved the value *has* that type, so
+re-declaring the rendered scheme above the definition must add no finding. 3,159 sources → 1,131
+re-declarations → **41 violations** (5 grammar refusals, 39 type errors). Two classes, both confirmed
+end-to-end with the real binary:
+
+- **Record field names are rendered unquoted.** `list(\`max size\` = 10L)` renders
+  `list{max size: integer}`, which the annotation grammar refuses. A stress sweep of 14 shapes fails
+  7 — and one fails *silently*: `list(\`a,b\` = 1L)` renders `list{a,b: integer}`, which **parses as
+  `list{a}`**, producing a bogus `type-mismatch` plus a bogus "I do not know the type `a`".
+- **`scalar numeric` is rendered but is not a writable constraint.** `function(n) 1:n` renders the
+  scheme `<T: scalar numeric> fn(n: T) -> double[]`; only `numeric` and `atomic` are writable
+  (`type-system.md` §Type parameters), so the renderer and the grammar disagree.
+
+This is the same class the codebase already documents one instance of — "a function member of a union
+must render parenthesized … a type copied out of a finding into an annotation changes meaning". The
+rule was applied to unions and never to field names or constraint spellings, and nothing enforces it
+generally. Cost of the oracle: 36 s over the whole in-tree corpus in release, dominated by the known
+~113 ms/db stub tax; under a second with a shared database. Scoped to `semantics/tests/typing` it is a
+default-suite-sized battery today.
+
+### LIVE BUG — a `<T: numeric>` binder's constraint is dropped inside a self-recursive body
+
+`type-system.md` §Type parameters is explicit that with `<T: numeric> fn(x: T) -> T` the body may use
+`x` numerically. Confirmed false positive:
+
+```
+#: <T: numeric> fn(n: T) -> integer
+countdown <- function(n) if (n <= 0L) 0L else countdown(n - 1L)
+  x expected a numeric value (`integer` or `double`), found `T`
+```
+
+Narrowed by minimal pairs: the same annotation over a non-recursive body using `x + 1L` or `x > 0L` is
+clean, and the *unannotated* `countdown` is clean — so writing down the checker's own inferred type
+turns a clean file into a failing one. 12 of the 41 violations above carry this message; the rest
+(rigid-vs-generalized binder disagreements, a default-value case) need per-case adjudication first.
+
+### Formatter preservation is kind-only, so any change confined to a token's spelling is invisible
+
+`significant_kinds` compares `Vec<SyntaxKind>`. A formatter emitting the wrong *bytes* for a token —
+exactly what a stale or off-by-one `raw()` range produces — preserves kinds perfectly, and R is
+case-sensitive, so this is a miscompile. Injected bug: uppercase the first letter of IDENT tokens ≥4
+chars. The shipping `format` battery passed **8/8**, including `fixture_sources_hold_invariants` and
+`legacy_corpus_holds_invariants`; a `(kind, text)` oracle caught **1,723 of 2,731** sources. Pristine
+baseline 0 violations, cost **0.1 s** for all 3,159 sources — cheaper than the check it replaces.
+(Control: a mutant dropping the `L` suffix *was* caught, because `1L`→`1` crosses a kind boundary. The
+blind spot is precisely within-kind.) Worth having alongside it: **format ⇒ semantics agreement**,
+formatting must not change the diagnostic multiset — pristine 0 divergent over 2,224, cost 20–35 s.
+
+### Nothing bounds the parse-error count from below, and the oracle that catches it is already in-tree
+
+`check_parse_invariants` guards against an error *cascade* but never asserts that a broken file reports
+anything, while the parser carries a lot of dedup and first-wins logic (`error_at`, `error_unclosed`,
+`statement_left_group_open`). Injected bug: drop zero-width ranges in `push_error`, a plausible "a
+zero-width caret underlines nothing" polish change. All four `test_fuzz` binaries stayed green while
+750 → 694 parse errors and **24 of 489 broken files became silently clean**. The catch:
+`crates/syntax/tests/test_corpus.rs::corpus_acceptance` is exactly the right differential and it
+`return`s silently because it points only at the gitignored fetched `corpus/`. Pointed at in-tree
+inputs, `theirs-only-error` (we accept, tree-sitter rejects) goes **2 → 22** on the corpus and
+**11 → 815** over 20,000 seed mutations. The `ours-only-error` direction is noisy (mostly `#:`
+annotations tree-sitter reads as comments) so gate only the `theirs-only` direction; a baseline of 11
+in 20,000 is small enough to allowlist. `tree-sitter-r` is already a dev-dependency; cost **97 ms**
+for the in-tree corpus, 765 ms for 20,000 mutations. **An oracle explicitly marked unproven:** "an
+`ERROR` node implies at least one reported error" holds (0 violations over 3,159 sources and 400,000
+fuzz inputs) but did *not* fire on this bug — the dropped errors came from files with no `ERROR` node.
+Prefer the differential.
+
+### IDE ranges are checked for in-bounds-ness, never for what they cover
+
+The ide battery asserts `range.end() <= text.len()`. A rename whose edits are all shifted one byte
+passes — and corrupts the user's file. Injected bug: off-by-one at the one place in `occurrences`
+where item-relative ranges are re-anchored to absolute offsets, which is the design's own documented
+single re-anchoring edge. The shipping battery passed **2/2**; a *name-identity* oracle (the text at
+every definition target and rename edit must be the identifier under the cursor) caught **748** bad
+edits, and a *round-trip* oracle (definition at a reference lands on a range `references` reports, and
+back) caught **358**. Pristine baseline 0 over 3,466 identifier positions and 1,389 definitions, cost
+**4 s**.
+
+### Oracles that hold — coverage the fuzzers lack, no bug found, each measured
+
+| oracle | result | cost |
+|---|---|---|
+| **middle edits** through incremental equivalence (the in-tree arm replaces whole text; the cargo-fuzz target truncates and appends — neither covers a common prefix *and* suffix) | 568 checked, 0 divergent | 9 s |
+| **project-file-set churn** — no arm ever changes `ProjectFiles`, though hosts add and remove files constantly | 120 removals, 0 divergent | 2 s |
+| **parallel vs sequential** on generated input (`ry check` really does fan out; `test_parallel.rs` covers 3 hand-written programs) | 30 × 8 files, 0 divergent | 0.9 s |
+| **two-wave superset** — a `parse_stage_diagnostics` finding that vanishes from `file_diagnostics` is an editor flicker; asserted only for hand-written cases | 3,159 sources, 0 lost | 25 s |
+| **leading-comment metamorphic** | 2,197 compared, 0 divergent | 36 s |
+| **alpha-rename metamorphic** | 3/1,162 hits, all three the transform's own fault (an edit-distance suggestion, a stub-shadowing name, string-form binders an IDENT-only rename missed); capture-avoiding transform 0/994 — usable only with the filters | 20 s |
+
+**One surface with no oracle at all:** `PackageMetadata` is referenced by zero fuzz arms, so attach
+tolerance, `imports_every_name` and the whole NAMESPACE/DESCRIPTION layer are fuzz-dark — and fixtures
+cannot reach them either, only `crates/ry/tests/test_cli.rs` can.
+
+**One hypothesis killed:** the semantics battery is *not* comparing mostly-empty renderings — over 250
+generated programs exactly 1 is empty and the mean is 462 characters. Determinism and incremental
+equivalence are meaningful self-consistency checks. They remain content-blind in the sense the three
+injected bugs demonstrate: a uniformly wrong answer is deterministic, incremental, and in-bounds.
+
 ## Open — a package's own `pkg::name` reads are resolved but not validated
 
 FIXED: the project's own package (from `DESCRIPTION`'s `Package` field) is now a known namespace
