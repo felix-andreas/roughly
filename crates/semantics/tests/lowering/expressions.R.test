@@ -1,0 +1,624 @@
+#==== literals
+#---- every_constant_lowers_to_its_own_atom
+# `NA` is logical; each typed variant names its own atom. Collapsing them
+# would make `NA_character_` indistinguishable from `NA` to the checker.
+NULL
+NA
+NA_integer_
+NA_real_
+NA_complex_
+NA_character_
+Inf
+NaN
+TRUE
+FALSE
+1i
+#++++
+# <statement>
+  Literal Null
+# <statement>
+  Literal Na(Logical)
+# <statement>
+  Literal Na(Integer)
+# <statement>
+  Literal Na(Double)
+# <statement>
+  Literal Na(Complex)
+# <statement>
+  Literal Na(Character)
+# <statement>
+  Literal Inf
+# <statement>
+  Literal NaN
+# <statement>
+  Literal Logical(true)
+# <statement>
+  Literal Logical(false)
+# <statement>
+  Literal Complex
+
+#---- numeric_literals_keep_their_source_text
+# The text is kept, not a parsed value: the checker reads it back for literal
+# index positions (`x[[2L]]`) and the whole-number-double courtesy (`seq_len(10)`).
+1L
+1.5
+1e3
+.5
+#++++
+# <statement>
+  Literal Integer("1L")
+# <statement>
+  Literal Double("1.5")
+# <statement>
+  Literal Double("1e3")
+# <statement>
+  Literal Double(".5")
+
+#---- a_hexadecimal_literal_keeps_a_text_no_consumer_can_parse
+# WRONG-BUT-CURRENT. `0x10` is a double 16 in R and `0x2L` an integer 2, but
+# both are stored verbatim and every consumer parses them with Rust's decimal
+# `parse`, which rejects the `0x` prefix. The observable effect: `pair[[2L]]`
+# resolves one element type while `pair[[0x2L]]` falls back to the union of
+# all of them.
+0x10
+0x2L
+#++++
+# <statement>
+  Literal Double("0x10")
+# <statement>
+  Literal Integer("0x2L")
+
+#---- string_literals_keep_their_value_without_the_quotes
+# A raw string keeps its body verbatim — the backslash-n below is two
+# characters, not a newline — and drops only the `r"(` … `)"` delimiters.
+"double"
+'single'
+r"(raw\n)"
+#++++
+# <statement>
+  Literal String("double")
+# <statement>
+  Literal String("single")
+# <statement>
+  Literal String("raw\\n")
+
+#==== operators
+#---- every_arithmetic_operator_maps_to_its_own_node
+a + b
+a - b
+a * b
+a / b
+a^b
+a %% b
+a %/% b
+a:b
+#++++
+# <statement>
+  Binary Add
+    NameRef a
+    NameRef b
+# <statement>
+  Binary Subtract
+    NameRef a
+    NameRef b
+# <statement>
+  Binary Multiply
+    NameRef a
+    NameRef b
+# <statement>
+  Binary Divide
+    NameRef a
+    NameRef b
+# <statement>
+  Binary Power
+    NameRef a
+    NameRef b
+# <statement>
+  Binary Modulo
+    NameRef a
+    NameRef b
+# <statement>
+  Binary IntegerDivide
+    NameRef a
+    NameRef b
+# <statement>
+  Binary Sequence
+    NameRef a
+    NameRef b
+
+#---- the_double_star_spelling_is_the_power_operator
+# `**` is R's deprecated spelling of `^`; the parser folds it away, so nothing
+# downstream needs to know the spelling existed.
+1L ** 2L
+#++++
+# <statement>
+  Binary Power
+    Literal Integer("1L")
+    Literal Integer("2L")
+
+#---- every_comparison_and_logical_operator_maps_to_its_own_node
+# `&`/`&&` and `|`/`||` are different functions in R (vectorized vs scalar
+# short-circuit), so they must not share a node.
+a < b
+a > b
+a <= b
+a >= b
+a == b
+a != b
+a & b
+a && b
+a | b
+a || b
+#++++
+# <statement>
+  Binary Less
+    NameRef a
+    NameRef b
+# <statement>
+  Binary Greater
+    NameRef a
+    NameRef b
+# <statement>
+  Binary LessEq
+    NameRef a
+    NameRef b
+# <statement>
+  Binary GreaterEq
+    NameRef a
+    NameRef b
+# <statement>
+  Binary Equal
+    NameRef a
+    NameRef b
+# <statement>
+  Binary NotEqual
+    NameRef a
+    NameRef b
+# <statement>
+  Binary And
+    NameRef a
+    NameRef b
+# <statement>
+  Binary And2
+    NameRef a
+    NameRef b
+# <statement>
+  Binary Or
+    NameRef a
+    NameRef b
+# <statement>
+  Binary Or2
+    NameRef a
+    NameRef b
+
+#---- every_unary_operator_maps_to_its_own_node
+-x
++x
+!x
+~x
+?x
+#++++
+# <statement>
+  Unary Minus
+    NameRef x
+# <statement>
+  Unary Plus
+    NameRef x
+# <statement>
+  Unary Not
+    NameRef x
+# <statement>
+  Unary Tilde
+    NameRef x
+# <statement>
+  Unary Help
+    NameRef x
+
+#---- a_percent_operator_that_is_not_arithmetic_keeps_its_spelling
+# `%%` and `%/%` are arithmetic; every other `%…%` is an ordinary function
+# call spelled as an operator, so naming needs the name to keep a
+# user-defined operator's definition alive.
+a %in% b
+a %o% b
+a %+% b
+#++++
+# <statement>
+  Binary Special %in%
+    NameRef a
+    NameRef b
+# <statement>
+  Binary Special %o%
+    NameRef a
+    NameRef b
+# <statement>
+  Binary Special %+%
+    NameRef a
+    NameRef b
+
+#---- parsed_precedence_is_already_resolved_in_the_tree
+# Checked against R: `^` over `*` over `+`; unary minus BELOW `^`, so `-a^b`
+# negates the power; `:` above `*`; `!` below `%in%`; `%in%` above `+`.
+a + b * c^d
+-a^b
+a:b * c
+!x %in% y
+a %in% b + 1L
+2 - -1
+#++++
+# <statement>
+  Binary Add
+    NameRef a
+    Binary Multiply
+      NameRef b
+      Binary Power
+        NameRef c
+        NameRef d
+# <statement>
+  Unary Minus
+    Binary Power
+      NameRef a
+      NameRef b
+# <statement>
+  Binary Multiply
+    Binary Sequence
+      NameRef a
+      NameRef b
+    NameRef c
+# <statement>
+  Unary Not
+    Binary Special %in%
+      NameRef x
+      NameRef y
+# <statement>
+  Binary Add
+    Binary Special %in%
+      NameRef a
+      NameRef b
+    Literal Integer("1L")
+# <statement>
+  Binary Subtract
+    Literal Double("2")
+    Unary Minus
+      Literal Double("1")
+
+#---- a_formula_is_an_opaque_operator_not_a_call
+# `~` captures its operands unevaluated, so neither side is a read of a value.
+# Lowering keeps the shape and leaves interpretation to whoever consumes it.
+y ~ x + z
+#++++
+# <statement>
+  Binary Tilde
+    NameRef y
+    Binary Add
+      NameRef x
+      NameRef z
+
+#---- a_one_sided_formula_is_a_unary_tilde
+# R parses `~x | g` as `~(x | g)`: the tilde has the lowest precedence.
+~ x | g
+#++++
+# <statement>
+  Unary Tilde
+    Binary Or
+      NameRef x
+      NameRef g
+
+#---- a_formula_dot_is_an_ordinary_name_reference
+y ~ .
+#++++
+# <statement>
+  Binary Tilde
+    NameRef y
+    NameRef .
+
+#---- a_formula_in_argument_position_lowers_like_any_other_value
+lm(y ~ x + 0, data = d)
+#++++
+# <statement>
+  Call
+    NameRef lm
+    Binary Tilde
+      NameRef y
+      Binary Add
+        NameRef x
+        Literal Double("0")
+    arg data =
+      NameRef d
+
+#==== calls
+#---- arguments_keep_their_names_and_their_source_order
+# Argument MATCHING is what a call's lowering must get right: positional
+# arguments keep their index and tagged ones keep their tag.
+f(1L, y = 2L, 3L)
+#++++
+# <statement>
+  Call
+    NameRef f
+    Literal Integer("1L")
+    arg y =
+      Literal Integer("2L")
+    Literal Integer("3L")
+
+#---- a_string_argument_tag_lowers_to_the_bare_name
+# R matches `f("a" = 1)` to the parameter `a`, exactly as `f(a = 1)` does.
+f("a" = 1L)
+#++++
+# <statement>
+  Call
+    NameRef f
+    arg a =
+      Literal Integer("1L")
+
+#---- a_backtick_argument_tag_lowers_to_the_bare_name
+f(`a b` = 1L)
+#++++
+# <statement>
+  Call
+    NameRef f
+    arg a b =
+      Literal Integer("1L")
+
+#---- a_positional_hole_is_an_argument_with_no_value
+# The hole holds a position: dropping it would shift every argument after it.
+f(, 1L)
+#++++
+# <statement>
+  Call
+    NameRef f
+    <empty>
+    Literal Integer("1L")
+
+#---- an_empty_tagged_value_is_a_named_argument_with_no_value
+# `switch` fall-through: `a = ,` means "case a does what case b does". The
+# empty value is the whole point, so it must survive as a named argument.
+switch(key, a = , b = 2L, "other")
+#++++
+# <statement>
+  Call
+    NameRef switch
+    NameRef key
+    arg a = <empty>
+    arg b =
+      Literal Integer("2L")
+    Literal String("other")
+
+#---- dots_forward_as_an_ordinary_name_reference
+f <- function(x, ...) g(x, ..., extra = 1L)
+#++++
+# f
+  Assign Local
+    NameRef f
+    Function(x, ...)
+      Call
+        NameRef g
+        NameRef x
+        NameRef ...
+        arg extra =
+          Literal Integer("1L")
+
+#---- a_numbered_dot_argument_is_an_ordinary_name_reference
+f <- function(...) ..1
+#++++
+# f
+  Assign Local
+    NameRef f
+    Function(...)
+      NameRef ..1
+
+#---- a_call_of_a_call_nests_in_the_callee_position
+f(a)(b)
+#++++
+# <statement>
+  Call
+    Call
+      NameRef f
+      NameRef a
+    NameRef b
+
+#---- an_immediately_invoked_function_keeps_the_parenthesis_node
+(function(x) x)(1L)
+#++++
+# <statement>
+  Call
+    Paren
+      Function(x)
+        NameRef x
+    Literal Integer("1L")
+
+#---- a_quoted_keyword_callee_is_an_ordinary_name
+# `if` is a function in R and can be called like one.
+`if`(a, 1L, 2L)
+#++++
+# <statement>
+  Call
+    NameRef if
+    NameRef a
+    Literal Integer("1L")
+    Literal Integer("2L")
+
+#---- a_bare_package_name_survives_as_a_name_reference
+# `library(stats)` quotes its argument, but lowering does NOT rewrite it to a
+# string: the quoting rule belongs to naming, which suppresses the read while
+# keeping the name available to IDE features. A rewrite here would destroy the
+# only token that spells the package.
+library(stats)
+require(utils)
+help(mean)
+#++++
+# <statement>
+  Call
+    NameRef library
+    NameRef stats
+# <statement>
+  Call
+    NameRef require
+    NameRef utils
+# <statement>
+  Call
+    NameRef help
+    NameRef mean
+
+#---- a_quoted_library_argument_is_already_a_string
+library("stats")
+#++++
+# <statement>
+  Call
+    NameRef library
+    Literal String("stats")
+
+#==== indexing
+#---- single_bracket_indexing_keeps_every_position
+x[1L, 2L]
+#++++
+# <statement>
+  Index [
+    NameRef x
+    Literal Integer("1L")
+    Literal Integer("2L")
+
+#---- double_bracket_indexing_keeps_every_position
+# `[` and `[[` differ in R (slice vs element), so the bracket must be recorded.
+x[[1L, 2L]]
+#++++
+# <statement>
+  Index [[
+    NameRef x
+    Literal Integer("1L")
+    Literal Integer("2L")
+
+#---- index_arguments_keep_their_names
+m[i, j, drop = FALSE]
+#++++
+# <statement>
+  Index [
+    NameRef m
+    NameRef i
+    NameRef j
+    arg drop =
+      Literal Logical(false)
+
+#---- a_string_index_stays_a_string_literal
+# Not folded into a field access: `x[["a"]]` and `x$a` differ in R (exact vs
+# partial matching, and `[[` accepts a computed index), and the checker reads
+# the literal back where it needs the name.
+x[["a"]]
+#++++
+# <statement>
+  Index [[
+    NameRef x
+    Literal String("a")
+
+#---- a_computed_index_is_an_ordinary_expression
+x[[c("a", "b")]]
+#++++
+# <statement>
+  Index [[
+    NameRef x
+    Call
+      NameRef c
+      Literal String("a")
+      Literal String("b")
+
+#---- a_leading_empty_index_position_is_preserved
+# `m[, 1]` selects a column of every row. Losing the hole would turn it into
+# `m[1]`, a different selection.
+m[, 1L]
+#++++
+# <statement>
+  Index [
+    NameRef m
+    <empty>
+    Literal Integer("1L")
+
+#---- a_trailing_empty_index_position_is_dropped
+# WRONG-BUT-CURRENT. R distinguishes `m[1, ]` (row 1, every column — a call of
+# arity 3) from `m[1]` (arity 2), and for a data frame those return different
+# things. The parser emits an empty ARGUMENT only for a hole followed by a
+# comma, so a trailing hole vanishes and the two lower identically. The
+# expected tree has a second `<empty>` argument.
+m[1L, ]
+#++++
+# <statement>
+  Index [
+    NameRef m
+    Literal Integer("1L")
+
+#---- an_index_with_no_positions_at_all
+x[]
+#++++
+# <statement>
+  Index [
+    NameRef x
+
+#---- chained_indexing_nests_the_target
+x[[i]][[j]]
+#++++
+# <statement>
+  Index [[
+    Index [[
+      NameRef x
+      NameRef i
+    NameRef j
+
+#==== fields
+#---- a_dollar_access_records_the_field_name
+x$a
+#++++
+# <statement>
+  Field $a
+    NameRef x
+
+#---- a_quoted_dollar_access_lowers_to_the_bare_name
+# R accepts `x$"a"` and ``x$`a b` `` and means the field `a` / `a b` by both.
+x$"a"
+x$`a b`
+#++++
+# <statement>
+  Field $a
+    NameRef x
+# <statement>
+  Field $a b
+    NameRef x
+
+#---- an_at_access_records_the_slot_name
+# S4 slots: `@` and `$` are different operators, so the accessor is recorded.
+shape@radius
+object@.Data
+#++++
+# <statement>
+  Field @radius
+    NameRef shape
+# <statement>
+  Field @.Data
+    NameRef object
+
+#---- an_access_chain_nests_left_to_right
+x$a$b
+x@a@b
+#++++
+# <statement>
+  Field $b
+    Field $a
+      NameRef x
+# <statement>
+  Field @b
+    Field @a
+      NameRef x
+
+#---- a_namespace_access_records_the_package_and_the_name
+# `:::` reaches internals `::` cannot, so the two are not interchangeable.
+stats::sd
+stats:::sd
+#++++
+# <statement>
+  Namespace stats::sd
+# <statement>
+  Namespace stats:::sd
+
+#---- a_qualified_callee_is_a_namespace_expression_in_callee_position
+base::print(1L)
+#++++
+# <statement>
+  Call
+    Namespace base::print
+    Literal Integer("1L")
