@@ -271,11 +271,12 @@ reporter 41 ms), so they were never evidence about the reporter at all. The clai
 `read_span` cost does track file length per span, measured directly above — but it was asserted from a
 measurement that could not show it.
 
-### A file-local name lookup scans the file's item list, so items × distinct references is quadratic
+### FIXED — a file-local name lookup scanned the file's item list
 
-`SalsaGlobals::frame_definition` answers "which earlier item in this file binds this name" with a
-linear reverse scan of the item list, once per name looked up. Neither factor is superlinear alone,
-which is why it hides — measured with each held fixed in turn:
+`SalsaGlobals::frame_definition` answered "which item of this file binds this name" with a linear
+reverse scan of the item list, once per name looked up, so a file with many items *and* many distinct
+cross-item references cost their product. Neither factor is superlinear alone, which is why it hid —
+measured with each held fixed in turn:
 
 | shape | 2,500 | 5,000 | 10,000 | 20,000 |
 |---|---|---|---|---|
@@ -283,18 +284,22 @@ which is why it hides — measured with each held fixed in turn:
 | call arguments fixed at 200, items vary | 76 ms | 137 ms | 269 ms | 576 ms |
 | **both vary together, references distinct** | 153 ms | 393 ms | 1,269 ms | **4,305 ms** |
 
-Both edges are linear; together they are quadratic, and the sum of the two edges at 20,000 (821 ms)
-is a fifth of the joint cost (4,305 ms). That is the signature of a per-lookup scan over the item
-list: 200 × 20,000 and 20,000 × 200 are both 4M steps, while 20,000 × 20,000 is 400M. The
-fixed-item row also confirms it is not the call size itself — 20,000 arguments cycling over 200 names
-cost 245 ms, because each name's scheme is memoized after its first lookup.
+Both edges linear; together quadratic, and the joint cost is five times their sum — the signature of a
+per-lookup scan, since 200 × 20,000 is 4M steps against 20,000 × 20,000 at 400M.
 
-The shape is a large file that defines many names and then references many of them: generated
-bindings, a long `utils.R`, a big `c(...)` of function references. The fix is the one already applied
-to `for_item`'s position lookup — a memoized per-file index from name to its binding items, replacing
-the scan. Note the index must preserve the ordering rule `frame_definition` implements (nearest
-*earlier* writer for an immediate read, last writer anywhere for a deferred one in a script), so it
-wants a per-name ordered list rather than a single winner.
+Replaced by `file_binders`, a memoized per-file index from name to the items binding it in file order.
+The ordering rule is preserved exactly: a binary search takes the last binder strictly above the
+reading item for an immediate read, and the last binder anywhere for a deferred read in a script,
+while a deferred read in a package still stands aside for the project-wide winner. Interleaved:
+20,000 × 20,000 goes **4,277 ms → 985 ms (4.3×)**, and the curve flattens from 30× to 11.6× across an
+8× growth — near-linear, with a mild residue not chased further.
+
+Finding sets byte-identical on all four corpus packages and `targets`, and corpus timings unchanged
+within noise, which is expected: this removes a cliff rather than general cost. Two fixtures pin the
+ordering — three bindings of one name with an immediate read resolving to the middle one, and a
+script closure seeing the last binding in the file. Both fail against a first-instead-of-last error
+(along with three pre-existing fixtures) and both pass against the pre-change code, so they guard the
+contract rather than encode the refactor.
 
 ### The package-path cost is test-block writes entering the package namespace — root cause found, one part fixed
 

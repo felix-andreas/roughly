@@ -219,6 +219,40 @@ h: Unknown
 g: <T> fn(x: T) -> T
 16..17 error[type-mismatch] this call supplies 0 arguments, but the function requires 1 — a required argument is missing
 
+#---- an_immediate_read_picks_the_nearest_earlier_binding_of_several
+# Not the first and not the last: with several bindings of one name, a read at
+# the file's top level resolves to the one directly above it. Two bindings
+# cannot tell a nearest-earlier rule from a first-or-last one, which is what
+# makes three the case worth pinning. The reads have to be immediate — a read
+# inside a function is deferred and sees the settled frame instead, which is the
+# case below.
+step <- 1L
+step <- "two"
+between <- step
+step <- TRUE
+after <- step
+#++++
+step: integer
+step: character
+between: character
+step: logical
+after: logical
+406..410 warning[unused] `step` is assigned but never used.
+431..438 warning[unused] `between` is assigned but never used.
+460..465 warning[unused] `after` is assigned but never used.
+
+#---- a_scripts_closure_sees_the_last_binding_in_the_file
+# A closure runs once the file's frame has settled, so a deferred read sees the
+# whole file — including a binding written below it, and its own.
+report <- function() total
+total <- 1L
+total <- "settled"
+#++++
+report: fn() -> character
+total: integer
+total: character
+148..154 warning[unused] `report` is assigned but never used.
+
 #==== conditional_slots
 #---- loop_binding_resolves_a_later_read
 for (i in 1:3) x <- i

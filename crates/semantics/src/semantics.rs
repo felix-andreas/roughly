@@ -1323,8 +1323,8 @@ fn refuse_check<'db>(db: &'db dyn Db, check: check::ItemCheck<'db>) -> check::It
 struct SalsaGlobals<'db> {
     db: &'db dyn Db,
     definitions: Option<&'db rustc_hash::FxHashMap<String, Item<'db>>>,
-    /// The file's items in order plus this item's own position, for both
-    /// document kinds — a file is sourced top-down whichever it is.
+    /// This item's own position in its file, for both document kinds — a file
+    /// is sourced top-down whichever it is.
     ///
     /// An **immediate** read therefore sees the nearest EARLIER writer in this
     /// file, ahead of the project-wide winner. That covers a top-level
@@ -1338,9 +1338,9 @@ struct SalsaGlobals<'db> {
     /// the closure runs once the file's frame has settled, so it sees the last
     /// writer anywhere in that file, its own binding included (self-recursion).
     /// In a package the function runs after the *whole package* is sourced, so
-    /// the answer is the project-wide winner and this scan must stand aside —
+    /// the answer is the project-wide winner and this file must stand aside —
     /// a later file's override would otherwise be lost.
-    frame_items: Option<(&'db [Item<'db>], usize)>,
+    frame_index: Option<usize>,
     /// Whether this item's file is a script, which decides the deferred-read
     /// rule above.
     is_script: bool,
@@ -1397,49 +1397,77 @@ fn visible_arithmetic_classes(db: &dyn Db, file: SourceFile) -> rustc_hash::FxHa
 
 const CONDITIONAL_SLOT_JOIN_CAP: usize = 8;
 
+/// Every item that binds a name at a file's top level, by name, in file order.
+///
+/// This is the index behind [`SalsaGlobals::frame_definition`], which answers
+/// "which item of this file binds this name" once per name a check looks up.
+/// Scanning the item list for that answer is linear per lookup, so a file with
+/// many items *and* many distinct cross-item references costs their product —
+/// quadratic, and invisible when only one of the two grows. Each axis alone
+/// stays linear, which is why it hid: 20,000 items referencing 200 names cost
+/// 576 ms and 200 items referencing 20,000 cost 245 ms, while 20,000 of each
+/// cost 4,305 ms, five times their sum.
+#[salsa::tracked(returns(ref))]
+fn file_binders<'db>(
+    db: &'db dyn Db,
+    file: SourceFile,
+) -> rustc_hash::FxHashMap<String, Vec<(usize, Item<'db>)>> {
+    let mut binders: rustc_hash::FxHashMap<String, Vec<(usize, Item<'db>)>> =
+        rustc_hash::FxHashMap::default();
+    for (index, &item) in item_tree(db, file).iter().enumerate() {
+        match *item.kind(db) {
+            ItemKind::Function | ItemKind::Value => {
+                if let Some(name) = item.name(db).clone() {
+                    binders.entry(name).or_default().push((index, item));
+                }
+            }
+            // A statement item binds through a conditional top-level write
+            // (the document-slot model), and may bind several names.
+            ItemKind::Statement => {
+                for name in item_top_level_names(db, item) {
+                    binders.entry(name.clone()).or_default().push((index, item));
+                }
+            }
+        }
+    }
+    binders
+}
+
 impl<'db> SalsaGlobals<'db> {
     fn for_item(db: &'db dyn Db, item: Item<'db>) -> SalsaGlobals<'db> {
         let definitions = ProjectFiles::try_get(db).map(|files| package_definitions(db, files));
         let file = *item.file(db);
         let is_script = *file.kind(db) == DocumentKind::Script;
-        let items = item_tree(db, file);
         // Looked up, not scanned for: this runs once per checked item, so a
         // linear search here is quadratic in a file's top-level items.
         let index = item_tree_positions(db, file)
             .get(&item)
             .copied()
-            .unwrap_or(items.len());
+            .unwrap_or_else(|| item_tree(db, file).len());
         SalsaGlobals {
             db,
             definitions,
-            frame_items: Some((items, index)),
+            frame_index: Some(index),
             is_script,
             file,
         }
     }
 
     fn frame_definition(&self, name: &str, deferred: bool) -> Option<Item<'db>> {
-        let (items, index) = self.frame_items.as_ref()?;
+        let index = self.frame_index?;
         // A package function body runs after every file is sourced, so the
         // project-wide winner owns that answer, not this file's last writer.
         if deferred && !self.is_script {
             return None;
         }
-        let visible = if deferred {
-            &items[..]
-        } else {
-            &items[..*index]
+        let binders = file_binders(self.db, self.file).get(name)?;
+        // A deferred read in a script sees the whole settled frame, its own
+        // binding included; an immediate one sees only what ran above it.
+        let visible = match deferred {
+            true => &binders[..],
+            false => &binders[..binders.partition_point(|&(at, _)| at < index)],
         };
-        visible
-            .iter()
-            .rev()
-            .find(|item| match *item.kind(self.db) {
-                ItemKind::Function | ItemKind::Value => item.name(self.db).as_deref() == Some(name),
-                // A statement item binds the name through a conditional
-                // top-level write (the document-slot model).
-                ItemKind::Statement => item_top_level_names(self.db, **item).contains(name),
-            })
-            .copied()
+        visible.last().map(|&(_, item)| item)
     }
 
     /// The joined scheme of a package-level conditional slot: every
