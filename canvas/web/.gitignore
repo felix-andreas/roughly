@@ -1,0 +1,4 @@
+node_modules/
+dist/
+# Built by `bun run core` from ../core; not a source file.
+public/canvas_core.wasm

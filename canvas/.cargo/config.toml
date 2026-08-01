@@ -1,0 +1,5 @@
+# The recursive tree walks over deeply nested R expressions need more than
+# wasm's 1 MiB default stack, the same reason the native CLI runs commands on
+# an explicitly sized thread.
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "link-arg=-zstack-size=16777216"]

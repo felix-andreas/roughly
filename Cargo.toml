@@ -1,6 +1,9 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "legacy/*", "editors/zed"]
+# The zoomable code canvas is a standalone project that consumes ry as a
+# library and builds for wasm32; it carries its own workspace.
+exclude = ["canvas"]
 default-members = ["crates/ry"]
 
 # The release pipeline cross-links the macOS binaries with zig, which has no

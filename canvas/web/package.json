@@ -1,0 +1,16 @@
+{
+  "name": "ry-canvas",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "core": "cd ../core && cargo build --release --target wasm32-unknown-unknown && cp ../target/wasm32-unknown-unknown/release/canvas_core.wasm ../web/public/canvas_core.wasm",
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3",
+    "vite": "^6.0.0"
+  }
+}

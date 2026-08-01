@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+    <title>ry canvas — a zoomable map of R code</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+  </head>
+  <body>
+    <div id="stage"></div>
+
+    <div class="hud hud-top">
+      <div class="brand">ry<span>·</span>canvas</div>
+      <div class="project" id="project"></div>
+      <div class="spacer"></div>
+      <button class="chip" id="open">Open folder…</button>
+      <button class="chip" id="search">Search <kbd>/</kbd></button>
+      <button class="chip" id="collapse">Collapse all</button>
+    </div>
+
+    <div class="inspector" id="inspector"></div>
+
+    <div class="palette" id="palette">
+      <input id="palette-input" placeholder="Jump to a definition…" spellcheck="false" autocomplete="off" />
+      <ul id="palette-list"></ul>
+    </div>
+
+    <div class="hud hud-bottom">
+      <div class="hints">
+        <span><kbd>drag</kbd>pan</span>
+        <span><kbd>⌘/ctrl scroll</kbd>zoom</span>
+        <span><kbd>click</kbd>an underlined name opens it inline</span>
+        <span><kbd>⇧click</kbd>fly to its definition</span>
+        <span><kbd>dbl-click</kbd>zoom to a card</span>
+        <span><kbd>esc</kbd>collapse all</span>
+      </div>
+      <div class="spacer"></div>
+      <div class="zoom" id="zoom"></div>
+    </div>
+
+    <div class="splash" id="splash">
+      <div class="title">ry canvas</div>
+      <div class="detail" id="splash-detail">loading the analyzer…</div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
