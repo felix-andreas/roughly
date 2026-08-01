@@ -1,0 +1,340 @@
+#==== parameters
+#---- every_parameter_gets_its_own_slot_in_order
+pair <- function(x, y) {
+  x
+  y
+}
+#++++
+# pair
+  b0 x parameter 17..18
+  b1 y parameter 20..21
+  b2 pair top-level 0..4
+  0..4 pair <- b2
+  27..28 x -> b0
+  31..32 y -> b1
+
+#---- a_parameter_no_read_reaches_is_reported
+mirror <- function(x, y) x
+#++++
+# mirror
+  b0 x parameter 19..20
+  b1 y parameter 22..23
+  b2 mirror top-level 0..6
+  0..6 mirror <- b2
+  25..26 x -> b0
+  unused-parameter y 22..23
+
+#---- dots_is_a_parameter_but_never_reported_and_never_read
+collect <- function(prefix, ...) list(prefix, ...)
+#++++
+# collect
+  b0 prefix parameter 20..26
+  b1 ... parameter 28..31
+  b2 collect top-level 0..7
+  0..7 collect <- b2
+  33..37 list -> non-local deferred
+  38..44 prefix -> b0
+
+#---- a_default_expression_reads_an_earlier_parameter
+f <- function(x, y = x) y
+#++++
+# f
+  b0 x parameter 14..15
+  b1 y parameter 17..18
+  b2 f top-level 0..1
+  0..1 f <- b2
+  21..22 x -> b0
+  24..25 y -> b1
+
+#---- a_default_expression_reads_a_later_parameter
+# R evaluates defaults lazily in the function's own frame, so a default may
+# name a parameter declared after it. If this regressed to left-to-right
+# visibility, `y` here would fall out of the frame and read as a non-local.
+f <- function(x = y, y = 1L) x
+#++++
+# f
+  b0 x parameter 14..15
+  b1 y parameter 21..22
+  b2 f top-level 0..1
+  0..1 f <- b2
+  18..19 y -> b1
+  29..30 x -> b0
+
+#---- assigning_a_parameter_name_writes_the_parameter_slot
+f <- function(x) {
+  x <- x + 1L
+  x
+}
+#++++
+# f
+  b0 x parameter 14..15
+  b1 f top-level 0..1
+  0..1 f <- b1
+  21..22 x <- b0
+  26..27 x -> b0
+  35..36 x -> b0
+
+#---- a_read_the_signature_does_not_bind_leaves_the_frame
+f <- function(y) x
+#++++
+# f
+  b0 y parameter 14..15
+  b1 f top-level 0..1
+  0..1 f <- b1
+  17..18 x -> non-local deferred
+  unused-parameter y 14..15
+
+#---- an_anonymous_lambda_binds_its_own_parameter
+f <- function(items) sapply(items, \(element) element + 1L)
+#++++
+# f
+  b0 items parameter 14..19
+  b1 element parameter 37..44
+  b2 f top-level 0..1
+  0..1 f <- b2
+  21..27 sapply -> non-local deferred
+  28..33 items -> b0
+  46..53 element -> b1
+
+#==== locals
+#---- the_first_write_creates_the_slot_and_later_writes_reuse_it
+f <- function() {
+  value <- 1L
+  value <- "ok"
+  value
+}
+#++++
+# f
+  b0 value local 20..25
+  b1 f top-level 0..1
+  0..1 f <- b1
+  20..25 value <- b0
+  34..39 value <- b0
+  50..55 value -> b0
+  unused value 20..25
+
+#---- the_right_hand_side_reads_the_slot_before_the_write_lands
+f <- function(x) {
+  x <- x
+  x
+}
+#++++
+# f
+  b0 x parameter 14..15
+  b1 f top-level 0..1
+  0..1 f <- b1
+  21..22 x <- b0
+  26..27 x -> b0
+  30..31 x -> b0
+
+#---- distinct_names_get_distinct_slots
+f <- function() {
+  first <- 1L
+  second <- "ok"
+  first
+  second
+}
+#++++
+# f
+  b0 first local 20..25
+  b1 second local 34..40
+  b2 f top-level 0..1
+  0..1 f <- b2
+  20..25 first <- b0
+  34..40 second <- b1
+  51..56 first -> b0
+  59..65 second -> b1
+
+#---- a_write_whose_value_no_read_observes_is_a_dead_store
+f <- function() {
+  x <- 1L
+  x <- 2L
+  y <- x
+  y
+}
+#++++
+# f
+  b0 x local 20..21
+  b1 y local 40..41
+  b2 f top-level 0..1
+  0..1 f <- b2
+  20..21 x <- b0
+  30..31 x <- b0
+  40..41 y <- b1
+  45..46 x -> b0
+  49..50 y -> b1
+  unused x 20..21
+
+#---- a_dot_or_underscore_prefixed_name_is_never_a_dead_store
+# The dead-store convention exempts the names a project uses to park a value it
+# means to ignore.
+f <- function() {
+  .ignored <- 1L
+  `_spare` <- 2L
+  3L
+}
+#++++
+# f
+  b0 .ignored local 20..28
+  b1 _spare local 37..45
+  b2 f top-level 0..1
+  0..1 f <- b2
+  20..28 .ignored <- b0
+  37..45 _spare <- b1
+
+#---- a_dead_store_inside_a_nested_function_is_still_reported
+f <- function() {
+  g <- function() {
+    dead <- 1L
+    2L
+  }
+  g
+}
+#++++
+# f
+  b0 g local 20..21
+  b1 dead local 42..46
+  b2 f top-level 0..1
+  0..1 f <- b2
+  20..21 g <- b0
+  42..46 dead <- b1
+  66..67 g -> b0
+  unused dead 42..46
+
+#==== blocks
+# Braces are not a scope in R. A write inside them survives the closing brace,
+# and a read after them must see it rather than falling back outward.
+#---- a_write_inside_braces_is_visible_after_them
+f <- function() {
+  {
+    x <- 1L
+  }
+  x
+}
+#++++
+# f
+  b0 x local 26..27
+  b1 f top-level 0..1
+  0..1 f <- b1
+  26..27 x <- b0
+  40..41 x -> b0
+
+#---- nested_braces_share_one_frame
+f <- function() {
+  {
+    x <- 1L
+    {
+      x
+    }
+  }
+  x
+}
+#++++
+# f
+  b0 x local 26..27
+  b1 f top-level 0..1
+  0..1 f <- b1
+  26..27 x <- b0
+  46..47 x -> b0
+  60..61 x -> b0
+
+#---- a_read_inside_braces_finds_the_nearest_write_of_the_frame
+f <- function() {
+  x <- "ok"
+  {
+    x
+  }
+}
+#++++
+# f
+  b0 x local 20..21
+  b1 f top-level 0..1
+  0..1 f <- b1
+  20..21 x <- b0
+  38..39 x -> b0
+
+#==== local_blocks
+#---- a_local_block_binds_in_its_own_scope_and_does_not_leak
+f <- function() {
+  local({
+    hidden <- 1L
+    hidden
+  })
+  hidden
+}
+#++++
+# f
+  b0 hidden local 32..38
+  b1 f top-level 0..1
+  0..1 f <- b1
+  32..38 hidden <- b0
+  49..55 hidden -> b0
+  63..69 hidden -> non-local deferred
+
+#---- a_local_block_reads_the_enclosing_frame
+f <- function() {
+  shared <- 1L
+  local({
+    shared
+  })
+}
+#++++
+# f
+  b0 shared local 20..26
+  b1 f top-level 0..1
+  0..1 f <- b1
+  20..26 shared <- b0
+  47..53 shared -> b0
+
+#---- a_write_in_a_local_block_does_not_touch_the_enclosing_slot
+# The block's write goes to the block's own slot, so the frame's slot keeps the
+# value it had — a regression that let the write escape would repoint the last
+# read at the inner slot.
+f <- function() {
+  x <- 1L
+  local({
+    x <- 2L
+    x
+  })
+  x
+}
+#++++
+# f
+  b0 x local 20..21
+  b1 x local 42..43
+  b2 f top-level 0..1
+  0..1 f <- b2
+  20..21 x <- b0
+  42..43 x <- b1
+  54..55 x -> b1
+  63..64 x -> b0
+
+#---- local_blocks_nest
+f <- function() {
+  outer_value <- 1L
+  local({
+    inner_value <- outer_value
+    local({
+      inner_value
+    })
+  })
+}
+#++++
+# f
+  b0 outer_value local 20..31
+  b1 inner_value local 52..63
+  b2 f top-level 0..1
+  0..1 f <- b2
+  20..31 outer_value <- b0
+  52..63 inner_value <- b1
+  67..78 outer_value -> b0
+  97..108 inner_value -> b1
+
+#---- local_of_a_bare_expression_needs_no_block
+f <- function(n) local(n + 1L)
+#++++
+# f
+  b0 n parameter 14..15
+  b1 f top-level 0..1
+  0..1 f <- b1
+  23..24 n -> b0
