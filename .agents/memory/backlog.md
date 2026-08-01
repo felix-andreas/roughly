@@ -238,26 +238,63 @@ arithmetic or comparison operator were inferred twice per level, so a nested cha
 container with other work running, so treat them as upper bounds, and note that all in-container
 timings are effectively ≤2-core numbers.
 
-### The human reporter is quadratic — findings × file length — and dominates `check` on a noisy file
+### FIXED — the human reporter was quadratic in findings × file length
 
-Found while measuring the per-item quadratic below, and **not** in either review, because both measured
-through `analysis-stats` or JSON output, which never touch this path. On one file of 8,000 items where
-every item reports, `analysis-stats` puts the whole cold pass at 452.6 ms and `--output json` finishes
-in 550 ms, while plain `ry check` takes 10,527 ms. So 95% of the wall clock is the reporter.
+Neither review saw it, because both measured through `analysis-stats` or `--output json`, which never
+touch this path. On one file of 8,000 items where every item reports, the whole cold analysis was
+452.6 ms and `--output json` finished in 550 ms while plain `ry check` took 10,527 ms.
 
-It scales as findings × file length, not findings × offset. Two 20,501-line projects with the same 500
-findings — crowded into the first 500 lines versus spread evenly — cost 6.9 s and 8.0 s, so position
-barely matters; and per-finding cost tracks file size directly (0.39 ms per finding on a 2,000-line
-file, 1.3 ms on an 8,000-line one, a 3.4× rise for 4× the text). `--min-severity error`, which
-suppresses the rendering, costs the same as JSON, which confirms it is the rendering rather than
-assembly or suppression parsing.
+Localized by instrumenting the reporter rather than by inference: at 8,000 findings, `render` was
+6,811 ms of which `read_span` alone was **6,728 ms — 98.8%**; the snippet-rule filter was 5 ms and
+writing 88 ms. A standalone probe confirmed the shape in miette itself: `SourceCode for str` costs
+31 µs per span on a 1,000-line file and 245 µs on an 8,000-line one, because it locates a span's lines
+by walking from byte zero. Once per finding, that is findings × file length.
 
-The likely site is `NamedText`'s `read_span` delegating to miette's `SourceCode for str`, which walks
-the source to locate a span's lines; doing that once per finding gives exactly this shape. The fix is
-to answer `read_span` from a per-file `LineIndex` built once, which `crates/ry/src/position.rs` already
-provides. Care is needed to reproduce miette's `SpanContents` exactly — data, span, line, column and
-line count — and the character-column re-count must stay, since it is what keeps the human header
-agreeing with the JSON record for the same finding.
+Fixed by answering `read_span` over a bounded window — the span's lines plus a margin wider than the
+requested context — and translating the result back into whole-file coordinates. It **delegates to
+miette inside the window** rather than reimplementing `SpanContents`, so there is one implementation of
+what a snippet contains. A `LineStarts` table per file (miette's own line rule: `\n`, `\r\n`, or a lone
+`\r`) makes locating the window a binary search.
+
+Interleaved, one file where every item reports: 1,000 findings 161→60 ms, 2,000 498→131, 4,000
+1,705→217, 8,000 **6,483→530 ms (13×)**, and the curve is now linear in findings rather than quadratic.
+On real packages, data.table 1,056→326 ms (3.1×). Rendered stderr is **byte-identical** on data.table,
+dplyr, ggplot2 and shiny, 1.24 MB of it on data.table alone, related-note snippets included. A
+differential test sweeps our window against miette's whole-file walk over `\n`, `\r\n`, lone-`\r` and
+mixed line endings, spans mid-line, across a break, at the very start and very end, and a file with no
+trailing newline — asserting data, span, line and line count all match.
+
+**Correction to this entry's own earlier evidence.** It claimed "position barely matters" from two
+20,501-line projects with 500 findings each costing 6.9 s and 8.0 s. That was inferred without
+splitting analysis from reporting, and it was wrong: those projects are analysis-bound (JSON 4.6 s,
+reporter 41 ms), so they were never evidence about the reporter at all. The claim happens to hold —
+`read_span` cost does track file length per span, measured directly above — but it was asserted from a
+measurement that could not show it.
+
+### A file-local name lookup scans the file's item list, so items × distinct references is quadratic
+
+`SalsaGlobals::frame_definition` answers "which earlier item in this file binds this name" with a
+linear reverse scan of the item list, once per name looked up. Neither factor is superlinear alone,
+which is why it hides — measured with each held fixed in turn:
+
+| shape | 2,500 | 5,000 | 10,000 | 20,000 |
+|---|---|---|---|---|
+| items fixed at 200, call arguments vary | 43 ms | 70 ms | 131 ms | 245 ms |
+| call arguments fixed at 200, items vary | 76 ms | 137 ms | 269 ms | 576 ms |
+| **both vary together, references distinct** | 153 ms | 393 ms | 1,269 ms | **4,305 ms** |
+
+Both edges are linear; together they are quadratic, and the sum of the two edges at 20,000 (821 ms)
+is a fifth of the joint cost (4,305 ms). That is the signature of a per-lookup scan over the item
+list: 200 × 20,000 and 20,000 × 200 are both 4M steps, while 20,000 × 20,000 is 400M. The
+fixed-item row also confirms it is not the call size itself — 20,000 arguments cycling over 200 names
+cost 245 ms, because each name's scheme is memoized after its first lookup.
+
+The shape is a large file that defines many names and then references many of them: generated
+bindings, a long `utils.R`, a big `c(...)` of function references. The fix is the one already applied
+to `for_item`'s position lookup — a memoized per-file index from name to its binding items, replacing
+the scan. Note the index must preserve the ordering rule `frame_definition` implements (nearest
+*earlier* writer for an immediate read, last writer anywhere for a deferred one in a script), so it
+wants a per-name ordered list rather than a single winner.
 
 ### The package-path cost is test-block writes entering the package namespace — root cause found, one part fixed
 

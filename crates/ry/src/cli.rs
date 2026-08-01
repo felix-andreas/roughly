@@ -165,6 +165,7 @@ pub fn check(
         // declaration.
         for (stub_path, stub_text) in &project_stub_files {
             let stub_index = LineIndex::new(stub_text);
+            let stub_lines = LineStarts::new(stub_text);
             for problem in semantics::stubs::stub_source_problems(&db, stub_text) {
                 n_diagnostics += 1;
                 let start = stub_index.line_start(problem.line as u32);
@@ -178,7 +179,7 @@ pub fn check(
                 };
                 match output {
                     OutputFormat::Human => {
-                        render_human_diagnostic(stub_path, stub_text, &diagnostic, &[])
+                        render_human_diagnostic(stub_path, stub_text, &stub_lines, &diagnostic, &[])
                     }
                     OutputFormat::Json => {
                         render_json_diagnostic(stub_path, stub_text, &stub_index, &diagnostic, &[])
@@ -388,6 +389,7 @@ pub fn check(
                 continue;
             }
             let line_index = LineIndex::new(source);
+            let snippet_lines = LineStarts::new(source);
             for diagnostic in &per_file[index] {
                 if min_severity == MinSeverity::Error && diagnostic.severity != Severity::Error {
                     continue;
@@ -397,7 +399,7 @@ pub fn check(
                     diagnostic.related.iter().filter_map(resolve_note).collect();
                 match output {
                     OutputFormat::Human => {
-                        render_human_diagnostic(path, source, diagnostic, &related)
+                        render_human_diagnostic(path, source, &snippet_lines, diagnostic, &related)
                     }
                     OutputFormat::Json => {
                         render_json_diagnostic(path, source, &line_index, diagnostic, &related)
@@ -441,9 +443,13 @@ pub fn check(
                 }
                 n_diagnostics += 1;
                 match output {
-                    OutputFormat::Human => {
-                        render_human_diagnostic(&namespace_path, namespace_source, &diagnostic, &[])
-                    }
+                    OutputFormat::Human => render_human_diagnostic(
+                        &namespace_path,
+                        namespace_source,
+                        &LineStarts::new(namespace_source),
+                        &diagnostic,
+                        &[],
+                    ),
                     OutputFormat::Json => render_json_diagnostic(
                         &namespace_path,
                         namespace_source,
@@ -707,9 +713,17 @@ struct RelatedNote<'a> {
 fn render_human_diagnostic(
     path: &Path,
     source: &str,
+    lines: &LineStarts,
     diagnostic: &Diagnostic,
     related: &[RelatedNote],
 ) {
+    // A companion location lives in another file, whose line table this run has
+    // not built. There are only ever a handful per finding, so building one here
+    // costs a walk each — against one walk per finding, which is the point.
+    let related_lines: Vec<LineStarts> = related
+        .iter()
+        .map(|note| LineStarts::new(note.source))
+        .collect();
     report(&Report {
         // The code heads the report — it is what a suppression comment must
         // spell (`# ry: allow(unused)`), so the human output teaches it.
@@ -720,19 +734,20 @@ fn render_human_diagnostic(
         },
         message: &diagnostic.message,
         snippet: Some(Snippet {
-            source: NamedText::new(path, source),
+            source: NamedText::new(path, source, lines),
             label: primary_label(source, diagnostic.range),
         }),
         related: related
             .iter()
-            .map(|note| Report {
+            .zip(&related_lines)
+            .map(|(note, note_lines)| Report {
                 // A companion location is context for the finding above it,
                 // never a finding of its own: advice severity is what keeps a
                 // reader from counting it as a second problem.
                 severity: ReportSeverity::Advice,
                 message: note.message,
                 snippet: Some(Snippet {
-                    source: NamedText::new(note.path, note.source),
+                    source: NamedText::new(note.path, note.source, note_lines),
                     label: primary_label(note.source, note.range),
                 }),
                 ..Report::default()
@@ -997,6 +1012,53 @@ fn closes_a_snippet(line: &str, closing_rule: &str) -> bool {
 /// snippet, which `check_draws_the_snippet_as_a_window` fails on.
 const CLOSING_RULE_WIDTH: usize = 4;
 
+/// Where each line of one file starts, by miette's own rule for what ends a
+/// line: `\n`, `\r\n`, or a lone `\r`.
+///
+/// It exists to bound snippet drawing. miette finds a span's lines by walking
+/// the source from byte zero, so a run reporting many findings against one file
+/// re-walks that file once per finding — on a file with 8,000 findings that was
+/// 6.7 s of a 7.3 s run, 98% of the reporter. Built once per file, this turns
+/// the walk into a binary search plus a bounded window.
+#[derive(Debug)]
+struct LineStarts {
+    starts: Vec<u32>,
+}
+
+impl LineStarts {
+    fn new(text: &str) -> LineStarts {
+        let mut starts = vec![0u32];
+        let bytes = text.as_bytes();
+        let mut offset = 0usize;
+        while offset < bytes.len() {
+            match bytes[offset] {
+                b'\r' => {
+                    // `\r\n` is one break, not two.
+                    offset += usize::from(bytes.get(offset + 1) == Some(&b'\n'));
+                    starts.push(offset as u32 + 1);
+                }
+                b'\n' => starts.push(offset as u32 + 1),
+                _ => {}
+            }
+            offset += 1;
+        }
+        LineStarts { starts }
+    }
+
+    /// The zero-based line a byte offset falls on, clamped to the last line.
+    fn line_of(&self, offset: usize) -> usize {
+        self.starts
+            .partition_point(|&start| (start as usize) <= offset)
+            .saturating_sub(1)
+    }
+
+    fn line_start(&self, line: usize) -> usize {
+        self.starts
+            .get(line)
+            .map_or(usize::MAX, |&start| start as usize)
+    }
+}
+
 /// A borrowed file behind a snippet, named for the snippet header.
 /// [`miette::NamedSource`] owns its text, which would copy the whole file into
 /// every finding reported against it.
@@ -1004,12 +1066,13 @@ const CLOSING_RULE_WIDTH: usize = 4;
 struct NamedText<'a> {
     name: String,
     text: &'a str,
+    lines: &'a LineStarts,
 }
 
 impl<'a> NamedText<'a> {
     /// Names the file the way the reader named it: relative to the working
     /// directory when it lies below it, as given otherwise.
-    fn new(path: &Path, text: &'a str) -> NamedText<'a> {
+    fn new(path: &Path, text: &'a str, lines: &'a LineStarts) -> NamedText<'a> {
         static WORKING_DIRECTORY: LazyLock<Option<PathBuf>> =
             LazyLock::new(|| std::env::current_dir().ok());
         let name = WORKING_DIRECTORY
@@ -1019,6 +1082,7 @@ impl<'a> NamedText<'a> {
         NamedText {
             name: name.display().to_string(),
             text,
+            lines,
         }
     }
 
@@ -1036,22 +1100,52 @@ impl<'a> NamedText<'a> {
 }
 
 impl SourceCode for NamedText<'_> {
+    /// miette's own answer, computed over a bounded window instead of the whole
+    /// file. The window is the span's lines plus a margin wider than the context
+    /// asked for, so the walk inside sees everything it would have seen and
+    /// stops where it would have stopped; the result is then translated back
+    /// into whole-file coordinates. Delegating keeps one implementation of what
+    /// a snippet contains — reimplementing it is how a drawing drifts while
+    /// still looking plausible.
     fn read_span<'a>(
         &'a self,
         span: &SourceSpan,
         context_lines_before: usize,
         context_lines_after: usize,
     ) -> Result<Box<dyn SpanContents<'a> + 'a>, MietteError> {
-        let contents = self
+        // A line of slack past the requested context on each side, so the walk
+        // inside breaks on a line boundary rather than on running out of input.
+        let first_line = self
+            .lines
+            .line_of(span.offset())
+            .saturating_sub(context_lines_before + 1);
+        let window_start = self.lines.line_start(first_line);
+        let last_line = self
+            .lines
+            .line_of(span.offset() + span.len())
+            .saturating_add(context_lines_after + 2);
+        let window_end = self.lines.line_start(last_line).min(self.text.len());
+        let Some(window) = self
             .text
-            .read_span(span, context_lines_before, context_lines_after)?;
+            .get(window_start..window_end)
+            .filter(|_| span.offset() >= window_start)
+        else {
+            return Err(MietteError::OutOfBounds);
+        };
+
+        let local = SourceSpan::from((span.offset() - window_start, span.len()));
+        let contents = window.read_span(&local, context_lines_before, context_lines_after)?;
+        let contents_span = SourceSpan::from((
+            contents.span().offset() + window_start,
+            contents.span().len(),
+        ));
         Ok(Box::new(MietteSpanContents::new_named(
             self.name.clone(),
             contents.data(),
-            *contents.span(),
-            contents.line(),
-            self.character_column(contents.span().offset()),
-            contents.line_count(),
+            contents_span,
+            contents.line() + first_line,
+            self.character_column(contents_span.offset()),
+            contents.line_count() + first_line,
         )))
     }
 }
@@ -1352,4 +1446,79 @@ fn human_bytes(bytes: f64) -> String {
         unit += 1;
     }
     format!("{value:.1} {}", UNITS[unit])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The windowed `read_span` must answer exactly what miette's own
+    /// whole-file walk answers — same bytes, same span, same line, same line
+    /// count — or the drawing drifts while still looking plausible. Swept over
+    /// every line ending R files carry, spans that start mid-line, span a break,
+    /// sit at the very start or the very end, and a file with no trailing
+    /// newline.
+    #[test]
+    fn the_windowed_snippet_matches_miettes_own() {
+        let bodies = [
+            "",
+            "x",
+            "x <- 1\n",
+            "a <- 1\nb <- 2\nc <- 3\nd <- 4\ne <- 5\n",
+            "a <- 1\r\nb <- 2\r\nc <- 3\r\nd <- 4\r\n",
+            "a <- 1\rb <- 2\rc <- 3\r",
+            "mixed <- 1\r\nlone <- 2\rboth <- 3\nlast <- 4",
+            "caf\u{e9} <- \"\u{1f600}\"\nnext_line <- 2\n",
+            "no_trailing_newline <- 1\nsecond <- 2",
+            "\n\n\n\n",
+        ];
+        let mut compared = 0usize;
+        for body in bodies {
+            let lines = LineStarts::new(body);
+            let named = NamedText {
+                name: "probe.R".to_owned(),
+                text: body,
+                lines: &lines,
+            };
+            for start in 0..=body.len() {
+                if !body.is_char_boundary(start) {
+                    continue;
+                }
+                for length in 0..=4usize {
+                    let span = SourceSpan::from((start, length));
+                    for context in 0..=2usize {
+                        let ours = named.read_span(&span, context, context);
+                        let theirs = body.read_span(&span, context, context);
+                        match (ours, theirs) {
+                            (Ok(ours), Ok(theirs)) => {
+                                let case = format!(
+                                    "body {body:?} span {start}..+{length} context {context}"
+                                );
+                                assert_eq!(ours.data(), theirs.data(), "data: {case}");
+                                assert_eq!(ours.span(), theirs.span(), "span: {case}");
+                                assert_eq!(ours.line(), theirs.line(), "line: {case}");
+                                assert_eq!(
+                                    ours.line_count(),
+                                    theirs.line_count(),
+                                    "line count: {case}"
+                                );
+                                compared += 1;
+                            }
+                            (Err(_), Err(_)) => compared += 1,
+                            (ours, theirs) => panic!(
+                                "one side refused {body:?} span {start}..+{length} context \
+                                 {context}: ours ok = {}, miette ok = {}",
+                                ours.is_ok(),
+                                theirs.is_ok()
+                            ),
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            compared > 1_000,
+            "expected a real sweep, compared {compared}"
+        );
+    }
 }
