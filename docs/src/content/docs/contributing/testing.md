@@ -39,6 +39,16 @@ expectations and `FIXTURE_FILTER=group__case` runs one case. Suites:
   except `programs.R.test`, which holds whole small programs written the way a real project is:
   a case there earns its place by exercising several features at once, and a clean case with an
   empty diagnostics block is a **zero-false-positive** contract for that style of code
+- `crates/semantics/tests/lowering` — the HIR each item lowers to, dumped as an indented
+  tree under the item's name (`# f`, or `# <statement>` for an unnamed one), with argument
+  tags rendered inline because argument matching is what a call's lowering has to get right.
+  This is the parse-tree dump one layer down: the `syntax` suite pins what the parser built,
+  this pins what lowering made of it. Its reason to exist is that a rewrite — the native
+  pipe becoming a call, a replacement form, `local` — is otherwise tested only through
+  whatever type falls out the far end, which cannot tell "lowered to the wrong shape but
+  coincidentally typed the same" from "lowered correctly". Cases whose comment says
+  `WRONG-BUT-CURRENT` pin a known defect together with the shape it should have, so a fix
+  turns them red; the open ones are listed in `.agents/memory/backlog.md`
 - `crates/semantics/tests/typing-scripts` — the same pipeline over script documents (one
   sequential top-down scope)
 - `crates/semantics/tests/typing-strict` — the strict stream: the per-file typing mode and
