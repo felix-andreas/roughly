@@ -1,5 +1,0 @@
-__futex_abstimed_wait_common64
-__futex_abstimed_wait_common64
-__pthread_clockjoin_ex
-__libc_start_call_main
-__libc_start_main_impl
