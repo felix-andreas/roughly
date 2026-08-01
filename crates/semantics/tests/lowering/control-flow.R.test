@@ -1,0 +1,199 @@
+#==== control_flow
+#---- an_if_with_both_branches_keeps_both
+if (TRUE) 1L else 2L
+#++++
+# <statement>
+  If
+    Literal Logical(true)
+    Literal Integer("1L")
+    Literal Integer("2L")
+
+#---- an_if_without_else_has_no_third_child
+# The absent else is absent, not a hole: `if (c) x` yields invisible NULL when
+# the condition is false, and the checker needs to see that there is no
+# alternative rather than an unknown one.
+if (FALSE) "no"
+#++++
+# <statement>
+  If
+    Literal Logical(false)
+    Literal String("no")
+
+#---- an_else_if_chain_nests_in_the_else_branch
+if (a) 1L else if (b) 2L else 3L
+#++++
+# <statement>
+  If
+    NameRef a
+    Literal Integer("1L")
+    If
+      NameRef b
+      Literal Integer("2L")
+      Literal Integer("3L")
+
+#---- an_if_with_empty_braced_branches_keeps_both_blocks
+if (TRUE) {
+} else {
+}
+#++++
+# <statement>
+  If
+    Literal Logical(true)
+    Block
+    Block
+
+#---- an_if_used_as_a_value_lowers_in_the_value_position
+x <- if (a) 1L
+#++++
+# x
+  Assign Local
+    NameRef x
+    If
+      NameRef a
+      Literal Integer("1L")
+
+#---- a_for_loop_records_its_variable_beside_sequence_and_body
+for (i in 1:10) print(i)
+#++++
+# <statement>
+  For i
+    Binary Sequence
+      Literal Double("1")
+      Literal Double("10")
+    Call
+      NameRef print
+      NameRef i
+
+#---- a_while_loop_keeps_condition_and_body
+while (TRUE) {
+  break
+}
+#++++
+# <statement>
+  While
+    Literal Logical(true)
+    Block
+      Break
+
+#---- a_repeat_loop_has_only_a_body
+repeat {
+  next
+}
+#++++
+# <statement>
+  Repeat
+    Block
+      Next
+
+#---- break_and_next_are_leaves_of_their_own
+while (cond) if (a) break else next
+#++++
+# <statement>
+  While
+    NameRef cond
+    If
+      NameRef a
+      Break
+      Next
+
+#---- a_loop_body_nests_every_construct_it_contains
+for (i in seq_along(xs)) {
+  if (i %% 2L == 0L) next
+  print(xs[[i]])
+}
+#++++
+# <statement>
+  For i
+    Call
+      NameRef seq_along
+      NameRef xs
+    Block
+      If
+        Binary Equal
+          Binary Modulo
+            NameRef i
+            Literal Integer("2L")
+          Literal Integer("0L")
+        Next
+      Call
+        NameRef print
+        Index [[
+          NameRef xs
+          NameRef i
+
+#==== blocks
+#---- a_block_lists_its_statements_in_order
+{
+  1L
+  2L
+}
+#++++
+# <statement>
+  Block
+    Literal Integer("1L")
+    Literal Integer("2L")
+
+#---- a_trailing_semicolon_is_recorded_because_it_changes_the_blocks_value
+# `{1L;}` evaluates to NULL, `{1L}` to 1L. The flag is the only thing that
+# tells the two apart once the tokens are gone.
+{
+  1L;
+}
+#++++
+# <statement>
+  Block trailing-semicolon
+    Literal Integer("1L")
+
+#---- semicolons_between_statements_do_not_set_the_flag
+{ 1L; 2L }
+#++++
+# <statement>
+  Block
+    Literal Integer("1L")
+    Literal Integer("2L")
+
+#---- an_empty_block_has_no_statements
+{}
+#++++
+# <statement>
+  Block
+
+#---- nested_blocks_nest
+{
+  {
+    1L
+  }
+}
+#++++
+# <statement>
+  Block
+    Block
+      Literal Integer("1L")
+
+#---- parentheses_are_kept_because_they_change_visibility
+# `(x <- 1)` prints where `x <- 1` does not, so the node cannot be folded away.
+(1L)
+#++++
+# <statement>
+  Paren
+    Literal Integer("1L")
+
+#---- top_level_semicolons_split_one_line_into_several_items
+x <- 1L; y <- 2L
+#++++
+# x
+  Assign Local
+    NameRef x
+    Literal Integer("1L")
+# y
+  Assign Local
+    NameRef y
+    Literal Integer("2L")
+
+#---- a_trailing_top_level_semicolon_does_not_create_an_item
+x <- 1L;
+#++++
+# x
+  Assign Local
+    NameRef x
+    Literal Integer("1L")

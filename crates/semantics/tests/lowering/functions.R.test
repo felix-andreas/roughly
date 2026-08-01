@@ -1,0 +1,197 @@
+#==== functions
+#---- a_function_with_no_parameters_has_an_empty_list
+function() NULL
+#++++
+# <statement>
+  Function()
+    Literal Null
+
+#---- parameters_lower_in_source_order
+function(a, b, c) a
+#++++
+# <statement>
+  Function(a, b, c)
+    NameRef a
+
+#---- a_default_marks_the_parameter_and_lowers_as_a_child_expression
+# The `= …` marker says the parameter HAS a default; the default expression
+# itself is a child of the function, so it is inferred and resolved like any
+# other expression rather than being skipped.
+function(count, label = NULL) count
+#++++
+# <statement>
+  Function(count, label = …)
+    NameRef count
+
+#---- a_default_may_be_an_arbitrary_expression
+function(x = c(1L, 2L)) x
+#++++
+# <statement>
+  Function(x = …)
+    NameRef x
+
+#---- a_default_may_reference_a_later_parameter
+# R's lazy defaults make this legal: `a`'s default is not forced until `a` is
+# read, by which time `b` is bound.
+function(a = b, b = 1L) a
+#++++
+# <statement>
+  Function(a = …, b = …)
+    NameRef a
+
+#---- dots_are_a_parameter_like_any_other
+function(a, b = 1L, ...) NULL
+#++++
+# <statement>
+  Function(a, b = …, ...)
+    Literal Null
+
+#---- a_backtick_parameter_binds_the_unquoted_name
+function(`odd name`) NULL
+#++++
+# <statement>
+  Function(odd name)
+    Literal Null
+
+#---- a_recursive_call_is_an_ordinary_call_in_the_body
+factorial <- function(n) if (n <= 1L) 1L else n * factorial(n - 1L)
+#++++
+# factorial
+  Assign Local
+    NameRef factorial
+    Function(n)
+      If
+        Binary LessEq
+          NameRef n
+          Literal Integer("1L")
+        Literal Integer("1L")
+        Binary Multiply
+          NameRef n
+          Call
+            NameRef factorial
+            Binary Subtract
+              NameRef n
+              Literal Integer("1L")
+
+#---- a_closure_returning_a_closure_nests_two_functions
+adder <- function(step) function(n) n + step
+#++++
+# adder
+  Assign Local
+    NameRef adder
+    Function(step)
+      Function(n)
+        Binary Add
+          NameRef n
+          NameRef step
+
+#---- an_anonymous_function_in_argument_position_is_an_ordinary_value
+lapply(xs, function(x) x + 1L)
+#++++
+# <statement>
+  Call
+    NameRef lapply
+    NameRef xs
+    Function(x)
+      Binary Add
+        NameRef x
+        Literal Integer("1L")
+
+#---- return_and_stop_are_ordinary_calls_in_the_tree
+# Recognized by name downstream, not rewritten here: the tree keeps the call
+# so navigation and hover still see a callee to point at.
+f <- function() {
+  if (bad) stop("boom")
+  return(1L)
+}
+#++++
+# f
+  Assign Local
+    NameRef f
+    Function()
+      Block
+        If
+          NameRef bad
+          Call
+            NameRef stop
+            Literal String("boom")
+        Call
+          NameRef return
+          Literal Integer("1L")
+
+#==== definitions
+#---- a_replacement_function_definition_is_an_ordinary_function
+# `names<-` is a name, not syntax: the definition binds a function like any
+# other, and only the CALL site `names(x) <- v` is the special form.
+`names<-` <- function(x, value) x
+#++++
+# names<-
+  Assign Local
+    NameRef names<-
+    Function(x, value)
+      NameRef x
+
+#---- an_s3_method_definition_is_an_ordinary_function
+`[.myclass` <- function(x, i) NULL
+#++++
+# [.myclass
+  Assign Local
+    NameRef [.myclass
+    Function(x, i)
+      Literal Null
+
+#---- a_user_defined_operator_definition_is_an_ordinary_function
+`%+%` <- function(a, b) a
+#++++
+# %+%
+  Assign Local
+    NameRef %+%
+    Function(a, b)
+      NameRef a
+
+#---- an_s3_generic_dispatches_through_an_ordinary_call
+describe <- function(x, ...) UseMethod("describe")
+#++++
+# describe
+  Assign Local
+    NameRef describe
+    Function(x, ...)
+      Call
+        NameRef UseMethod
+        Literal String("describe")
+
+#---- an_s4_generic_is_a_call_that_the_item_tree_names
+# `setGeneric("area", …)` defines `area` even though the HIR is a plain call
+# with no assignment in it: the item header below carries the name, recovered
+# from the call's first argument when the file's items are classified.
+setGeneric("area", function(shape) standardGeneric("area"))
+#++++
+# area
+  Call
+    NameRef setGeneric
+    Literal String("area")
+    Function(shape)
+      Call
+        NameRef standardGeneric
+        Literal String("area")
+
+#---- an_s4_class_and_method_are_ordinary_calls
+setClass("Circle", representation(radius = "numeric"))
+setMethod("area", "Circle", function(shape) shape@radius)
+#++++
+# <statement>
+  Call
+    NameRef setClass
+    Literal String("Circle")
+    Call
+      NameRef representation
+      arg radius =
+        Literal String("numeric")
+# <statement>
+  Call
+    NameRef setMethod
+    Literal String("area")
+    Literal String("Circle")
+    Function(shape)
+      Field @radius
+        NameRef shape
