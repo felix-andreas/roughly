@@ -11,18 +11,149 @@ result <- data |> transform(n = 1L)
       arg n =
         Literal Integer("1L")
 
-#---- a_placeholder_pipe_keeps_the_argument_position
-result <- data |> merge(other, by = "id")
+#---- a_pipe_into_a_call_with_no_arguments_supplies_the_only_one
+data |> nrow()
 #++++
-# result
-  Assign Local
-    NameRef result
+# <statement>
+  Call
+    NameRef nrow
+    NameRef data
+
+#---- a_pipe_prepends_the_value_before_the_calls_own_arguments
+# The piped value takes the FIRST positional slot, so `other` shifts right.
+# An implementation that appended instead would swap two arguments silently.
+data |> merge(other, by = "id")
+#++++
+# <statement>
+  Call
+    NameRef merge
+    NameRef data
+    NameRef other
+    arg by =
+      Literal String("id")
+
+#---- a_named_placeholder_takes_the_value_instead_of_the_first_slot
+# With `_` present the first positional slot stays free for `y`, and the piped
+# value lands on `arg`. R's own parser produces `f(y, arg = x)` for this.
+x |> f(y, arg = _)
+#++++
+# <statement>
+  Call
+    NameRef f
+    NameRef y
+    arg arg =
+      NameRef x
+
+#---- a_pipe_chain_nests_left_to_right
+data |> subset(x > 1L) |> transform(y = x * 2L)
+#++++
+# <statement>
+  Call
+    NameRef transform
     Call
-      NameRef merge
+      NameRef subset
       NameRef data
-      NameRef other
-      arg by =
-        Literal String("id")
+      Binary Greater
+        NameRef x
+        Literal Integer("1L")
+    arg y =
+      Binary Multiply
+        NameRef x
+        Literal Integer("2L")
+
+#---- a_pipe_into_a_qualified_call_keeps_the_namespace_callee
+data |> dplyr::filter(keep)
+#++++
+# <statement>
+  Call
+    Namespace dplyr::filter
+    NameRef data
+    NameRef keep
+
+#---- a_placeholder_binds_to_the_call_of_its_own_link
+x |> f(a = 1L) |> g(b = _)
+#++++
+# <statement>
+  Call
+    NameRef g
+    arg b =
+      Call
+        NameRef f
+        NameRef x
+        arg a =
+          Literal Integer("1L")
+
+#---- a_positional_placeholder_is_not_a_pipe_r_accepts
+# R: "pipe placeholder can only be used as a named argument". Lowering keeps
+# the opaque operator rather than guessing which slot was meant.
+x |> f(_)
+#++++
+# <statement>
+  Binary Pipe
+    NameRef x
+    Call
+      NameRef f
+      NameRef _
+
+#---- a_placeholder_nested_in_a_subexpression_is_not_a_pipe_r_accepts
+# R: "invalid use of pipe placeholder".
+x |> f(g(_))
+#++++
+# <statement>
+  Binary Pipe
+    NameRef x
+    Call
+      NameRef f
+      Call
+        NameRef g
+        NameRef _
+
+#---- a_repeated_placeholder_is_not_a_pipe_r_accepts
+# R: "pipe placeholder may only appear once".
+x |> f(a = _, b = _)
+#++++
+# <statement>
+  Binary Pipe
+    NameRef x
+    Call
+      NameRef f
+      arg a =
+        NameRef _
+      arg b =
+        NameRef _
+
+#---- a_non_call_right_hand_side_is_not_a_pipe_r_accepts
+# R: "The pipe operator requires a function call as RHS".
+x |> f
+#++++
+# <statement>
+  Binary Pipe
+    NameRef x
+    NameRef f
+
+#---- an_extraction_placeholder_is_not_desugared
+# WRONG-BUT-CURRENT. R 4.3 accepts `_` as the head of an extraction on the
+# right of a pipe: `x |> _$a` is `x$a`, and `_[[i]]`, `_[i]`, `_@s` likewise.
+# Lowering rewrites only a CALL right-hand side, so this stays an opaque
+# operator and the field access reads a name `_` that exists nowhere.
+x |> _$a
+#++++
+# <statement>
+  Binary Pipe
+    NameRef x
+    Field $a
+      NameRef _
+
+#---- a_magrittr_pipe_stays_an_opaque_operator
+# `%>%` is an ordinary function, not grammar: desugaring it would assume a
+# definition the file may never have loaded.
+x %>% f()
+#++++
+# <statement>
+  Binary Special %>%
+    NameRef x
+    Call
+      NameRef f
 
 #==== assignment
 #---- a_replacement_form_reads_the_base_and_writes_it_back
@@ -37,6 +168,61 @@ names(x) <- c("a")
       NameRef c
       Literal String("a")
 
+#---- a_nested_replacement_keeps_the_whole_accessor_chain_as_the_target
+# R expands this to a nested replacement, x <- "names<-"(x, "[<-"(names(x), 1,
+# v)): the target must survive as the whole accessor chain, or the write loses
+# its outer step.
+names(x)[1L] <- "a"
+#++++
+# <statement>
+  Assign Local
+    Index [
+      Call
+        NameRef names
+        NameRef x
+      Literal Integer("1L")
+    Literal String("a")
+
+#---- a_dollar_replacement_targets_the_field
+x$a <- 1L
+#++++
+# <statement>
+  Assign Local
+    Field $a
+      NameRef x
+    Literal Integer("1L")
+
+#---- a_slot_replacement_targets_the_slot
+p@radius <- 1L
+#++++
+# <statement>
+  Assign Local
+    Field @radius
+      NameRef p
+    Literal Integer("1L")
+
+#---- a_double_bracket_replacement_targets_the_element
+x[[i]] <- 1L
+#++++
+# <statement>
+  Assign Local
+    Index [[
+      NameRef x
+      NameRef i
+    Literal Integer("1L")
+
+#---- a_chained_index_replacement_nests_the_target
+x[[i]][[j]] <- v
+#++++
+# <statement>
+  Assign Local
+    Index [[
+      Index [[
+        NameRef x
+        NameRef i
+      NameRef j
+    NameRef v
+
 #---- a_right_assignment_lowers_like_a_left_one
 1L -> value
 #++++
@@ -45,12 +231,22 @@ names(x) <- c("a")
     NameRef value
     Literal Integer("1L")
 
-#---- a_string_target_binds_the_name_it_spells
-"quoted" <- 1L
+#---- a_right_super_assignment_normalizes_to_target_first
+value ->> counter
 #++++
-# quoted
-  Assign Local
-    Literal String("quoted")
+# counter
+  Assign Super
+    NameRef counter
+    NameRef value
+
+#---- an_equals_assignment_keeps_its_own_spelling
+# The three spellings differ in scope (`<<-`) and in argument-vs-assignment
+# ambiguity (`=`), so lowering normalizes the ORDER but never the spelling.
+x = 1L
+#++++
+# x
+  Assign Equals
+    NameRef x
     Literal Integer("1L")
 
 #---- a_super_assignment_keeps_its_spelling
@@ -63,6 +259,47 @@ f <- function() counter <<- 1L
       Assign Super
         NameRef counter
         Literal Integer("1L")
+
+#---- a_string_target_binds_the_name_it_spells
+"quoted" <- 1L
+#++++
+# quoted
+  Assign Local
+    Literal String("quoted")
+    Literal Integer("1L")
+
+#---- a_backtick_target_binds_the_unquoted_name
+`my var` <- 1L
+#++++
+# my var
+  Assign Local
+    NameRef my var
+    Literal Integer("1L")
+
+#---- a_chained_assignment_nests_right_to_left
+x <- y <- 1L
+#++++
+# x
+  Assign Local
+    NameRef x
+    Assign Local
+      NameRef y
+      Literal Integer("1L")
+
+#---- a_walrus_lowers_to_a_call_because_it_binds_nothing
+# `:=` is not assignment anywhere in R — it is a call to a function of that
+# name (data.table defines one for its brackets, rlang for quoting). The
+# callee sits on the operator token so an unresolved `:=` reports there.
+# The `# x` header is the ITEM TREE's classification, which still reads `:=`
+# as an assignment spelling and so publishes a definition of `x` the HIR does
+# not make — the two disagree, and the item tree is the one that is wrong.
+x := y
+#++++
+# x
+  Call
+    NameRef :=
+    NameRef x
+    NameRef y
 
 #==== constructs
 #---- local_is_its_own_construct_not_a_call
@@ -80,6 +317,53 @@ value <- local({
           NameRef hidden
           Literal Integer("1L")
         NameRef hidden
+
+#---- local_of_a_bare_expression_is_still_the_construct
+local(x + 1L)
+#++++
+# <statement>
+  Local
+    Binary Add
+      NameRef x
+      Literal Integer("1L")
+
+#---- a_second_argument_makes_local_an_ordinary_call
+# `local(expr, envir)` evaluates in a caller-supplied environment, which is not
+# the fresh-scope construct, so only the one-argument form is recognized.
+local({ 1L }, envir = e)
+#++++
+# <statement>
+  Call
+    NameRef local
+    Block
+      Literal Integer("1L")
+    arg envir =
+      NameRef e
+
+#---- a_named_expr_argument_makes_local_an_ordinary_call
+local(expr = { 1L })
+#++++
+# <statement>
+  Call
+    NameRef local
+    arg expr =
+      Block
+        Literal Integer("1L")
+
+#---- a_locally_defined_local_is_still_the_construct
+# A deliberate limitation: recognition is syntactic on the bare callee name,
+# like `return` and `stop`. Rebinding `local` is not modeled.
+local <- function(expression) expression
+local(1L)
+#++++
+# local
+  Assign Local
+    NameRef local
+    Function(expression)
+      NameRef expression
+# <statement>
+  Local
+    Literal Integer("1L")
 
 #---- a_lambda_lowers_to_the_same_shape_as_function
 square <- \(x) x^2
