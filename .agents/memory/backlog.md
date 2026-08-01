@@ -540,6 +540,105 @@ qualification). Mechanical, but do it as its own pass so the diff stays readable
   'zed_roughly' not found in workspace` and carries on, so the exclusion silently does nothing and the
   one warning scrolls past in a long build log.
 
+## Open — fuzzing input-generation review (measured)
+
+An independent review of what the fuzzers actually feed the code, with every number produced by a
+probe that reimplements each generator arm byte-for-byte (same RNG constants, seeds and budgets) and
+real `-C instrument-coverage` region counts. **11,735 generated inputs per default battery run**;
+98.7% of the wall clock goes to the two batteries with the worst input quality.
+
+### The format battery's 4,500 generated inputs add 8 regions of 2,951
+
+Leave-one-out region coverage of `format.rs` (whole battery 2,771/2,951): dropping `fuzz_random_bytes`
+loses **0**, dropping `fuzz_seed_mutations` loses **0**, dropping token soup loses 4. Dropping all three
+as a block: 2,771 → 2,763. `fixture_sources_hold_invariants` alone covers 2,762 and contributes **410
+unique regions**. The earlier "14 in 1500" figure for the random-byte arm reaching the formatter body is
+confirmed and is worse than it reads: 11 of the 14 are empty or whitespace, so it formats a program with
+at least one token **3 times in 1500**, and never one with ten tokens. Delete the random-byte arm, cut
+soup to ~200 (it is the cheapest source of parser-error shapes — 33 of 35), and seed mutations from the
+fixture corpus instead of the 35 hand seeds.
+
+### The generators cannot express most of the type system
+
+Diagnostics normalized to message *shapes*: all three semantics fuzz arms reach **60 shapes (33 of them
+parser errors, 9 distinct `type-mismatch`, 0 lint)** against the legacy corpus's 110 and the typing
+fixtures' 80. In 250 generated programs the annotation grammar produces `TYPE_REF`/`TYPE_FUNCTION`/
+`TYPE_RECORD` and **zero** unions, binders (`<T>`), applications (`Box<T>`), vectors, `list[T]`, tuples,
+parens, optional `[x]:` or rest `...r:` parameters. The generator calls **6 of 872 declared stub names**
+and reaches **1 of 37 overload sets**. No harness emits `library(...)`, so every conditional namespace and
+the whole NSE ladder is unreachable; no `setClass`/`setGeneric`/`R6Class`/`new()` anywhere.
+`metadata.rs` sits at **7.63%** regions, and `lints.rs` produces **zero findings in 250 programs**.
+
+### Grammar-directed generation, prototyped and measured rather than projected
+
+A ~250-line recursive generator over the R grammar × the `#:` grammar, 1,500 programs in **0.338 s**:
+
+| metric | best current arm | grammar prototype |
+|---|---|---|
+| parses clean | 35.3% | **100%** |
+| formats with ≥10 tokens | 8.0% | **41.3%** mutated |
+| `parser.rs` regions | 87.27% | **93.46%** |
+| semantic regions (9 files) | 11,073 | **12,888** |
+| diagnostic shapes | 60 | **95** (+59 new) |
+| distinct `type-mismatch` shapes | 9 | **17** |
+| lint shapes | 0 | **5** |
+| `ide::type_definition` hits | **0 / 7,884** | 80 / 23,826 |
+
+Added *alongside* the existing arms (not replacing — soup still owns 24 parser-error shapes), semantic
+coverage goes 11,073 → **13,306 regions (+12.9 points)**. Typing fixtures still lead at 14,580, so the
+corpus beats synthesis and both beat noise.
+
+### The best inputs are already in the tree and only one crate uses them
+
+`fixture_sources_hold_invariants` exists **only in `format`**. The same 388 typing-fixture sources through
+the semantic pipeline reach **86.92% of `check.rs`** and 80 shapes, against the entire generated
+battery's 54.35% and 60. Wire it into `syntax`, `semantics` and `ide`, and use both corpora as *mutation
+seeds* rather than only fixed inputs.
+
+**A fair criticism of the legacy-corpus arm as landed**: it runs one shared database over all 1,967 files,
+`file_diagnostics` only, asserting never-panic plus range geometry. That shared project changes what is
+tested — `unresolved` collapses from 284 to 148 while `duplicate` explodes from 20 to **2,182**, because
+1,967 unrelated files redeclare each other's names. Per-file with the full battery it reaches 110 shapes.
+Fix by batching into projects of a sane size and running the full `check_semantics_invariants`; the cost
+is fresh databases (~9 ms each in release, ~113 ms in debug), so this wants the batteries in release or a
+lower db-per-input count.
+
+### The IDE battery costs 216 s and never reaches the type-driven features
+
+`type_definition` returns `Some` **0 times in 7,884 offsets** — structurally, since it needs a
+`TyKind::Named` and no IDE seed declares a `@type`. `signature_help` fires at 0.5%. 86.7% of inputs do not
+parse. Swapping the 10 hand seeds for grammar-generated programs that declare and use nominals took
+`ide.rs` from 52.58% to **68.38%** on *fewer* inputs. Cap generated programs at ~10 statements — a
+150-input grammar sweep cost 81 s against 45 s for 300 tiny mutated ones.
+
+### The semantics incremental invariant never performs a small edit
+
+`check_pipeline_reporting` derives its "edit" by generating an unrelated program, so the computed splice
+covers **97.3% of the old text on average** and only 1 pair in 250 touches ≤10%. `syntax::reparse` takes
+the full-parse fallback essentially always and salsa sees whole-file invalidation every time, so the
+splice-reuse path and per-item early cutoff — the architecture's core claim — are never exercised.
+Derive the edit from the source instead: replace or insert one statement at a boundary.
+
+### Smaller, each with its measurement
+
+- **The syntax edit stream degenerates but its coverage is fine.** 0/400 buffers parse clean, only 89
+  distinct shapes, and 60 steps lex to two tokens because an inserted `"` swallows the buffer — yet
+  `reparse.rs` is at 96.12% against a grammar-directed stream's 96.44%. Reset the buffer every ~20 steps
+  and skip near-empty ones; do **not** rewrite it.
+- **Coverage-guided fuzzing has never run.** `cargo fuzz` is not installed, `fuzz/corpus/` does not exist,
+  no CI job invokes it, and the root `cargo test` resolves to the product crate so `fuzz_deep` never runs
+  either — while the `REGRESSIONS` arrays (21 in `format`, 2 in `semantics`) are documented finds from
+  exactly that mechanism. `fuzz/` does still compile (`cargo +nightly check`, 83 s). Coverage judgement
+  costs one component: `rustup component add llvm-tools-preview` produced every number in this review.
+- **Two arms silently contribute zero inputs.** `corpus/` does not exist and nothing in CI or the justfile
+  fetches it, so `fuzz_corpus_seeded` in `syntax` and `format` returns early — ~1,050 budgeted inputs that
+  never run, behind a skip line `cargo test` hides. Same "green means nothing ran" species the
+  `FIXTURE_FILTER` guard already fixed.
+- **Surfaces with no fuzz coverage at all**: `syntax::literate::r_source_of_literate` has an explicit
+  byte-length-preserving contract, one caller, and no test of any kind — the cheapest possible property;
+  generated `.Rtypes` text never reaches the stub loader (`stubs.rs` 60.67%); `PackageMetadata` appears in
+  no harness; the IDE arm only ever uses `DocumentKind::Package`.
+
 ## Open — test & fuzz architecture review
 
 An independent review of the fuzzing and test architecture, with every claim measured rather than
