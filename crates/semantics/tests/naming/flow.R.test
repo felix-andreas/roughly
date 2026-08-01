@@ -1,0 +1,394 @@
+#==== branches
+#---- a_read_inside_the_branch_that_wrote_it_is_definitely_assigned
+f <- function(flag) {
+  if (flag) {
+    x <- 1L
+    x
+  }
+}
+#++++
+# f
+  b0 flag parameter 14..18
+  b1 x local 40..41
+  b2 f top-level 0..1
+  0..1 f <- b2
+  28..32 flag -> b0
+  40..41 x <- b1
+  52..53 x -> b1
+
+#---- an_else_branch_introduction_leaves_a_later_read_maybe_undefined
+f <- function(flag) {
+  if (flag) {
+    1L
+  } else {
+    x <- 2L
+  }
+  x
+}
+#++++
+# f
+  b0 flag parameter 14..18
+  b1 x local 58..59
+  b2 f top-level 0..1
+  0..1 f <- b2
+  28..32 flag -> b0
+  58..59 x <- b1
+  72..73 x -> b1 maybe-undefined
+
+#---- an_introduction_nested_two_ifs_deep_still_reaches_the_later_read
+f <- function(flag) {
+  if (flag) {
+    if (flag) {
+      x <- 1L
+    }
+  }
+  x
+}
+#++++
+# f
+  b0 flag parameter 14..18
+  b1 x local 58..59
+  b2 f top-level 0..1
+  0..1 f <- b2
+  28..32 flag -> b0
+  44..48 flag -> b0
+  58..59 x <- b1
+  78..79 x -> b1 maybe-undefined
+
+#---- a_fresh_name_written_in_both_branches_is_definitely_assigned
+# Every path writes, so nothing is maybe-undefined even though the name exists
+# nowhere before the `if`.
+f <- function(flag) {
+  if (flag) {
+    x <- 1L
+  } else {
+    x <- 2L
+  }
+  x
+}
+#++++
+# f
+  b0 flag parameter 14..18
+  b1 x local 40..41
+  b2 f top-level 0..1
+  0..1 f <- b2
+  28..32 flag -> b0
+  40..41 x <- b1
+  63..64 x <- b1
+  77..78 x -> b1
+
+#---- rewriting_an_existing_name_in_both_branches_kills_the_earlier_write
+# Both branch writes reach the read, so neither is a dead store — and the
+# pre-`if` write is dead, because no path reaches the read without passing one
+# of the branches.
+f <- function(flag) {
+  x <- 0L
+  if (flag) {
+    x <- 1L
+  } else {
+    x <- 2L
+  }
+  x
+}
+#++++
+# f
+  b0 flag parameter 14..18
+  b1 x local 24..25
+  b2 f top-level 0..1
+  0..1 f <- b2
+  24..25 x <- b1
+  38..42 flag -> b0
+  50..51 x <- b1
+  73..74 x <- b1
+  87..88 x -> b1
+  unused x 24..25
+
+#---- an_unconditional_write_survives_a_conditional_rewrite
+# An `if` without `else` leaves the pre-`if` write reaching the read too, so
+# both writes are alive.
+f <- function(flag) {
+  x <- 0L
+  if (flag) {
+    x <- 1L
+  }
+  x
+}
+#++++
+# f
+  b0 flag parameter 14..18
+  b1 x local 24..25
+  b2 f top-level 0..1
+  0..1 f <- b2
+  24..25 x <- b1
+  38..42 flag -> b0
+  50..51 x <- b1
+  64..65 x -> b1
+
+#---- the_else_branch_cannot_read_the_then_branch_introduction
+# The branches are alternatives: the else branch runs only when the then branch
+# did not, so its read cannot see the then branch's write and falls out of the
+# frame, exactly as R's `object 'x' not found` says.
+f <- function(flag) {
+  if (flag) {
+    x <- 1L
+  } else {
+    x
+  }
+}
+#++++
+# f
+  b0 flag parameter 14..18
+  b1 x local 40..41
+  b2 f top-level 0..1
+  0..1 f <- b2
+  28..32 flag -> b0
+  40..41 x <- b1
+  63..64 x -> non-local deferred
+  unused x 40..41
+
+#==== loops
+#---- a_read_inside_the_loop_body_sees_the_body_write
+f <- function(items) {
+  for (item in items) {
+    doubled <- item
+    doubled
+  }
+}
+#++++
+# f
+  b0 items parameter 14..19
+  b1 item for-variable 30..34
+  b2 doubled local 51..58
+  b3 f top-level 0..1
+  0..1 f <- b3
+  38..43 items -> b0
+  51..58 doubled <- b2
+  62..66 item -> b1
+  71..78 doubled -> b2
+
+#---- a_for_body_introduction_leaves_a_later_read_maybe_undefined
+f <- function(items) {
+  for (item in items) {
+    value <- item
+  }
+  value
+}
+#++++
+# f
+  b0 items parameter 14..19
+  b1 item for-variable 30..34
+  b2 value local 51..56
+  b3 f top-level 0..1
+  0..1 f <- b3
+  38..43 items -> b0
+  51..56 value <- b2
+  60..64 item -> b1
+  71..76 value -> b2 maybe-undefined
+
+#---- a_while_body_introduction_leaves_a_later_read_maybe_undefined
+f <- function(flag) {
+  while (flag) {
+    x <- 1L
+  }
+  x
+}
+#++++
+# f
+  b0 flag parameter 14..18
+  b1 x local 43..44
+  b2 f top-level 0..1
+  0..1 f <- b2
+  31..35 flag -> b0
+  43..44 x <- b1
+  57..58 x -> b1 maybe-undefined
+
+#---- a_loop_accumulator_is_read_around_the_back_edge
+# The accumulator's write is read on the next iteration as well as after the
+# loop, so it is not a dead store — a walk that visited the body once would
+# report it.
+f <- function(n) {
+  total <- 0L
+  for (index in 1:n) {
+    total <- total + index
+  }
+  total
+}
+#++++
+# f
+  b0 n parameter 14..15
+  b1 total local 21..26
+  b2 index for-variable 40..45
+  b3 f top-level 0..1
+  0..1 f <- b3
+  21..26 total <- b1
+  51..52 n -> b0
+  60..65 total <- b1
+  69..74 total -> b1
+  77..82 index -> b2
+  89..94 total -> b1
+
+#---- a_body_read_above_the_body_write_still_sees_it
+# The read is above the write in the source but below it around the back edge,
+# so it resolves to the slot and is maybe-undefined on the first iteration.
+f <- function(flag) {
+  while (flag) {
+    previous <- current
+    current <- 1L
+  }
+  previous
+}
+#++++
+# f
+  b0 flag parameter 14..18
+  b1 previous local 43..51
+  b2 current local 67..74
+  b3 f top-level 0..1
+  0..1 f <- b3
+  31..35 flag -> b0
+  43..51 previous <- b1
+  55..62 current -> b2 maybe-undefined
+  67..74 current <- b2
+  87..95 previous -> b1 maybe-undefined
+
+#---- a_conditional_skip_inside_the_body_does_not_change_the_slot
+f <- function(items) {
+  for (item in items) {
+    if (is.null(item)) next
+    total <- item
+  }
+  total
+}
+#++++
+# f
+  b0 items parameter 14..19
+  b1 item for-variable 30..34
+  b2 total local 79..84
+  b3 f top-level 0..1
+  0..1 f <- b3
+  38..43 items -> b0
+  55..62 is.null -> non-local deferred
+  63..67 item -> b1
+  79..84 total <- b2
+  88..92 item -> b1
+  99..104 total -> b2 maybe-undefined
+
+#---- braces_inside_a_loop_body_share_the_frame
+f <- function(items) {
+  for (item in items) {
+    {
+      seen <- item
+    }
+    seen
+  }
+}
+#++++
+# f
+  b0 items parameter 14..19
+  b1 item for-variable 30..34
+  b2 seen local 59..63
+  b3 f top-level 0..1
+  0..1 f <- b3
+  38..43 items -> b0
+  59..63 seen <- b2
+  67..71 item -> b1
+  82..86 seen -> b2
+
+#---- a_for_variable_clobbers_an_earlier_write_of_the_same_name
+# R re-initializes the loop variable from the sequence on every iteration and
+# sets it to `NULL` when the sequence is empty, so the loop always writes it:
+# the earlier `x <- 1L` can never be read afterwards.
+f <- function(items) {
+  x <- 1L
+  for (x in items) {
+    x
+  }
+  x
+}
+#++++
+# f
+  b0 items parameter 14..19
+  b1 x local 25..26
+  b2 x for-variable 40..41
+  b3 f top-level 0..1
+  0..1 f <- b3
+  25..26 x <- b1
+  45..50 items -> b0
+  58..59 x -> b2
+  66..67 x -> b2
+  unused x 25..26
+
+#---- the_loop_variable_is_assigned_even_when_the_body_never_runs
+f <- function(items) {
+  for (x in items) {
+    1L
+  }
+  x
+}
+#++++
+# f
+  b0 items parameter 14..19
+  b1 x for-variable 30..31
+  b2 f top-level 0..1
+  0..1 f <- b2
+  35..40 items -> b0
+  57..58 x -> b1
+
+#---- writing_the_loop_variable_in_the_body_writes_the_loop_slot
+f <- function(items) {
+  for (x in items) {
+    x <- x
+    x
+  }
+  x
+}
+#++++
+# f
+  b0 items parameter 14..19
+  b1 x for-variable 30..31
+  b2 f top-level 0..1
+  0..1 f <- b2
+  35..40 items -> b0
+  48..49 x <- b1
+  53..54 x -> b1
+  59..60 x -> b1
+  67..68 x -> b1
+
+#---- a_body_write_of_another_name_leaves_the_loop_variable_alone
+f <- function(items) {
+  seen <- 0L
+  for (item in items) {
+    seen <- seen + 1L
+  }
+  seen
+}
+#++++
+# f
+  b0 items parameter 14..19
+  b1 seen local 25..29
+  b2 item for-variable 43..47
+  b3 f top-level 0..1
+  0..1 f <- b3
+  25..29 seen <- b1
+  51..56 items -> b0
+  64..68 seen <- b1
+  72..76 seen -> b1
+  88..92 seen -> b1
+
+#---- the_loop_condition_reads_the_slot_the_body_writes
+f <- function() {
+  count <- 3L
+  while (count > 0L) {
+    count <- count - 1L
+  }
+  count
+}
+#++++
+# f
+  b0 count local 20..25
+  b1 f top-level 0..1
+  0..1 f <- b1
+  20..25 count <- b0
+  41..46 count -> b0
+  59..64 count <- b0
+  68..73 count -> b0
+  85..90 count -> b0
