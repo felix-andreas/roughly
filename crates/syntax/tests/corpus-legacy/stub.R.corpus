@@ -1,0 +1,37 @@
+#---- declarations.R__function_declaration
+length : fn(x: Any) -> integer
+#---- declarations.R__function_multiple_parameters
+substr : fn(x: character, start: integer, stop: integer) -> character
+#---- declarations.R__dotted_name
+is.null : fn(x: Any) -> logical
+#---- declarations.R__atomic_value
+pi : double
+#---- declarations.R__any_value
+paste : Any
+#---- declarations.R__generic_identity
+identity : <T> fn(x: T) -> T
+#---- declarations.R__generic_higher_order
+lapply : <T, U> fn(x: list[T], f: fn(T) -> U) -> list[U]
+#---- declarations.R__trailing_comment_ignored
+abs : Any  # widened: result mirrors the argument
+#---- declarations.R__comment_and_blank_lines_skipped
+# a leading comment
+
+length : fn(x: Any) -> integer
+
+# a trailing comment
+#---- declarations.R__repeated_name_parses_both
+abs : fn(x: integer) -> integer
+abs : fn(x: double) -> double
+#---- declarations.R__missing_colon
+length fn(x: Any) -> integer
+#---- declarations.R__empty_name
+: fn(x: Any) -> integer
+#---- declarations.R__missing_type
+length :
+#---- declarations.R__invalid_type_expression
+broken : fn(x: ) -> integer
+#---- declarations.R__valid_and_malformed_mixed
+length : fn(x: Any) -> integer
+oops
+pi : double

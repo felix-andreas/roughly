@@ -1,0 +1,971 @@
+#---- bugs_catalog.R__union_arithmetic_without_a_guard
+# The variable is integer | character at the use: real bug, must error.
+parse_count <- function(raw) {
+  count <- 0L
+  if (raw == "unknown") {
+    count <- "?"
+  }
+  count + 1L
+}
+#---- bugs_catalog.R__wrong_argument_type
+#: fn(count: integer, label: character) -> character
+render_row <- function(count, label) {
+  paste0(label, ": ", count)
+}
+broken <- function() {
+  render_row("three", 3L)
+}
+#---- bugs_catalog.R__missing_required_argument
+#: fn(numerator: double, denominator: double) -> double
+ratio <- function(numerator, denominator) {
+  numerator / denominator
+}
+broken <- function() {
+  ratio(1.0)
+}
+#---- bugs_catalog.R__unguarded_nullable_use
+#: fn(x: integer | NULL) -> integer
+increment <- function(x) {
+  x + 1L
+}
+#---- bugs_catalog.R__calling_a_non_function
+broken <- function() {
+  total <- 10L
+  total(2L)
+}
+#---- bugs_catalog.R__post_dots_option_cannot_be_filled_positionally
+# R runtime: "argument \"strict\" is missing, with no default" — formals after
+# `...` are name-only, so the trailing TRUE lands in the dots.
+join_fields <- function(..., strict) {
+  if (strict) {
+    paste(..., sep = ",")
+  } else {
+    paste(...)
+  }
+}
+broken <- function() {
+  join_fields("a", "b", TRUE)
+}
+#---- bugs_catalog.R__typed_rest_parameter_rejects_a_wrong_element
+#: fn(...: double) -> double
+total_of <- function(...) {
+  sum(...)
+}
+broken <- function() {
+  total_of(1.5, "two")
+}
+#---- config_options.R__config_module_is_clean
+# NULL-union option handling: annotated nullable results, is.null narrowing with early
+# returns, switch dispatch with and without defaults, and environment-variable fallbacks.
+#: fn(name: character, [fallback]: character) -> character
+env_or <- function(name, fallback = "") {
+  value <- Sys.getenv(name)
+  if (nchar(value) == 0L) {
+    return(fallback)
+  }
+  value
+}
+
+#: fn(level: character) -> integer
+log_level_rank <- function(level) {
+  switch(level, debug = 1L, info = 2L, warn = 3L, error = 4L, 2L)
+}
+
+#: fn(timeout: integer | NULL) -> integer
+effective_timeout <- function(timeout) {
+  if (is.null(timeout)) {
+    return(30L)
+  }
+  if (timeout < 1L) {
+    stop("timeout must be positive")
+  }
+  timeout
+}
+
+describe_config <- function() {
+  host <- env_or("SERVICE_HOST", "localhost")
+  rank <- log_level_rank(env_or("LOG_LEVEL", "info"))
+  timeout <- effective_timeout(NULL)
+  sprintf("%s (level %d, timeout %ds)", host, rank, timeout)
+}
+#---- config_options.R__optional_without_default_via_missing_guard
+# R's optional-without-default idiom: the caller may omit `punct` because
+# every use is missing()-guarded; positional [[ extracts from a named list.
+settings <- list(host = "localhost", port = 8080L)
+
+describe <- function(name, punct) {
+  label <- toupper(name)
+  if (missing(punct)) {
+    label
+  } else {
+    paste0(label, punct)
+  }
+}
+
+report <- function() {
+  first <- settings[[1L]]
+  header <- describe("connection")
+  loud <- describe("connection", "!")
+  paste(header, loud, first, sep = " | ")
+}
+#---- config_options.R__missing_guard_write_and_early_exit_are_clean
+# The two canonical missing() idioms: fill the omitted formal on the missing
+# branch, or stop() so only the supplied edge continues — plus the negated
+# guard returning early on the supplied edge.
+fill_default <- function(name, punct) {
+  if (missing(punct)) {
+    punct <- "!"
+  }
+  paste0(name, punct)
+}
+
+require_x <- function(x) {
+  if (missing(x)) stop("x is required")
+  x + 1L
+}
+
+pick <- function(x) {
+  if (!missing(x)) {
+    return(x + 1L)
+  }
+  0L
+}
+
+use_all <- function() {
+  paste(fill_default("a"), require_x(1L), pick(), sep = " ")
+}
+#---- config_options.R__reading_a_missing_formal_is_an_error
+# Reading the formal on the branch where missing() held would fail at run
+# time ("argument is missing, with no default"), so it is a checked error.
+describe <- function(name, punct) {
+  if (missing(punct)) {
+    return(nchar(punct))
+  }
+  paste0(name, punct)
+}
+#---- control_flow_idioms.R__while_loop_accumulator_is_clean
+# A `while` loop that mutates two integer slots (the working value and a step
+# counter) through modular arithmetic: the mutable-slot model joins the branch
+# writes and the loop stays integer end to end.
+collatz_steps <- function(n) {
+  steps <- 0L
+  while (n > 1L) {
+    if (n %% 2L == 0L) {
+      n <- n %/% 2L
+    } else {
+      n <- 3L * n + 1L
+    }
+    steps <- steps + 1L
+  }
+  steps
+}
+
+run <- function() collatz_steps(27L)
+#---- control_flow_idioms.R__repeat_with_early_return_is_clean
+# `repeat` with `return` as the only exit: linear search over a list.
+find_index <- function(xs, target) {
+  index <- 1L
+  repeat {
+    if (index > length(xs)) {
+      return(-1L)
+    }
+    if (xs[[index]] == target) {
+      return(index)
+    }
+    index <- index + 1L
+  }
+}
+
+run <- function() find_index(list(10L, 20L, 30L), 20L)
+#---- control_flow_idioms.R__switch_dispatch_is_clean
+# `switch` selecting one of several numeric branches, with a `stop(...)` fallback
+# that contributes no type of its own.
+apply_op <- function(op, a, b) {
+  switch(op,
+    add = a + b,
+    sub = a - b,
+    mul = a * b,
+    stop("unknown op"))
+}
+
+run <- function() apply_op("add", 3L, 4L)
+#---- control_flow_idioms.R__mutual_recursion_is_clean
+# Two functions that call each other: the package interface fixed point resolves
+# both schemes even though neither is fully known when the other is checked.
+is_even <- function(n) if (n == 0L) TRUE else is_odd(n - 1L)
+
+is_odd <- function(n) if (n == 0L) FALSE else is_even(n - 1L)
+
+run <- function() list(even = is_even(10L), odd = is_odd(7L))
+#---- control_flow_idioms.R__closure_captured_counter_is_clean
+# A closure that mutates a slot in its defining frame with `<<-`: the captured
+# write joins back at the enclosing definition site and the counter stays integer.
+make_counter <- function() {
+  count <- 0L
+  function() {
+    count <<- count + 1L
+    count
+  }
+}
+
+run <- function() {
+  next_id <- make_counter()
+  next_id()
+  next_id()
+}
+#---- control_flow_idioms.R__structure_constructor_and_field_access_is_clean
+# The S3 constructor idiom: `structure(list(...), class = ...)` returns the list,
+# so reading its fields back and combining them type-checks.
+new_point <- function(x, y) {
+  structure(list(x = x, y = y), class = "point")
+}
+
+distance_from_origin <- function(p) {
+  sqrt(p$x * p$x + p$y * p$y)
+}
+
+run <- function() {
+  origin_distance <- distance_from_origin(new_point(3.0, 4.0))
+  origin_distance
+}
+#---- control_flow_idioms.R__switch_union_result_used_arithmetically
+# A `switch` whose branches disagree (`integer` for the named cases, `character`
+# for the default) has type `integer | character`; using that in arithmetic
+# without narrowing is a real error, reported on the union.
+classify <- function(code) {
+  switch(code,
+    ok = 1L,
+    warn = 2L,
+    "unknown")
+}
+
+run <- function() classify("ok") + 10L
+#---- csv_report.R__sales_report_is_clean
+# A realistic delimited-data pipeline: read, guard, derive, format, write. Exercises typed
+# read.csv controls, sealed-nominal access (df$col, df[rows, cols]), narrowing on an early
+# guard, string formatting, and typed writers.
+read_sales <- function(path) {
+  read.csv(path, header = TRUE, stringsAsFactors = FALSE)
+}
+
+#: fn(prefix: character, amount: double) -> character
+format_line <- function(prefix, amount) {
+  sprintf("%s: %.2f", prefix, round(amount, 2L))
+}
+
+summarize_sales <- function(path, out_path) {
+  sales <- read_sales(path)
+  if (nrow(sales) == 0L) {
+    stop("no rows in ", path)
+  }
+  amounts <- as.numeric(sales$amount)
+  total <- sum(amounts)
+  average <- mean(amounts)
+  lines <- c(
+    format_line("total", total),
+    format_line("average", average)
+  )
+  high_value <- sales[amounts > average, ]
+  write.csv(high_value, out_path, row.names = FALSE)
+  paste(lines, collapse = "\n")
+}
+#---- functional_idioms.R__recursion_defaults_and_composition_are_clean
+# Everyday functional R that must type without a false positive: self-recursion,
+# default arguments, nested if/else-if returning one type, a higher-order
+# function that returns a closure, and function composition.
+countdown <- function(n) {
+  if (n <= 0L) 0L else countdown(n - 1L)
+}
+
+greet <- function(name, greeting = "Hello") {
+  paste(greeting, name)
+}
+
+clamp <- function(x, lo, hi) {
+  if (x < lo) {
+    lo
+  } else if (x > hi) {
+    hi
+  } else {
+    x
+  }
+}
+
+compose <- function(f, g) {
+  function(x) f(g(x))
+}
+
+run <- function() {
+  depth <- countdown(5L)
+  hello <- greet("Ada")
+  hi <- greet("Bob", "Hi")
+  bounded <- clamp(12L, 0L, 10L)
+  inc_then_double <- compose(function(x) x * 2L, function(x) x + 1L)
+  list(depth = depth, hello = hello, hi = hi, bounded = bounded, out = inc_then_double(5L))
+}
+#---- functional_idioms.R__higher_order_stub_combinators_are_clean
+# The base functional combinators over a homogeneous list: Filter keeps the
+# element type, Negate builds a predicate, Reduce folds with a typed init.
+keep_positive <- function(values) {
+  Filter(function(x) x > 0L, values)
+}
+
+is_present <- Negate(is.null)
+
+sum_all <- function(values) {
+  Reduce(function(acc, x) acc + x, values, 0L)
+}
+
+run <- function() {
+  kept <- keep_positive(list(1L, -2L, 3L))
+  present <- is_present(5L)
+  total <- sum_all(list(1L, 2L, 3L))
+  list(kept = kept, present = present, total = total)
+}
+#---- functional_idioms.R__structural_access_on_unannotated_params_is_clean
+# Structural access over an unannotated parameter is everyday R: a recursive
+# tree fold reads `$` fields off a node whose shape is never annotated, and
+# generic accessors index with `[[`, `$`, and `[`. The parameter stays
+# unconstrained, the access types as `Unknown`, and none of it is a false
+# "not a list" / "unsupported `[`".
+sum_tree <- function(node) {
+  if (is.null(node)) {
+    0L
+  } else {
+    node$value + sum_tree(node$left) + sum_tree(node$right)
+  }
+}
+
+first_element <- function(x) x[[1L]]
+
+field_of <- function(record) record$payload
+
+leading_slice <- function(x) x[1L]
+
+run <- function() {
+  total <- sum_tree(NULL)
+  head <- first_element(list(1L, 2L))
+  payload <- field_of(list(payload = "ok"))
+  front <- leading_slice(list(1L, 2L))
+  list(total = total, head = head, payload = payload, front = front)
+}
+#---- functional_idioms.R__combine_tolerates_non_concrete_arguments
+# `c(...)` over an argument whose element type is not statically known — an
+# unannotated parameter, a trusted `Any`, or an `Unknown` from an unmodeled
+# construct — yields `Unknown` instead of a false "expected integer, found T".
+prepend_zero <- function(x) c(x, 0L)
+
+with_any <- function() {
+  #: @trust Any
+  head <- 1L
+  c(head, 2L, 3L)
+}
+
+with_unknown <- function() {
+  config <- 1L
+  port <- config@port
+  c(port, 8080L)
+}
+
+run <- function() {
+  list(a = prepend_zero(c(1L, 2L)), b = with_any(), d = with_unknown())
+}
+#---- functional_idioms.R__partial_annotation_leaves_the_return_inferred
+# Annotating only the parameters is the idiomatic partial form: the elided
+# return is inferred from the body instead of silently pinning `NULL`, so a
+# checked param annotation never rejects a value-returning function.
+#: @param base {double}
+#: @param exponent {integer}
+power <- function(base, exponent) base^exponent
+
+#: fn(name: character)
+greet <- function(name) paste("Hello,", name)
+
+run <- function() {
+  list(eight = power(2.0, 3L), hi = greet("Ada"))
+}
+#---- functional_idioms.R__script_preamble_library_calls_are_clean
+# The opening lines of nearly every real script: `library`/`require`/`help`
+# evaluate their first argument non-standardly (the bare name IS the package
+# or topic name), so none of these warn unresolved.
+library(stats)
+require(utils)
+
+lookup_docs <- function() help(mean)
+
+run <- function() {
+  values <- rnorm(10L)
+  mean(values)
+}
+#---- generic_helpers.R__generic_option_library_is_clean
+# A small user-annotated generic "option" library — the T | NULL idiom with
+# <T>/<T, U> helpers — used at several concrete types in one program. Exercises
+# annotation-driven generics instantiating per call site, is.null narrowing
+# inside the generic bodies, and a fn(T) -> U callback flowing through.
+
+#: <T> fn(value: T | NULL, fallback: T) -> T
+or_else <- function(value, fallback) {
+  if (is.null(value)) {
+    fallback
+  } else {
+    value
+  }
+}
+
+#: <T, U> fn(value: T | NULL, transform: fn(T) -> U) -> U | NULL
+map_option <- function(value, transform) {
+  if (is.null(value)) {
+    NULL
+  } else {
+    transform(value)
+  }
+}
+
+#: fn(name: character) -> integer | NULL
+lookup_limit <- function(name) {
+  if (nchar(name) == 0L) {
+    NULL
+  } else {
+    nchar(name)
+  }
+}
+
+#: fn(text: character) -> character | NULL
+first_word <- function(text) {
+  parts <- strsplit(text, " ")[[1L]]
+  if (length(parts) == 0L) {
+    NULL
+  } else {
+    parts[[1L]]
+  }
+}
+
+summarize <- function() {
+  limit <- or_else(lookup_limit("requests"), 100L)
+  label <- or_else(first_word("anonymous user"), "anonymous")
+  # A bare NULL value: `T` is determined by the fallback argument, not pinned to
+  # NULL by the literal, so this is `character`.
+  fallback_label <- or_else(NULL, "anonymous")
+  doubled <- map_option(lookup_limit("cache"), function(size) size * 2L)
+  effective <- or_else(doubled, 0L)
+  sprintf("%s/%s: limit %d, effective %d", label, fallback_label, limit, effective)
+}
+#---- generic_helpers.R__fallback_type_must_match_the_value
+# `<T>` binds the value and the fallback to one type, so a character fallback
+# for an integer value cannot instantiate.
+#: <T> fn(value: T | NULL, fallback: T) -> T
+or_else <- function(value, fallback) {
+  if (is.null(value)) fallback else value
+}
+broken <- function() {
+  or_else(3L, "zero")
+}
+#---- generic_helpers.R__transform_callback_must_accept_the_value_type
+# The transform's body adds `1L` to its parameter, constraining it numeric, so
+# handing `map_option` a character value cannot satisfy `fn(T) -> U` at T = character.
+#: <T, U> fn(value: T | NULL, transform: fn(T) -> U) -> U | NULL
+map_option <- function(value, transform) {
+  if (is.null(value)) NULL else transform(value)
+}
+broken <- function() {
+  map_option("text", function(n) n + 1L)
+}
+#---- generic_helpers.R__optional_callback_annotation_is_writable_and_narrows
+# The optional-callback idiom, annotated with a parenthesized function member:
+# `(fn() -> integer) | NULL`. The `is.null` guard narrows the union, so the
+# callback is callable on the false edge, and both `NULL` and a conforming
+# function are accepted at the call site.
+#: @param on_done {(fn() -> integer) | NULL}
+finish <- function(on_done) {
+  if (is.null(on_done)) 0L else on_done()
+}
+
+run <- function() {
+  list(quiet = finish(NULL), loud = finish(function() 42L))
+}
+#---- generic_helpers.R__callback_with_the_wrong_result_type_is_caught
+#: @param on_done {(fn() -> integer) | NULL}
+finish <- function(on_done) {
+  if (is.null(on_done)) 0L else on_done()
+}
+
+run <- function() finish(function() "text")
+#---- log_analysis.R__log_analyzer_is_clean
+# A log analyzer: strsplit's typed list-of-vectors feeds positional [[
+# extraction, parsed entries travel as named-list records, switch ranks
+# levels with a default arm, a closure counter mutates its captured total
+# through <<-, and a nullable search result is is.null-guarded at the caller.
+
+parse_line <- function(line) {
+  parts <- strsplit(line, " :: ")[[1L]]
+  list(level = tolower(trimws(parts[[1L]])), message = parts[[2L]])
+}
+
+#: fn(level: character) -> integer
+rank_of <- function(level) {
+  switch(level, error = 3L, warn = 2L, 1L)
+}
+
+make_counter <- function() {
+  total <- 0L
+  function() {
+    total <<- total + 1L
+    total
+  }
+}
+
+#: fn(lines: character[], prefix: character) -> character | NULL
+first_with_prefix <- function(lines, prefix) {
+  for (line in lines) {
+    if (startsWith(line, prefix)) {
+      return(line)
+    }
+  }
+  NULL
+}
+
+analyze <- function() {
+  lines <- c("ERROR :: disk full", "INFO :: started", "WARN :: low memory")
+  seen <- make_counter()
+  worst <- 0L
+  for (line in lines) {
+    entry <- parse_line(line)
+    seen()
+    rank <- rank_of(entry$level)
+    if (rank > worst) {
+      worst <- rank
+    }
+  }
+  first_error <- first_with_prefix(lines, "ERROR")
+  summary <- if (is.null(first_error)) {
+    "no errors"
+  } else {
+    first_error
+  }
+  sprintf("%d lines, worst rank %d, first error: %s", seen(), worst, summary)
+}
+#---- log_analysis.R__summing_a_character_field
+# Accumulating the wrong record field: the level is a character column, and
+# adding it into an integer counter is the classic wrong-column bug.
+
+parse_line <- function(line) {
+  parts <- strsplit(line, " :: ")[[1L]]
+  list(level = parts[[1L]], message = parts[[2L]])
+}
+
+count_levels <- function(lines) {
+  total <- 0L
+  for (line in lines) {
+    entry <- parse_line(line)
+    total <- total + entry$level
+  }
+  total
+}
+#---- log_analysis.R__handler_table_dispatch_is_clean
+# The dispatch-table idiom: a record of handlers indexed by a computed name
+# yields the union of the handler types, and calling through that union checks
+# the call against every member.
+handlers <- list(
+  add = function(left, right) left + right,
+  subtract = function(left, right) left - right,
+  multiply = function(left, right) left * right
+)
+
+apply_operation <- function(name, left, right) {
+  handler <- handlers[[name]]
+  handler(left, right)
+}
+
+report <- function() {
+  total <- apply_operation("add", 2, 3)
+  difference <- apply_operation("subtract", total, 1)
+  sprintf("total %.1f, difference %.1f", total, difference)
+}
+#---- log_analysis.R__mixed_arity_handler_table_is_caught
+# A one-argument handler in the same table makes two-argument dispatch unsound:
+# the union call must be valid for every member.
+handlers <- list(
+  add = function(left, right) left + right,
+  shout = function(text) toupper(text)
+)
+
+broken <- function(name) {
+  handler <- handlers[[name]]
+  handler(1, 2)
+}
+#---- numeric_summary.R__descriptive_statistics_is_clean
+# Numeric analysis: reductions over vectors, generic element-preserving helpers, integer/double
+# coercion at parameter positions, accumulators in loops, and vectorized comparisons.
+#: <T: numeric> fn(values: T) -> T
+clamp_positive <- function(values) {
+  values
+}
+
+#: fn(values: double[]) -> character
+describe <- function(values) {
+  sprintf(
+    "n=%d mean=%.2f sd=%.2f range=[%.1f, %.1f]",
+    length(values),
+    mean(values),
+    sd(values),
+    min(values),
+    max(values)
+  )
+}
+
+#: fn(n: integer) -> double[]
+running_means <- function(n) {
+  observations <- rev(sort(c(2.5, 1.0, 4.5, 3.0)))
+  means <- double()
+  for (index in seq_len(n)) {
+    window <- head(observations, index)
+    means <- c(means, mean(window))
+  }
+  means
+}
+
+summary_report <- function() {
+  values <- c(1.5, 2.5, 3.5, 4.5)
+  kept <- clamp_positive(values)
+  describe(kept)
+}
+#---- numeric_summary.R__matrix_margins_with_forwarded_reductions
+# apply with an overloaded reduction callback, identity piping, and a
+# missing()-guarded formatter — the stub-unlock idioms together.
+summarize_matrix <- function(values) {
+  m <- as.matrix(values)
+  row_totals <- apply(m, 1L, sum)
+  col_totals <- apply(m, 2L, sum, na.rm = TRUE)
+  list(rows = identity(row_totals), cols = col_totals)
+}
+
+format_total <- function(value, unit) {
+  text <- as.character(value)
+  if (missing(unit)) {
+    text
+  } else {
+    paste0(text, " ", unit)
+  }
+}
+
+report <- function() {
+  totals <- summarize_matrix(c(1.5, 2.5, 3.5))
+  format_total(length(totals$rows), "rows")
+}
+#---- polymorphism_in_practice.R__generic_helper_used_at_two_types_is_clean
+# A helper with no annotation generalizes, so the same function applies at
+# `integer` and at `character` in one program without conflating them.
+identity_of <- function(x) x
+
+pair_of <- function(a, b) list(first = a, second = b)
+
+run <- function() {
+  numbers <- identity_of(1L)
+  words <- identity_of("text")
+  mixed <- pair_of(1L, "x")
+  flags <- pair_of(TRUE, FALSE)
+  list(numbers = numbers, words = words, mixed = mixed, flags = flags)
+}
+#---- polymorphism_in_practice.R__family_guarded_tree_fold_is_clean
+# Recursive descent over a nested list with a family guard: `is.numeric`
+# separates the leaf case from the branch case, and the branch iterates its
+# children and folds their recursive results.
+sum_leaves <- function(node) {
+  if (is.numeric(node)) {
+    node
+  } else {
+    total <- 0
+    for (child in node) {
+      total <- total + sum_leaves(child)
+    }
+    total
+  }
+}
+
+run <- function() sum_leaves(list(1, list(2, 3), list(list(4, 5), 6)))
+#---- record_accumulators.R__record_field_updates_are_clean
+# Replacement-form assignment in idiomatic accumulator code: updating a record's
+# fields in place with `$<-`, where each field keeps its type across the update
+# (`count` stays integer, `name` stays character). Exercises the read+write
+# lowering of replacement forms end to end.
+step_counter <- function() {
+  acc <- list(count = 0L, name = "start")
+  acc$count <- acc$count + 1L
+  acc$name <- paste0(acc$name, "!")
+  acc
+}
+
+report <- function() {
+  state <- step_counter()
+  sprintf("%s: %d", state$name, state$count)
+}
+#---- record_accumulators.R__map_build_and_record_start_are_clean
+# Building a container incrementally from an empty `list()`: a computed-key
+# `[[<-` in a loop makes a map-like `list[named: integer]` (a name read is then
+# nullable, so the lookup is is.null-guarded), and a literal-field `$<-` on an
+# empty list starts a record whose field reads at its precise type.
+build_totals <- function(labels) {
+  totals <- list()
+  for (label in labels) {
+    totals[[label]] <- 0L
+  }
+  totals
+}
+
+first_total <- function(labels) {
+  totals <- build_totals(labels)
+  first <- totals[["a"]]
+  if (is.null(first)) {
+    0L
+  } else {
+    first + 1L
+  }
+}
+
+new_counter <- function() {
+  acc <- list()
+  acc$count <- 0L
+  acc$count + 1L
+}
+#---- record_accumulators.R__field_retype_via_replacement_is_tracked
+# `$<-` refines the field's type, so a later use expecting the old type fails:
+# after assigning a character to `count`, adding to it is a type error.
+mutate_field <- function() {
+  acc <- list(count = 0L)
+  acc$count <- "now text"
+  acc$count + 1L
+}
+#---- record_accumulators.R__unguarded_map_read_is_nullable
+# A computed-key build makes a map-like list, whose name read is `T | NULL`, so
+# using it in arithmetic without an is.null guard is an error.
+unguarded_total <- function(labels) {
+  totals <- list()
+  for (label in labels) {
+    totals[[label]] <- 0L
+  }
+  totals[["a"]] + 1L
+}
+#---- sales_pipeline.R__monthly_sales_report
+# A full reporting script: CSV in, filtered aggregation, formatted lines out.
+# Exercises data.frame accessor tolerance, c() accumulators, seq_len loops,
+# paste/sprintf variadics (rest-position matching), and early-exit guards.
+read_sales <- function(path) {
+  if (!file.exists(path)) {
+    stop(paste("no such file:", path))
+  }
+  read.csv(path, stringsAsFactors = FALSE)
+}
+
+#: fn(amounts: double[], rate: double) -> double[]
+apply_discount <- function(amounts, rate) {
+  amounts * (1 - rate)
+}
+
+format_row <- function(month, total) {
+  sprintf("%s: %0.2f", month, total)
+}
+
+main <- function() {
+  sales <- read_sales("sales.csv")
+  amounts <- as.double(sales$amount)
+  discounted <- apply_discount(amounts, 0.1)
+
+  lines <- character()
+  months <- unique(as.character(sales$month))
+  for (index in seq_len(length(months))) {
+    month <- months[[index]]
+    total <- sum(discounted, na.rm = TRUE)
+    lines <- c(lines, format_row(month, total))
+  }
+  paste(lines, collapse = "\n")
+}
+#---- sales_pipeline.R__variadic_wrappers_forward_cleanly
+# User-defined variadic helpers: R's dots as a rest parameter, pre-dots
+# formals filling positionally, post-dots options by name.
+log_line <- function(level, ...) {
+  message(level, ": ", ...)
+}
+
+banner <- function(...) {
+  text <- paste(..., sep = " | ")
+  toupper(text)
+}
+
+report <- function() {
+  log_line("info", "run started")
+  log_line("warn", "low disk", " retrying")
+  banner("alpha", "beta", "gamma")
+}
+#---- sales_pipeline.R__guarded_config_lookup
+# integer | NULL narrowing through early exits, with switch dispatch.
+#: fn(name: character, fallback: integer) -> integer
+option_or <- function(name, fallback) {
+  value <- getOption(name)
+  if (is.null(value)) {
+    return(fallback)
+  }
+  if (!is.integer(value)) {
+    return(fallback)
+  }
+  value
+}
+
+#: fn(mode: character) -> integer
+retries_for <- function(mode) {
+  base <- option_or("app.retries", 3L)
+  extra <- switch(mode, aggressive = 5L, patient = 0L, 1L)
+  base + extra
+}
+#---- simulation_study.R__monte_carlo_power_study_is_clean
+# A Monte-Carlo power study: a closure factory builds test statistics from
+# summary functions (including a stub function passed as a callback, whose
+# surplus optional parameters must not block the match), replicates stream
+# through c() accumulation, rejection rates fold vector comparisons, and
+# lapply + Reduce aggregate the scenario sweep with a typed accumulator.
+
+#: fn(n: integer, effect: double) -> double[]
+draw_treated <- function(n, effect) {
+  rnorm(n, mean = effect, sd = 1)
+}
+
+#: fn(summarise: fn(sample_values: double[]) -> double) -> fn(treated: double[], control: double[]) -> double
+make_statistic <- function(summarise) {
+  function(treated, control) {
+    summarise(treated) - summarise(control)
+  }
+}
+
+#: fn(n_rep: integer, n: integer, effect: double, statistic: fn(treated: double[], control: double[]) -> double) -> double[]
+simulate_statistics <- function(n_rep, n, effect, statistic) {
+  values <- numeric()
+  for (replicate in seq_len(n_rep)) {
+    treated <- draw_treated(n, effect)
+    control <- rnorm(n)
+    values <- c(values, statistic(treated, control))
+  }
+  values
+}
+
+#: fn(values: double[], threshold: double) -> double
+rejection_rate <- function(values, threshold) {
+  sum(abs(values) > threshold) / length(values)
+}
+
+power_study <- function() {
+  statistic <- make_statistic(mean)
+  effects <- c(0.0, 0.2, 0.5, 0.8)
+  rates <- lapply(effects, function(effect) {
+    draws <- simulate_statistics(200L, 30L, effect, statistic)
+    rejection_rate(draws, 0.5)
+  })
+  best <- Reduce(function(current, rate) if (rate > current) rate else current, rates, 0.0)
+  sprintf("best power %.3f over %d scenarios", best, length(effects))
+}
+#---- simulation_study.R__bootstrap_interval_is_clean
+# A bootstrap confidence interval: sample() keeps its element type through the
+# generic stub, the optional confidence level is missing()-guarded instead of
+# defaulted, and the result travels as a named-list record whose fields are
+# read back with `$`.
+
+#: fn(observed: double[], n_boot: integer) -> double[]
+bootstrap_means <- function(observed, n_boot) {
+  means <- numeric()
+  for (draw in seq_len(n_boot)) {
+    resample <- sample(observed, replace = TRUE)
+    means <- c(means, mean(resample))
+  }
+  means
+}
+
+interval <- function(means, level) {
+  alpha <- if (missing(level)) 0.05 else 1 - level
+  ordered <- sort(means)
+  bounds <- quantile(ordered, probs = c(alpha / 2, 1 - alpha / 2))
+  list(lower = bounds[[1L]], upper = bounds[[2L]])
+}
+
+report_interval <- function() {
+  observed <- rnorm(50L, mean = 1.5)
+  means <- bootstrap_means(observed, 500L)
+  default_band <- interval(means)
+  wide_band <- interval(means, 0.99)
+  sprintf(
+    "default [%.2f, %.2f], wide [%.2f, %.2f]",
+    default_band$lower,
+    default_band$upper,
+    wide_band$lower,
+    wide_band$upper
+  )
+}
+#---- simulation_study.R__statistic_called_with_wrong_sample
+# The factory's closure remembers its parameter types: handing it a character
+# vector where a sample of draws belongs is a bug, not a coercion.
+
+#: fn(summarise: fn(sample_values: double[]) -> double) -> fn(treated: double[], control: double[]) -> double
+make_statistic <- function(summarise) {
+  function(treated, control) {
+    summarise(treated) - summarise(control)
+  }
+}
+
+broken <- function() {
+  statistic <- make_statistic(mean)
+  statistic(rnorm(10L), "control")
+}
+#---- simulation_study.R__reduce_accumulator_mismatch
+# Reduce's accumulator is one type across the whole fold: the folder counts
+# numerically, so a character init cannot seed it — reported on the init.
+
+count_positive <- function() {
+  draws <- lapply(c(1.0, -2.0, 3.0), function(value) value)
+  Reduce(function(count, value) count + 1L, draws, "start")
+}
+#---- text_stats.R__word_statistics_is_clean
+# String processing over vectors: regex predicates, substitution, case mapping, per-element
+# measurement, accumulation across a loop, and a union-typed classifier joined from branches.
+#: fn(line: character) -> character
+normalize <- function(line) {
+  collapsed <- gsub("[[:space:]]+", " ", line)
+  tolower(trimws(collapsed))
+}
+
+#: fn(word: character) -> character
+classify_word <- function(word) {
+  if (grepl("^[0-9]+$", word)) {
+    "number"
+  } else if (nchar(word) > 7L) {
+    "long"
+  } else {
+    "short"
+  }
+}
+
+count_long_words <- function(lines) {
+  total <- 0L
+  for (line in c("alpha beta", "gamma delta epsilon")) {
+    cleaned <- normalize(line)
+    words <- strsplit(cleaned, " ", fixed = TRUE)
+    total <- total + length(words)
+  }
+  invisible(lines)
+  total
+}
+
+report_words <- function() {
+  count <- count_long_words(c("The quick Brown fox", "jumps  over the lazy dog"))
+  label <- classify_word("extraordinary")
+  paste0(label, ": ", count)
+}
+#---- text_stats.R__functional_pipeline_with_forwarded_callbacks
+# The apply-family idiom: callbacks with more formals than fn(T) -> U,
+# completed by forwarded arguments exactly as R invokes them.
+normalize_words <- function(words) {
+  cleaned <- lapply(words, gsub, pattern = "[^a-z]", replacement = "")
+  lengths <- lapply(words, nchar)
+  list(cleaned = cleaned, lengths = lengths)
+}
+
+report <- function() {
+  stats <- normalize_words(c("alpha!", "beta?"))
+  length(stats$cleaned) + length(stats$lengths)
+}

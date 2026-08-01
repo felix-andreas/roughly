@@ -1,0 +1,652 @@
+#---- closures.R__R/main.R
+x <- 1L
+f <- function() x
+#---- closures.R__R/main.R
+f <- function() {
+  x <- 1L
+  g <- function() x
+}
+#---- closures.R__R/main.R
+f <- function(x) {
+  g <- function() x
+}
+#---- closures.R__R/main.R
+x <- 1L
+f <- function() {
+  g <- function() x
+}
+#---- closures.R__R/main.R
+f <- function() {
+  x <- 1L
+  g <- function() {
+    h <- function() x
+  }
+}
+#---- closures.R__R/main.R
+f <- function() {
+  x <- 1L
+  g <- function(x) x
+}
+#---- closures.R__R/main.R
+f <- function(x) {
+  g <- function() {
+    x <- "ok"
+    x
+  }
+}
+#---- closures.R__R/main.R
+x <- 1L
+f <- function() {
+  x <- "outer"
+  g <- function() {
+    x <- TRUE
+    h <- function() x
+  }
+}
+#---- closures.R__R/b.R
+f <- function() {
+  g <- function() x
+}
+#---- closures.R__R/b.R
+x <- 2L
+#---- closures.R__R/c.R
+f <- function() {
+  x <- 3L
+  g <- function() x
+}
+#---- conditional_globals.R__R/a.R
+if (TRUE) {
+  x <- 1L
+}
+#---- conditional_globals.R__R/b.R
+x
+#---- conditional_globals.R__R/a.R
+if (FALSE) {
+  1L
+} else {
+  x <- 1L
+}
+#---- conditional_globals.R__R/a.R
+if (FALSE) {
+  1L
+} else if (TRUE) {
+  x <- 1L
+}
+#---- conditional_globals.R__R/a.R
+for (item in list(1L)) {
+  x <- 1L
+}
+#---- conditional_globals.R__R/a.R
+while (TRUE) {
+  x <- 1L
+}
+#---- conditional_globals.R__R/a.R
+repeat {
+  x <- 1L
+}
+#---- conditional_globals.R__R/a.R
+if (TRUE) {
+  for (item in list(1L)) {
+    x <- 1L
+  }
+}
+#---- conditional_globals.R__R/a.R
+if (TRUE) {
+  x <- 1L
+  x
+}
+#---- conditional_globals.R__R/a.R
+if (TRUE) {
+  x <- 1L
+}
+x
+#---- conditional_globals.R__R/a.R
+x <- 1L
+if (TRUE) {
+  x <- 2L
+}
+x
+#---- cross_file_values.R__R/c.R
+mirror(value)
+#---- cross_file_values.R__R/b.R
+f <- function() x
+#---- cross_file_values.R__R/c.R
+x <- 3L
+#---- cross_file_values.R__R/b.R
+x
+x <- 2L
+#---- cross_file_values.R__R/c.R
+x
+x <- 3L
+#---- cross_file_values.R__R/a.R
+{
+  x <- 1L
+}
+#---- failures.R__R/main.R
+list <- 1L
+#---- failures.R__R/a.R
+#: @type Person {integer}
+#---- failures.R__R/b.R
+#: @type Person {double}
+#---- failures.R__R/c.R
+#: @alias Person {character}
+#---- failures.R__R/c.R
+f <- function() {
+  x <- 3L
+  x
+}
+#---- failures.R__R/b.R
+#: Person
+x
+#---- failures.R__inst/scripts/helper.R
+#: Person
+value <- 1L
+#---- failures.R__R/main.R
+deviation <- stats::sd(c(1, 2, 3))
+#---- failures.R__R/main.R
+result <- foobar::bazqux(1L)
+#---- failures.R__R/main.R
+result <- stats::bazqux(1L)
+#---- failures.R__R/main.R
+lenght(c(1L, 2L))
+#---- for_bindings.R__R/main.R
+for (x in list(1L)) {
+  x
+}
+#---- for_bindings.R__R/main.R
+y <- 1L
+for (x in list(1L)) {
+  y
+}
+#---- for_bindings.R__R/main.R
+x <- 0L
+for (x in list(1L)) {
+  x <- x
+  x
+}
+x
+#---- for_bindings.R__R/main.R
+y <- 0L
+for (x in list(1L)) {
+  y <- y
+  y
+}
+y
+#---- for_bindings.R__R/main.R
+for (x in list(1L)) {
+  g <- function() x
+}
+#---- for_bindings.R__R/main.R
+x <- 1L
+for (x in list(1L)) {
+  x
+}
+x
+#---- for_bindings.R__R/c.R
+for (x in list(1L)) {
+  x
+}
+x
+#---- incremental_naming.R__R/a.R
+g <- 1L
+#---- incremental_naming.R__R/b.R
+g
+#---- incremental_naming.R__R/c.R
+g <- 2L
+#---- incremental_naming.R__R/c.R
+other <- 2L
+#---- incremental_naming.R__R/c.R
+g <- 3L
+#---- incremental_naming.R__R/c.R
+c_other <- 3L
+#---- incremental_naming.R__R/a.R
+foo <- 1L
+#---- incremental_naming.R__R/b.R
+foo
+#---- incremental_naming.R__R/a.R
+bar <- 1L
+#---- incremental_naming.R__R/b.R
+foo
+bar
+#---- incremental_naming.R__R/a.R
+placeholder <- 1L
+#---- incremental_types.R__R/a.R
+#: @type Person {integer}
+person <- 1L
+#---- incremental_types.R__R/c.R
+#: @type Person {double}
+other <- 2L
+#---- incremental_types.R__R/a.R
+#: @type Shape {integer}
+shape <- 1L
+#---- incremental_types.R__R/b.R
+#: @new Shape
+value <- 1L
+#---- incremental_types.R__R/a.R
+#: @alias Shape {integer}
+shape <- 1L
+#---- incremental_types.R__R/a.R
+#: @type Slot {integer}
+compartment <- 1L
+#---- incremental_types.R__R/b.R
+#: Slot
+value <- 1L
+#---- incremental_types.R__R/a.R
+#: @type Slot<T> {list{value: T}}
+compartment <- 1L
+#---- incremental_types.R__R/a.R
+#: Widget
+value <- 1L
+#---- incremental_types.R__R/b.R
+#: @type Widget {integer}
+widget <- 1L
+#---- local.R__R/main.R
+local({
+  a <- 1L
+  a
+})
+a
+#---- local.R__R/main.R
+x <- 1L
+local({
+  x
+})
+#---- local.R__R/main.R
+local(1L + 2L)
+#---- local.R__R/main.R
+x <- 1L
+local({
+  x <- "inner"
+  x
+})
+x
+#---- locals.R__R/main.R
+f <- function() {
+  value <- 1L
+  value
+}
+#---- locals.R__R/main.R
+f <- function() {
+  value <- 1L
+  value <- "ok"
+  value
+}
+#---- locals.R__R/main.R
+f <- function(x) {
+  x <- x
+  x
+}
+#---- locals.R__R/main.R
+x <- 1L
+f <- function() {
+  x <- "ok"
+  x
+}
+#---- locals.R__R/main.R
+f <- function(x) {
+  x <- "ok"
+  x
+}
+#---- locals.R__R/main.R
+x <- 1L
+f <- function(y) {
+  x <- y
+  x
+}
+#---- maybe_undefined.R__R/main.R
+f <- function() {
+  for (item in list(1L)) {
+    value <- 1L
+  }
+  value
+}
+#---- maybe_undefined.R__R/main.R
+f <- function() {
+  while (TRUE) {
+    x <- 1L
+  }
+  x
+}
+#---- maybe_undefined.R__R/main.R
+f <- function() {
+  repeat {
+    x <- 1L
+  }
+  x
+}
+#---- maybe_undefined.R__R/main.R
+f <- function() {
+  if (TRUE) {
+    x <- 1L
+    x
+  }
+}
+#---- maybe_undefined.R__R/main.R
+f <- function() {
+  for (item in list(1L)) {
+    x <- 1L
+    x
+  }
+}
+#---- maybe_undefined.R__R/main.R
+f <- function() {
+  while (TRUE) {
+    x <- 1L
+    x
+  }
+}
+#---- maybe_undefined.R__R/main.R
+f <- function(cond) {
+  if (cond) {
+    x <- 1L
+  }
+  x
+}
+#---- maybe_undefined.R__R/main.R
+f <- function(cond) {
+  if (cond) {
+    1L
+  } else {
+    x <- 2L
+  }
+  x
+}
+#---- maybe_undefined.R__R/main.R
+f <- function(cond) {
+  if (cond) {
+    if (cond) {
+      x <- 1L
+    }
+  }
+  x
+}
+#---- maybe_undefined.R__R/main.R
+f <- function(cond) {
+  if (cond) {
+    for (item in list(1L)) {
+      x <- 1L
+    }
+  }
+  x
+}
+#---- maybe_undefined.R__R/main.R
+f <- function(cond) {
+  x <- 0L
+  if (cond) {
+    x <- 1L
+  } else {
+    x <- 2L
+  }
+  x
+}
+#---- maybe_undefined.R__R/main.R
+f <- function(cond) {
+  if (cond) {
+    x <- 1L
+  } else {
+    x <- 2L
+  }
+  x
+}
+#---- maybe_undefined.R__R/main.R
+f <- function(cond) {
+  if (cond) {
+    x <- 1L
+  } else {
+    x
+  }
+}
+#---- maybe_undefined.R__R/main.R
+f <- function(cond) {
+  while (cond) {
+    y <- x
+    x <- 1L
+  }
+  y
+}
+#---- parameters.R__R/main.R
+pair <- function(x, y) {
+  x
+  y
+}
+#---- parameters.R__R/main.R
+mirror <- function(x, y) x
+#---- parameters.R__R/main.R
+mirror <- function(x) {
+  helper <- 1L
+  x
+}
+#---- parameters.R__R/main.R
+x <- 1L
+f <- function(x) x
+#---- parameters.R__R/main.R
+x <- 1L
+f <- function(y) x
+#---- parameters.R__R/c.R
+f <- function(x) x
+#---- scope_reuse.R__R/main.R
+x <- 1L
+f <- function() {
+  x <- "ok"
+  {
+    x
+  }
+}
+#---- scope_reuse.R__R/main.R
+x <- 1L
+f <- function() {
+  {
+    x <- "ok"
+  }
+  x
+}
+#---- scope_reuse.R__R/main.R
+f <- function() {
+  {
+    x <- 1L
+  }
+  x
+}
+#---- scope_reuse.R__R/main.R
+f <- function() {
+  {
+    x <- 1L
+    {
+      x
+    }
+  }
+  x
+}
+#---- scope_reuse.R__R/main.R
+x <- 0L
+for (x in list(1L)) {
+  {
+    x <- 2L
+  }
+  x
+}
+x
+#---- scope_reuse.R__R/main.R
+for (item in list(1L)) {
+  value <- 1L
+  value
+}
+#---- scope_reuse.R__R/main.R
+x <- 1L
+f <- function() {
+  {
+    x
+  }
+}
+#---- shadowing.R__R/main.R
+x <- 1L
+f <- function(x) {
+  x <- "ok"
+  x
+}
+#---- shadowing.R__R/b.R
+x <- x
+#---- top_level.R__R/main.R
+x <- 1L
+x
+#---- top_level.R__R/main.R
+x
+x <- 1L
+#---- top_level.R__R/main.R
+value <- 1L
+mirror <- function(x) x
+mirror(value)
+#---- top_level.R__R/main.R
+x <- 1L
+y <- "ok"
+x
+y
+#---- top_level.R__R/main.R
+x <- 1L
+x <- "ok"
+x
+#---- top_level.R__R/main.R
+x <- 1L
+x
+x <- "ok"
+x
+#---- top_level.R__R/main.R
+x <- 1L
+x <- x
+x
+#---- type_failures.R__R/main.R
+#: @type Person {integer}
+#: @type Person {double}
+value <- 1L
+#---- type_failures.R__R/main.R
+#: @alias Person {integer}
+#: @alias Person {double}
+value <- 1L
+#---- type_failures.R__R/main.R
+#: @type Person {integer}
+#: @alias Person {double}
+value <- 1L
+#---- type_failures.R__R/main.R
+#: @alias Person {integer}
+#: @type Person {double}
+value <- 1L
+#---- type_failures.R__R/a.R
+#: @alias Person {integer}
+#---- type_failures.R__R/b.R
+#: @alias Person {double}
+#---- type_failures.R__R/main.R
+#: list{age: intgr}
+record <- list(age = 1L)
+#---- type_failures.R__R/main.R
+#: @alias Box<T> {list{value: T}}
+
+#: Box<Person>
+value <- list(value = 1L)
+#---- type_failures.R__R/main.R
+#: @alias Pair<T, U> {list{left: T, right: U}}
+
+#: Pair<integer>
+value <- list(left = 1L, right = 2L)
+#---- type_failures.R__R/main.R
+#: @type Person<T> {list{value: T}}
+
+#: Person<integer, character>
+value <- list(value = 1L)
+#---- type_failures.R__R/main.R
+#: @type Person {integer}
+
+#: Person<integer>
+value <- 1L
+#---- type_failures.R__R/main.R
+#: @new Person
+value <- list(name = "bob")
+#---- type_failures.R__R/main.R
+#: @type Person<T> {list{value: T}}
+
+#: @new Person
+value <- list(value = 1L)
+#---- type_failures.R__R/main.R
+#: @new list{name: character}
+value <- list(name = "bob")
+#---- type_failures.R__R/main.R
+#: @type Person<T> {list{value: T}}
+
+#: @new Person<integer, character>
+value <- list(value = 1L)
+#---- type_lookup.R__R/main.R
+#: @type Team {list{owner: Person}}
+#: @type Person {list{name: character}}
+value <- 1L
+#---- type_lookup.R__R/a.R
+#: @type Team {list{owner: Person}}
+#---- type_lookup.R__R/b.R
+#: @alias TeamOwner {Person}
+#---- type_lookup.R__R/main.R
+#: @type Person {integer}
+
+#: Person
+value <- 1L
+#---- type_lookup.R__R/main.R
+#: @alias Count {integer}
+
+#: Count
+value <- 1L
+#---- type_lookup.R__R/b.R
+#: Count
+value <- 1L
+#---- type_lookup.R__R/main.R
+#: @type Person {list{name: character}}
+
+#: @new Person
+value <- list(name = "bob")
+#---- type_lookup.R__R/main.R
+#: @type Person<T> {list{value: T}}
+
+#: @new Person<integer>
+value <- list(value = 1L)
+#---- type_shadowing.R__R/main.R
+#: @type T {integer}
+#: @type Box<T> {list{value: T}}
+value <- 1L
+#---- type_shadowing.R__R/main.R
+#: @alias T {integer}
+#: @alias Box<T> {list{value: T}}
+value <- 1L
+#---- type_shadowing.R__R/a.R
+#: @type T {integer}
+#---- type_shadowing.R__R/b.R
+#: @type Box<T> {list{value: T}}
+#---- type_shadowing.R__R/a.R
+#: @alias T {integer}
+#---- type_shadowing.R__R/main.R
+#: @type Box<T, T> {list{value: T}}
+value <- 1L
+#---- closures.R__local_recursive_function_resolves_its_own_name
+driver <- function(n) {
+  fact <- function(k) {
+    if (k <= 1L) 1L else k * fact(k - 1L)
+  }
+  fact(n)
+}
+#---- closures.R__non_closure_rhs_still_reads_the_old_binding
+outer_value <- 1L
+f <- function() {
+  outer_value <- outer_value + 1L
+  outer_value
+}
+#---- closures.R__data_table_brackets_mask_column_references
+report <- function(dt) {
+  dt[region == "west", .(total = sum(amount)), by = product]
+}
+#---- closures.R__walrus_marks_the_mask
+add_revenue <- function(dt) {
+  dt[, revenue := price * quantity]
+}
+#---- closures.R__base_indexing_stays_lexical
+pick <- function(m) {
+  m[not_a_column]
+}
+#---- closures.R__with_family_masks_after_the_data
+peek <- function(dt) {
+  with(dt, mean(score_col))
+}

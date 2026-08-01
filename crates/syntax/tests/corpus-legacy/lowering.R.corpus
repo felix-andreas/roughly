@@ -1,0 +1,220 @@
+#---- annotations.R__top_level_assignment
+#: integer
+x <- 1L
+#---- annotations.R__function_assignment
+#: fn(integer) -> integer
+f <- function(x) x
+#---- annotations.R__nested_block_annotation
+{
+  #: integer
+  x <- 1L
+}
+#---- annotations.R__if_unknown_annotation
+#: @if-unknown integer
+x <- 1L
+#---- annotations.R__trust_annotation
+#: @trust integer
+x <- 1L
+#---- annotations.R__nominal_introduction_annotation
+#: @type Person {list{name: character}}
+
+#: @new Person
+x <- list(name = "bob")
+#---- annotations.R__generic_nominal_introduction_annotation
+#: @type Person<T> {T}
+
+#: @new Person<integer>
+x <- 1L
+#---- annotations.R__checked_generic_nominal_annotation
+#: @type Person<T> {list{value: T}}
+
+#: Person<integer>
+x <- list(value = 1L)
+#---- annotations.R__expanded_optional_parameter_annotation
+#: @param count {integer}
+#: @param [label] {character}
+#: @returns {integer}
+f <- function(count, label = NULL) count
+#---- annotations.R__multiline_annotation
+#: @param a {integer}
+#: @param b {integer}
+#: @return {integer}
+f <- function(a, b) a + b
+#---- annotations.R__standalone_alias
+#: @alias Count {integer}
+#---- annotations.R__generic_alias_definition
+#: @alias Box<T> {list{value: T}}
+#---- annotations.R__standalone_type
+#: @type Pair<T, U> {list{first: T, second: U}}
+#---- annotations.R__multiline_definition_block
+#: @alias PersonShape {list{name: character}}
+#: @type Person {PersonShape}
+#---- basics.R__literals
+1L
+1.5
+"hello"
+TRUE
+#---- basics.R__standalone_type_alias
+#: @alias User {list{id: integer, name: character}}
+#---- basics.R__namespace_get_lowers
+stats::sd
+#---- basics.R__internal_namespace_get_lowers
+stats:::sd
+#---- control_flow.R__block_simple
+{
+  1L
+  2L
+}
+#---- control_flow.R__block_trailing_semicolon
+{
+  1L;
+}
+#---- control_flow.R__if_statement
+if (TRUE) 1L else 2L
+#---- control_flow.R__if_statement_no_else
+if (FALSE) "no"
+#---- control_flow.R__for_loop
+for (i in 1:10) print(i)
+#---- control_flow.R__while_loop
+while (TRUE) {
+  break
+}
+#---- control_flow.R__repeat_loop
+repeat {
+  next
+}
+#---- data_structures.R__subset_single
+x[1L]
+#---- data_structures.R__subset_multiple
+x[1L, 2L]
+#---- data_structures.R__subset_named
+x[row = 1L, col = 2L]
+#---- data_structures.R__subset2_single
+x[[1L]]
+#---- data_structures.R__subset2_multiple
+x[[1L, 2L]]
+#---- data_structures.R__subset2_named
+x[[row = 1L, col = 2L]]
+#---- data_structures.R__subset2_string_literal_converted
+x[["a"]]
+#---- data_structures.R__dollar_identifier
+x$a
+#---- data_structures.R__dollar_string_converted
+x$"a"
+#---- functions.R__empty_function
+function() NULL
+#---- functions.R__one_parameter
+function(x) x
+#---- functions.R__multiple_parameters
+function(a, b, c) a
+#---- functions.R__parameter_with_default
+function(count, label = NULL) count
+#---- functions.R__simple_call
+f()
+#---- functions.R__call_with_arguments
+f(1L, "a")
+#---- functions.R__call_with_named_arguments
+f(x = 1L, y = 2L)
+#---- functions.R__call_with_mixed_arguments
+f(1L, y = 2L)
+#---- functions.R__library_bare_name_lowers_as_character
+library(stats)
+#---- functions.R__require_bare_name_lowers_as_character
+require(utils)
+#---- functions.R__help_bare_name_lowers_as_character
+help(mean)
+#---- functions.R__library_string_stays_a_string
+library("stats")
+#---- functions.R__library_named_first_argument_stays_a_reference
+library(package = stats)
+#---- operators.R__unary_minus
+-1L
+#---- operators.R__binary_plus
+1L + 2L
+#---- operators.R__binary_minus
+1L - 2L
+#---- operators.R__binary_multiply
+1L * 2L
+#---- operators.R__binary_divide
+1L / 2L
+#---- operators.R__binary_power
+1L ** 2L
+#---- operators.R__logical_and
+TRUE && FALSE
+#---- operators.R__logical_or
+TRUE || FALSE
+#---- operators.R__assignment_left
+x <- 1L
+#---- operators.R__assignment_equals
+x = 1L
+#---- syntax.R__arguments_missing_closing_delimiter
+f(
+#---- syntax.R__braced_expression_missing_closing_delimiter
+{
+  1L
+#---- syntax.R__parameters_missing_closing_delimiter
+function(value value
+#---- syntax.R__parenthesized_expression_missing_closing_delimiter
+(1L
+#---- syntax.R__for_head_missing_closing_delimiter
+for (x in a {
+}
+#---- syntax.R__if_head_missing_closing_delimiter
+if (TRUE
+  1L
+else 2L
+#---- syntax.R__while_head_missing_closing_delimiter
+while (TRUE
+  print(value)
+#---- syntax.R__if_missing_body
+if (TRUE)
+#---- syntax.R__while_missing_body
+while (TRUE)
+#---- syntax.R__for_missing_body
+for (item in values)
+#---- syntax.R__if_missing_condition
+if () 1L
+#---- syntax.R__while_missing_condition
+while () 1L
+#---- syntax.R__for_missing_sequence
+for (item in ) 1L
+#---- syntax.R__binary_operator_missing_rhs
+1L +
+#---- syntax.R__function_definition_missing_body
+function(value)
+#---- syntax.R__bare_open_paren
+(
+#---- syntax.R__bare_open_brace
+{
+#---- syntax.R__bare_open_bracket
+[
+#---- syntax.R__bare_open_double_bracket
+[[
+#---- syntax.R__bare_close_paren
+)
+#---- syntax.R__bare_close_brace
+}
+#---- syntax.R__bare_close_bracket
+]
+#---- syntax.R__bare_close_double_bracket
+]]
+#---- syntax.R__generic_unexpected_token
+,
+#---- syntax.R__missing_following_expression_at_end_of_block
+{
+  #: integer
+}
+#---- syntax.R__comment_after_typing_comment
+#: integer
+# regular comment
+value <- 1L
+#---- syntax.R__empty_line_before_normal_comment
+#: integer
+
+# regular comment
+value <- 1L
+#---- syntax.R__empty_line_before_typing_comment
+#: integer
+
+#: character
+value <- 1L

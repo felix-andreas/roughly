@@ -1762,8 +1762,27 @@ code does not run a single one of them** — `legacy/fixtures` is a harness-only
 new-stack test reading those directories. Case-name overlap is 15 of 138 for ide and 1 for the whole
 typecheck suite, so the corpus was reimplemented rather than ported. Name overlap understates
 behavioural overlap and should not be read as 2,830 cases of missing coverage — but it does establish
-that nothing has shown the new suites cover what those do. Mine that corpus before anyone proposes
-deleting it; the one directory partially mined so far (ide) surfaced two real bugs.
+that nothing has shown the new suites cover what those do.
+
+**The inputs are now mined, which is the part that transfers.** 1,967 distinct sources live in
+`crates/syntax/tests/corpus-legacy/` and run in the `syntax`, `format` and `semantics` invariant
+batteries (see the testing page). Expectations deliberately did **not** come with them: the naming
+suite renders binding-resolution trees and the type suites use an older notation, so bulk-blessing
+would encode today's behavior as the contract. What ran was measured rather than assumed — all 2,447
+extracted sources through `ry check`, **zero crashes and zero non-clean exits** — and the invariants
+pass on all of them, so this arm is a regression net rather than a bug-finder today.
+
+Two findings from the mining worth keeping. The frozen `type_syntax` suite stores **bare annotation
+bodies** without the `#:` marker, because that stack parsed the type grammar standalone; 287 of its 303
+cases therefore read as `expected a statement, found @` until the marker is prepended, which is a
+format difference and not a parser gap. And automated *semantic* mining has a high noise floor: the
+sources are fragments whose declaring context lives in the case's other files, so `@new Person` alone
+reports an unknown type. Adjudicating the type suites needs per-case context, not a bulk pass.
+
+What is left before deleting that directory is the **expectation** half: a differential triage
+emitting (id, source, frozen expectation, new rendering), bucketed by shape, adjudicated per suite
+against the type-system reference. Priority `naming` (513 cases, no new-stack counterpart at all),
+then typecheck, type_syntax, diagnostics, ide.
 
 ## Open — rename to `ry`: what is left
 

@@ -116,6 +116,34 @@ the coverage-guided targets below share the exact same contracts. The `format` a
 harnesses additionally carry a `fuzz_regressions_hold_invariants` battery pinning inputs those
 targets have broken; `syntax` and `ide` have no such battery yet.
 
+### The mined legacy corpus
+
+`crates/syntax/tests/corpus-legacy/*.R.corpus` holds 1,967 distinct R programs extracted from the
+frozen stack's fixture suites, and `syntax::testing::legacy_corpus_sources` reads them. The `syntax`,
+`format` and `semantics` batteries each run the whole set.
+
+They are kept for their **inputs**, not their expectations. That stack's suites hold ~2,830 curated
+edge cases, but their expected output cannot be ported — the naming suite renders binding-resolution
+trees, and the type suites use an older notation (`fn(x: ?1) -> ?1` where the shipping crates render
+`<T> fn(x: T) -> T`) — so bulk-blessing them would encode today's behavior as the contract rather than
+check it. Case-name overlap with the current suites is 15 of 138 for ide and 1 across the whole
+typecheck suite, so the corpus was reimplemented rather than ported, and **nothing in the shipping
+crates ran a single one of those programs** until this arm existed: the harness that runs them drives
+them against the frozen oracle.
+
+The invariants need no expectations, which is what makes the inputs usable on their own: never panic,
+lossless reprint and tree geometry in `syntax`, the preservation oracle in `format`, and diagnostic
+ranges inside their file in `semantics`. The semantics arm shares **one** database across the whole
+corpus rather than using the per-input battery — a fresh database costs a stub re-parse each — so it
+asserts what a shared database can and leaves determinism and incremental equivalence to the generated
+arms. Each arm asserts the corpus is non-empty, so deleting it fails loudly instead of passing green
+on zero cases.
+
+Regenerating: the corpus is derived from `legacy/analysis-legacy/tests/**/*.test` by taking each
+case's source between its `#---- <id>` header and the `#++++` expectation, stripping the per-file
+headers multi-file cases use, and deduplicating. It is committed rather than derived at test time so
+it survives the eventual deletion of that directory.
+
 ### Coverage-guided fuzzing
 
 `fuzz/` is a cargo-fuzz crate (its own workspace, excluded from the main one) with libFuzzer

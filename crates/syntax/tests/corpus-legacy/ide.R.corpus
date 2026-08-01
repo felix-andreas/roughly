@@ -1,0 +1,485 @@
+#---- basics__R/main.R
+wrapper <- function(parameter, partner) {
+  inner <- function(inner_parameter) {
+    pa
+    inner_p
+  }
+  pa
+}
+#---- basics__R/main.R
+wrapper <- function(value) {
+  inner <- function(value) {
+    va
+  }
+}
+#---- basics__R/main.R
+helper <- function(value) value
+wrapper <- function(argument) {
+  local_value <- argument
+  lo
+}
+he
+#---- basics__R/main.R
+wrapper <- function() {
+  outer_value <- 1L
+  inner <- function() {
+    inn
+    outer_v
+  }
+}
+#---- basics__R/main.R
+wrapper <- function() {
+  value <- 1L
+  inner <- function() {
+    value <- 2L
+    va
+  }
+}
+#---- basics__R/main.R
+wrapper <- function() {
+  function(param_a) {
+    var_a <- 1L
+    va
+    pa
+  }
+  function(param_b) {
+    var_b <- 2L
+    va
+    pa
+  }
+}
+#---- basics__R/main.R
+i
+na_
+#---- basics__R/main.R
+wrapper <- function(x) {
+  {
+    block_value <- 1L
+    block_v
+  }
+  if (TRUE) {
+    if_value <- 1L
+    if_v
+  }
+  while (TRUE) {
+    while_value <- 1L
+    while_v
+  }
+  repeat {
+    repeat_value <- 1L
+    repeat_v
+  }
+  switch(
+    x,
+    a = {
+      switch_value <- 1L
+      switch_v
+    }
+  )
+}
+#---- basics__R/main.R
+wrapper <- function(values) {
+  for (item in values) {
+    inner_value <- item
+    ite
+    inner_v
+  }
+}
+#---- basics__R/main.R
+wrapper <- function(values) {
+  for (item in values) {
+    inner <- function(item) {
+      ite
+    }
+    ite
+  }
+}
+#---- basics__R/main.R
+value <- function() NULL
+wrapper <- function() {
+  value <- 1L
+  va
+}
+#---- contexts__R/main.R
+config$alpha
+config$beta
+config$al
+#---- contexts__R/main.R
+object@first_field
+object@second_field
+object@fi
+#---- contexts__R/main.R
+pkg::alpha_fun
+pkg::beta_fun
+pkg::al
+#---- contexts__R/main.R
+pkg:al
+#---- contexts__R/main.R
+MyValue <- 1L
+my
+#---- contexts__R/main.R
+helper <- function() 1L
+constant <- 2L
+wrapper <- function() {
+  hel
+  con
+}
+#---- contexts__R/main.R
+forwarded <- 1L
+wrapper <- function(fortune) {
+  fo
+}
+#---- contexts__R/main.R
+value <- 1L
+zz
+#---- basics__R/main.R
+wrapper <- function() {
+  value <- 1L
+  value
+}
+#---- basics__R/main.R
+f <- function(parameter) parameter
+#---- basics__R/main.R
+wrapper <- function(items) {
+  for (item in items) {
+    item
+  }
+}
+#---- basics__R/main.R
+wrapper <- function() {
+  value <- 1L
+  inner <- function() {
+    value <- 2L
+    value
+  }
+  value
+}
+#---- basics__R/main.R
+wrapper <- function() {
+  value <- 1L
+  value
+  value <- 2L
+  value
+}
+#---- basics__R/def.R
+helper <- function(value) value
+#---- basics__R/use.R
+result <- helper(1L)
+#---- basics__R/main.R
+value <- 1L
+result <- value
+#---- basics__R/use.R
+wrapper <- function() {
+  helper(1L)
+}
+#---- basics__R/main.R
+value <- 1L
+value
+value <- 2L
+#---- basics__R/main.R
+wrapper <- function() {
+  unknown_value
+}
+#---- basics__R/main.R
+values <- c(1L, 2L)
+#---- basics__R/main.R
+object <- 1L
+object$field
+#---- basics__R/main.R
+if (TRUE) 1L
+#---- basics__R/main.R
+wrapper <- function() {
+  value = 1L
+  value
+}
+#---- basics__R/main.R
+wrapper <- function(flag) {
+  if (flag) value <- 1L
+  value
+}
+#---- basics__R/b.R
+value <- 2L
+#---- basics__R/c.R
+result <- value
+#---- basics__edit R/def.R 1:1-1:1 -> "other <- 2L\n"
+#!!!! goto_definition after_edit.goto_definition
+R/use.R:1:11
+#---- basics__delete R/def.R
+#!!!! goto_definition after_delete.goto_definition
+R/use.R:1:11
+#---- basics__R/classes.R
+setClass("Animal", representation(name = "character"))
+setGeneric("speak", function(x) standardGeneric("speak"))
+#---- basics__R/methods.R
+setMethod("speak", "Animal", function(x) x)
+make <- function() new("Animal")
+#---- basics__R/main.R
+#: @type Person {list{name: character}}
+
+#: Person
+who <- make_person()
+#---- basics__R/main.R
+#: @alias Identifier {character}
+
+#: Identifier
+id <- "x"
+#---- basics__R/types.R
+#: @type Person {list{name: character}}
+#---- basics__R/main.R
+#: Person
+who <- make_person()
+#---- basics__R/main.R
+value <- function(parameter) parameter
+#---- basics__R/main.R
+mirror <- function(argument) argument
+value <- 1L
+result <- mirror(value)
+#---- basics__R/main.R
+value <- 1L
+other <- 2L
+result <- value + other
+#---- basics__R/main.R
+data <- 1L
+index <- 1L
+result <- data[index]
+#---- basics__R/main.R
+data <- 1L
+index <- 1L
+result <- data[[index]]
+#---- basics__R/main.R
+data <- 1L
+result <- data$field
+#---- basics__R/main.R
+value <- 1L
+block <- { value }
+negated <- -value
+#---- basics__R/main.R
+value <- 1L
+items <- 2L
+chooser <- if (TRUE) value else 0L
+result <- for (item in items) value
+loop <- while (TRUE) value
+again <- repeat value
+#---- basics__move R/a.R -> R/c.R
+#!!!! hover lookup.hover
+R/b.R:1:11
+#---- details__R/main.R
+nothing <- NULL
+flag <- TRUE
+count <- 1L
+ratio <- 1.5
+text <- "hello"
+named <- text["name"]
+#---- details__R/main.R
+#: integer
+checked <- 1L
+#: @if-unknown integer
+maybe <- 2L
+#: @trust integer
+trusted <- 3L
+#---- details__R/main.R
+#: @type Person {list{name: character}}
+
+#: @new Person
+person <- make_person()
+#---- details__R/main.R
+#: @type Person {list{name: character}}
+#: @alias Identifier {character}
+#: @type Pair<T, U> {list{first: T, second: U}}
+#---- details__R/main.R
+f <- function(flag) {
+  x <- 1L
+  if (flag) {
+    x <- 2L
+  }
+  x
+}
+#---- details__R/main.R
+f <- function(flag) {
+  x <- 1L
+  if (flag) {
+    x <- "two"
+  }
+  x
+}
+#---- details__R/main.R
+f <- function() {
+  total <- 0L
+  for (i in 1:3) {
+    total <- total + i
+  }
+  total
+}
+#---- details__R/main.R
+mirror <- function(x) x
+mirror
+#---- details__R/main.R
+pair <- function(x, y) x
+pair
+#---- details__R/main.R
+value <- undefined_fn()
+value
+#---- details__R/main.R
+undefined_fn(1L)
+#---- details__R/main.R
+#: list{name: character, age: integer}
+record <- make_record()
+#---- details__R/main.R
+#: @type Person {list{name: character}}
+
+#: fn(
+#:   subject: Person
+#: ) -> character
+greet <- function(subject) "hi"
+#---- details__R/main.R
+value <- if (TRUE) 1L else "foo"
+#---- details__R/main.R
+for (item in list(a = 1L, b = "two")) item
+#---- details__R/main.R
+print(1L)
+#---- details__R/main.R
+length(c(1L, 2L))
+#---- details__R/main.R
+total <- sum(1L, 2L)
+#---- inference__R/main.R
+add_one <- function(x) x + 1L
+add_one
+#---- inference__R/main.R
+make <- function(x) list(x, 1L)
+make
+#---- inference__R/main.R
+wrap <- function(first, second) second
+#---- basics__R/main.R
+count <- 1L
+label <- "hello"
+ratio <- 1L / 2L
+#: integer
+annotated <- 5L
+#---- basics__R/main.R
+compute <- function(x) {
+  doubled <- x + x
+  doubled
+}
+#---- basics__R/main.R
+make <- function() 1L
+#---- inference__R/main.R
+mirror <- function(x) x
+#---- inference__R/main.R
+g <- function(x) {
+  y <- x
+  y
+}
+#---- inference__R/main.R
+mystery <- function() undefined_fn()
+#---- basics__R/main.R
+wrapper <- function() {
+  value <- 1L
+  value
+  identity(value)
+}
+#---- basics__R/use.R
+result <- value
+other <- value
+#---- basics__R/use.R
+wrapper <- function() {
+  helper(1L)
+}
+result <- helper(2L)
+#---- basics__R/main.R
+pkg::func
+#---- basics__move R/a.R -> R/c.R
+#!!!! references after_move.references
+R/b.R:1:11
+#---- basics__R/use.R
+result <- value
+helper <- function() {
+  value <- 99L
+  value
+}
+#---- basics__R/classes.R
+setClass("Animal", representation(name = "character"))
+#---- basics__R/a.R
+#: @type handle
+#: fn(x: handle) -> handle
+open_it <- function(x) x
+#---- basics__R/b.R
+#: fn(value: handle) -> NULL
+close_it <- function(value) NULL
+#---- basics__R/main.R
+wrapper <- function(parameter) parameter
+#---- basics__R/main.R
+wrapper <- function(value) {
+  inner <- function() value
+  value
+}
+#---- basics__R/main.R
+wrapper <- function(value) {
+  inner <- function(value) value
+  value
+}
+#---- basics__R/main.R
+wrapper <- function() {
+  value <- 1L
+  inner <- function() value
+  value
+}
+#---- basics__R/main.R
+value <- 1L
+wrapper <- function() {
+  value <- 2L
+  value
+}
+value
+#---- basics__R/main.R
+wrapper <- function(values) {
+  for (item in values) item
+}
+#---- basics__R/main.R
+wrapper <- function(values) {
+  for (item in values) {
+    inner <- function(item) item
+    item
+  }
+}
+#---- basics__R/main.R
+obj@field
+#---- basics__R/main.R
+obj$field
+#---- basics__R/main.R
+wrapper <- function() {
+  missing_name
+}
+#---- basics__R/a.R
+#: @alias score {double}
+#: fn(x: score) -> score
+bump <- function(x) x
+#---- basics__R/b.R
+#: fn(value: score) -> score
+keep <- function(value) value
+#---- basics__R/main.R
+config <- make_config()
+port <- config@port
+config@host <- "localhost"
+#---- basics__R/main.R
+#: fn(count: integer, label: character) -> integer
+describe <- function(count, label) count
+result <- describe(1L, "x")
+#---- basics__R/main.R
+#: fn(count: integer, label: character) -> integer
+describe <- function(count, label) count
+result <- describe(label = "x", 1L)
+#---- basics__R/main.R
+#: @trust fn(...: character, [quiet]: logical) -> character
+join <- function(...) ""
+text <- join("a", "b")
+#---- basics__R/main.R
+#: @trust fn([quiet]: logical, ...: character) -> character
+join <- function(quiet = FALSE, ...) ""
+text <- join(TRUE, "b")
+#---- generics__R/main.R
+result <- lapply()
+#---- generics__R/main.R
+result <- lapply(list(1L, 2L), function(item) item)
+#---- generics__R/main.R
+pick <- function(x, y) x
+value <- pick()

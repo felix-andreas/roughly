@@ -1,0 +1,680 @@
+#---- custom_types.R__nominal_type_definition
+@type Person {list{name: character, age: double}}
+#---- custom_types.R__nominal_type_definition_with_whitespace
+@type   Person   { list{ name: character, age: double } }
+#---- custom_types.R__alias_definition
+@alias PersonShape {list{name: character, age: double}}
+#---- custom_types.R__alias_definition_with_nested_function
+@alias Formatter {fn(count: integer) -> character}
+#---- custom_types.R__multiline_definition_block
+@type Person {list{name: character, age: double}}
+@alias Team {list{owner: Person}}
+#---- custom_types.R__nominal_introduction
+@new Person
+#---- custom_types.R__nominal_introduction_with_whitespace
+@new   Person
+#---- custom_types.R__generic_nominal_introduction
+@new Person<integer>
+#---- custom_types.R__nested_generic_nominal_introduction
+@new Result<Person<integer>>
+#---- custom_types.R__invalid_nominal_introduction_missing_name
+@new
+#---- custom_types.R__invalid_nominal_introduction_scalar_payload
+@new integer
+#---- custom_types.R__invalid_nominal_introduction_structural_payload
+@new list{name: character}
+#---- custom_types.R__invalid_nominal_introduction_nullable_payload
+@new Person | NULL
+#---- custom_types.R__invalid_nominal_introduction_function_payload
+@new fn(integer) -> integer
+#---- custom_types.R__bare_named_type_reference
+Person
+#---- custom_types.R__alias_name_reference
+PersonShape
+#---- custom_types.R__nullable_named_type_reference
+Person | NULL
+#---- custom_types.R__list_of_named_type
+list[Person]
+#---- custom_types.R__named_list_of_named_type
+list[named: Person]
+#---- custom_types.R__tuple_with_named_type
+list{Person, integer}
+#---- custom_types.R__record_with_named_type
+list{owner: Person}
+#---- custom_types.R__function_with_named_type_parameter_and_return
+fn(Person) -> Person
+#---- custom_types.R__function_with_nullable_named_type_parameter_and_named_list_return
+fn(Person | NULL) -> list[named: Person]
+#---- custom_types.R__invalid_type_definition_missing_name
+@type {list{name: character}}
+#---- custom_types.R__invalid_alias_definition_missing_body
+@alias Person
+#---- custom_types.R__invalid_type_definition_with_trailing_text
+@type Person {list{name: character}} extra
+#---- custom_types.R__mixed_definition_and_compact_annotation_block
+@type Person {list{name: character}}
+integer
+#---- custom_types.R__mixed_definition_and_expanded_annotation_block
+@type Person {list{name: character}}
+@param count {integer}
+@return {Person}
+#---- directives.R__if_unknown_annotation_type
+@if-unknown integer
+#---- directives.R__trust_annotation_type
+@trust list[integer]
+#---- directives.R__trust_annotation_function_type
+@trust fn(count: integer) -> character
+#---- directives.R__if_unknown_annotation_named_type
+@if-unknown Person
+#---- directives.R__trust_annotation_named_type
+@trust Person
+#---- directives.R__trust_annotation_nullable_type
+@trust integer | NULL
+#---- directives.R__if_unknown_annotation_nullable_type
+@if-unknown integer | NULL
+#---- directives.R__invalid_if_unknown_missing_type
+@if-unknown
+#---- directives.R__invalid_trust_missing_type
+@trust
+#---- functions.R__elided_return_renders_elided
+fn(integer)
+#---- functions.R__explicit_null_return_renders_the_arrow
+fn(integer) -> NULL
+#---- functions.R__positional_parameters
+fn(integer,character)->logical
+#---- functions.R__named_parameters
+fn(count:integer,label:character)->integer
+#---- functions.R__mixed_positional_and_named_parameters
+fn(integer,label:character,verbose:logical)->character
+#---- functions.R__nullable_parameter_and_return
+fn(integer | NULL)->character | NULL
+#---- functions.R__function_parameter
+fn(fn(integer)->character)->logical
+#---- functions.R__function_return
+fn(integer)->fn(character)->logical
+#---- functions.R__function_parameter_and_named_parameter
+fn(fn(integer)->character,formatter:fn(character)->raw)->logical
+#---- functions.R__nested_higher_order_function
+fn(fn(integer)->fn(character)->logical)->fn(raw)->double
+#---- functions.R__record_parameter
+fn(list{count:integer,label:character})->logical
+#---- functions.R__list_parameter_and_record_return
+fn(list[integer])->list{sum:integer,mean:double}
+#---- functions.R__named_list_parameter
+fn(payload:list[named:character])->integer
+#---- functions.R__tuple_parameter
+fn(list{integer,character,logical})->raw
+#---- functions.R__expanded_single_parameter
+@param count {integer}
+@return {character}
+#---- functions.R__expanded_multiple_parameters
+@param count {integer}
+@param label {character}
+@return {logical}
+#---- functions.R__expanded_optional_parameter
+@param count {integer}
+@param [label] {character}
+@return {logical}
+#---- functions.R__expanded_returns_alias
+@param value {double}
+@returns {integer}
+#---- functions.R__expanded_without_return_is_elided
+@param count {integer}
+#---- functions.R__expanded_higher_order_parameter
+@param formatter {fn(integer) -> character}
+@param count {integer}
+@return {character}
+#---- functions.R__expanded_structured_return
+@param count {integer}
+@return {list{value: integer, ok: logical}}
+#---- functions.R__multiline_expanded_structured_return
+@param count {integer}
+@param payload {list{
+    label: character,
+    values: list[double]
+}}
+@return {list{
+    ok: logical,
+    result: character
+}}
+#---- functions.R__multiline_expanded_higher_order_parameter
+@param formatter {fn(
+    integer,
+    options: list{
+        verbose: logical
+    }
+) -> character}
+@return {list[named: character]}
+#---- functions.R__compact_optional_named_parameter
+fn(count: integer, [label]: character) -> integer
+#---- functions.R__compact_optional_parameter_without_name_is_rejected
+fn(integer, [character]) -> integer
+#---- functions.R__compact_optional_parameter_missing_colon_is_rejected
+fn([label] character) -> integer
+#---- functions.R__named_parameter_with_interior_dot
+fn(x: double, na.rm: logical) -> double
+#---- functions.R__optional_parameter_with_interior_dot
+fn(x: integer, [length.out]: integer) -> integer[]
+#---- functions.R__dot_allowed_in_type_name
+foo.bar
+#---- functions.R__dot_not_allowed_in_type_parameter
+<T.x> fn(T) -> T
+#---- functions.R__bare_rest_parameter
+fn(...) -> character
+#---- functions.R__typed_rest_parameter
+fn(...: character) -> character
+#---- functions.R__named_rest_parameter
+fn(...values: integer) -> integer
+#---- functions.R__rest_after_fixed_parameters
+fn(sep: character, ...: Any) -> character
+#---- functions.R__rest_after_positional
+fn(integer, ...: double) -> double
+#---- functions.R__generic_rest_parameter
+<T> fn(...: T) -> list[T]
+#---- functions.R__named_parameter_after_rest_is_name_only
+fn(..., x: integer) -> integer
+#---- functions.R__optional_parameters_after_rest
+fn(...: Any, [sep]: character, [collapse]: character | NULL) -> character
+#---- functions.R__parameters_on_both_sides_of_rest
+fn(x: character, ...: character, [domain]: Any) -> character
+#---- functions.R__two_rest_parameters_rejected
+fn(..., ...) -> integer
+#---- functions.R__positional_parameter_after_rest_is_rejected
+fn(...: Any, integer) -> integer
+#---- generics.R__simple_polymorphic_list
+<T> list[T]
+#---- generics.R__simple_polymorphic_record
+<T> list{value: T}
+#---- generics.R__simple_polymorphic_function
+<T> fn(T) -> T
+#---- generics.R__polymorphic_function_with_nullable_return
+<T> fn(T) -> T | NULL
+#---- generics.R__polymorphic_function_with_multiple_parameters
+<T, U> fn(T, U) -> T
+#---- generics.R__multiline_polymorphic_function
+<T> fn(
+    value: T,
+    label: character
+) -> T | NULL
+#---- generics.R__numeric_constrained_binder
+<T: numeric> fn(values: T) -> T
+#---- generics.R__atomic_constrained_binder
+<T: atomic> fn(x: T[]) -> T[]
+#---- generics.R__constrained_and_unconstrained_binders_mix
+<T: numeric, U> fn(x: T, y: U) -> T
+#---- generics.R__expanded_forall_with_constraint
+@forall T: numeric
+@param value {T}
+@return {T}
+#---- generics.R__generic_alias_definition
+@alias Box<T> {list{value: T}}
+#---- generics.R__generic_nominal_definition
+@type Person<T> {list{value: T}}
+#---- generics.R__generic_alias_definition_multiple_parameters
+@alias Pair<T, U> {list{left: T, right: U}}
+#---- generics.R__generic_nominal_definition_nested_structural_type
+@type Result<T> {list{value: T | NULL}}
+#---- generics.R__generic_alias_application
+Box<integer>
+#---- generics.R__generic_alias_application_multiple_arguments
+Pair<integer, character>
+#---- generics.R__generic_nominal_application
+Person<integer>
+#---- generics.R__generic_nominal_nullable_application
+Person<integer> | NULL
+#---- generics.R__generic_named_type_inside_structural_type
+list{owner: Person<integer>}
+#---- generics.R__expanded_single_forall
+@forall T
+@param value {T}
+@return {T}
+#---- generics.R__expanded_multiple_forall_lines
+@forall T
+@forall U
+@param left {T}
+@param right {U}
+@return {T}
+#---- generics.R__expanded_single_forall_multiple_names
+@forall T,U
+@param left {T}
+@param right {U}
+@return {U}
+#---- generics.R__expanded_generic_nullable_return
+@forall T
+@param condition {logical}
+@param value {T}
+@return {T | NULL}
+#---- generics.R__expanded_generic_structural_parameter
+@forall T
+@param values {list[T]}
+@return {list[T]}
+#---- generics.R__generic_atomic_array_suffix
+<T> fn(x: T[]) -> T[]
+#---- generics.R__generic_atomic_named_suffix
+<T> fn(x: T[named]) -> T[]
+#---- invalid_semantics.R__duplicate_type_parameters_in_universal_binder
+<T, T> fn(T) -> T
+#---- invalid_semantics.R__duplicate_type_parameters_in_expanded_forall
+@forall T
+@forall T
+@param value {T}
+@return {T}
+#---- invalid_semantics.R__unknown_constraint_in_universal_binder
+<T: frobnicate> fn(values: T) -> T
+#---- invalid_semantics.R__unknown_constraint_in_expanded_forall
+@forall T: frobnicate
+@param value {T}
+@return {T}
+#---- invalid_semantics.R__consecutive_typing_comments
+integer
+character
+#---- invalid_semantics.R__expanded_param_after_return
+@return {integer}
+@param count {integer}
+#---- invalid_semantics.R__generic_arity_is_not_a_parse_error
+Pair<integer>
+#---- invalid_semantics.R__duplicate_record_field_name
+list{id: integer, id: integer}
+#---- invalid_syntax.R__bare_at_sign
+@
+#---- invalid_syntax.R__unknown_directive_without_payload
+@unknown
+#---- invalid_syntax.R__unknown_directive_with_payload
+@unknown integer
+#---- invalid_syntax.R__bare_list_keyword
+list
+#---- invalid_syntax.R__bare_function_keyword
+fn
+#---- invalid_syntax.R__empty_list_brackets
+list[]
+#---- invalid_syntax.R__empty_named_list_value
+list[named:]
+#---- invalid_syntax.R__unclosed_list_bracket
+list[integer
+#---- invalid_syntax.R__unclosed_list_brace
+list{integer
+#---- invalid_syntax.R__unclosed_function_parameters
+fn(integer
+#---- invalid_syntax.R__unclosed_named_list
+list[named: integer
+#---- invalid_syntax.R__double_comma_in_function_parameters
+fn(integer,,character)
+#---- invalid_syntax.R__double_comma_in_tuple_items
+list{integer,,character}
+#---- invalid_syntax.R__semicolon_in_function_parameters
+fn(integer;character)
+#---- invalid_syntax.R__semicolon_in_tuple_items
+list{integer;character}
+#---- invalid_syntax.R__trailing_closing_brace_after_primitive
+integer}
+#---- invalid_syntax.R__trailing_closing_bracket_after_primitive
+integer]
+#---- invalid_syntax.R__mismatched_named_list_record_closer
+list[named: integer}
+#---- invalid_syntax.R__mismatched_function_list_closer
+fn(integer]
+#---- invalid_syntax.R__square_bracket_named_generic_definition
+@type Person[T] {list{value: T}}
+#---- invalid_syntax.R__square_bracket_named_generic_alias_definition
+@alias Box[T] {list{value: T}}
+#---- invalid_syntax.R__misplaced_binder_inside_named_type_body
+@type Person {<T> list{value: T}}
+#---- invalid_syntax.R__misplaced_binder_inside_named_alias_body
+@alias Box {<T> list{value: T}}
+#---- invalid_syntax.R__attached_function_binder_not_supported
+fn<T>(T) -> T
+#---- invalid_syntax.R__attached_named_type_application_not_supported
+Person[T]
+#---- invalid_syntax.R__bare_forall_without_type
+<T>
+#---- invalid_syntax.R__empty_forall_parameter_list
+<> fn(integer) -> integer
+#---- invalid_syntax.R__trailing_comma_in_forall
+<T,> fn(T) -> T
+#---- invalid_syntax.R__repeated_comma_in_forall
+<T,,U> fn(T) -> U
+#---- invalid_syntax.R__malformed_expanded_forall_trailing_comma
+@forall T,
+#---- invalid_syntax.R__malformed_expanded_forall_double_comma
+@forall T,,U
+#---- invalid_syntax.R__unclosed_universal_binder
+<T fn(T) -> T
+#---- invalid_syntax.R__unclosed_named_generic_application
+Person<integer
+#---- invalid_syntax.R__empty_named_generic_application
+Person<>
+#---- invalid_syntax.R__trailing_comma_in_named_generic_application
+Person<integer,>
+#---- invalid_syntax.R__double_comma_in_named_generic_application
+Person<integer,,character>
+#---- invalid_syntax.R__missing_comma_in_named_generic_application
+Person<integer character>
+#---- invalid_syntax.R__malformed_named_generic_definition_parameter_list
+@alias Box<T,> {list{value: T}}
+#---- invalid_syntax.R__trailing_pipe_in_union
+integer |
+#---- invalid_syntax.R__leading_pipe_in_union
+| integer
+#---- invalid_syntax.R__bare_pipe
+|
+#---- invalid_syntax.R__double_pipe_in_union
+integer || NULL
+#---- lists.R__empty_tuple_like_list
+list{}
+#---- lists.R__single_item_tuple_like_list
+list{integer}
+#---- lists.R__multiple_item_tuple_like_list
+list{integer,character,logical}
+#---- lists.R__tuple_like_list_with_nullable_item
+list{integer|NULL,character}
+#---- lists.R__tuple_like_list_with_nested_tuple
+list{integer,list{character,logical}}
+#---- lists.R__tuple_like_list_with_nested_record
+list{integer,list{label:character,ok:logical}}
+#---- lists.R__tuple_like_list_with_function_item
+list{fn(integer)->character,logical}
+#---- lists.R__simple_homogeneous_list
+list[integer]
+#---- lists.R__nullable_item_list
+list[integer|NULL]
+#---- lists.R__nested_homogeneous_list
+list[list[integer]]
+#---- lists.R__list_of_tuple_like_lists
+list[list{integer,character}]
+#---- lists.R__list_of_record_like_lists
+list[list{length:integer,label:character}]
+#---- lists.R__list_of_functions
+list[fn(integer,label:character)->logical]
+#---- lists.R__simple_named_list
+list[named:integer]
+#---- lists.R__nullable_named_list
+list[named:integer|NULL]
+#---- lists.R__nested_named_list
+list[named:list[integer]]
+#---- lists.R__named_list_of_tuple_like_lists
+list[named:list{integer,character}]
+#---- lists.R__named_list_of_record_like_lists
+list[named:list{length:integer,label:character}]
+#---- lists.R__named_list_of_functions
+list[named:fn(integer)->character]
+#---- lists.R__nested_named_list_inside_record_field_shape
+list{items:list[named:list{integer,character}]}
+#---- lists.R__sibling_record_field_after_named_list_field_shape
+list{items:list[named:list{integer,character}],render:fn(integer)->list{label:character}}
+#---- lists.R__nested_render_field_shape
+list{meta:list{render:fn(integer)->list{label:character}}}
+#---- lists.R__named_list_field_before_sibling_inside_nested_record_shape
+list{meta:list{items:list[named:list{integer,character}],render:character}}
+#---- lists.R__named_list_field_before_function_sibling_inside_nested_record_shape
+list{meta:list{items:list[named:list{integer,character}],render:fn(integer)->character}}
+#---- lists.R__named_list_with_nullable_element_before_sibling_inside_nested_record_shape
+list{meta:list{items:list[named:character|NULL],render:character}}
+#---- lists.R__simple_record_like_list
+list{length:integer}
+#---- lists.R__multiple_field_record_like_list
+list{length:integer,label:character,ok:logical}
+#---- lists.R__record_like_list_with_nullable_field
+list{length:integer|NULL,label:character}
+#---- lists.R__record_like_list_with_tuple_field
+list{items:list{integer,character}}
+#---- lists.R__record_like_list_with_record_field
+list{meta:list{length:integer,label:character}}
+#---- lists.R__record_like_list_with_homogeneous_list_field
+list{items:list[integer],labels:list[character]}
+#---- lists.R__record_like_list_with_named_list_field
+list{items:list[named:integer],labels:list[named:character]}
+#---- lists.R__record_like_list_with_function_field
+list{render:fn(integer,label:character)->character}
+#---- lists.R__deeply_nested_record_like_list
+list{meta:list{items:list[named:list{integer,character}],render:fn(integer)->list{label:character}}}
+#---- lists.R__deeply_nested_record_like_list_with_tuple_like_inner_value
+list{meta:list{items:list[named:list{integer,character}]}}
+#---- lists.R__function_returning_record_inside_record_field
+list{render:fn(integer)->list{label:character}}
+#---- lists.R__malformed_missing_inner_named_list_closing_bracket_before_sibling
+list{meta:list{items:list[named:list{integer,character},render:character}}
+#---- lists.R__mixed_named_and_unnamed_items
+list{integer,label:character}
+#---- lists.R__non_ascii_record_field_name
+list{naïve:integer}
+#---- lists.R__record_field_name_with_interior_dot
+list{na.rm:logical,length.out:integer}
+#---- misc.R__multiline_function_type
+fn(
+    integer,
+    label: character
+) -> logical
+#---- misc.R__multiline_record_type
+list{
+    value: integer,
+    label: character
+}
+#---- misc.R__non_ascii_record_field_name
+list{naïve: integer}
+#---- misc.R__non_ascii_named_type_reference
+Élément
+#---- misc.R__non_ascii_function_parameter_name
+fn(naïve: integer) -> character
+#---- multiline.R__multiline_simple_record_type
+list{
+    label: character,
+    ok: logical
+}
+#---- multiline.R__multiline_record_trailing_comma
+list{
+    id: integer,
+    name: character,
+}
+#---- nested.R__nested_record
+list{meta:list{length:integer}}
+#---- nested.R__nested_record_multiple_fields
+list{meta:list{length:integer,label:character},value:double}
+#---- nested.R__deeply_nested_record
+list{meta:list{shape:list{rows:integer,cols:integer}},payload:list{ok:logical}}
+#---- nested.R__multiline_record_with_nested_named_list_and_function
+list{
+    meta: list{
+        items: list[named: list{
+            integer,
+            character
+        }],
+        render: fn(
+            integer
+        ) -> list{
+            label: character
+        }
+    }
+}
+#---- nested.R__nested_named_list_and_record
+list[named:list{meta:list[named:character],items:list[integer]}]
+#---- nested.R__tuple_containing_record
+list{integer,list{label:character}}
+#---- nested.R__tuple_containing_list
+list{integer,list[character],logical}
+#---- nested.R__record_containing_tuple
+list{shape:list{integer,integer},label:character}
+#---- nested.R__deep_mixed_structure
+list{meta:list{tags:list[character],shape:list{integer,integer}},items:list[list{value:double}]}
+#---- nested.R__function_returning_record
+fn(integer)->list{value:character}
+#---- nested.R__function_returning_list
+fn(integer)->list[character]
+#---- nested.R__function_taking_record
+fn(list{length:integer,label:character})->logical
+#---- nested.R__function_taking_list_of_records
+fn(list[list{value:double}])->integer
+#---- nested.R__higher_order_nested_function
+fn(handler:fn(integer)->list{value:character})->list[named:logical]
+#---- nested.R__deeply_nested_higher_order_function
+fn(loader:fn(list{path:character})->list[list{value:double}],fallback:list{ok:logical})->fn(integer)->list{result:double}
+#---- nested.R__multiline_function_and_record_type_expression
+fn(
+    integer,
+    options: list{
+        label: character,
+        nested: fn(
+            integer,
+            value: list[named: double]
+        ) -> list{
+            ok: logical
+        }
+    }
+) -> list{
+    result: character
+}
+#---- nested.R__multiline_higher_order_function
+fn(
+    handler: fn(
+        integer,
+        label: character
+    ) -> list{
+        ok: logical
+    },
+    fallback: list[named: double]
+) -> fn(
+    character
+) -> list{
+    result: double
+}
+#---- nested.R__nullable_list_item
+list[integer | NULL]
+#---- nested.R__nullable_record_field
+list{value:integer | NULL}
+#---- nested.R__nullable_nested_record
+list{meta:list{value:integer | NULL}}
+#---- nested.R__nullable_function_parameter
+fn(integer | NULL)->character
+#---- nested.R__nullable_function_returning_record
+fn(list{value:integer | NULL})->list{result:character | NULL}
+#---- primitives.R__logical_scalar
+logical
+#---- primitives.R__integer_scalar
+integer
+#---- primitives.R__double_scalar
+double
+#---- primitives.R__complex_scalar
+complex
+#---- primitives.R__character_scalar
+character
+#---- primitives.R__raw_scalar
+raw
+#---- primitives.R__null_uppercase
+NULL
+#---- primitives.R__null_lowercase
+null
+#---- primitives.R__unknown_uppercase
+Unknown
+#---- primitives.R__unknown_lowercase
+unknown
+#---- primitives.R__any_uppercase
+Any
+#---- primitives.R__any_lowercase
+any
+#---- primitives.R__logical_vector
+logical[]
+#---- primitives.R__integer_vector
+integer[]
+#---- primitives.R__double_vector
+double[]
+#---- primitives.R__complex_vector
+complex[]
+#---- primitives.R__character_vector
+character[]
+#---- primitives.R__raw_vector
+raw[]
+#---- primitives.R__logical_named_vector
+logical[named]
+#---- primitives.R__integer_named_vector
+integer[named]
+#---- primitives.R__double_named_vector
+double[named]
+#---- primitives.R__complex_named_vector
+complex[named]
+#---- primitives.R__character_named_vector
+character[named]
+#---- primitives.R__raw_named_vector
+raw[named]
+#---- union.R__nullable_integer
+integer | NULL
+#---- union.R__nullable_logical
+logical|NULL
+#---- union.R__nullable_character_with_lowercase_null
+character | null
+#---- union.R__nullable_integer_with_null_on_left
+NULL | integer
+#---- union.R__nullable_integer_vector
+integer[] | NULL
+#---- union.R__nullable_named_character_vector
+character[named]|NULL
+#---- union.R__nullable_logical_vector_with_lowercase_null
+logical[] | null
+#---- union.R__nullable_named_list_item
+list[named: character | NULL]
+#---- union.R__nullable_record_field
+list{value:integer|NULL}
+#---- union.R__nullable_function_return
+fn(integer)->character|NULL
+#---- union.R__nullable_function_parameter
+fn(integer|NULL)->character
+#---- union.R__nullable_function_return_with_null_on_left
+fn(integer)->NULL | character
+#---- union.R__nullable_function_inside_list
+list[fn(integer)->NULL]
+#---- union.R__nested_nullable_special_record
+list{value:integer|NULL,meta:list{missing:Unknown,default:Any}}
+#---- union.R__special_forms_in_higher_order_function
+fn(handler:fn(Unknown)->Any)->list{result:Any,missing:Unknown|NULL}
+#---- union.R__two_members
+integer | character
+#---- union.R__three_members
+integer | character | logical
+#---- union.R__multi_member_with_null
+integer | character | NULL
+#---- union.R__null_moves_last
+NULL | integer | character
+#---- union.R__duplicate_members_collapse
+integer | character | integer
+#---- union.R__duplicate_null_members_collapse
+integer | NULL | character | NULL
+#---- union.R__any_member_absorbs_union
+integer | Any | character
+#---- union.R__unknown_member_absorbs_union
+integer | Unknown
+#---- union.R__multi_member_function_parameter
+fn(integer | character) -> integer
+#---- union.R__multi_member_function_return
+fn(integer) -> integer | character
+#---- union.R__multi_member_list_item
+list[integer | character]
+#---- union.R__multi_member_record_field
+list{value: integer | character}
+#---- union.R__multi_member_vector_members
+integer[] | character[] | NULL
+#---- union.R__function_member_union
+(fn() -> integer) | NULL
+#---- union.R__function_member_union_with_parameters
+(fn(x: integer) -> character) | NULL
+#---- union.R__two_function_members
+(fn() -> integer) | (fn() -> character)
+#---- union.R__redundant_group_collapses
+(integer)
+#---- union.R__grouped_union_flattens
+(integer | character) | NULL
+#---- union.R__group_in_parameter_position
+fn(callback: (fn() -> integer) | NULL) -> integer
+#---- union.R__group_as_list_item
+list[(fn() -> integer) | NULL]
+#---- union.R__unclosed_group
+(integer
+#---- union.R__empty_group
+()
+#---- union.R__binder_inside_group_rejected
+(<T> fn(x: T) -> T) | NULL
+#---- union.R__invalid_null_null_union
+NULL | NULL
+#---- unsupported.R__higher_rank_function_parameter_not_supported
+fn(transform: <T> fn(T) -> T) -> integer
+#---- unsupported.R__higher_rank_record_field_not_supported
+list{value: <T> list[T]}
+#---- unsupported.R__nested_forall_inside_function_return_not_supported
+fn(integer) -> <T> fn(T) -> T

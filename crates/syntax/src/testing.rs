@@ -43,6 +43,63 @@ pub fn parse_fixture_files(suite_dir: &Path) -> Vec<FixtureFile> {
         .collect()
 }
 
+/// Every source in the mined legacy corpus (`tests/corpus-legacy/*.R.corpus`),
+/// oldest-stack fixture cases kept for their *inputs* rather than their
+/// expectations.
+///
+/// The frozen stack's suites hold ~2,000 curated R edge cases whose expected
+/// output cannot be ported — it renders binding-resolution trees and a different
+/// type notation — but the programs themselves are the richest hand-written
+/// corpus in the repository, and nothing in the shipping crates ran a single one
+/// of them. They are wired into the invariant batteries instead, where no
+/// expectation is needed: never panic, stay deterministic, keep ranges in
+/// bounds, and do not lose code when formatting.
+///
+/// Each file is `#---- <id>` followed by that case's source, up to the next
+/// header. Sources are deduplicated across suites.
+pub fn legacy_corpus_sources() -> Vec<(String, String)> {
+    let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/corpus-legacy");
+    let Ok(entries) = std::fs::read_dir(&directory) else {
+        return Vec::new();
+    };
+    let mut files: Vec<PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "corpus")
+        })
+        .collect();
+    files.sort();
+    let mut sources = Vec::new();
+    for path in files {
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let mut id = String::new();
+        let mut body = String::new();
+        for line in text.lines() {
+            match line.strip_prefix("#---- ") {
+                Some(next) => {
+                    if !id.is_empty() {
+                        sources.push((std::mem::take(&mut id), std::mem::take(&mut body)));
+                    }
+                    id = next.to_owned();
+                    body.clear();
+                }
+                None => {
+                    body.push_str(line);
+                    body.push('\n');
+                }
+            }
+        }
+        if !id.is_empty() {
+            sources.push((id, body));
+        }
+    }
+    sources
+}
+
 /// Reads an environment variable under its `RY_` name, falling back to the
 /// pre-rename `ROUGHLY_` spelling. Both are honoured so a developer's existing
 /// shell aliases and CI scripts keep working after the rename.

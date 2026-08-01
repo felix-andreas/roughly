@@ -230,6 +230,22 @@ fn fixture_sources_hold_invariants() {
     );
 }
 
+/// The mined legacy corpus through the formatter, preservation oracle included:
+/// these are the only invariants those ~2,000 cases have ever been run against.
+#[test]
+fn legacy_corpus_holds_invariants() {
+    let sources = syntax::testing::legacy_corpus_sources();
+    assert!(
+        sources.len() > 1_000,
+        "expected the mined corpus, found {}",
+        sources.len()
+    );
+    for (id, source) in &sources {
+        std::panic::catch_unwind(|| check_invariants(source))
+            .unwrap_or_else(|_| panic!("legacy corpus case `{id}` broke a format invariant"));
+    }
+}
+
 #[test]
 fn fuzz_random_bytes() {
     run_random_bytes(iterations());

@@ -1,0 +1,3294 @@
+#---- annotations.R__compact_annotation_without_return
+#: fn(count: integer)
+log_count <- function(count) { }
+#---- annotations.R__compact_elided_return_is_inferred_from_the_body
+#: fn(count: integer)
+add_one <- function(count) count + 1L
+#---- annotations.R__expanded_param_only_return_is_inferred_from_the_body
+#: @param count {integer}
+add_one <- function(count) count + 1L
+#---- annotations.R__forall_with_elided_return_generalizes
+#: @forall T
+#: @param value {T}
+mirror <- function(value) value
+#---- annotations.R__trusted_elided_return_stays_null
+#: @trust fn(count: integer)
+log_count <- function(count) count
+#---- annotations.R__scalar_checked_annotation
+#: integer
+value <- 1L
+#---- annotations.R__unknown_only_annotation_on_unknown_binding
+#: @if-unknown integer
+value <- 1L ~ 2L
+#---- annotations.R__trusted_annotation_on_incompatible_binding
+#: @trust integer
+value <- "hello"
+#---- annotations.R__list_map_checked_annotation
+#: list[named: integer]
+value <- list(foo = 1L, bar = 2L)
+#---- annotations.R__record_checked_annotation
+#: list{name: character, age: double}
+value <- list(name = "bob", age = 20)
+#---- annotations.R__constrained_binder_scheme_keeps_its_constraint
+#: <T: numeric> fn(values: T) -> T
+passthrough <- function(values) values
+#---- annotations.R__expanded_forall_two_lines_binding
+#: @forall T
+#: @forall U
+#: @param left {T}
+#: @param right {U}
+#: @return {T}
+keep_left <- function(left, right) left
+#---- annotations.R__nullable_return_function_binding
+#: fn(count: integer) -> integer | NULL
+maybe_count <- function(count) {
+  if (count > 0L) count
+}
+#---- annotations.R__higher_order_named_parameter_binding
+#: fn(transform: fn(integer) -> character, count: integer) -> character
+apply_transform <- function(transform, count) transform(count)
+#---- annotations.R__optional_parameter_default_inferred_binding
+pad <- function(value, width = NULL) value
+#---- audit_function_inference.R__first_of_two
+first <- function(x, y) x
+#---- audit_function_inference.R__second_of_two
+second <- function(x, y) y
+#---- audit_function_inference.R__constant_ignores_param
+const <- function(x) "ok"
+#---- audit_function_inference.R__param_numeric_from_add_literal
+inc <- function(x) x + 1L
+#---- audit_function_inference.R__param_numeric_from_negate
+neg <- function(x) -x
+#---- audit_function_inference.R__param_numeric_from_compare
+is_pos <- function(x) x > 0L
+#---- audit_function_inference.R__param_numeric_two_params
+add <- function(a, b) a + b
+#---- audit_function_inference.R__param_numeric_division_double
+halve <- function(x) x / 2
+#---- audit_function_inference.R__param_logical_from_negation
+notx <- function(x) !x
+#---- audit_function_inference.R__param_logical_from_and
+both <- function(x, y) x && y
+#---- audit_function_inference.R__param_logical_from_if_cond
+when <- function(x) if (x) 1L else 2L
+#---- audit_function_inference.R__if_without_else_returns_nullable
+maybe <- function(x) if (x) 1L
+#---- audit_function_inference.R__higher_order_apply
+invoke <- function(f, value) f(value)
+#---- audit_function_inference.R__higher_order_compose
+compose <- function(f, g, x) f(g(x))
+#---- audit_function_inference.R__default_makes_param_optional
+greet <- function(count, label = NULL) count
+#---- audit_function_inference.R__default_non_null_optional
+withdef <- function(x, y = 1L) x + y
+#---- audit_function_inference.R__block_last_expr_return
+f <- function(x) {
+  y <- 1L
+  x
+}
+#---- audit_function_inference.R__let_polymorphism_two_uses
+mirror <- function(x) x
+a <- mirror(1L)
+b <- mirror("foo")
+#---- audit_function_inference.R__alias_of_polymorphic
+mirror <- function(x) x
+alias <- mirror
+#---- audit_function_inference.R__return_arithmetic_result
+sumlit <- function(x, y) x + y + 1L
+#---- audit_function_inference.R__nested_function_returns_function
+adder <- function(x) function(y) x + y
+#---- audit_function_inference.R__param_used_as_nullary_callee
+call_it <- function(f) f()
+#---- audit_function_inference.R__empty_body_returns_null
+noop <- function(x) { }
+#---- audit_function_inference.R__param_passed_to_two_funcs_same_constraint
+twice <- function(x) x + x
+#---- audit_function_inference.R__compare_character_literal
+gtchar <- function(x) x > "a"
+#---- audit_function_inference.R__closure_captures_outer
+outer <- 1L
+capf <- function(x) x + outer
+#---- audit_function_inference.R__param_passed_to_annotated
+#: fn(integer) -> character
+render <- function(n) "ok"
+wrap <- function(x) render(x)
+#---- audit_function_inference.R__nested_let_generalization
+mk <- function(a) {
+  id <- function(x) x
+  id(a)
+}
+#---- audit_function_inference.R__param_used_numeric_then_returned_in_block
+acc <- function(x) {
+  s <- x + 1L
+  s + x
+}
+#---- audit_function_inference.R__higher_order_returns_param_call_twice
+applytwice <- function(f, x) f(f(x))
+#---- audit_function_inference.R__param_or_default_logical
+flagfn <- function(flag = TRUE) if (flag) 1L else 2L
+#---- audit_function_inference.R__if_with_param_value_nullable
+pick <- function(c, v) if (c) v
+#---- audit_function_inference.R__nested_call_result_numeric
+addcall <- function(f, x) f(x) + 1L
+#---- audit_function_inference.R__modulo_param
+modp <- function(x) x %% 2L
+#---- audit_function_inference.R__double_negate
+dn <- function(x) -(-x)
+#---- audit_function_inference.R__three_param_sum
+sum3 <- function(a, b, c) a + b + c
+#---- audit_function_inference.R__param_used_in_sequence_block
+seqf <- function(x) { x; x }
+#---- audit_function_inference.R__nullary_empty_body
+emptyf <- function() { }
+#---- audit_function_inference.R__mult_literal_param
+mulp <- function(x) x * 2L
+#---- audit_function_inference.R__power_param_double
+powp <- function(x) x ^ 2L
+#---- audit_function_inference.R__and_with_literal
+andlit <- function(x) x && TRUE
+#---- audit_function_inference.R__nested_higher_order_apply_to_self
+twiceapply <- function(f) function(x) f(f(x))
+#---- audit_function_inference.R__chooser_unifies_branch_variables
+pick <- function(cond, a, b) if (cond) a else b
+#---- audit_function_inference.R__null_else_branch_keeps_variable_polymorphic
+maybe <- function(flag, value) if (flag) value else NULL
+#---- audit_function_inference.R__different_branch_literals_join_to_union
+label_or_count <- function(flag) if (flag) 1L else "one"
+#---- audit_nominal_new.R__alias_record_binding
+#: @alias PersonShape {list{name: character, age: double}}
+
+#: PersonShape
+value <- list(name = "bob", age = 20)
+#---- audit_nominal_new.R__generic_alias_binding
+#: @alias Box<T> {list{value: T}}
+
+#: Box<integer>
+value <- list(value = 1L)
+#---- audit_nominal_new.R__generic_alias_two_params_binding
+#: @alias Pair<T, U> {list{first: T, second: U}}
+
+#: Pair<integer, character>
+value <- list(first = 1L, second = "a")
+#---- audit_nominal_new.R__nominal_new_record_binding
+#: @type Person {list{name: character, age: double}}
+
+#: @new Person
+person <- list(name = "bob", age = 20)
+#---- audit_nominal_new.R__generic_nominal_new_binding
+#: @type Box<T> {list{value: T}}
+
+#: @new Box<integer>
+box <- list(value = 1L)
+#---- audit_nominal_new.R__nominal_atomic_representation_binding
+#: @type Meters {double}
+
+#: @new Meters
+height <- 1.8
+#---- audit_nominal_new.R__nominal_value_projects_to_underlying
+#: @type Person {list{name: character}}
+
+#: @new Person
+person <- list(name = "bob")
+
+#: list{name: character}
+shape <- person
+#---- audit_nominal_new.R__nominal_rebound_to_same_nominal
+#: @type Person {list{name: character}}
+
+#: @new Person
+person <- list(name = "bob")
+copy <- person
+#---- audit_nominal_new.R__nominal_field_access_projects
+#: @type Person {list{name: character}}
+
+#: @new Person
+person <- list(name = "bob")
+
+name <- person$name
+#---- audit_nominal_new.R__nominal_atomic_arithmetic_projects
+#: @type Meters {double}
+
+#: @new Meters
+height <- 1.8
+
+total <- height + height
+#---- audit_nominal_new.R__nominal_in_function_return_annotation
+#: @type Person {list{name: character}}
+
+#: fn(name: character) -> Person
+make_person <- function(name) {
+  #: @new Person
+  list(name = name)
+}
+#---- audit_nominal_new.R__nominal_param_field_access
+#: @type Person {list{name: character, age: double}}
+
+#: fn(value: Person) -> character
+get_name <- function(value) value$name
+#---- audit_nominal_new.R__generic_nominal_nested_argument
+#: @type Box<T> {list{value: T}}
+
+#: @new Box<list{name: character}>
+box <- list(value = list(name = "bob"))
+#---- audit_nominal_new.R__nominal_value_as_function_arg
+#: @type Person {list{name: character}}
+
+#: @new Person
+person <- list(name = "bob")
+
+#: fn(p: Person) -> character
+get_name <- function(p) p$name
+
+n <- get_name(person)
+#---- audit_nominal_new.R__nominal_distinct_identity_alias_binding
+#: @type Celsius {double}
+#: @type Fahrenheit {double}
+
+#: @new Celsius
+c <- 20.0
+
+copy <- c
+#---- audit_nominal_new.R__generic_nominal_new_character
+#: @type Box<T> {list{value: T}}
+
+#: @new Box<character>
+b <- list(value = "x")
+#---- audit_nominal_new.R__generic_nominal_new_two_params
+#: @type Pairing<T, U> {list{first: T, second: U}}
+
+#: @new Pairing<integer, character>
+p <- list(first = 1L, second = "a")
+#---- audit_nominal_new.R__nominal_representation_uses_alias
+#: @alias Name {character}
+#: @type Person {list{name: Name}}
+
+#: @new Person
+p <- list(name = "bob")
+#---- audit_nominal_new.R__new_maplike_representation
+#: @type Env {list[named: integer]}
+
+#: @new Env
+e <- list(a = 1L, b = 2L)
+#---- audit_nominal_new.R__new_arraylike_representation
+#: @type Stack {list[integer]}
+
+#: @new Stack
+s <- list(1L, 2L)
+#---- audit_nominal_new.R__new_generic_arraylike_representation
+#: @type Stack<T> {list[T]}
+
+#: @new Stack<integer>
+s <- list(1L, 2L)
+#---- audit_nominal_new.R__new_generic_maplike_representation
+#: @type Env<T> {list[named: T]}
+
+#: @new Env<integer>
+e <- list(a = 1L, b = 2L)
+#---- audit_nominal_new.R__nominal_nullable_binding
+#: @type Person {list{name: character}}
+
+#: @new Person
+p <- list(name = "bob")
+
+#: Person | NULL
+q <- p
+#---- audit_nominal_new.R__nominal_value_into_representation_param
+#: @type Person {list{name: character}}
+
+#: fn(s: list{name: character}) -> character
+f <- function(s) s$name
+
+#: @new Person
+p <- list(name = "bob")
+
+r <- f(p)
+#---- audit_nominal_new.R__nested_nominal_field_value
+#: @type Inner {list{v: integer}}
+#: @type Outer {list{inner: Inner}}
+
+#: @new Inner
+i <- list(v = 1L)
+
+#: @new Outer
+o <- list(inner = i)
+#---- audit_nominal_new.R__new_atomic_return_keeps_numeric_scheme
+#: @type Meters {double}
+
+asM <- function(x) {
+  #: @new Meters
+  x + 0
+}
+#---- audit_nominal_new.R__new_noop_on_already_nominal
+#: @type Person {list{name: character}}
+
+#: @new Person
+p <- list(name = "bob")
+
+#: @new Person
+p2 <- p
+#---- audit_nominal_new.R__new_generic_noop_on_already_nominal
+#: @type Box<T> {list{value: T}}
+
+#: @new Box<integer>
+b <- list(value = 1L)
+
+#: @new Box<integer>
+b2 <- b
+#---- audit_numeric.R__double_literal_add
+x <- 1 + 2
+#---- audit_numeric.R__integer_literal_add
+x <- 1L + 2L
+#---- audit_numeric.R__mix_integer_double_add
+x <- 1L + 2.5
+#---- audit_numeric.R__division_always_double
+x <- 5L / 2L
+#---- audit_numeric.R__power_always_double
+x <- 2L ^ 3L
+#---- audit_numeric.R__power_starstar_always_double
+x <- 2L ** 3L
+#---- audit_numeric.R__modulo_integer
+x <- 5L %% 2L
+#---- audit_numeric.R__modulo_mix_double
+x <- 5L %% 2.0
+#---- audit_numeric.R__intdiv_integer
+x <- 5L %/% 2L
+#---- audit_numeric.R__unary_minus_integer
+x <- -3L
+#---- audit_numeric.R__unary_minus_double
+x <- -3.5
+#---- audit_numeric.R__range_integer_literals
+x <- 1L:5L
+#---- audit_numeric.R__range_whole_double_literals
+x <- 1:10
+#---- audit_numeric.R__range_double_literal
+x <- 1.5:3
+#---- audit_numeric.R__scalar_times_array
+x <- 2L * c(1L, 2L)
+#---- audit_numeric.R__double_times_int_array
+x <- 2.0 * c(1L, 2L)
+#---- audit_numeric.R__comparison_scalar_logical
+x <- 1L < 2L
+#---- audit_numeric.R__comparison_mixed_numeric
+x <- 1L == 1.5
+#---- audit_numeric.R__comparison_array_logical
+x <- c(1L, 2L) > 1L
+#---- audit_numeric.R__numeric_param_modulo
+f <- function(x) x %% 2L
+#---- audit_numeric.R__numeric_param_intdiv
+f <- function(x) x %/% 2L
+#---- audit_numeric.R__numeric_param_power
+f <- function(x) x ^ 2L
+#---- audit_numeric.R__numeric_param_times
+f <- function(x) x * 2L
+#---- audit_numeric.R__numeric_param_minus
+f <- function(x) x - 1L
+#---- audit_numeric.R__numeric_param_compare_eq
+f <- function(x) x == 0L
+#---- audit_numeric.R__numeric_param_compare_le
+f <- function(x) x <= 10L
+#---- audit_numeric.R__numeric_two_params_mul
+f <- function(a, b) a * b
+#---- audit_numeric.R__numeric_param_unary_minus_in_expr
+f <- function(x) -x + 1L
+#---- audit_numeric.R__call_numeric_fn_integer
+f <- function(x) x + 1L
+r <- f(2L)
+#---- audit_numeric.R__call_numeric_fn_double
+f <- function(x) x + 1L
+r <- f(2.5)
+#---- audit_numeric.R__numeric_param_div_two_double_result
+f <- function(x, y) x / y
+#---- audit_numeric.R__numeric_chain_local
+f <- function(x) {
+  a <- x + 1L
+  b <- a * 2L
+  b
+}
+#---- audit_numeric.R__numeric_escape_defaults_double
+make <- function() {
+  total <- 0L
+  total
+}
+v <- make()
+#---- audit_numeric.R__numeric_param_used_then_returned_plus
+f <- function(x) {
+  x + 1L
+  x
+}
+#---- audit_numeric.R__promotion_array_mix
+x <- c(1L, 2L) + c(1.0, 2.0)
+#---- audit_numeric.R__named_vector_arith_loses_map
+x <- c(foo = 1L, bar = 2L) + 1L
+#---- audit_numeric.R__unary_minus_array
+x <- -c(1L, 2L)
+#---- audit_numeric.R__unary_minus_named
+x <- -c(foo = 1L, bar = 2L)
+#---- audit_numeric.R__numeric_double_div_literal
+f <- function(x) x / 2.0
+#---- audit_numeric.R__nested_arith_double
+x <- (1L + 2L) / (3L - 1L)
+#---- audit_numeric.R__complex_minus_unsupported_clean
+x <- 1L - 2L * 3L
+#---- audit_numeric.R__range_double_scalar_var
+x <- 2.5
+y <- x:5L
+#---- audit_numeric.R__unary_minus_param_only
+f <- function(x) -x
+#---- audit_numeric.R__self_power_param
+f <- function(x) x ^ x
+#---- audit_numeric.R__two_params_div_double
+f <- function(a, b) a / b
+#---- audit_numeric.R__compare_then_arith_param
+f <- function(x) {
+  y <- x > 0L
+  x + 1L
+}
+#---- audit_numeric.R__param_sum_then_compare
+f <- function(a, b) a + b > 0L
+#---- audit_numeric.R__numeric_escape_top_integer
+y <- 1L
+z <- y + 1L
+#---- audit_numeric.R__modulo_param_double_literal
+f <- function(x) x %% 2.0
+#---- audit_numeric.R__range_both_double_vars
+a <- 1
+b <- 10
+x <- a:b
+#---- audit_numeric.R__unconstrained_vs_numeric_param
+f <- function(x) x
+g <- function(x) x + 1L
+#---- audit_numeric.R__nested_closure_captures_numeric
+outer <- function(x) {
+  inner <- function() x + 1L
+  inner()
+}
+#---- audit_numeric.R__arith_div_result_double_local
+f <- function(x) {
+  a <- x / 2L
+  a
+}
+#---- audit_numeric.R__param_add_double_literal_stays_numeric
+f <- function(x) x + 2.5
+#---- audit_numeric.R__compare_against_character_leaves_unconstrained
+f <- function(x) x == "a"
+#---- audit_numeric.R__compare_against_numeric_literal_constrains
+f <- function(x) x == 1L
+#---- audit_numeric.R__range_over_numeric_var_is_double
+rangef <- function(n) 1:n
+#---- basics.R__rebinding_updates_binding_shape
+value <- 1L
+value <- "ok"
+#---- basics.R__reserved_atomic_constants
+na <- NA
+na_int <- NA_integer_
+na_real <- NA_real_
+na_char <- NA_character_
+infinity <- Inf
+not_a_number <- NaN
+imaginary <- 1i
+#---- functions.R__character_binding
+label <- "ok"
+#---- functions.R__constant_function_binding
+render <- function(count) "ok"
+#---- functions.R__constant_integer_function_binding
+const_integer <- function(x) 1L
+#---- functions.R__annotated_monomorphic_binding
+#: fn(integer) -> integer
+increment <- function(value) value
+#---- functions.R__numeric_param_plus_literal
+increment <- function(x) x + 1L
+#---- functions.R__numeric_param_negate
+negate <- function(x) -x
+#---- functions.R__numeric_param_compare_literal
+is_positive <- function(x) x > 0L
+#---- functions.R__numeric_variable_defaults_to_double_when_unpinned
+increment <- function(x) x + 1L
+#: Any
+anything <- 1L
+result <- increment(anything)
+#---- nominals.R__generic_nominal_introduction_binding
+#: @type Person<T> {list{value: T}}
+
+#: @new Person<integer>
+person <- list(value = 1L)
+#---- nominals.R__nominal_in_function_return_binding
+#: @type Person {list{name: character}}
+
+#: fn(name: character) -> Person
+make_person <- function(name) {
+  #: @new Person
+  person <- list(name = name)
+  person
+}
+#---- nominals.R__new_annotation_on_block_final_expression
+#: @type User {list{name: character, age: integer}}
+
+#: fn(name: character, age: integer) -> User
+createUser <- function(name, age) {
+  #: @new User
+  list(name = name, age = age)
+}
+#---- nominals.R__new_infers_unannotated_function_parameter_types
+#: @type Instrument {list{id: integer, name: character}}
+Instrument <- function(id, name) {
+  #: @new Instrument
+  list(id = id, name = name)
+}
+#---- nominals.R__new_generic_infers_unannotated_parameter_types
+#: @type Box<T> {list{value: T}}
+makeBox <- function(value) {
+  #: @new Box<integer>
+  list(value = value)
+}
+#---- arithmetic.R__integer_plus_double
+1L + 2.5
+#---- arithmetic.R__integer_minus_integer
+2L - 1L
+#---- arithmetic.R__integer_times_double
+2L * 1.5
+#---- arithmetic.R__integer_div_integer
+4L / 2L
+#---- arithmetic.R__double_power_integer
+2.5 ** 2L
+#---- arithmetic.R__vector_plus_scalar
+c(1L, 2L) + 4L
+#---- arithmetic.R__scalar_plus_vector
+4L + c(1L, 2.5)
+#---- arithmetic.R__named_map_plus_scalar_loses_map_likeness
+c(foo = 1L, bar = 2L) + 4L
+#---- arithmetic.R__unary_minus_vector
+-c(1L, 2L)
+#---- arithmetic.R__unary_minus_named_map_loses_map_likeness
+-c(foo = 1L, bar = 2L)
+#---- arithmetic.R__integer_modulo_integer
+5L %% 2L
+#---- arithmetic.R__double_modulo_integer
+5.5 %% 2L
+#---- arithmetic.R__integer_division_integer
+5L %/% 2L
+#---- arithmetic.R__integer_division_with_double
+5L %/% 2.5
+#---- arithmetic.R__vector_modulo_scalar
+c(5L, 6L) %% 2L
+#---- arithmetic.R__double_star_power
+2L ** 3L
+#---- arithmetic.R__vector_power
+c(1L, 2L) ^ 2L
+#---- arithmetic.R__other_special_operator_is_unsupported
+1L %o% 2L
+#---- arithmetic.R__tilde_formula_is_unsupported
+1L ~ 2L
+#---- arithmetic.R__s4_slot_read_is_unknown_but_visits_the_subject
+value <- 1L
+value@slot
+#---- arithmetic.R__s4_slot_read_still_surfaces_subject_errors
+result <- (1L + "x")@slot
+#---- arithmetic.R__double_literal_times_parameter_returns_double
+# R semantics: `2` is a double literal, and double * integer is double at run time
+# (`typeof(2 * 5L)` is "double"), so the inferred return is faithfully `double` — the
+# whole-number-literal-counts-as-integer rule applies at parameter positions and `:` endpoints,
+# deliberately NOT to arithmetic results. An integer-preserving double_it needs `2L * x`.
+double_it <- function(x) 2 * x
+double_it(5L)
+#---- arithmetic.R__integer_literal_times_parameter_preserves_integer
+int_double_it <- function(x) 2L * x
+int_double_it(5L)
+#---- audit_atomics.R__logical_true
+TRUE
+#---- audit_atomics.R__logical_false
+FALSE
+#---- audit_atomics.R__integer_literal
+1L
+#---- audit_atomics.R__integer_zero
+0L
+#---- audit_atomics.R__integer_hex
+0x1aL
+#---- audit_atomics.R__double_literal
+1.5
+#---- audit_atomics.R__double_bare_whole
+1
+#---- audit_atomics.R__double_zero
+0
+#---- audit_atomics.R__double_scientific
+1e5
+#---- audit_atomics.R__double_leading_dot
+.5
+#---- audit_atomics.R__double_hex
+0xff
+#---- audit_atomics.R__character_double_quote
+"hello"
+#---- audit_atomics.R__character_single_quote
+'hello'
+#---- audit_atomics.R__character_empty
+""
+#---- audit_atomics.R__empty_block
+{ }
+#---- audit_atomics.R__empty_block_nested
+{ { } }
+#---- audit_atomics.R__parenthesized_integer
+(1L)
+#---- audit_atomics.R__parenthesized_null
+(NULL)
+#---- audit_control_flow.R__if_without_else_double
+if (TRUE) 1.5
+#---- audit_control_flow.R__if_without_else_character
+if (TRUE) "x"
+#---- audit_control_flow.R__if_without_else_logical
+if (TRUE) FALSE
+#---- audit_control_flow.R__if_without_else_vector_branch
+if (TRUE) c(1L, 2L)
+#---- audit_control_flow.R__if_without_else_null_literal
+if (TRUE) NULL
+#---- audit_control_flow.R__if_without_else_block_last_expr
+if (TRUE) {
+  1L
+}
+#---- audit_control_flow.R__if_without_else_block_trailing_semicolon
+if (TRUE) {
+  1L;
+}
+#---- audit_control_flow.R__if_else_double_branches
+if (TRUE) 1.5 else 2.5
+#---- audit_control_flow.R__if_else_character_branches
+if (TRUE) "a" else "b"
+#---- audit_control_flow.R__if_else_both_null
+if (TRUE) NULL else NULL
+#---- audit_control_flow.R__if_else_vector_branches
+if (TRUE) c(1L, 2L) else c(3L, 4L)
+#---- audit_control_flow.R__if_else_integer_double_union
+if (TRUE) 1L else 2.5
+#---- audit_control_flow.R__if_else_character_integer_union
+if (TRUE) "a" else 1L
+#---- audit_control_flow.R__if_condition_integer_rejected
+if (1L) 1L else 2L
+#---- audit_control_flow.R__if_condition_character_rejected
+if ("x") 1L else 2L
+#---- audit_control_flow.R__if_else_nested_in_else
+if (TRUE) 1L else if (FALSE) 2L else 3L
+#---- audit_control_flow.R__if_value_assigned_nullable
+result <- if (TRUE) 1L
+result
+#---- audit_control_flow.R__if_else_value_assigned
+result <- if (TRUE) 1L else 2L
+result
+#---- audit_control_flow.R__if_branch_is_assignment
+flag <- TRUE
+if (flag) x <- 1L
+x
+#---- audit_control_flow.R__nested_block_last_expr
+{
+  {
+    1L
+  }
+}
+#---- audit_control_flow.R__block_single_semicolon_only
+{
+  ;
+}
+#---- audit_control_flow.R__block_last_is_if_without_else
+{
+  if (TRUE) 1L
+}
+#---- audit_control_flow.R__block_leaks_binding_to_top_level
+{
+  x <- 1L
+}
+x
+#---- audit_control_flow.R__for_over_double_vector_null
+for (item in c(1.5, 2.5)) item
+#---- audit_control_flow.R__for_over_character_vector_null
+for (item in c("a", "b")) item
+#---- audit_control_flow.R__while_with_logical_variable
+flag <- TRUE
+while (flag) { }
+#---- audit_control_flow.R__repeat_with_body_null
+repeat {
+  1L
+}
+#---- audit_control_flow.R__for_loop_var_element_type_in_body
+for (n in c(1L, 2L)) {
+  n + 1L
+}
+#---- audit_control_flow.R__for_over_double_range_element_type
+total <- 0
+for (x in 1.5:3.5) {
+  total <- total + x
+}
+total
+#---- audit_control_flow.R__rebinding_changes_type_across_block
+x <- 1L
+{
+  x <- "s"
+}
+x
+#---- audit_control_flow.R__if_branch_does_not_create_scope
+y <- 1L
+if (TRUE) y <- "s"
+y
+#---- audit_control_flow.R__while_value_assigned_null
+x <- while (FALSE) { }
+x
+#---- audit_control_flow.R__repeat_with_break_null
+repeat {
+  break
+}
+#---- audit_control_flow.R__for_with_next_null
+for (i in c(1L, 2L)) next
+#---- audit_control_flow.R__nested_for_loops_null
+for (i in c(1L, 2L)) {
+  for (j in c(1L, 2L)) { }
+}
+#---- audit_control_flow.R__block_last_is_for_loop_null
+{
+  for (i in c(1L, 2L)) { }
+}
+#---- audit_lists.R__empty_list
+list()
+#---- audit_lists.R__single_unnamed
+list(1L)
+#---- audit_lists.R__multi_unnamed_homogeneous
+list(1L, 2L, 3L)
+#---- audit_lists.R__heterogeneous_tuple
+list(1L, "foo")
+#---- audit_lists.R__tuple_with_double_and_int
+list(1L, 2.5)
+#---- audit_lists.R__tuple_bare_numbers_default_double
+list(1, 2)
+#---- audit_lists.R__tuple_with_logical
+list(TRUE, 1L, "x")
+#---- audit_lists.R__tuple_with_null_element
+list(1L, NULL)
+#---- audit_lists.R__nested_tuple
+list(list(1L), list("x"))
+#---- audit_lists.R__single_named
+list(foo = 1L)
+#---- audit_lists.R__record_two_fields
+list(foo = 1L, bar = "foo")
+#---- audit_lists.R__record_homogeneous_fields
+list(foo = 1L, bar = 2L)
+#---- audit_lists.R__record_with_null_field
+list(foo = 1L, bar = NULL)
+#---- audit_lists.R__nested_record
+list(server = list(port = 8080L))
+#---- audit_lists.R__record_containing_tuple
+list(point = list(1L, 2L))
+#---- audit_lists.R__mixed_named_first
+list(foo = 1L, "bar")
+#---- audit_lists.R__list_with_function_element
+list(function(x) x)
+#---- audit_lists.R__tuple_coerce_to_array_annotation
+#: list[integer]
+value <- list(1L, 2L, 3L)
+value
+#---- audit_lists.R__record_coerce_to_array_annotation
+#: list[integer]
+value <- list(foo = 1L, bar = 2L)
+value
+#---- audit_lists.R__record_coerce_to_map_annotation
+#: list[named: integer]
+value <- list(foo = 1L, bar = 2L)
+value
+#---- audit_lists.R__tuple_explicit_tuple_annotation
+#: list{integer, character}
+value <- list(1L, "foo")
+value
+#---- audit_lists.R__record_explicit_record_annotation
+#: list{foo: integer, bar: character}
+value <- list(foo = 1L, bar = "foo")
+value
+#---- audit_lists.R__heterogeneous_tuple_to_array_rejected
+#: list[integer]
+value <- list(1L, "foo")
+#---- audit_lists.R__record_heterogeneous_to_map_rejected
+#: list[named: integer]
+value <- list(foo = 1L, bar = "x")
+#---- audit_lists.R__empty_list_coerce_to_array
+#: list[integer]
+value <- list()
+value
+#---- audit_lists.R__empty_list_coerce_to_map
+#: list[named: integer]
+value <- list()
+#---- audit_lists.R__tuple_null_member_coerce_to_nullable_array
+#: list[integer | NULL]
+value <- list(1L, NULL)
+value
+#---- audit_lists.R__array_does_not_coerce_back_to_tuple
+#: @trust list[integer]
+value <- list(1L, 2L)
+#: list{integer, integer}
+copy <- value
+#---- audit_lists.R__map_does_not_coerce_back_to_record
+#: @trust list[named: integer]
+value <- list(foo = 1L, bar = 2L)
+#: list{foo: integer, bar: integer}
+copy <- value
+#---- audit_lists.R__nested_tuple_coerce_to_nested_array
+#: list[list[integer]]
+value <- list(list(1L), list(2L, 3L))
+value
+#---- audit_lists.R__array_to_array_identity
+#: @trust list[integer]
+value <- list(1L)
+#: list[integer]
+copy <- value
+copy
+#---- audit_lists.R__array_coerce_to_nullable_array
+#: @trust list[integer]
+value <- list(1L)
+#: list[integer | NULL]
+copy <- value
+copy
+#---- audit_lists.R__record_field_order_preserved
+list(z = 1L, a = 2L, m = 3L)
+#---- audit_lists.R__duplicate_field_name
+list(a = 1L, a = 2L)
+#---- audit_lists.R__double_tuple_coerce_to_double_array
+#: list[double]
+value <- list(1.0, 2.0)
+value
+#---- audit_lists.R__backtick_named_field
+list(`a b` = 1L, c = 2L)
+#---- audit_lists.R__list_of_vectors
+list(c(1L, 2L), c("a", "b"))
+#---- audit_lists.R__list_containing_named_vector
+list(counts = c(foo = 1L))
+#---- audit_lists.R__deeply_nested_record
+list(a = list(b = list(c = 1L)))
+#---- audit_lists.R__record_coerce_to_array_with_nullable
+#: list[integer | NULL]
+value <- list(a = 1L, b = NULL)
+value
+#---- audit_lists.R__tuple_too_few_for_record_annotation
+#: list{integer, integer, integer}
+value <- list(1L, 2L)
+#---- audit_lists.R__record_missing_field_annotation
+#: list{a: integer, b: integer}
+value <- list(a = 1L)
+#---- audit_lists.R__record_field_name_mismatch_annotation
+#: list{a: integer, b: integer}
+value <- list(a = 1L, c = 2L)
+#---- audit_lists.R__single_null_named
+list(x = NULL)
+#---- audit_lists.R__tuple_does_not_coerce_to_map_annotation
+#: list[named: integer]
+value <- list(1L, 2L)
+#---- audit_lists.R__nested_record_coerce_to_record_annotation
+#: list{server: list{port: integer}}
+value <- list(server = list(port = 8080L))
+value
+#---- audit_lists.R__list_of_lists_heterogeneous_to_array_rejected
+#: list[list[integer]]
+value <- list(list(1L), list("x"))
+#---- audit_lists.R__record_coerce_to_map_ignores_field_names
+#: list[named: integer]
+value <- list(alpha = 1L, beta = 2L, gamma = 3L)
+value
+#---- audit_lists.R__list_single_null
+list(NULL)
+#---- audit_lists.R__list_two_nulls
+list(NULL, NULL)
+#---- audit_lists.R__record_field_function_type
+list(f = function(x) x)
+#---- audit_lists.R__single_tuple_coerce_to_array
+#: list[integer]
+value <- list(1L)
+value
+#---- audit_lists.R__map_coerce_to_array
+#: @trust list[named: integer]
+m <- list(a = 1L)
+#: list[integer]
+arr <- m
+arr
+#---- audit_lists.R__record_to_array_heterogeneous_rejected
+#: list[integer]
+value <- list(a = 1L, b = "x")
+#---- audit_lists.R__deeply_nested_array_coercion
+#: list[list[list[integer]]]
+value <- list(list(list(1L)), list(list(2L, 3L)))
+value
+#---- audit_lists.R__tuple_int_double_widens_to_double_array
+#: list[double]
+value <- list(1L, 2.0)
+value
+#---- audit_lists.R__tuple_double_to_integer_array_still_rejected
+#: list[integer]
+value <- list(1L, 2.5)
+value
+#---- audit_lists.R__list_of_named_vectors_to_array
+#: list[integer[named]]
+value <- list(c(a = 1L), c(b = 2L))
+value
+#---- audit_lists.R__list_of_vectors_to_array_of_arrays
+#: list[integer[]]
+value <- list(c(1L), c(2L, 3L))
+value
+#---- audit_lists.R__scalar_elements_coerce_to_array_of_arrays
+#: list[integer[]]
+value <- list(1L, 2L)
+value
+#---- audit_operators_indexing.R__comparison_le_character
+"a" <= "b"
+#---- audit_operators_indexing.R__comparison_ge_double
+2.5 >= 1L
+#---- audit_operators_indexing.R__comparison_logical_ordering
+TRUE < FALSE
+#---- audit_operators_indexing.R__comparison_character_vectors
+c("a", "b") < c("c", "d")
+#---- audit_operators_indexing.R__comparison_both_map_like_loses_map
+c(a = 1L) == c(b = 2L)
+#---- audit_operators_indexing.R__comparison_integer_double_mix_vector
+c(1L, 2L) >= 1.5
+#---- audit_operators_indexing.R__comparison_logical_vs_character_rejected
+TRUE == "a"
+#---- audit_operators_indexing.R__comparison_against_null_rejected
+1L == NULL
+#---- audit_operators_indexing.R__and_chained
+TRUE && FALSE && TRUE
+#---- audit_operators_indexing.R__or_with_vector_right_rejected
+TRUE || c(FALSE, TRUE)
+#---- audit_operators_indexing.R__and_of_comparisons
+(1L < 2L) && (2L < 3L)
+#---- audit_operators_indexing.R__not_double_negation
+!!TRUE
+#---- audit_operators_indexing.R__not_map_like_loses_map
+!c(yes = TRUE, no = FALSE)
+#---- audit_operators_indexing.R__double_bracket_scalar_vector
+x <- 1L
+x[[1L]]
+#---- audit_operators_indexing.R__double_bracket_array_vector
+c(1.5, 2.5)[[1L]]
+#---- audit_operators_indexing.R__double_bracket_named_vector_name_nullable
+c(foo = 1L)[["foo"]]
+#---- audit_operators_indexing.R__double_bracket_named_vector_positional
+c(foo = 1L, bar = 2L)[[2L]]
+#---- audit_operators_indexing.R__double_bracket_tuple_literal_position
+list(1L, "foo", TRUE)[[2L]]
+#---- audit_operators_indexing.R__double_bracket_tuple_out_of_bounds
+list(1L, "foo")[[5L]]
+#---- audit_operators_indexing.R__double_bracket_tuple_nonliteral_unions_items
+i <- 1L
+list(1L, "foo")[[i]]
+#---- audit_operators_indexing.R__double_bracket_record_literal_name
+list(foo = 1L, bar = "x")[["foo"]]
+#---- audit_operators_indexing.R__double_bracket_record_missing_name_rejected
+list(foo = 1L)[["missing"]]
+#---- audit_operators_indexing.R__double_bracket_array_list
+#: list[integer]
+v <- list(1L, 2L)
+v[[1L]]
+#---- audit_operators_indexing.R__double_bracket_map_list_name_nullable
+#: list[named: integer]
+v <- list(foo = 1L)
+v[["foo"]]
+#---- audit_operators_indexing.R__bracket_array_list_returns_array_list
+#: list[integer]
+v <- list(1L, 2L)
+v[1L]
+#---- audit_operators_indexing.R__bracket_map_list_returns_map_list
+#: list[named: integer]
+v <- list(foo = 1L)
+v["foo"]
+#---- audit_operators_indexing.R__bracket_tuple_coerces_to_array_list
+list(1L, 2L, 3L)[2L]
+#---- audit_operators_indexing.R__bracket_record_coerces_to_map_list
+list(foo = 1L, bar = 2L)["bar"]
+#---- audit_operators_indexing.R__bracket_heterogeneous_tuple_union_element
+list(1L, "foo")[1L]
+#---- audit_operators_indexing.R__bracket_on_scalar_vector_rejected
+y <- 1L
+y[1L]
+#---- audit_operators_indexing.R__bracket_on_array_vector_rejected
+c(1L, 2L)[1L]
+#---- audit_operators_indexing.R__dollar_record_field
+list(foo = 1L, bar = "x")$foo
+#---- audit_operators_indexing.R__dollar_missing_record_field_rejected
+list(foo = 1L)$bar
+#---- audit_operators_indexing.R__dollar_tuple_list_rejected
+list(1L, 2L)$foo
+#---- audit_operators_indexing.R__dollar_map_list_nullable
+#: list[named: integer]
+v <- list(foo = 1L)
+v$foo
+#---- audit_operators_indexing.R__dollar_named_vector_rejected
+c(foo = 1L, bar = 2L)$foo
+#---- audit_operators_indexing.R__double_bracket_on_function_rejected
+f <- function(x) x
+f[[1L]]
+#---- audit_operators_indexing.R__chained_double_bracket_nested_list
+#: list[list[integer]]
+v <- list(list(1L), list(2L))
+v[[1L]][[1L]]
+#---- audit_operators_indexing.R__chained_dollar_record
+cfg <- list(a = list(b = 2L))
+cfg$a$b
+#---- audit_operators_indexing.R__dollar_on_unannotated_param_yields_unknown
+function(x) x$field
+#---- audit_operators_indexing.R__double_bracket_on_unannotated_param_yields_unknown
+function(x) x[[1L]]
+#---- audit_operators_indexing.R__bracket_on_unannotated_param_yields_unknown
+function(x) x[1L]
+#---- audit_operators_indexing.R__nominal_dollar_projects
+#: @type Person {list{name: character}}
+
+#: @new Person
+p <- list(name = "bob")
+p$name
+#---- audit_operators_indexing.R__nominal_double_bracket_projects
+#: @type Person {list{name: character, age: integer}}
+
+#: @new Person
+p <- list(name = "bob", age = 3L)
+p[["age"]]
+#---- audit_operators_indexing.R__nominal_arithmetic_projects
+#: @type Meters {double}
+
+#: @new Meters
+h <- 1.8
+h + h
+#---- audit_operators_indexing.R__nominal_comparison_projects
+#: @type Meters {double}
+
+#: @new Meters
+h <- 1.8
+h < 2.0
+#---- audit_operators_indexing.R__nominal_bracket_projects_array_list
+#: @type Bag {list[integer]}
+
+#: @new Bag
+b <- list(1L, 2L)
+b[1L]
+#---- audit_operators_indexing.R__and_array_logical_left_rejected
+c(TRUE, FALSE) && TRUE
+#---- audit_operators_indexing.R__comparison_chain_crossfamily
+1L < 2L < 3L
+#---- audit_operators_indexing.R__bracket_single_on_function_rejected
+f <- function(x) x
+f[1L]
+#---- audit_operators_indexing.R__map_like_vector_bracket_rejected
+#: integer[named]
+v <- c(foo = 1L)
+v["foo"]
+#---- audit_operators_indexing.R__lists_equality_rejected
+list(a = 1L) == list(a = 1L)
+#---- audit_operators_indexing.R__and_or_precedence
+TRUE && FALSE || TRUE
+#---- audit_operators_indexing.R__not_of_array_comparison
+!(c(1L, 2L) < 3L)
+#---- audit_operators_indexing.R__map_list_positional_double_bracket_extracts_the_item
+#: list[named: integer]
+v <- list(foo = 1L)
+v[[1L]]
+#---- audit_operators_indexing.R__array_vector_variable_positional_index
+i <- 1L
+c(1L, 2L)[[i]]
+#---- audit_operators_indexing.R__array_vector_name_double_bracket_returns_element
+c(1L, 2L)[["foo"]]
+#---- audit_operators_indexing.R__comparison_scalar_vs_map_vector
+1L < c(foo = 2L, bar = 3L)
+#---- audit_operators_indexing.R__not_scalar_extracted_from_array_vector
+v <- c(TRUE, FALSE)
+!v[[1L]]
+#---- audit_operators_indexing.R__or_with_nullable_operand_rejected
+c(a = TRUE)[["a"]] || FALSE
+#---- audit_operators_indexing.R__nominal_comparison_character_projects
+#: @type Name {character}
+
+#: @new Name
+n <- "bob"
+n < "z"
+#---- audit_operators_indexing.R__nominal_maprepr_dollar_nullable
+#: @type Env {list[named: integer]}
+
+#: @new Env
+e <- list(foo = 1L)
+e$foo
+#---- audit_operators_indexing.R__nominal_maprepr_double_bracket_nullable
+#: @type Env {list[named: integer]}
+
+#: @new Env
+e <- list(foo = 1L)
+e[["foo"]]
+#---- audit_operators_indexing.R__nominal_arraylist_double_bracket_returns_element
+#: @type Bag {list[integer]}
+
+#: @new Bag
+b <- list(1L, 2L)
+b[[1L]]
+#---- audit_operators_indexing.R__nominal_boolean_and_projects
+#: @type Flag {logical}
+
+#: @new Flag
+flag <- TRUE
+flag && TRUE
+#---- audit_vectors.R__c_single_integer
+c(1L)
+#---- audit_vectors.R__c_single_logical
+c(TRUE)
+#---- audit_vectors.R__c_single_character
+c("a")
+#---- audit_vectors.R__c_single_double
+c(1.5)
+#---- audit_vectors.R__c_partial_named_is_array
+c(foo = 1L, 2L)
+#---- audit_vectors.R__c_partial_named_promotes_double
+c(foo = 1L, 2.5)
+#---- audit_vectors.R__c_all_named_promotes_double
+c(a = 1L, b = 2.5)
+#---- audit_vectors.R__c_nested_array_arg
+c(c(1L, 2L))
+#---- audit_vectors.R__c_nested_named_flatten
+c(c(foo = 1L), c(bar = 2L))
+#---- audit_vectors.R__c_array_plus_named_arg
+c(c(1L, 2L), foo = 3L)
+#---- audit_vectors.R__c_three_types_mismatch
+c(1L, "a", TRUE)
+#---- audit_vectors.R__c_double_and_character
+c(1.5, "a")
+#---- audit_vectors.R__c_logical_and_double
+c(TRUE, 1.5)
+#---- audit_vectors.R__c_logical_named
+c(yes = TRUE, no = FALSE)
+#---- audit_vectors.R__compare_named_map_loses_map
+c(foo = 1L) == 1L
+#---- audit_vectors.R__range_integer
+1L:5L
+#---- audit_vectors.R__range_whole_double_literals
+1:5
+#---- audit_vectors.R__range_double
+1.5:3
+#---- audit_vectors.R__negate_logical_vector
+!c(TRUE, FALSE)
+#---- audit_vectors.R__negate_logical_named_loses_map
+!c(yes = TRUE)
+#---- audit_vectors.R__arith_named_plus_named
+c(foo = 1L) + c(bar = 2L)
+#---- audit_vectors.R__div_vector_scalar
+c(1L, 2L) / 2L
+#---- audit_vectors.R__mult_double_by_array
+2.5 * c(1L, 2L)
+#---- audit_vectors.R__scalar_to_named_map_rejected
+#: integer[named]
+value <- 1L
+#---- audit_vectors.R__named_map_to_named_map_ok
+#: integer[named]
+value <- c(foo = 1L)
+value
+#---- audit_vectors.R__record_to_named_map_rejected_for_vectors
+#: character[]
+value <- c("a", "b")
+value
+#---- audit_vectors.R__index_array_element
+x <- c(1L, 2L)
+x[[1]]
+#---- audit_vectors.R__index_scalar_element
+x <- 1L
+x[[1]]
+#---- audit_vectors.R__index_named_map_element
+x <- c(foo = 1L, bar = 2L)
+x[["foo"]]
+#---- audit_vectors.R__c_single_named_is_map
+c(foo = 1L)
+#---- audit_vectors.R__c_nested_single_named
+c(c(foo = 1L))
+#---- audit_vectors.R__compare_array_array
+c(1L, 2L) == c(3L, 4L)
+#---- audit_vectors.R__range_double_nonwhole
+1.5:3.5
+#---- audit_vectors.R__power_scalar_by_array
+2L ^ c(1L, 2L)
+#---- audit_vectors.R__c_scalar_and_array_mix
+c(1L, c(2L, 3L))
+#---- audit_vectors.R__compare_array_scalar
+c(1L, 2L) > 1L
+#---- audit_vectors.R__compare_array_cross_family
+c(1L, 2L) < "a"
+#---- audit_vectors.R__sub_named_map_scalar
+c(foo = 1L, bar = 2L) - 1L
+#---- audit_vectors.R__c_three_numeric_promote
+c(1L, 2.5, 3L)
+#---- audit_vectors.R__fn_scalar_arg_to_array_param
+#: fn(x: integer[]) -> integer[]
+f <- function(x) x
+f(1L)
+#---- audit_vectors.R__range_mixed_whole
+1:10L
+#---- audit_vectors.R__range_descending
+10L:1L
+#---- audit_vectors.R__range_double_var
+x <- 2.5
+x:5L
+#---- audit_vectors.R__index_c_result_direct
+c(1L, 2L)[[1]]
+#---- audit_vectors.R__c_named_array_value
+c(x = c(1L, 2L))
+#---- audit_vectors.R__index_array_nonliteral
+x <- c(1L, 2L)
+i <- 1L
+x[[i]]
+#---- basics.R__known_name_after_assignment
+value <- 1L
+value
+#---- basics.R__assignment_expression_returns_assigned_type
+other <- (value <- 1L)
+value
+other
+#---- basics.R__rebinding_updates_name_type
+value <- 1L
+value <- "hello"
+value
+#---- basics.R__unknown_name
+missing_value
+#---- basics.R__block_returns_unknown_when_last_expression_is_unknown
+{
+  1L
+  1L ~ 2L
+}
+#---- comparison.R__integer_less_than_integer
+1L < 2L
+#---- comparison.R__integer_equals_double
+1L == 1.5
+#---- comparison.R__double_greater_equal_double
+2.5 >= 1.5
+#---- comparison.R__not_equal_integers
+1L != 2L
+#---- comparison.R__character_ordering
+"a" < "b"
+#---- comparison.R__character_equality
+"a" == "b"
+#---- comparison.R__logical_equality
+TRUE == FALSE
+#---- comparison.R__scalar_compared_to_vector_returns_logical_array
+1L == c(1L, 2L)
+#---- comparison.R__named_map_comparison_loses_map_likeness
+c(foo = 1L, bar = 2L) > 0L
+#---- comparison.R__character_vector_comparison
+c("a", "b") == "a"
+#---- comparison.R__not_logical_scalar
+!TRUE
+#---- comparison.R__not_comparison_result
+!(1L < 2L)
+#---- comparison.R__integer_colon_integer
+1L:10L
+#---- comparison.R__fractional_double_literal_makes_double_range
+1.5:10L
+#---- comparison.R__double_typed_operand_makes_double_range
+from <- 1.5
+from:10L
+#---- comparison.R__integer_typed_operand_range
+from <- 1L
+from:10L
+#---- control_flow.R__if_without_else_empty_block
+if (TRUE) { }
+#---- control_flow.R__if_else_integer_and_null
+if (TRUE) 1L else NULL
+#---- control_flow.R__if_else_null_and_integer
+if (TRUE) NULL else 2L
+#---- control_flow.R__if_else_both_empty_blocks
+if (TRUE) { } else { }
+#---- control_flow.R__if_else_union_flows_into_binding
+flag <- TRUE
+value <- if (flag) 1L else "foo"
+value
+#---- control_flow.R__if_condition_must_be_scalar_logical
+if (c(TRUE, FALSE)) 1L else 2L
+#---- control_flow.R__scalar_logical_or
+flag <- TRUE
+other_flag <- FALSE
+flag || other_flag
+#---- control_flow.R__for_over_scalar_vector_returns_null
+for (item in 1L) item
+#---- control_flow.R__for_over_tuple_like_list_returns_null
+for (item in list(1L, 2L)) item
+#---- control_flow.R__while_returns_null
+while (TRUE) { }
+#---- control_flow.R__while_condition_must_be_scalar_logical
+while (c(TRUE, FALSE)) { }
+#---- control_flow.R__repeat_returns_null
+repeat { }
+#---- control_flow.R__if_without_else_nullable_branch_stays_single_nullable
+flag <- TRUE
+value <- if (flag) 1L
+if (flag) value
+#---- control_flow.R__if_else_same_nullable_branches
+flag <- TRUE
+left <- if (flag) 1L
+right <- if (flag) 2L
+if (flag) left else right
+#---- control_flow.R__negated_condition
+flag <- TRUE
+if (!flag) 1L else 2L
+#---- control_flow.R__comparison_condition
+count <- 3L
+if (count > 2L) "big" else "small"
+#---- control_flow.R__for_over_range_binds_element_type
+total <- 0L
+for (index in 1L:3L) {
+  total <- total + index
+}
+#---- control_flow.R__for_over_record_like_list
+for (field in list(foo = 1L, bar = 2L)) field
+#---- control_flow.R__for_over_map_like_list_annotation
+#: list[named: integer]
+values <- list(foo = 1L, bar = 2L)
+for (value in values) value
+#---- control_flow.R__for_body_uses_element_type_in_typed_call
+#: fn(count: integer) -> integer
+double_count <- function(count) count + count
+for (count in c(1L, 2L)) double_count(count)
+#---- control_flow.R__for_over_heterogeneous_tuple_allowed
+for (item in list(1L, "foo")) item
+#---- control_flow.R__for_over_empty_list_allowed
+for (item in list()) item
+#---- control_flow.R__for_element_union_usable_at_union_parameter
+#: fn(value: integer | character) -> logical
+accepts <- function(value) TRUE
+for (item in list(a = 1L, b = "two")) accepts(item)
+#---- control_flow.R__for_element_union_rejected_at_member_parameter
+#: fn(count: integer) -> integer
+double_count <- function(count) count + count
+for (item in list(a = 1L, b = "two")) double_count(item)
+#---- control_flow.R__for_over_function_is_rejected
+for (item in function(x) x) item
+#---- control_flow.R__for_over_null_runs_zero_iterations
+for (item in NULL) item
+#---- control_flow.R__for_over_any_yields_any_items
+#: fn(values: Any) -> NULL
+consume <- function(values) {
+  for (item in values) item
+  NULL
+}
+#---- control_flow.R__for_over_unannotated_parameter_stays_unconstrained
+drain <- function(items) {
+  for (item in items) item
+  items
+}
+#---- control_flow.R__unknown_branch_propagates
+u <- 1L ~ 2L
+if (TRUE) 1L else u
+#---- control_flow.R__conditional_retype_joins_with_prior_state
+flag <- TRUE
+x <- 1L
+if (flag) x <- "a"
+x
+#---- control_flow.R__both_branches_retype_join_without_prior_state_member
+flag <- TRUE
+x <- 1L
+if (flag) x <- "a" else x <- 2L
+x
+#---- control_flow.R__same_type_rewrite_keeps_single_type
+flag <- TRUE
+x <- 1L
+if (flag) x <- 2L
+x
+#---- control_flow.R__loop_accumulator_stays_integer
+total <- 0L
+for (i in 1:3) {
+  total <- total + i
+}
+total
+#---- control_flow.R__loop_rewrite_joins_across_iterations
+flag <- TRUE
+x <- 1L
+while (flag) {
+  x <- "a"
+}
+x
+#---- control_flow.R__repeat_division_widens_to_double
+x <- 1L
+repeat {
+  x <- x / 2
+}
+x
+#---- control_flow.R__structurally_growing_loop_slot_widens_to_unknown
+x <- 1L
+repeat {
+  x <- list(x)
+}
+x
+#---- functions.R__compact_annotation_named_parameter_and_return
+#: fn(count: integer) -> integer
+double_count <- function(count) count + count
+double_count
+#---- functions.R__compact_annotation_without_return_defaults_to_null
+#: fn(count: integer)
+log_count <- function(count) { }
+log_count
+#---- functions.R__expanded_annotation_with_optional_parameter
+#: @param count {integer}
+#: @param [label] {character}
+#: @return {integer}
+double_count <- function(count, label = NULL) count + count
+double_count(1L)
+double_count(1L, "units")
+#---- functions.R__higher_order_function_annotation
+#: @param render_count {fn(integer) -> character}
+#: @param count {integer}
+#: @return {character}
+apply_renderer <- function(render_count, count) { render_count(count) }
+#: fn(integer) -> character
+render_count <- function(count) "ok"
+apply_renderer(render_count, 1L)
+#---- functions.R__annotated_named_parameter_accepts_named_argument
+#: fn(count: integer) -> integer
+mirror <- function(count) count
+mirror(count = 1L)
+#---- functions.R__annotated_identity_call
+#: fn(count: integer) -> integer
+mirror <- function(count) count
+mirror(1L)
+#---- functions.R__positional_only_function_rejects_named_argument
+#: fn(integer) -> integer
+mirror <- function(value) value
+mirror(value = 1L)
+#---- functions.R__missing_required_argument
+mirror <- function(x) x
+mirror()
+#---- functions.R__non_variadic_annotated_function_still_rejects_surplus_arguments
+# Regression fence: adding a `...` rest parameter must not slacken arity checking for functions that
+# have none. A fixed-arity annotated function must still error on a surplus positional argument.
+#: fn(count: integer) -> integer
+double_count <- function(count) count + count
+double_count(1L, 2L)
+#---- functions.R__call_argument_type_mismatch
+#: fn(integer) -> integer
+mirror <- function(value) value
+mirror("hello")
+#---- functions.R__inferred_function_accepts_named_argument
+mirror <- function(x) x
+mirror(x = 1L)
+#---- functions.R__inferred_function_accepts_named_arguments_out_of_order
+#: fn(count: integer, label: character) -> character
+describe <- function(count, label) label
+describe(label = "items", count = 2L)
+#---- functions.R__inferred_default_makes_parameter_optional
+pad <- function(value, width = NULL) value
+pad(1L)
+#---- functions.R__inferred_default_parameter_can_still_be_supplied
+pad <- function(value, width = NULL) value
+pad(1L, 2L)
+#---- functions.R__optional_parameter_supplied_by_name
+#: fn(count: integer, [label]: character) -> integer
+double_count <- function(count, label = NULL) count + count
+double_count(1L, label = "units")
+#---- functions.R__omitting_required_parameter_is_rejected
+#: fn(count: integer, label: character) -> integer
+double_count <- function(count, label = NULL) count + count
+double_count(1L)
+#---- functions.R__expected_optional_requires_actual_default
+#: fn(count: integer, [label]: character) -> integer
+double_count <- function(count, label) count + count
+#---- functions.R__scalar_argument_coerces_to_array_parameter
+#: fn(values: integer[]) -> integer[]
+keep <- function(values) values
+keep(1L)
+#---- functions.R__named_map_argument_coerces_to_array_parameter
+#: fn(values: integer[]) -> integer[]
+keep <- function(values) values
+keep(c(foo = 1L, bar = 2L))
+#---- functions.R__null_argument_accepted_for_nullable_parameter
+#: fn(label: character | NULL) -> NULL
+log_label <- function(label) NULL
+log_label(NULL)
+#---- functions.R__value_argument_accepted_for_nullable_parameter
+#: fn(label: character | NULL) -> NULL
+log_label <- function(label) NULL
+log_label("items")
+#---- functions.R__tuple_argument_coerces_to_array_like_list_parameter
+#: fn(items: list[integer]) -> NULL
+consume <- function(items) NULL
+consume(list(1L, 2L))
+#---- functions.R__record_argument_coerces_to_map_like_list_parameter
+#: fn(items: list[named: integer]) -> NULL
+consume <- function(items) NULL
+consume(list(foo = 1L, bar = 2L))
+#---- functions.R__nullable_parameter_rejects_wrong_base_type
+#: fn(label: character | NULL) -> NULL
+log_label <- function(label) NULL
+log_label(1L)
+#---- functions.R__array_argument_rejected_for_scalar_parameter
+#: fn(count: integer) -> integer
+double_count <- function(count) count + count
+double_count(c(1L, 2L))
+#---- functions.R__annotated_function_accepted_where_positional_interface_expected
+#: fn(transform: fn(integer) -> character, count: integer) -> character
+apply_transform <- function(transform, count) transform(count)
+
+#: fn(value: integer) -> character
+render <- function(value) "ok"
+apply_transform(render, 1L)
+#---- functions.R__function_argument_with_wrong_return_is_rejected
+#: fn(transform: fn(integer) -> character) -> character
+apply_transform <- function(transform) transform(1L)
+
+#: fn(value: integer) -> integer
+render <- function(value) value
+apply_transform(render)
+#---- functions.R__whole_number_literal_accepted_at_integer_parameter
+#: fn(n: integer) -> integer
+f <- function(n) n
+f(10)
+#---- functions.R__fractional_literal_rejected_at_integer_parameter
+#: fn(n: integer) -> integer
+f <- function(n) n
+f(2.5)
+#---- functions.R__double_variable_rejected_at_integer_parameter
+#: fn(n: integer) -> integer
+f <- function(n) n
+x <- 10
+f(x)
+#---- functions.R__integer_widens_at_double_parameter
+#: fn(x: double) -> double
+g <- function(x) x
+g(1L)
+#---- functions.R__integer_vector_widens_at_double_vector_parameter
+#: fn(x: double[]) -> double
+h <- function(x) 1.0
+h(c(1L, 2L))
+#---- functions.R__whole_number_literal_accepted_at_integer_annotation
+#: fn(n: integer, m: integer) -> integer
+add2 <- function(n, m) n
+add2(3, m = 4)
+#---- functions.R__swapped_names_align_to_formals
+#: fn(a: integer, b: character) -> integer
+swapped <- function(b, a) b + 1L
+#---- functions.R__swapped_names_accept_when_body_matches
+#: fn(a: integer, b: character) -> character
+swapped <- function(b, a) b
+swapped(a = 1L, b = "x")
+#---- functions.R__annotation_renaming_a_parameter_is_rejected
+#: fn(count: integer) -> integer
+f <- function(n) n
+#---- functions.R__positional_annotation_needs_no_names
+#: fn(integer) -> integer
+f <- function(n) n
+f(1L)
+#---- functions.R__early_return_joins_the_trailing_value
+f <- function() {
+  if (4 > 2) {
+    return("foo")
+  }
+  5
+}
+#---- functions.R__bare_return_contributes_null
+f <- function(x) {
+  if (x) {
+    return()
+  }
+  1L
+}
+#---- functions.R__return_value_errors_still_surface
+f <- function() {
+  return(1L + "x")
+}
+#---- functions.R__return_inside_a_loop_exits_the_function
+f <- function() {
+  for (item in c(1L, 2L)) {
+    return(item)
+  }
+  NULL
+}
+#---- functions.R__switch_branches_union_with_null_without_default
+describe <- function(x) {
+  switch(x, a = 1L, b = "two")
+}
+#---- functions.R__switch_default_branch_removes_null
+describe <- function(x) {
+  switch(x, a = 1L, "fallback")
+}
+#---- functions.R__switch_branches_are_typechecked
+f <- function(x) {
+  switch(x, a = 1L + "oops")
+}
+#---- functions.R__dots_formal_infers_a_rest_parameter
+join <- function(...) NULL
+#---- functions.R__pre_dots_formal_fills_positionally_and_surplus_is_absorbed
+wrap <- function(x, ...) x + 1L
+wrap(1L, "extra", TRUE)
+#---- functions.R__pre_dots_formal_still_matches_by_name
+wrap <- function(x, ...) x
+wrap(x = 1L, "extra")
+#---- functions.R__post_dots_formal_is_matched_by_name
+f <- function(..., sep) sep
+f("a", "b", sep = 1L)
+#---- functions.R__post_dots_formal_is_not_filled_positionally
+f <- function(..., sep) sep
+f("a", 1L)
+#---- functions.R__unmatched_keyword_is_absorbed_by_the_rest
+f <- function(...) NULL
+f(anything = 1L, other = "x")
+#---- functions.R__variadic_annotation_now_checks_against_the_body
+#: fn(x: character, ...: character) -> character
+wrap <- function(x, ...) x
+wrap("a", "b", "c")
+#---- functions.R__variadic_annotation_element_is_enforced_at_calls
+#: fn(...: character) -> NULL
+f <- function(...) NULL
+f("a", 1L)
+#---- functions.R__annotation_rest_position_must_match_the_formals
+#: fn(...: Any, x: integer) -> integer
+f <- function(x, ...) x
+#---- functions.R__fixed_annotation_on_a_variadic_function_is_rejected
+#: fn(x: integer) -> integer
+f <- function(x, ...) x
+#---- functions.R__numeric_binder_is_writable_and_enforced
+#: <T: numeric> fn(values: T) -> T
+passthrough <- function(values) values
+kept <- passthrough(2.5)
+rejected <- passthrough("text")
+#---- functions.R__numeric_binder_accepts_numeric_arguments
+#: <T: numeric> fn(values: T) -> T
+passthrough <- function(values) values
+passthrough(2.5)
+passthrough(1L)
+#---- functions.R__forall_binder_takes_the_same_constraint
+#: @forall T: numeric
+#: @param values {T}
+#: @return {T}
+passthrough <- function(values) values
+passthrough(3.5)
+#---- indexing.R__scalar_vector_double_bracket_returns_element
+value <- 1L
+value[[1L]]
+#---- indexing.R__array_vector_double_bracket_returns_element
+c(1L, 2L, 3L)[[1L]]
+#---- indexing.R__named_vector_name_lookup_is_nullable
+c(foo = 1L, bar = 2L)[["foo"]]
+#---- indexing.R__tuple_literal_position_returns_element_type
+list(1L, "foo")[[2L]]
+#---- indexing.R__tuple_nonliteral_position_unions_items
+index <- 2L
+list(1L, "foo")[[index]]
+#---- indexing.R__record_literal_name_returns_field_type
+list(foo = 1L, bar = "foo")[["bar"]]
+#---- indexing.R__record_missing_field_is_rejected
+list(foo = 1L)[["bar"]]
+#---- indexing.R__array_like_list_double_bracket_returns_element
+#: list[integer]
+value <- list(1L, 2L)
+value[[1L]]
+#---- indexing.R__map_like_list_name_lookup_is_nullable
+#: list[named: integer]
+value <- list(foo = 1L, bar = 2L)
+value[["foo"]]
+#---- indexing.R__array_like_list_bracket_returns_array_like_list
+#: list[integer]
+value <- list(1L, 2L)
+value[1L]
+#---- indexing.R__map_like_list_bracket_returns_map_like_list
+#: list[named: integer]
+value <- list(foo = 1L, bar = 2L)
+value["foo"]
+#---- indexing.R__tuple_bracket_coerces_to_array_like_list
+list(1L, 2L, 3L)[1L]
+#---- indexing.R__record_bracket_coerces_to_map_like_list
+list(foo = 1L, bar = 2L)["foo"]
+#---- indexing.R__dollar_name_is_record_lookup_sugar
+list(foo = 1L, bar = 2L)$foo
+#---- indexing.R__bracket_on_scalar_vector_is_rejected
+value <- 1L
+value[1L]
+#---- indexing.R__bracket_on_named_vector_is_rejected
+c(foo = 1L)[["foo"]]
+c(foo = 1L)["foo"]
+#---- indexing.R__tuple_out_of_bounds_literal_position_is_rejected
+list(1L, "foo")[[3L]]
+#---- indexing.R__named_vector_positional_index_returns_element
+c(foo = 1L, bar = 2L)[[1L]]
+#---- indexing.R__dollar_on_map_like_list_is_nullable
+#: list[named: integer]
+values <- list(foo = 1L, bar = 2L)
+values$foo
+#---- indexing.R__dollar_on_named_vector_is_rejected
+counts <- c(foo = 1L, bar = 2L)
+counts$foo
+#---- indexing.R__chained_record_access
+config <- list(server = list(port = 8080L))
+config$server$port
+#---- indexing.R__tuple_double_literal_position_returns_element
+list(1L, "foo", TRUE)[[2]]
+#---- indexing.R__record_positional_double_bracket_extracts_the_field
+config <- list(host = "localhost", port = 8080L)
+config[[1L]]
+config[[2L]]
+#---- indexing.R__record_positional_double_bracket_out_of_range
+config <- list(host = "localhost")
+config[[3L]]
+#---- nominals.R__new_introduces_nominal_type
+#: @type Person {list{name: character}}
+
+#: @new Person
+person <- list(name = "bob")
+person
+#---- nominals.R__new_on_generic_nominal
+#: @type Box<T> {list{value: T}}
+
+#: @new Box<integer>
+box <- list(value = 1L)
+box
+#---- nominals.R__new_rejects_wrong_generic_argument
+#: @type Box<T> {list{value: T}}
+
+#: @new Box<character>
+box <- list(value = 1L)
+#---- nominals.R__new_accepts_already_nominal_value
+#: @type Person {list{name: character}}
+
+#: @new Person
+person <- list(name = "bob")
+
+#: @new Person
+same <- person
+#---- nominals.R__dollar_access_projects_to_representation
+#: @type Person {list{name: character}}
+
+#: @new Person
+person <- list(name = "bob")
+person$name
+#---- nominals.R__double_bracket_access_projects_to_representation
+#: @type Person {list{name: character}}
+
+#: @new Person
+person <- list(name = "bob")
+person[["name"]]
+#---- nominals.R__generic_nominal_field_access_uses_type_argument
+#: @type Box<T> {list{value: T}}
+
+#: @new Box<integer>
+box <- list(value = 1L)
+box$value
+#---- nominals.R__arithmetic_projects_nominal_to_numeric_representation
+#: @type Meters {double}
+
+#: @new Meters
+height <- 1.8
+height + height
+#---- nominals.R__comparison_projects_nominal_representation
+#: @type Meters {double}
+
+#: @new Meters
+height <- 1.8
+height < 2.0
+#---- nominals.R__for_iterates_nominal_vector_representation
+#: @type Scores {integer[]}
+
+#: @new Scores
+scores <- c(1L, 2L)
+for (score in scores) score
+#---- nominals.R__nominal_parameter_accepts_nominal_value
+#: @type Person {list{name: character}}
+
+#: fn(value: Person) -> character
+get_name <- function(value) value$name
+
+#: @new Person
+person <- list(name = "bob")
+get_name(person)
+#---- nominals.R__nominal_return_type_flows_through_call
+#: @type Person {list{name: character}}
+
+#: fn(name: character) -> Person
+make_person <- function(name) {
+  #: @new Person
+  person <- list(name = name)
+  person
+}
+
+made <- make_person("bob")
+made$name
+#---- nominals.R__alias_annotation_is_structural
+#: @alias Count {integer}
+
+#: Count
+value <- 1L
+value
+#---- nominals.R__alias_inside_larger_type
+#: @alias Person {list{name: character}}
+
+#: list{owner: Person}
+value <- list(owner = list(name = "bob"))
+value
+#---- nominals.R__generic_alias_application
+#: @alias Box<T> {list{value: T}}
+
+#: Box<integer>
+value <- list(value = 1L)
+value$value
+#---- nominals.R__alias_in_function_annotation
+#: @alias Formatter {fn(count: integer) -> character}
+
+#: Formatter
+render <- function(count) "ok"
+render(1L)
+#---- operators.R__colon_endpoint_variable_is_scalar_constrained
+f <- function(n) 1:n
+f(3L)
+#---- operators.R__vector_endpoint_through_a_polymorphic_call_is_rejected
+f <- function(n) 1:n
+f(c(1.5, 2.5))
+#---- polymorphism.R__identity_instantiates_at_multiple_types
+mirror <- function(x) x
+first <- mirror(1L)
+second <- mirror("hello")
+#---- polymorphism.R__repeated_polymorphic_instantiations_remain_independent
+mirror <- function(x) x
+first <- mirror(1L)
+second <- mirror("hello")
+third <- mirror(2L)
+#---- polymorphism.R__aliased_polymorphic_function_remains_polymorphic
+mirror <- function(x) x
+alias <- mirror
+first <- alias(1L)
+second <- alias("hello")
+#---- polymorphism.R__higher_order_polymorphic_identity
+mirror <- function(x) x
+apply_once <- function(f, value) f(value)
+first <- apply_once(mirror, 1L)
+second <- apply_once(mirror, "hello")
+#---- polymorphism.R__constant_function_instantiates_across_argument_types
+const_integer <- function(x) 1L
+const_integer(1L)
+const_integer("hello")
+#---- polymorphism.R__repeated_fresh_instantiation_in_higher_order_calls
+invoke <- function(f, value) f(value)
+const_integer <- function(x) 1L
+mirror <- function(x) x
+invoke(const_integer, "hello")
+invoke(mirror, 1L)
+invoke(mirror, "hello")
+#---- polymorphism.R__solved_returned_function_keeps_outer_argument_type
+apply_left <- function(x) function(f) f(x)
+use_integer <- apply_left(1L)
+use_integer(function(value) 1L)
+#---- polymorphism.R__compact_forall_identity_instantiates
+#: <T> fn(value: T) -> T
+mirror <- function(value) value
+mirror(1L)
+mirror("hello")
+#---- polymorphism.R__expanded_forall_identity_instantiates
+#: @forall T
+#: @param value {T}
+#: @return {T}
+mirror <- function(value) value
+mirror(1L)
+mirror("hello")
+#---- polymorphism.R__forall_two_parameters_keep_left
+#: <T, U> fn(left: T, right: U) -> T
+keep_left <- function(left, right) left
+keep_left(1L, "x")
+keep_left("x", 1L)
+#---- polymorphism.R__forall_nullable_return
+#: <T> fn(condition: logical, value: T) -> T | NULL
+then_some <- function(condition, value) {
+  if (condition) value
+}
+then_some(TRUE, 1L)
+then_some(FALSE, "x")
+#---- polymorphism.R__forall_higher_order_application
+#: <T, U> fn(transform: fn(T) -> U, value: T) -> U
+apply_once <- function(transform, value) transform(value)
+
+#: fn(count: integer) -> character
+render <- function(count) "ok"
+apply_once(render, 1L)
+#---- polymorphism.R__forall_vector_element_preserves_atomic
+#: <T> fn(x: T[]) -> T[]
+same <- function(x) x
+same(c(1L, 2L))
+same(c("a", "b"))
+#---- polymorphism.R__forall_vector_element_accepts_scalar_coercion
+#: <T> fn(x: T[]) -> T[]
+same <- function(x) x
+same(2.5)
+#---- polymorphism.R__forall_vector_element_rejects_list
+#: <T> fn(x: T[]) -> T[]
+same <- function(x) x
+same(list(1L, 2L))
+#---- polymorphism.R__forall_vector_element_used_arithmetically
+#: <T> fn(x: T[]) -> T[]
+same <- function(x) x
+same(c(1L, 2L)) + 1L
+#---- polymorphism.R__forall_vector_element_extraction
+#: <T> fn(x: T[]) -> T
+first_of <- function(x) x[[1L]]
+first_of(c("a", "b"))
+#---- polymorphism.R__vector_suffix_rejects_non_atomic_element
+#: @alias Person {list{name: character}}
+
+#: fn(x: Person[]) -> NULL
+f <- function(x) NULL
+#---- polymorphism.R__numeric_binder_authorizes_body_arithmetic
+#: <T: numeric> fn(x: T) -> T
+add_one <- function(x) x + 1L
+add_one(2L)
+#---- polymorphism.R__unconstrained_binder_still_refuses_body_arithmetic
+#: <T> fn(x: T) -> T
+add_one <- function(x) x + 1L
+#---- polymorphism.R__atomic_binder_does_not_authorize_arithmetic
+#: <T: atomic> fn(x: T[]) -> T[]
+bump <- function(x) x + 1L
+#---- polymorphism.R__numeric_binder_authorizes_comparison
+#: <T: numeric> fn(x: T) -> logical
+positive <- function(x) x > 0L
+positive(1.5)
+#---- scoping.R__local_block_result_is_last_expression
+x <- local({
+  a <- 1L
+  a + 1L
+})
+x
+#---- scoping.R__local_of_bare_expression_is_its_type
+y <- local("hi")
+y
+#---- scoping.R__local_sees_enclosing_binding
+n <- 2L
+m <- local(n + 1L)
+m
+#---- scoping.R__global_access
+x <- 1L
+f <- function() {
+  x
+}
+#---- scoping.R__local_shadows_global
+x <- 1L
+f <- function() {
+  x <- "s"
+  x
+}
+#---- scoping.R__argument_shadows_global
+x <- 1L
+f <- function(x) {
+  x
+}
+#---- scoping.R__nested_function_access
+f <- function() {
+  x <- 1L
+  g <- function() {
+    x
+  }
+  g()
+}
+#---- scoping.R__nested_shadowing
+f <- function() {
+  x <- 1L
+  g <- function() {
+    x <- "s"
+    x
+  }
+  g()
+}
+#---- scoping.R__local_binding_does_not_escape
+x <- 1L
+f <- function() {
+  x <- "ok"
+  x
+}
+x
+#---- scoping.R__parameter_shadowing_preserves_outer_binding
+x <- 1L
+f <- function(x) x
+x
+f("ok")
+#---- scoping.R__nested_function_uses_enclosing_binding
+x <- 1L
+f <- function() {
+  g <- function() x
+  g()
+}
+f()
+#---- special_types.R__any_annotation_accepts_integer
+#: Any
+value <- 1L
+value
+#---- special_types.R__any_annotation_accepts_null
+#: Any
+value <- NULL
+value
+#---- special_types.R__any_annotation_accepts_unknown
+#: Any
+value <- 1L ~ 2L
+value
+#---- special_types.R__unknown_only_coercion_accepts_unknown
+#: @if-unknown integer
+value <- 1L ~ 2L
+value
+#---- special_types.R__trusted_coercion_overrides_incompatible_source
+#: @trust integer
+value <- "hello"
+value
+#---- special_types.R__checked_annotation_rejects_unknown
+#: integer
+value <- 1L ~ 2L
+#---- special_types.R__nullable_union_annotation_accepts_integer
+#: integer | NULL
+value <- 1L
+value
+#---- special_types.R__nullable_union_annotation_accepts_null
+#: integer | NULL
+value <- NULL
+value
+#---- special_types.R__unknown_argument_is_accepted_without_cascading
+unsupported <- 1L ~ 2L
+
+#: fn(count: integer) -> integer
+double_count <- function(count) count + count
+double_count(unsupported)
+#---- special_types.R__unknown_callee_call_evaluates_to_unknown
+unsupported <- 1L ~ 2L
+unsupported(1L)
+#---- special_types.R__any_callee_call_evaluates_to_any
+#: @trust Any
+callee <- 1L
+callee(1L)
+#---- special_types.R__any_argument_is_accepted
+#: @trust Any
+anything <- 1L
+
+#: fn(count: integer) -> integer
+double_count <- function(count) count + count
+double_count(anything)
+#---- special_types.R__unknown_in_arithmetic_stays_unknown
+unsupported <- 1L ~ 2L
+unsupported + 1L
+#---- special_types.R__union_annotation_accepts_integer
+#: integer | character
+value <- 1L
+value
+#---- special_types.R__union_annotation_accepts_character
+#: integer | character
+value <- "two"
+value
+#---- special_types.R__union_annotation_rejects_non_member
+#: integer | character
+value <- TRUE
+#---- special_types.R__member_accepted_where_union_parameter_expected
+#: fn(value: integer | character | NULL) -> logical
+accepts <- function(value) TRUE
+
+accepts(1L)
+#---- special_types.R__null_accepted_where_union_contains_null
+#: fn(value: integer | character | NULL) -> logical
+accepts <- function(value) TRUE
+
+accepts(NULL)
+#---- special_types.R__union_accepted_where_wider_union_expected
+#: integer | NULL
+narrow <- 1L
+
+#: integer | character | NULL
+wide <- narrow
+wide
+#---- special_types.R__union_rejected_where_narrower_union_expected
+#: integer | character | NULL
+wide <- 1L
+
+#: integer | NULL
+narrow <- wide
+#---- special_types.R__alias_expansion_into_union_dedupes
+#: @alias MaybeCount {integer | NULL}
+
+#: MaybeCount | integer | NULL
+value <- 1L
+value
+#---- union_operands.R__numeric_union_accepted_member_wise
+flag <- TRUE
+x <- if (flag) 1L else 2.5
+x + 1L
+#---- union_operands.R__numeric_union_promotes_per_member
+flag <- TRUE
+x <- if (flag) 1L else 2.5
+x + 1.5
+#---- union_operands.R__always_double_operator_collapses_union
+flag <- TRUE
+x <- if (flag) 1L else 2.5
+x / 2L
+#---- union_operands.R__union_with_character_member_is_rejected
+flag <- TRUE
+x <- if (flag) 1L else "a"
+x + 1L
+#---- union_operands.R__union_with_null_member_is_rejected
+flag <- TRUE
+x <- if (flag) 1L else NULL
+x + 1L
+#---- union_operands.R__unary_minus_preserves_union
+flag <- TRUE
+x <- if (flag) 1L else 2.5
+-x
+#---- union_operands.R__vector_member_makes_pair_result_vector
+flag <- TRUE
+x <- if (flag) 1L else c(1.5, 2.5)
+x + 1L
+#---- union_operands.R__numeric_union_compares_member_wise
+flag <- TRUE
+x <- if (flag) 1L else 2.5
+x > 0L
+#---- union_operands.R__union_of_mixed_families_is_rejected
+flag <- TRUE
+x <- if (flag) 1L else "a"
+x > 0L
+#---- union_operands.R__character_union_compares_within_family
+flag <- TRUE
+x <- if (flag) "a" else "b"
+x > "a"
+#---- union_operands.R__loop_variable_joins_union_of_vector_iterables
+flag <- TRUE
+items <- if (flag) c(1L, 2L) else c("a", "b")
+for (item in items) item
+#---- union_operands.R__heterogeneous_list_element_arithmetic_is_member_wise
+for (item in list(1L, 2.5)) item + 1L
+#---- union_operands.R__union_iterable_with_non_iterable_member_is_rejected
+flag <- TRUE
+items <- if (flag) c(1L, 2L) else function(x) x
+for (item in items) item
+#---- union_operands.R__shared_field_over_union_of_records
+flag <- TRUE
+rec <- if (flag) list(a = 1L) else list(a = 2L, b = "x")
+rec$a
+#---- union_operands.R__field_with_differing_member_types_joins
+flag <- TRUE
+rec <- if (flag) list(a = 1L) else list(a = "x")
+rec$a
+#---- union_operands.R__field_missing_on_one_member_is_rejected
+flag <- TRUE
+rec <- if (flag) list(a = 1L) else list(b = "x")
+rec$b
+#---- union_operands.R__subset2_over_union_of_lists
+flag <- TRUE
+items <- if (flag) list(1L, 2L) else list("a")
+items[[1L]]
+#---- union_operands.R__subset_over_union_of_lists
+flag <- TRUE
+items <- if (flag) list(1L, 2L) else list("a")
+items[1L]
+#---- union_operands.R__empty_list_slice_is_list_of_null
+list()[1L]
+#---- variance.R__contravariant_arg_rejected
+#: @type Handler<T> {fn(value: T) -> NULL}
+
+#: @new Handler<integer>
+handler <- function(value) NULL
+
+#: Handler<integer | NULL>
+widened <- handler
+#---- variance.R__contravariant_arg_widening_accepted
+#: @type Handler<T> {fn(value: T) -> NULL}
+
+#: @new Handler<integer | NULL>
+handler <- function(value) NULL
+
+#: Handler<integer>
+narrowed <- handler
+narrowed
+#---- variance.R__covariant_arg_still_accepted
+#: @type Box<T> {list{value: T}}
+
+#: @new Box<integer>
+box <- list(value = 1L)
+
+#: Box<integer | NULL>
+widened <- box
+widened
+#---- variance.R__invariant_arg_rejects_widening
+#: @type Cell<T> {list{get: T, set: fn(value: T) -> NULL}}
+
+#: @new Cell<integer>
+cell <- list(get = 1L, set = function(value) NULL)
+
+#: Cell<integer | NULL>
+widened <- cell
+#---- variance.R__invariant_arg_requires_exact_match
+#: @type Cell<T> {list{get: T, set: fn(value: T) -> NULL}}
+
+#: @new Cell<integer>
+cell <- list(get = 1L, set = function(value) NULL)
+
+#: Cell<integer>
+same <- cell
+same
+#---- variance.R__phantom_param_accepts_any
+#: @type Tagged<T> {integer}
+
+#: @new Tagged<integer>
+tagged <- 1L
+
+#: Tagged<logical>
+relabelled <- tagged
+relabelled
+#---- variance.R__nested_nominal_arg_is_invariant
+#: @type Sink<T> {fn(value: T) -> NULL}
+#: @type Outer<T> {Sink<T>}
+
+#: @new Outer<integer>
+outer <- function(value) NULL
+
+#: Outer<integer | NULL>
+widened <- outer
+#---- vectors.R__logical_array
+c(TRUE, FALSE)
+#---- vectors.R__integer_array
+c(1L, 2L, 3L)
+#---- vectors.R__double_array
+c(1.5, 2.5)
+#---- vectors.R__character_array
+c("foo", "bar")
+#---- vectors.R__integer_named_map
+c(foo = 1L, bar = 2L)
+#---- vectors.R__character_named_map
+c(x = "foo", y = "bar")
+#---- vectors.R__scalar_checked_annotation_coerces_to_array
+#: integer[]
+value <- 1L
+value
+#---- vectors.R__named_map_checked_annotation_coerces_to_array
+#: integer[]
+value <- c(foo = 1L, bar = 2L)
+value
+#---- vectors.R__empty_combine_is_null
+c()
+#---- vectors.R__nested_combine_flattens
+c(c(1L, 2L), 3L)
+#---- vectors.R__combine_promotes_named_map_argument
+c(c(foo = 1L), 2.5)
+#---- vectors.R__combine_of_logical_and_integer_coerces
+c(TRUE, 1L)
+#---- vectors.R__combine_of_list_is_rejected
+c(list(1L), 2L)
+#---- vectors.R__combine_with_unannotated_param_is_unknown
+function(x) c(x, 1L)
+#---- functions.R__exports_bindings_and_aliases
+#: @alias Formatter {fn(integer) -> character}
+mirror <- function(x) x
+render <- function(count) "ok"
+#---- functions.R__optional_parameter_export
+#: fn(count: integer, [label]: character) -> integer
+double_count <- function(count, label = NULL) count + count
+#---- functions.R__latest_function_binding_wins_with_changed_shape
+render <- function(count) "ok"
+
+#: fn(count: integer, label: character) -> character
+render <- function(count, label) label
+#---- functions.R__exports_interleaved_with_type_definitions
+#: @alias Count {integer}
+first <- 1L
+
+#: @type Person {list{name: character}}
+second <- "two"
+#---- types.R__type_definitions_and_binding
+#: @type Person {list{name: character}}
+
+#: @alias Formatter {fn(integer) -> character}
+value <- 1L
+#---- types.R__latest_binding_wins_in_interface
+mirror <- function(x) x
+mirror <- function(x) 1L
+#---- types.R__generic_alias_export
+#: @alias Box<T> {list{value: T}}
+value <- list(value = 1L)
+#---- types.R__generic_nominal_export
+#: @type Person<T> {list{value: T}}
+value <- 1L
+#---- types.R__mixed_nominal_alias_and_value_exports
+#: @alias PersonShape {list{name: character}}
+#: @type Person {PersonShape}
+
+#: @new Person
+person <- list(name = "bob")
+#---- audit_cross_file.R__R/a.R
+mirror <- function(value) value
+#---- audit_cross_file.R__R/b.R
+#: integer
+a <- mirror(1L)
+
+#: character
+b <- mirror("x")
+#---- audit_cross_file.R__R/b.R
+#: integer
+total <- add_one(2L) + 10L
+#---- audit_cross_file.R__R/a.R
+add_one <- function(x) x + 1L
+#---- audit_cross_file.R__R/b.R
+#: integer
+r <- add_one(2L)
+#---- audit_cross_file.R__R/b.R
+r <- add_one("x")
+#---- audit_cross_file.R__R/b.R
+x <- "text"
+#---- audit_cross_file.R__R/c.R
+#: character
+y <- x
+#---- audit_cross_file.R__R/c.R
+#: integer
+y <- x
+#---- audit_cross_file.R__R/a.R
+f <- function(value) value
+#---- audit_cross_file.R__R/b.R
+f <- function(x) x + 1L
+#---- audit_cross_file.R__R/c.R
+r <- f("x")
+#---- audit_cross_file.R__R/a.R
+base <- 10L
+#---- audit_cross_file.R__R/b.R
+#: integer
+total <- base + 5L
+#---- audit_cross_file.R__R/b.R
+r <- double_count(count = 2L)
+#---- audit_cross_file.R__R/a.R
+#: fn(integer) -> integer
+inc <- function(n) n + 1L
+#---- audit_cross_file.R__R/b.R
+r <- inc(n = 2L)
+#---- audit_cross_file.R__R/a.R
+#: fn(count: integer, [label]: character) -> integer
+tag <- function(count, label = NULL) count
+#---- audit_cross_file.R__R/b.R
+#: integer
+a <- tag(1L)
+
+#: integer
+b <- tag(1L, "x")
+#---- audit_cross_file.R__R/b.R
+#: Box<integer>
+v <- list(value = 1L)
+#---- audit_cross_file.R__R/b.R
+#: @new Box<integer>
+v <- list(value = 1L)
+#---- audit_cross_file.R__R/b.R
+#: @new Box<integer>
+v <- list(value = "x")
+#---- audit_cross_file.R__R/b.R
+#: character
+n <- person$name
+#---- audit_cross_file.R__R/a.R
+#: @alias Count {integer}
+
+#: fn(value: Count) -> Count
+inc <- function(value) value + 1L
+#---- audit_cross_file.R__R/b.R
+#: integer
+r <- inc(1L)
+#---- audit_cross_file.R__R/a.R
+#: @type Shape {integer}
+#---- audit_cross_file.R__R/b.R
+#: @alias Shape {character}
+#---- audit_cross_file.R__scripts/define.R
+helper <- function(x) x
+#---- audit_cross_file.R__scripts/use.R
+r <- helper(1L)
+#---- incremental.R__R/b.R
+result <- double_count(2L)
+#---- incremental.R__R/a.R
+#: fn(count: character) -> integer
+count_letters <- function(count) 1L
+double_count <- count_letters
+#---- incremental.R__R/a.R
+#: fn(count: integer) -> integer
+double_count <- function(count) {
+  count + count
+}
+#---- incremental.R__R/b.R
+result <- double_count("two")
+#---- incremental.R__delete R/a.R
+#++++ R/b.R
+warning[unresolved] I could not resolve `double_count` in this package, its imports, or builtins.
+--> 1:11-1:23
+| result <- double_count(2L)
+#---- incremental.R__R/a.R
+#: Person
+value <- list(name = "bob")
+#---- scripts.R__scripts/local.R
+#: @type Person {list{age: double}}
+#---- scripts.R__R/pkg.R
+pkg_value <- 1L
+#---- scripts.R__scripts/local.R
+count <- 1L
+
+#: integer
+doubled <- count + count
+#---- scripts.R__scripts/local.R
+value <- 1L
+value <- "text"
+
+#: character
+label <- value
+#---- scripts.R__scripts/local.R
+#: integer
+x <- "wrong"
+#---- scripts.R__scripts/local.R
+#: @type Person {list{age: double}}
+
+#: @new Person
+person <- list(age = 20)
+#---- scripts.R__scripts/local.R
+#: @type Widget {list{size: integer}}
+
+#: @new Widget
+w <- list(size = 3L)
+
+#: integer
+s <- w$size
+#---- scripts.R__R/main.R
+#: @strict
+x <- 1L %then% 2L
+#---- types.R__R/a.R
+#: @type Person {list{name: character}}
+
+#: fn(value: Person) -> character
+get_name <- function(value) value$name
+#---- types.R__R/b.R
+#: @new Person
+person <- list(name = "bob")
+result <- get_name(person)
+#---- types.R__R/b.R
+result <- get_name(list(name = "bob"))
+#---- values.R__R/a.R
+count <- 1L
+#---- values.R__R/b.R
+#: character
+label <- count
+#---- values.R__R/a.R
+result <- render(1L)
+#---- values.R__R/b.R
+#: fn(count: integer) -> character
+render <- function(count) "ok"
+#---- values.R__R/a.R
+#: integer
+first <- "one"
+#: integer
+second <- "two"
+#---- values.R__R/a.R
+#: integer
+first <- "one"
+#---- values.R__R/b.R
+#: integer
+second <- "two"
+#---- values.R__R/a.R
+third <- second
+second <- first
+first <- 1L
+#---- values.R__R/b.R
+#: integer
+ok <- third
+#---- values.R__R/a.R
+first <- 1L
+#---- values.R__R/b.R
+second <- first
+#---- values.R__R/c.R
+#: integer
+check <- second
+#---- values.R__R/b.R
+get_base <- function() base
+#---- values.R__R/c.R
+#: integer
+value <- get_base()
+#---- values.R__R/c.R
+#: character
+bad <- second
+#---- values.R__R/c.R
+third <- second
+#---- values.R__R/d.R
+#: integer
+fourth <- third
+#---- values.R__R/a.R
+a <- b
+#---- values.R__R/b.R
+b <- a
+#---- values.R__R/c.R
+result <- a(2L)
+#---- values.R__R/a.R
+#: fn(value: integer) -> integer
+seed <- function(value) value
+a <- b
+#---- values.R__R/c.R
+good <- seed(2L)
+bad <- seed("two")
+#---- values.R__R/a.R
+ring_one <- ring_two
+#---- values.R__R/b.R
+ring_two <- ring_three
+#---- values.R__R/c.R
+ring_three <- ring_one
+#---- values.R__R/d.R
+result <- ring_one(1L)
+#---- values.R__R/a.R
+helper <- function() 1L
+oops <- function() (
+#---- values.R__R/b.R
+result <- helper()
+#---- values.R__R/a.R
+#: fn() -> integer
+get_count <- function() {
+#---- values.R__R/b.R
+total <- get_count() + 1L
+#---- values.R__R/a.R
+count <-
+#---- values.R__R/b.R
+mirrored <- count
+#---- values.R__R/dt.R
+summarize_sales <- function(dt) {
+  dt[region == "west", .(total = sum(amount)), by = product]
+}
+add_revenue <- function(dt) {
+  dt[, revenue := price * quantity]
+}
+peek <- function(dt) {
+  with(dt, mean(score_col))
+}
+#---- values.R__R/globals.R
+utils::globalVariables(c("generated_col", "another_col"))
+globalVariables("single_name")
+#---- values.R__R/use.R
+use_them <- function() {
+  generated_col + another_col + single_name
+}
+#---- values.R__R/globals.R
+utils::globalVariables("declared_name")
+#---- values.R__R/use.R
+f <- function() declared_name + genuinely_undefined
+#---- values.R__R/fact.R
+# A package-level self-recursive function keeps the fixed point's Unknown return on purpose:
+# heterogeneous self-recursion (the tree fold T = double | list[T]) is untypeable in HM, and
+# pinning the parameter through the recursive call manufactures call-site false positives.
+# Unannotated consumers tolerate the Unknown; the mutual case below shows the typed contrast.
+top_fact <- function(k) {
+  if (k <= 1L) 1L else k * top_fact(k - 1L)
+}
+#---- values.R__R/use.R
+total <- top_fact(4L) + 1L
+#---- values.R__R/pair.R
+is_even <- function(n) if (n == 0L) TRUE else is_odd(n - 1L)
+is_odd <- function(n) if (n == 0L) FALSE else is_even(n - 1L)
+#---- values.R__R/use.R
+#: logical
+check <- is_even(4L)
+#---- base.R__T_is_logical
+T
+#---- base.R__F_is_logical
+F
+#---- base.R__pi_is_double
+pi
+#---- base.R__pi_arithmetic_promotes_through_operator_kernel
+pi / 2
+#---- base.R__letters_is_character_vector
+letters
+#---- base.R__length_of_vector_is_integer
+length(c(1L, 2L, 3L))
+#---- base.R__nchar_is_integer
+nchar("hello")
+#---- base.R__is_null_is_logical
+is.null(NULL)
+#---- base.R__seq_len_is_integer_vector
+seq_len(3L)
+#---- base.R__seq_along_is_integer_vector
+seq_along(c(1L, 2L))
+#---- base.R__toupper_is_character
+toupper("x")
+#---- base.R__tolower_is_character
+tolower("HELLO")
+#---- base.R__is_na_is_logical
+is.na(1L)
+#---- base.R__as_integer_is_integer
+as.integer("3")
+#---- base.R__as_character_is_character
+as.character(3L)
+#---- base.R__as_numeric_is_double
+as.numeric("3.5")
+#---- base.R__substr_is_character
+substr("hello", 1L, 3L)
+#---- base.R__seq_len_accepts_double_literal
+seq_len(10)
+#---- base.R__substr_accepts_double_literal_positions
+substr("hello", 1, 3)
+#---- base.R__substring_accepts_optional_last
+substring("hello", 1, 3)
+#---- base.R__substring_two_argument_form
+substring("hello", 2)
+#---- base.R__round_accepts_double_literal_digits
+round(3.14159, 2)
+#---- base.R__mean_second_positional_is_trim_not_na_rm
+mean(c(1, 2), 0.1)
+#---- base.R__toupper_accepts_vector
+toupper(c("a", "b"))
+#---- base.R__nchar_accepts_vector_and_coerced_input
+nchar(c("aa", "b"))
+nchar(42L)
+#---- base.R__gsub_accepts_vector_subject_and_flags
+gsub("a", "b", c("aa", "ab"), fixed = TRUE)
+#---- base.R__grepl_accepts_flags
+grepl("^x", "xy", perl = TRUE, ignore.case = TRUE)
+#---- base.R__sort_accepts_decreasing_by_name
+sort(c(2L, 1L), decreasing = TRUE)
+#---- base.R__unique_accepts_fromLast
+unique(c(1L, 1L), fromLast = TRUE)
+#---- base.R__paste_of_many_arguments_is_character
+paste("a", "b", "c")
+#---- base.R__paste_of_zero_arguments_is_character
+paste()
+#---- base.R__paste_accepts_sep_and_collapse
+paste(c("a", "b"), collapse = ", ")
+paste("a", "b", sep = "-")
+#---- base.R__paste_accepts_explicit_null_collapse
+paste("a", collapse = NULL)
+#---- base.R__paste0_accepts_collapse
+paste0("x", 1L, collapse = "")
+#---- base.R__cat_is_null_and_accepts_sep
+cat("a", "b")
+cat("a", "b", sep = "\n")
+#---- base.R__format_accepts_named_controls
+format(3.14159, nsmall = 2L)
+#---- base.R__sprintf_variadic_is_character
+sprintf("%d-%s", 1L, "a")
+#---- base.R__unmatched_named_argument_absorbs_into_rest
+paste("a", quote = FALSE)
+#---- base.R__absorbed_named_argument_checks_the_rest_element_and_steers_selection
+sum(1L, 2L, extra = 2L)
+sum(1L, 2L, extra = "x")
+#---- base.R__duplicated_declared_parameter_is_rejected_despite_rest
+paste("a", sep = "-", sep = "_")
+#---- base.R__sum_of_integers_is_integer
+sum(1L, 2L, 3L)
+#---- base.R__sum_accepts_named_na_rm_with_rest_arguments
+sum(1, 2, na.rm = TRUE)
+#---- base.R__sum_of_mixed_integer_and_double_is_double
+sum(1L, 2.5)
+#---- base.R__sum_of_logicals_is_integer
+sum(TRUE, FALSE)
+#---- base.R__sum_of_vector_and_scalar_is_integer
+sum(c(1L, 2L), 3L)
+#---- base.R__min_accepts_character_arguments
+min("a", "z")
+#---- base.R__max_of_integers_is_integer
+max(1L, 2L, na.rm = TRUE)
+#---- base.R__range_of_integers_is_integer_vector
+range(1L, 2L, 3L)
+#---- base.R__reduction_of_mixed_character_and_numeric_falls_back_to_any
+min(1L, "a")
+#---- base.R__prod_is_genuinely_double
+prod(2L, 3L)
+#---- base.R__mean_of_vector_is_double
+mean(c(1L, 2L))
+#---- base.R__mean_accepts_named_na_rm
+mean(c(1, 2), na.rm = TRUE)
+#---- base.R__any_is_logical
+any(TRUE, FALSE)
+#---- base.R__all_accepts_vector_and_na_rm
+all(c(TRUE, FALSE), na.rm = TRUE)
+#---- base.R__isTRUE_is_logical
+isTRUE(TRUE)
+#---- base.R__rev_preserves_the_element_type
+rev(c(1L, 2L, 3L))
+#---- base.R__sort_of_characters_is_character_vector
+sort(c("b", "a"))
+#---- base.R__setdiff_threads_the_element_type
+setdiff(c("a", "b"), c("b"))
+#---- base.R__rev_of_list_preserves_the_item_type
+rev(list(1L, 2L))
+#---- base.R__abs_of_integer_scalar_is_integer
+abs(1L)
+#---- base.R__abs_of_double_vector_is_double_vector
+abs(c(1.5, -2.5))
+#---- base.R__cumsum_of_integer_vector_is_integer_vector
+cumsum(c(1L, 2L, 3L))
+#---- base.R__unresolved_argument_selects_general_fallback
+f <- function(x) sum(x)
+f(c("a", "b"))
+#---- base.R__trimws_is_character
+trimws("  hi  ")
+#---- base.R__substring_is_character
+substring("hello", 1L)
+#---- base.R__gsub_is_character
+gsub("a", "b", "banana")
+#---- base.R__grepl_is_logical
+grepl("a", "banana")
+#---- base.R__strsplit_is_list_of_character_vectors
+strsplit("a,b", ",")
+#---- base.R__strrep_is_character
+strrep("ab", 3L)
+#---- base.R__toString_accepts_sep
+toString(c(1L, 2L), sep = "; ")
+#---- base.R__round_is_double
+round(3.14159, 2L)
+#---- base.R__floor_is_double
+floor(3.7)
+#---- base.R__signif_is_double
+signif(3.14159, 3L)
+#---- base.R__sqrt_of_integer_is_double
+sqrt(4L)
+#---- base.R__exp_and_log_are_double
+exp(1L)
+log(8, base = 2)
+#---- base.R__lapply_preserves_element_type_via_mapper
+#: list[character]
+xs <- list("a", "b")
+lapply(xs, toupper)
+#---- base.R__lapply_maps_element_type_through_predicate
+#: list[character]
+words <- list("a", "b")
+lapply(words, nchar)
+#---- base.R__filter_preserves_list_type
+#: list[integer]
+ns <- list(1L, 2L)
+Filter(is.numeric, ns)
+#---- base.R__find_returns_nullable_element
+#: list[integer]
+ns <- list(1L, 2L)
+Find(is.numeric, ns)
+#---- base.R__position_returns_nullable_index
+#: list[integer]
+ns <- list(1L, 2L)
+Position(is.numeric, ns)
+#---- base.R__reduce_folds_to_element_type
+Reduce(function(a, b) a + b, list(1L, 2L))
+#---- base.R__reduce_accepts_init_with_distinct_accumulator_type
+Reduce(function(acc, x) paste0(acc, x), list(1L, 2L), init = "")
+#---- base.R__invisible_passes_value_through
+invisible(5L)
+#---- base.R__force_passes_value_through
+force(1L)
+#---- base.R__print_returns_its_argument
+print(42L)
+print(c("a", "b"), quote = FALSE)
+#---- base.R__suppressWarnings_passes_body_type_through
+suppressWarnings(as.numeric("x"))
+#---- base.R__stop_in_else_branch_does_not_poison_the_join
+x <- if (TRUE) 1L else stop("bad")
+x + 1L
+#---- base.R__stopifnot_is_null_and_accepts_string_labels
+stopifnot(TRUE)
+stopifnot("must hold" = TRUE)
+#---- base.R__message_is_null
+message("hi", appendLF = FALSE)
+#---- base.R__tryCatch_resolves_with_handler
+tryCatch(1L, error = function(e) NULL)
+#---- base.R__try_returns_any
+try(log(-1), silent = TRUE)
+#---- base.R__names_is_null_hybrid_any
+names(list(a = 1L))
+#---- base.R__class_is_character
+class(1L)
+#---- base.R__inherits_is_logical
+inherits(1L, "integer")
+#---- base.R__nrow_is_null_hybrid_any_and_arithmetic_stays_clean
+n <- nrow(c(1L))
+n + 1L
+#---- base.R__NROW_is_genuinely_integer
+NROW(c(1L, 2L))
+#---- base.R__dim_is_null_hybrid_any
+dim(1L)
+#---- base.R__typeof_is_character
+typeof(1L)
+#---- base.R__which_is_integer_vector
+which(c(TRUE, FALSE))
+#---- base.R__which_max_is_integer
+which.max(c(1, 3))
+#---- base.R__match_is_integer
+match("a", c("a", "b"))
+#---- base.R__identical_is_logical
+identical(1L, 1L)
+#---- base.R__attr_reads_any
+attr(1L, "names")
+#---- base.R__atomic_constructors_return_typed_vectors
+numeric(3)
+integer(2L)
+character(0L)
+logical(1L)
+#---- base.R__matrix_and_factor_degrade_to_any_with_checked_formals
+matrix(c(1L, 2L), nrow = 1L)
+factor(c("a"), levels = c("a", "b"))
+#---- base.R__rowSums_is_double_vector
+rowSums(matrix(c(1, 2), nrow = 1L), na.rm = TRUE)
+#---- base.R__order_is_integer_vector
+order(c(2L, 1L), decreasing = TRUE)
+#---- base.R__tabulate_is_integer_vector
+tabulate(c(1L, 2L))
+#---- base.R__split_returns_list
+split(c(1L, 2L), c("a", "b"))
+#---- base.R__file_path_is_character
+file.path("a", "b")
+#---- base.R__file_exists_scalar_claim_keeps_if_clean
+if (file.exists("f")) 1L else 2L
+#---- base.R__readLines_is_character_vector
+readLines("f.txt")
+#---- base.R__writeLines_is_null
+writeLines("hi")
+#---- base.R__readRDS_is_any_saveRDS_is_null
+readRDS("f.rds")
+saveRDS(1L, "f.rds")
+#---- base.R__basename_is_character
+basename("/a/b.R")
+#---- base.R__list_files_is_character_vector
+list.files("dir", pattern = "[.]R$", full.names = TRUE)
+#---- base.R__tempfile_is_character
+tempfile(fileext = ".csv")
+#---- base.R__dir_exists_is_logical
+dir.exists("d")
+#---- base.R__sys_time_is_any_sys_getenv_is_character
+Sys.time()
+Sys.getenv("HOME")
+#---- base.R__sys_getpid_is_integer
+Sys.getpid()
+#---- base.R__commandArgs_is_character_vector
+commandArgs(trailingOnly = TRUE)
+#---- base.R__set_seed_is_null
+set.seed(42)
+#---- base.R__library_with_string_argument_resolves
+library("utils", character.only = TRUE)
+#---- base.R__require_is_logical
+if (require("utils", quietly = TRUE)) 1L else 2L
+#---- base.R__requireNamespace_is_logical
+requireNamespace("utils", quietly = TRUE)
+#---- base.R__getOption_is_any
+getOption("digits", default = 7L)
+#---- base.R__grep_stays_any
+grep("a", "banana")
+#---- base.R__sapply_stays_any
+sapply(list(1L), is.numeric)
+#---- base.R__arbitrary_named_argument_sinks_resolve_as_any
+data.frame(x = 1L)
+structure(1L, class = "score")
+cbind(a = 1L, b = 2L)
+Sys.setenv(MY_VAR = "v")
+table(group = c("a", "a"))
+#---- base.R__reflection_resolves
+do.call(sum, list(1L))
+ifelse(TRUE, 1L, 2L)
+eval(parse(text = "1 + 1"))
+#---- base.R__exists_and_get_have_string_signatures
+exists("count")
+get("count")
+assign("count", 1L)
+#---- base.R__unknown_namespace_read_is_unknown
+mystery <- foobar::bazqux
+#---- base.R__sys_date_returns_the_date_nominal
+Sys.Date()
+#---- base.R__as_factor_returns_the_factor_nominal
+as.factor(c("a", "b"))
+#---- base.R__file_returns_a_connection
+file("data.txt", open = "r")
+#---- base.R__annotation_can_name_a_stub_nominal
+#: fn(x: factor) -> logical
+check_factor <- function(x) TRUE
+check_factor(as.factor("a"))
+#---- base.R__stub_nominals_are_distinct
+#: fn(x: factor) -> logical
+check_factor <- function(x) TRUE
+check_factor(Sys.Date())
+#---- base.R__combine_drops_null_members_of_union_arguments
+grow <- function() {
+  acc <- c()
+  for (value in c(1.5, 2.5)) {
+    acc <- c(acc, value)
+  }
+  acc
+}
+#---- base.R__lapply_forwards_named_arguments_into_the_callback
+words <- c("alpha", "beta")
+lapply(words, gsub, pattern = "a", replacement = "o")
+#---- base.R__lapply_forwards_positional_arguments_after_the_element
+words <- c("alpha", "beta")
+lapply(words, gsub, "a", "o")
+#---- base.R__lapply_accepts_a_callback_with_surplus_optional_formals
+words <- c("alpha", "beta")
+lapply(words, nchar)
+#---- base.R__lapply_over_an_atomic_vector_types_the_elements
+values <- c(1L, 2L, 3L)
+lapply(values, function(value) value + 1L)
+#---- base.R__forwarded_argument_with_a_wrong_type_is_rejected
+words <- c("alpha", "beta")
+lapply(words, gsub, pattern = 1L, replacement = "o")
+#---- base.R__missing_tested_formal_is_optional_at_call_sites
+greet <- function(name, punct) {
+  if (missing(punct)) {
+    name
+  } else {
+    punct
+  }
+}
+greet("ada")
+#---- base.R__unguarded_formal_stays_required
+join2 <- function(left, right) {
+  paste0(left, right)
+}
+join2("a")
+#---- base.R__negated_missing_test_also_marks_optional
+pick <- function(x) {
+  if (!missing(x)) {
+    return(x + 1L)
+  }
+  0L
+}
+pick(2L)
+#---- methods.R__extends_is_logical
+extends("Speaker", "Person")
+#---- methods.R__isVirtualClass_is_logical
+isVirtualClass("Person")
+#---- methods.R__isGeneric_is_logical
+isGeneric("show")
+#---- methods.R__existsMethod_and_hasMethod_are_logical
+existsMethod("show", "Person")
+hasMethod("show")
+#---- methods.R__is_stays_any
+is(1L, "integer")
+#---- methods.R__new_with_arbitrary_slot_names_stays_any
+new("Person", name = "bob")
+#---- methods.R__setClass_machinery_stays_any
+setClass("Person", representation(name = "character"))
+#---- methods.R__validObject_mirrors_input_as_any
+validObject(1L)
+#---- methods.R__callNextMethod_stays_any
+callNextMethod()
+#---- methods.R__slotNames_is_character_vector
+slotNames("Person")
+#---- methods.R__standardGeneric_dispatches_as_any
+standardGeneric("show")
+#---- narrowing.R__else_branch_drops_the_null_member
+#: fn(x: integer | NULL) -> integer
+f <- function(x) {
+  if (is.null(x)) {
+    0L
+  } else {
+    x + 1L
+  }
+}
+#---- narrowing.R__true_branch_is_null
+#: fn(x: integer | NULL) -> character
+f <- function(x) {
+  if (is.null(x)) {
+    "missing"
+  } else {
+    "present"
+  }
+}
+#---- narrowing.R__negated_guard_swaps_the_edges
+#: fn(x: integer | NULL) -> integer
+f <- function(x) {
+  if (!is.null(x)) {
+    x + 1L
+  } else {
+    0L
+  }
+}
+#---- narrowing.R__without_narrowing_the_union_still_errors
+#: fn(x: integer | NULL) -> integer
+f <- function(x) {
+  x + 1L
+}
+#---- narrowing.R__early_return_persists_the_false_edge
+#: fn(x: integer | NULL) -> integer
+f <- function(x) {
+  if (is.null(x)) {
+    return(0L)
+  }
+  x + 1L
+}
+#---- narrowing.R__stop_call_persists_the_false_edge
+#: fn(x: character | NULL) -> character
+f <- function(x) {
+  if (is.null(x)) {
+    stop("x is required")
+  }
+  x
+}
+#---- narrowing.R__negated_early_return_persists_the_true_edge
+#: fn(x: integer | NULL) -> integer
+f <- function(x) {
+  if (!is.null(x)) {
+    return(x)
+  }
+  0L
+}
+#---- narrowing.R__character_guard_splits_a_two_family_union
+#: fn(x: integer | character) -> character
+f <- function(x) {
+  if (is.character(x)) {
+    x
+  } else {
+    "number"
+  }
+}
+#---- narrowing.R__numeric_guard_keeps_both_numeric_families
+#: fn(x: integer | double | character) -> double
+g <- function(x) {
+  if (is.numeric(x)) {
+    x + 0.5
+  } else {
+    0.0
+  }
+}
+#---- narrowing.R__list_guard_selects_the_list_member
+#: fn(x: list[integer] | integer) -> list[integer]
+h <- function(x) {
+  if (is.list(x)) {
+    x
+  } else {
+    list(x)
+  }
+}
+#---- narrowing.R__branch_write_replaces_the_refinement
+#: fn(x: integer | NULL) -> integer | character
+f <- function(x) {
+  if (is.null(x)) {
+    x <- "fallback"
+  }
+  x
+}
+#---- narrowing.R__refined_edges_rejoin_to_the_original_union
+#: fn(x: integer | NULL) -> integer | NULL
+f <- function(x) {
+  if (is.null(x)) {
+    y <- 1L
+  }
+  x
+}
+#---- narrowing.R__diverging_else_contributes_no_value
+#: fn(x: integer | NULL) -> integer
+f <- function(x) {
+  y <- if (!is.null(x)) x else return(0L)
+  y + 1L
+}
+#---- narrowing.R__guard_on_any_pins_the_true_edge_to_null
+f <- function() {
+  x <- getOption("value")
+  if (is.null(x)) {
+    x
+  } else {
+    "something"
+  }
+}
+#---- narrowing.R__coalesce_generalizes_to_optional
+or_else <- function(value, fallback) {
+  if (is.null(value)) {
+    fallback
+  } else {
+    value
+  }
+}
+#---- narrowing.R__coalesce_accepts_null_and_binds_from_the_fallback
+or_else <- function(value, fallback) {
+  if (is.null(value)) fallback else value
+}
+picked <- or_else(NULL, "anonymous")
+picked
+#---- narrowing.R__early_return_shapes_the_parameter
+f <- function(x) {
+  if (is.null(x)) {
+    return(0L)
+  }
+  x + 1L
+}
+#---- narrowing.R__negated_guard_shapes_too
+f <- function(x) {
+  if (!is.null(x)) x + 1L else 0L
+}
+#---- narrowing.R__testing_null_makes_unguarded_use_a_real_finding
+f <- function(x) {
+  if (is.null(x)) 0L else 1L
+  x + 1L
+}
+#---- recursion.R__top_level_factorial_types
+fact <- function(k) {
+  if (k <= 1L) 1L else k * fact(k - 1L)
+}
+fact(5L)
+#---- recursion.R__recursive_scheme_rejects_a_bad_argument
+countdown <- function(x) if (x > 0L) countdown(x - 1L) else "done"
+countdown("not an integer")
+#---- recursion.R__mutual_local_recursion_stays_refused
+# Letrec visibility is per binding: `is_even`'s body references `is_odd` before any binding for
+# it exists, which stays a loud refusal rather than a silent mistype. Top-level mutual recursion
+# resolves through the package interface instead.
+pair <- function() {
+  is_even <- function(n) if (n == 0L) TRUE else is_odd(n - 1L)
+  is_odd <- function(n) if (n == 0L) FALSE else is_even(n - 1L)
+  is_even(4L)
+}
+#---- recursion.R__mutual_top_level_pair_schemes
+is_even <- function(n) if (n == 0L) TRUE else is_odd(n - 1L)
+is_odd <- function(n) if (n == 0L) FALSE else is_even(n - 1L)
+is_even(4L)
+#---- recursion.R__mutual_pair_without_in_file_call
+even2 <- function(n) if (n == 0L) TRUE else odd2(n - 1L)
+odd2 <- function(n) if (n == 0L) FALSE else even2(n - 1L)
+#---- stats.R__sd_is_double
+sd(c(1, 2, 3))
+#---- stats.R__median_is_type_preserving_any
+median(c(1L, 2L, 3L))
+#---- stats.R__median_accepts_na_rm
+median(c(1, 2), na.rm = TRUE)
+#---- stats.R__var_and_cor_are_matrix_capable_any
+var(c(1, 2))
+cor(c(1, 2), c(2, 3))
+#---- stats.R__cor_single_matrix_argument_is_idiomatic
+m <- matrix(c(1, 2, 3, 4), nrow = 2L)
+cor(m)
+#---- stats.R__weighted_mean_weights_are_optional
+weighted.mean(c(1, 2))
+weighted.mean(c(1, 2), c(0.3, 0.7))
+#---- stats.R__mad_and_IQR_are_double
+mad(c(1, 2))
+IQR(c(1, 2), na.rm = TRUE)
+#---- stats.R__quantile_is_double_vector
+quantile(c(1, 2, 3))
+#---- stats.R__quantile_second_positional_is_probs
+quantile(c(1, 2, 3), 0.5)
+#---- stats.R__quantile_accepts_probs_vector_and_na_rm
+quantile(c(1, 2, 3), probs = c(0.25, 0.75), na.rm = TRUE)
+#---- stats.R__fivenum_is_double_vector
+fivenum(c(1, 2), na.rm = TRUE)
+#---- stats.R__setNames_preserves_object_type
+setNames(c(1L, 2L), c("a", "b"))
+#---- stats.R__na_omit_is_type_preserving_any
+na.omit(c(1, NA))
+#---- stats.R__complete_cases_is_logical
+complete.cases(c(1, NA))
+#---- stats.R__rnorm_is_double_vector
+rnorm(5L)
+#---- stats.R__rnorm_accepts_mean_and_sd
+rnorm(10, mean = 5, sd = 2)
+#---- stats.R__runif_accepts_positional_bounds
+runif(5, 0, 1)
+#---- stats.R__rbinom_is_integer_vector
+rbinom(5, 10, 0.5)
+#---- stats.R__rpois_is_integer_vector
+rpois(3, 2.5)
+#---- stats.R__pnorm_is_double_vector
+pnorm(1.96)
+#---- stats.R__qnorm_accepts_tail_controls
+qnorm(0.975, lower.tail = FALSE)
+#---- stats.R__dnorm_accepts_mean_and_sd
+dnorm(0, mean = 0, sd = 1)
+#---- stats.R__dbinom_is_double_vector
+dbinom(3, 10, 0.5, log = TRUE)
+#---- stats.R__model_fitters_take_a_formula_and_return_any
+x <- c(1, 2)
+y <- c(2, 4)
+lm(y ~ x)
+glm(y ~ x, family = "poisson")
+#---- stats.R__model_fitters_absorb_passthrough_keywords
+x <- c(1, 2)
+y <- c(2, 4)
+lm(y ~ x, singular.ok = TRUE)
+#---- stats.R__model_fitter_rejects_a_non_formula_subject
+lm(c(1, 2))
+#---- stats.R__prediction_helpers_stay_any
+predict(1L)
+coef(1L)
+residuals(1L)
+fitted(1L)
+#---- utils.R__head_preserves_the_element_type
+head(c(1L, 2L, 3L))
+#---- utils.R__head_accepts_count
+head(c(1L, 2L, 3L), 2)
+#---- utils.R__tail_accepts_named_count
+tail(c(1L, 2L), n = 1L)
+#---- utils.R__str_is_null
+str(list(1L, 2L))
+#---- utils.R__str_accepts_display_controls
+str(list(1L), max.level = 1L)
+#---- utils.R__read_csv_returns_a_data_frame
+read.csv("data.csv")
+#---- utils.R__read_csv_checks_declared_controls_and_absorbs_passthrough_keywords
+read.csv("data.csv", header = FALSE, stringsAsFactors = FALSE)
+read.table("data.tsv", sep = "\t", nrows = 10L, comment.char = "")
+#---- utils.R__read_csv_rejects_a_mistyped_declared_control
+read.csv("data.csv", header = "yes")
+#---- utils.R__read_csv_accepts_a_connection_subject
+read.csv(file("data.csv"))
+#---- utils.R__write_csv_is_null
+write.csv("x", "out.csv")
+#---- utils.R__write_csv_accepts_row_names_by_name
+write.csv(1L, "out.csv", row.names = FALSE)
+#---- utils.R__write_table_accepts_separator_controls
+write.table(1L, "out.tsv", sep = "\t", col.names = TRUE)
+#---- utils.R__download_file_is_integer_status
+download.file("https://example.org", "dest.html", quiet = TRUE)
+#---- utils.R__capture_output_is_character_vector
+capture.output(1L)
+#---- utils.R__install_packages_is_null
+install.packages("roughly")
+#---- utils.R__install_packages_accepts_repos_and_dependencies
+install.packages("pkg", repos = "https://cran.r-project.org", dependencies = TRUE)
+#---- utils.R__packageVersion_is_any
+packageVersion("base")
+#---- utils.R__sessionInfo_is_any
+sessionInfo()
+#---- utils.R__help_returns_help_object_as_any
+help("sum", package = "base")
+#---- utils.R__modifyList_has_checked_arity
+modifyList(list(a = 1L), list(a = 2L))
+#---- utils.R__combn_stays_any
+combn(4L, 2L)
+#---- utils.R__object_size_is_any
+object.size(c(1L, 2L))
+#---- utils.R__URLencode_is_character
+URLencode("a b", reserved = TRUE)
+#---- library_typing.R__R/main.R
+flag <- T
+no_flag <- F
+half <- pi / 2
+count <- length(c(1L, 2L, 3L))
+width <- nchar("hello")
+ids <- seq_len(count)
+#---- library_typing.R__R/main.R
+joined <- paste("a", "b", "c")
+reversed <- rev(c(1L, 2L, 3L))
+#---- library_typing.R__R/main.R
+ok <- length(c(1L, 2L))
+bad <- 1L %then% 2L
+#---- library_typing.R__R/main.R
+length <- function(x) 0L
+#---- unknown_origins.R__R/main.R
+x <- "foo"
+bad <- x + 1L
+#---- unknown_origins.R__R/main.R
+#: @trust Any
+1L %then% 2L
+#---- unknown_origins.R__R/b.R
+y <- x
+#---- unknown_origins.R__R/main.R
+get_value <- function(node) node$value
+#---- unknown_origins.R__R/main.R
+first <- function(x) x[[1L]]
+#---- unknown_origins.R__R/main.R
+slice <- function(x) x[1L]
+#---- unknown_origins.R__R/main.R
+grow <- function(x) c(x, 1L)
+#---- unknown_origins.R__R/main.R
+#: @strict off
+x <- 1L %then% 2L
+#---- unknown_origins.R__R/main.R
+frobnicate(1L)
+#---- unknown_origins.R__R/main.R
+foobar::bazqux(1L)
+#---- unknown_origins.R__R/main.R
+#: @strict off
+frobnicate(1L)
+#---- unknown_origins.R__R/main.R
+config <- 1L
+port <- config@port
+#---- basics.R__assignment_then_call
+mirror <- function(x) x
+mirror(1L)
+#---- basics.R__tuple_length_mismatch
+#: list{integer}
+value <- list(1L, 2L)
+#---- basics.R__record_field_mismatch
+#: list{left: integer}
+value <- list(right = 1L)
+#---- basics.R__null_join_keeps_variable_in_union
+maybe <- function(flag, value) if (flag) value
+#---- basics.R__union_typed_argument_instantiates_scheme
+maybe <- function(flag, value) if (flag) value
+maybe(TRUE, 1L)
+#---- basics.R__branch_join_falls_back_to_union
+pick_label <- function(flag) if (flag) 1L else "one"
+pick_label(TRUE)
+#---- functions.R__constant_function_literal
+function(x) 1L
+#---- functions.R__higher_order_apply_literal
+function(f, value) f(value)
+#---- functions.R__two_parameter_function_literal
+function(x, y) x
+#---- functions.R__function_returning_identity_literal
+function(f) function(x) f(x)
+#---- functions.R__self_application_occurs_check
+function(x) x(x)

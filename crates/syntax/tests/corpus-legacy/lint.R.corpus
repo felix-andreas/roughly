@@ -1,0 +1,27 @@
+#---- basics.R__clean_input
+snake_name <- function(value_name) {
+  helper_name(value_name)
+  TRUE
+}
+#---- basics.R__short_true
+snake_name <- T
+#---- basics.R__assignment_equals
+snake_name = 1L
+#---- basics.R__trailing_comma
+snake_name(
+  value_name,
+)
+#---- basics.R__snake_case_required_in_function
+snake_name <- function(badParam) {
+  badName <- 1L
+}
+#---- basics.R__allow_suppresses_a_lint_on_the_next_line
+# roughly: allow(boolean-shorthand)
+flag <- T
+#---- basics.R__allow_suppresses_a_trailing_lint_on_the_same_line
+flag <- T # roughly: allow(boolean-shorthand)
+#---- basics.R__allow_with_a_different_code_does_not_suppress
+# roughly: allow(naming-style)
+flag <- T
+#---- basics.R__allow_all_suppresses_everything_on_the_line
+flag <- T # roughly: allow(all)
