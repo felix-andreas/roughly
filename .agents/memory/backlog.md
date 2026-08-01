@@ -666,7 +666,7 @@ bounded pass runs in the default test suite so CI fuzzes on every change" — th
 been for the pipeline's whole life. Fix the wording in `decisions.md` and the testing page independently
 of the workflow move.
 
-### `ide::completion` costs ~160–190 s per gate run to assert that strings are non-empty
+### FIXED — `ide::completion` cost ~160–190 s per gate run to assert that strings are non-empty
 
 Per-offset on one warm database, 25 offsets: **completion 23.490 ms**, hover 0.044, hover_debug 0.039,
 code_actions 0.035, rename 0.033, definition 0.029, references 0.027, type_definition 0.024,
@@ -674,8 +674,14 @@ signature_help 0.016. Completion is 587.26 ms of the 592.4 ms those nine feature
 from the harness's seed sweep: 6.34 s → 1.27 s debug (80%), 1.43 s → 0.08 s release (94%). The ide
 binary is 199.77 s of the 667.5 s battery, so completion alone is **~26% of the entire workspace test
 suite** — and its only assertion is `assert!(!item.label.is_empty())`. It is also mostly redundant: over
-the 10 seeds, 245 swept offsets produce **64 distinct results (73.9% duplicates)**. Call it at one offset
-per token-boundary class, not every stride offset.
+the 10 seeds, 245 swept offsets produce **64 distinct results (73.9% duplicates)**.
+
+Fixed by sampling once per completion context — the kind of token the cursor sits in or after. Two
+sharper-looking variants were measured and rejected: filtering to token boundaries saved only 5%
+(in short inputs nearly every sampled offset already is one), and keying on the *pair* of
+surrounding kinds saved 29%. Per-token-kind halves the harness (29.8 s → 16.8 s at `FUZZ_ITERS=50`,
+against a 6.2 s floor with completion removed entirely), and the full `ide` binary went 195 s → 94 s
+*while gaining* the two range oracles below.
 
 ### This is not a fuzzer; it is a fixed 498-program corpus re-derived at 124 s a run
 
@@ -1777,7 +1783,7 @@ clean, and the *unannotated* `countdown` is clean — so writing down the checke
 turns a clean file into a failing one. 12 of the 41 violations above carry this message; the rest
 (rigid-vs-generalized binder disagreements, a default-value case) need per-case adjudication first.
 
-### Formatter preservation is kind-only, so any change confined to a token's spelling is invisible
+### FIXED — formatter preservation was kind-only, so a token's spelling could change invisibly
 
 `significant_kinds` compares `Vec<SyntaxKind>`. A formatter emitting the wrong *bytes* for a token —
 exactly what a stale or off-by-one `raw()` range produces — preserves kinds perfectly, and R is
@@ -1789,7 +1795,7 @@ baseline 0 violations, cost **0.1 s** for all 3,159 sources — cheaper than the
 blind spot is precisely within-kind.) Worth having alongside it: **format ⇒ semantics agreement**,
 formatting must not change the diagnostic multiset — pristine 0 divergent over 2,224, cost 20–35 s.
 
-### Nothing bounds the parse-error count from below, and the oracle that catches it is already in-tree
+### FIXED — nothing bounded the parse-error count from below; the oracle already existed and never ran
 
 `check_parse_invariants` guards against an error *cascade* but never asserts that a broken file reports
 anything, while the parser carries a lot of dedup and first-wins logic (`error_at`, `error_unclosed`,
@@ -1807,7 +1813,7 @@ for the in-tree corpus, 765 ms for 20,000 mutations. **An oracle explicitly mark
 fuzz inputs) but did *not* fire on this bug — the dropped errors came from files with no `ERROR` node.
 Prefer the differential.
 
-### IDE ranges are checked for in-bounds-ness, never for what they cover
+### FIXED — IDE ranges were checked for in-bounds-ness, never for what they cover
 
 The ide battery asserts `range.end() <= text.len()`. A rename whose edits are all shifted one byte
 passes — and corrupts the user's file. Injected bug: off-by-one at the one place in `occurrences`
@@ -1828,6 +1834,18 @@ back) caught **358**. Pristine baseline 0 over 3,466 identifier positions and 1,
 | **two-wave superset** — a `parse_stage_diagnostics` finding that vanishes from `file_diagnostics` is an editor flicker; asserted only for hand-written cases | 3,159 sources, 0 lost | 25 s |
 | **leading-comment metamorphic** | 2,197 compared, 0 divergent | 36 s |
 | **alpha-rename metamorphic** | 3/1,162 hits, all three the transform's own fault (an edit-distance suggestion, a stub-shadowing name, string-form binders an IDENT-only rename missed); capture-avoiding transform 0/994 — usable only with the filters | 20 s |
+
+### Open — the parser accepts escape sequences R rejects (found by the differential's first run)
+
+The lexer's string scanner skips any escaped character wholesale, with a comment calling escape
+validity "a semantic concern" — but no semantic layer checks it, so every malformed escape is
+silently accepted. Verified with R as referee: `"\u{1F600}"` has five hex digits and `\u` takes at
+most four, so R refuses it with `invalid \u{xxxx} sequence` while `ry` reports nothing. R's rules to
+implement: `\x` 1–2 hex, `\u` 1–4 hex (bare or braced), `\U` 1–8 hex (bare or braced), `\0`–`\7`
+octal 1–3 digits, the named escapes, and `unrecognized escape in character string` for anything
+else. The fixture case `syntax/tests/syntax::quoting__escape_soup` currently sits in
+`crates/syntax/tests/in-tree-acceptance-allowlist.txt` labelled as this gap; implementing the check
+should remove that entry and re-bless the case.
 
 **One surface with no oracle at all:** `PackageMetadata` is referenced by zero fuzz arms, so attach
 tolerance, `imports_every_name` and the whole NAMESPACE/DESCRIPTION layer are fuzz-dark — and fixtures
