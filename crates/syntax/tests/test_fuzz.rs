@@ -190,6 +190,60 @@ fn legacy_corpus_holds_invariants() {
     }
 }
 
+/// Blanking prose out of a literate document must not move a single byte:
+/// every offset the analysis reports is an offset into the *original* file, so
+/// a transform that shortened or lengthened the text by one byte would shift
+/// every diagnostic after it. The unit tests pin that on four hand-written
+/// documents; this pins it over generated ones, which is where a stray
+/// multibyte character or an unterminated fence would show up.
+#[test]
+fn literate_conversion_never_moves_a_byte() {
+    const PIECES: &[&str] = &[
+        "# Title\n",
+        "Some prose.\n",
+        "```{r}\n",
+        "```{r setup, echo=FALSE}\n",
+        "```{python}\n",
+        "```\n",
+        "x <- 1L\n",
+        "café <- \"héllo 😀\"\n",
+        "<<chunk, echo=TRUE>>=\n",
+        "@\n",
+        "\\section{One}\n",
+        "\n",
+        "``` {r}\n",
+        "```{r",
+        "text without a newline",
+        "\r\n",
+        "#| echo: false\n",
+    ];
+    let mut rng = SplitMix64(0x11_7E_A7);
+    for _ in 0..iterations() {
+        let mut document = String::new();
+        for _ in 0..rng.below(12) {
+            document.push_str(PIECES[rng.below(PIECES.len())]);
+        }
+        let converted = syntax::literate::r_source_of_literate(&document);
+        assert_eq!(
+            converted.len(),
+            document.len(),
+            "length changed for {document:?} -> {converted:?}"
+        );
+        let original_newlines: Vec<usize> =
+            document.match_indices('\n').map(|(at, _)| at).collect();
+        let converted_newlines: Vec<usize> =
+            converted.match_indices('\n').map(|(at, _)| at).collect();
+        assert_eq!(
+            original_newlines, converted_newlines,
+            "newlines moved for {document:?} -> {converted:?}"
+        );
+        // The converted text is fed straight to the parser, so it must also be
+        // something the parser can hold: the invariants below are the same ones
+        // every other arm asserts.
+        check_invariants(&converted);
+    }
+}
+
 #[test]
 fn fuzz_random_bytes() {
     run_random_bytes(iterations());

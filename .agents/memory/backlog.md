@@ -634,10 +634,13 @@ Derive the edit from the source instead: replace or insert one statement at a bo
   fetches it, so `fuzz_corpus_seeded` in `syntax` and `format` returns early — ~1,050 budgeted inputs that
   never run, behind a skip line `cargo test` hides. Same "green means nothing ran" species the
   `FIXTURE_FILTER` guard already fixed.
-- **Surfaces with no fuzz coverage at all**: `syntax::literate::r_source_of_literate` has an explicit
-  byte-length-preserving contract, one caller, and no test of any kind — the cheapest possible property;
-  generated `.Rtypes` text never reaches the stub loader (`stubs.rs` 60.67%); `PackageMetadata` appears in
-  no harness; the IDE arm only ever uses `DocumentKind::Package`.
+- **Surfaces with no fuzz coverage**: generated `.Rtypes` text never reaches the stub loader
+  (`stubs.rs` 60.67%); `PackageMetadata` appears in no harness; the IDE arm only ever uses
+  `DocumentKind::Package`. **The review's fourth item here was wrong and is corrected**: it reported
+  `syntax::literate::r_source_of_literate` as having "no test of any kind", but it has eight unit tests
+  and three of them already assert the byte-length invariant, including one for multibyte prose. The real
+  gap was only that the invariant was pinned on four hand-written documents rather than over generated
+  input, which the `syntax` battery now closes.
 
 ## Open — test & fuzz architecture review
 
@@ -1467,6 +1470,47 @@ below, ranked by how often a real user hits it.
   binding rather than "move it up a line", which would annotate the wrong thing.
 - Overload candidates when touched: `is`, `extends`, `grep(value =)`, `cor` (vector vs matrix — needs matrix nominals). `Date`/`POSIXct` arithmetic refuses loudly today — revisit if real code makes it noisy.
 - **A list operation over a RECORD still loses the field types.** `rev`/`unique`/`head`/`tail`/`Filter` now declare a `list[named: T]` candidate ahead of the plain list one, so a name survives and a field read is `T | NULL` instead of a missing-field error — but a fixed-shape input coerces to a name-keyed list on the way in, so the exact field types are gone and the read stays nullable. Only a shape-mirroring return ("the same record") fixes it, and the type language has no way for a stub to say that; `rev` is the case where the claim would be exactly right (it reorders and drops nothing), while `head`/`tail`/`Filter` genuinely may drop a name and are correctly nullable. Same family as the data.frame row-type and matrix-shape designs.
+
+## Open — lowering fidelity (each one pinned wrong-but-current in `crates/semantics/tests/lowering/`)
+
+Found by dumping the HIR directly instead of reading it off the far-end type. Each has a fixture case
+whose comment says the expected shape, so fixing one turns its case red and forces a deliberate
+re-bless.
+
+- **A trailing empty argument position is dropped, so `m[1, ]` and `m[1]` lower identically**
+  (`indexing__a_trailing_empty_index_position_is_dropped`). R distinguishes them — `` `[`(m, 1, ) ``
+  is arity 3, `` `[`(m, 1) `` arity 2 — and for a data frame they return different things (a row vs
+  a column). The cause is in the *parser*: `argument_list` emits an empty `ARGUMENT` only when a
+  comma arrives while an argument is still expected, so a leading or interior hole survives
+  (`m[, 1]` is right) and a trailing one vanishes. Fixing it needs the parser to close a pending
+  position when the closer follows a comma; the HIR side already models the hole
+  (`Argument { value: None }`).
+- **The R 4.3 extraction placeholder is not desugared**
+  (`pipes__an_extraction_placeholder_is_not_desugared`). `x |> _$a` is `x$a` in R, and `_[[i]]`,
+  `_[i]`, `_@s` likewise. `lower_pipe` accepts only a `CALL_EXPR` right-hand side, so these stay an
+  opaque `Binary Pipe` whose field access reads a name `_` that exists nowhere. `pipe_shape` needs a
+  second shape for "the placeholder is the head of an extraction chain", substituting the piped
+  value for the `_` in place.
+- **An empty control-flow head slots the BODY into the condition**
+  (`broken__an_empty_if_condition_slots_the_body_into_the_condition`, plus the `while` and `for`
+  siblings). `if () 1L` lowers to `If(condition: 1L, then: Missing)` because the `IF_EXPR` arm reads
+  its children positionally and the parser emits no placeholder for the missing head. Contained
+  today only because a broken item's type diagnostics are suppressed — verified: a sibling item in
+  the same file still type-checks, so the suppression is per item, not per file — but IDE reads of
+  the region see the wrong slot. The fix is to key the slots off the head delimiters rather than off
+  child order.
+- **A hexadecimal literal keeps a text no consumer can parse**
+  (`literals__a_hexadecimal_literal_keeps_a_text_no_consumer_can_parse`). Literals store source text
+  and every reader parses it with Rust's decimal `parse`, which rejects `0x`. Observable: with
+  `pair: list{a: integer, b: character}`, `pair[[2L]]` resolves `character` while `pair[[0x2L]]`
+  falls back to `integer | character`. `integer_literal_position` and `is_whole_number_double` both
+  need a radix-aware parse.
+- **`:=` publishes a definition the HIR does not make.** `classify_top_level` lists `COLON_EQ` among
+  the assignment spellings, so `x := 1L` names its item `x` and a later `y <- x` resolves — but
+  lowering (correctly) makes it a call to a function `:=` that binds nothing, and R binds nothing
+  either. Two sources of truth for what an item defines, and the item tree is the wrong one. Pinned
+  by `assignment__a_walrus_lowers_to_a_call_because_it_binds_nothing`, whose header shows the
+  disagreement.
 
 ## Open — a package's own `pkg::name` reads are resolved but not validated
 
