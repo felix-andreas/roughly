@@ -361,22 +361,28 @@ impl ItemSyntax {
 /// The lowered HIR of one item, derived from its position-independent green
 /// subtree only — never from the whole file — so it stays equal (and cuts off)
 /// across edits elsewhere in the file. `None` when the item no longer exists.
-#[salsa::tracked(returns(clone))]
+///
+/// Borrowed, not cloned: a check, the diagnostics passes and every IDE read all
+/// fetch this, roughly five times per item over a run, and cloning a `Module`
+/// walks its whole expression arena each time.
+#[salsa::tracked(returns(ref))]
 pub fn item_hir<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<hir::Module> {
     let syntax = item_syntax(db, item)?;
     Some(hir::lower_item(&syntax.syntax_node()))
 }
 
 /// The naming facts of one item (position-independent, like the HIR they are
-/// derived from).
-#[salsa::tracked(returns(clone))]
+/// derived from). Borrowed for the same reason as [`item_hir`], and more so:
+/// `ItemNaming` is maps and sets throughout, so a clone is a node-by-node
+/// allocation walk.
+#[salsa::tracked(returns(ref))]
 pub fn item_naming<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<naming::ItemNaming> {
-    let module = item_hir(db, item)?;
+    let module = item_hir(db, item).as_ref()?;
     let masked_verbs = stubs::stubs(db)
         .map(|library| library.masked.clone())
         .unwrap_or_default();
     Some(naming::resolve_item_with_masked_verbs(
-        &module,
+        module,
         &masked_verbs,
     ))
 }
@@ -1137,8 +1143,8 @@ fn check_member_scheme<'db>(
     item: Item<'db>,
     table: &rustc_hash::FxHashMap<String, types::TypeScheme<'db>>,
 ) -> Option<types::TypeScheme<'db>> {
-    let module = item_hir(db, item)?;
-    let naming = item_naming(db, item)?;
+    let module = item_hir(db, item).as_ref()?;
+    let naming = item_naming(db, item).as_ref()?;
     let annotation = item_annotation_syntax(db, item)
         .map(|syntax| annotations::lower_annotation(db, &syntax.syntax_node()));
     let base = SalsaGlobals::for_item(db, item);
@@ -1148,8 +1154,8 @@ fn check_member_scheme<'db>(
     };
     check::check_item_with_annotation(
         db,
-        &module,
-        &naming,
+        module,
+        naming,
         annotation.as_ref(),
         &item_expression_annotations(db, item),
         Some(&globals),
@@ -1212,15 +1218,15 @@ fn global_scheme_recover<'db>(
     cycle_initial = item_check_initial
 )]
 pub fn item_check<'db>(db: &'db dyn Db, item: Item<'db>) -> Option<check::ItemCheck<'db>> {
-    let module = item_hir(db, item)?;
-    let naming = item_naming(db, item)?;
+    let module = item_hir(db, item).as_ref()?;
+    let naming = item_naming(db, item).as_ref()?;
     let annotation = item_annotation_syntax(db, item)
         .map(|syntax| annotations::lower_annotation(db, &syntax.syntax_node()));
     let globals = SalsaGlobals::for_item(db, item);
     let mut check = check::check_item_with_annotation(
         db,
-        &module,
-        &naming,
+        module,
+        naming,
         annotation.as_ref(),
         &item_expression_annotations(db, item),
         Some(&globals),
@@ -1869,7 +1875,7 @@ mod tests {
             None,
             0,
         );
-        let before = item_hir(&db, add).expect("add lowers");
+        let before = item_hir(&db, add).clone().expect("add lowers");
         let root = before.expression(before.root.expect("has root"));
         let hir::ExpressionKind::Assign { value, .. } = &root.kind else {
             panic!("expected an assignment root, got {root:?}");
@@ -1899,7 +1905,7 @@ mod tests {
             None,
             0,
         );
-        let after = item_hir(&db, add).expect("add still lowers");
+        let after = item_hir(&db, add).clone().expect("add still lowers");
         assert_eq!(before, after);
     }
 

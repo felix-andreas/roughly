@@ -122,7 +122,7 @@ pub fn hover(
 
     let position = position_in_item(db, file, offset)?;
     let check = item_check(db, position.item)?;
-    let hir = item_hir(db, position.item)?;
+    let hir = item_hir(db, position.item).as_ref()?;
     // The smallest containing expression with a recorded type: write targets
     // and operators record none, so the hover widens to the enclosing typed
     // expression instead of going silent.
@@ -138,7 +138,7 @@ pub fn hover(
             // the single exported truth — not the initializer's checked
             // type: a `#: @new` declaration brands the scheme even when the
             // initializer's own type is Unknown.
-            let exported = item_naming(db, position.item).and_then(|naming| {
+            let exported = item_naming(db, position.item).as_ref().and_then(|naming| {
                 let binding = naming.resolutions.get(&expression)?;
                 (naming.bindings.get(binding)?.kind == BindingKind::TopLevel).then_some(())?;
                 check.scheme.as_ref()
@@ -181,7 +181,7 @@ fn hover_definition<'db>(
     expression: ExprId,
     name: &str,
 ) -> Option<HoverDefinition> {
-    let naming = item_naming(db, item)?;
+    let naming = item_naming(db, item).as_ref()?;
     if let Some(binding) = naming.resolutions.get(&expression) {
         let info = naming.bindings.get(binding)?;
         // The item's own top-level binding IS the global definition.
@@ -329,7 +329,7 @@ pub fn definition(
 ) -> Option<DefinitionTarget> {
     match target_at(db, files, file, offset)? {
         Target::Slot { item, binding } => {
-            let naming = item_naming(db, item)?;
+            let naming = item_naming(db, item).as_ref()?;
             let info = naming.bindings.get(&binding)?;
             let item_offset = item_node(db, item)?.text_range().start();
             Some(DefinitionTarget::Project(NavigationTarget {
@@ -534,7 +534,7 @@ pub struct SignatureData {
 /// slot (parameters after `...` match by name only).
 pub fn signature_help(db: &dyn Db, file: SourceFile, offset: TextSize) -> Option<SignatureHelp> {
     let position = position_in_item(db, file, offset)?;
-    let hir = item_hir(db, position.item)?;
+    let hir = item_hir(db, position.item).as_ref()?;
     let check = item_check(db, position.item)?;
 
     // Containing calls, smallest first; the innermost whose callee has a
@@ -569,7 +569,7 @@ pub fn signature_help(db: &dyn Db, file: SourceFile, offset: TextSize) -> Option
                     TyKind::Function(function) => Some(function.clone()),
                     _ => None,
                 });
-        let overloads = callee_name(&hir, *callee)
+        let overloads = callee_name(hir, *callee)
             .and_then(|name| semantics::stubs::stubs(db)?.schemes.get(&name).cloned())
             .filter(|schemes| schemes.len() > 1);
         (function.is_some() || overloads.is_some())
@@ -585,7 +585,7 @@ pub fn signature_help(db: &dyn Db, file: SourceFile, offset: TextSize) -> Option
     if let Some(schemes) = overloads {
         let mut signatures: Vec<SignatureData> = schemes
             .iter()
-            .map(|scheme| overload_signature(db, scheme, arguments, &hir, position.relative))
+            .map(|scheme| overload_signature(db, scheme, arguments, hir, position.relative))
             .collect();
         let selected = check.selected_overloads.get(&callee).copied().unwrap_or(0);
         // The committed candidate is shown with this call site's types filled
@@ -603,7 +603,7 @@ pub fn signature_help(db: &dyn Db, file: SourceFile, offset: TextSize) -> Option
                 function,
                 parameters.len(),
                 arguments,
-                &hir,
+                hir,
                 position.relative,
             );
             entry.label = label;
@@ -623,7 +623,7 @@ pub fn signature_help(db: &dyn Db, file: SourceFile, offset: TextSize) -> Option
         function,
         parameters.len(),
         arguments,
-        &hir,
+        hir,
         position.relative,
     );
     Some(SignatureHelp {
@@ -2096,7 +2096,7 @@ fn string_subscript_completion(
     string_token: &syntax::SyntaxToken,
 ) -> Option<CompletionResult> {
     let position = position_in_item(db, file, offset)?;
-    let hir = item_hir(db, position.item)?;
+    let hir = item_hir(db, position.item).as_ref()?;
     let check = item_check(db, position.item)?;
 
     let string_range = string_token.text_range() - position.item_offset;
@@ -2368,7 +2368,7 @@ fn dollar_completions(
 ) -> Vec<CompletionItem> {
     let typed = (|| {
         let position = position_in_item(db, file, offset)?;
-        let hir = item_hir(db, position.item)?;
+        let hir = item_hir(db, position.item).as_ref()?;
         let check = item_check(db, position.item)?;
         // The innermost field access containing the cursor; its target's
         // record fields are the candidates.
@@ -2856,7 +2856,7 @@ fn target_at<'db>(
     }
 
     let position = position_in_item(db, file, offset)?;
-    let naming = item_naming(db, position.item)?;
+    let naming = item_naming(db, position.item).as_ref()?;
 
     if let Some(expression) = position.expression_at() {
         if let Some(binding) = naming.resolutions.get(&expression) {
@@ -2926,7 +2926,7 @@ fn target_at<'db>(
 fn global_declaration_exists(db: &dyn Db, files: ProjectFiles, name: &str) -> bool {
     files.files(db).iter().any(|file| {
         item_tree(db, *file).iter().copied().any(|item| {
-            item_naming(db, item).is_some_and(|naming| {
+            item_naming(db, item).as_ref().is_some_and(|naming| {
                 naming
                     .bindings
                     .values()
@@ -3058,7 +3058,7 @@ fn slot_occurrences(
         ranges.push((info.range + item_offset, true));
     }
 
-    let targets = assignment_targets(&hir);
+    let targets = assignment_targets(hir);
     for (expression, resolved) in &naming.resolutions {
         if resolved == &binding {
             ranges.push((

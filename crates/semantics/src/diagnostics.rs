@@ -339,7 +339,7 @@ pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
         // the enclosing statement's own target (self-recursion).
         for (expression, name) in &naming.non_locals {
             let NonLocalRead::Unresolved { suggestion } =
-                classify_non_local_read(db, file, item_index, &check, &naming, expression, name)
+                classify_non_local_read(db, file, item_index, &check, naming, expression, name)
             else {
                 continue;
             };
@@ -1176,18 +1176,22 @@ const R6_INJECTED_BINDINGS: [&str; 3] = ["self", "private", "super"];
 fn file_defines_r6_class(db: &dyn Db, file: SourceFile) -> bool {
     use crate::hir::ExpressionKind;
     crate::item_spans(db, file).iter().any(|span| {
-        crate::item_hir(db, span.item).is_some_and(|module| {
-            module.expressions.iter().any(|expression| {
-                let ExpressionKind::Call { callee, .. } = &expression.kind else {
-                    return false;
-                };
-                match &module.expression(*callee).kind {
-                    ExpressionKind::NameRef(name) => name == "R6Class",
-                    ExpressionKind::Namespace { name, .. } => name.as_deref() == Some("R6Class"),
-                    _ => false,
-                }
+        crate::item_hir(db, span.item)
+            .as_ref()
+            .is_some_and(|module| {
+                module.expressions.iter().any(|expression| {
+                    let ExpressionKind::Call { callee, .. } = &expression.kind else {
+                        return false;
+                    };
+                    match &module.expression(*callee).kind {
+                        ExpressionKind::NameRef(name) => name == "R6Class",
+                        ExpressionKind::Namespace { name, .. } => {
+                            name.as_deref() == Some("R6Class")
+                        }
+                        _ => false,
+                    }
+                })
             })
-        })
     })
 }
 
@@ -1576,7 +1580,7 @@ pub fn strict_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
         };
         for (expression, name) in &naming.non_locals {
             if !matches!(
-                classify_non_local_read(db, file, item_index, &check, &naming, expression, name),
+                classify_non_local_read(db, file, item_index, &check, naming, expression, name),
                 NonLocalRead::Tolerated
             ) {
                 continue;

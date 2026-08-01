@@ -419,18 +419,30 @@ What is true: format is 113 ms parse plus ~890 ms render, so the render is ~8× 
 MiB/s against ~18 MiB/s for parsing). Actionable: fan `fmt` out the way `check` already does. The
 render's 8× was not localized and needs its own profile before anyone touches it.
 
-### `returns(clone)` on the two hottest per-item queries
+### FIXED — `returns(clone)` on the two hottest per-item queries
 
-`item_hir` and `item_naming` are `returns(clone)`, and `ItemNaming` is entirely `BTreeMap`/`BTreeSet`,
-so each clone is a node-by-node allocation walk. Measured with all memos warm, so the time is pure
-clone: on a 277K-line project's 14,771 items, `item_naming` 54.2 ms and `item_hir` **152.9 ms** per
-full pass (`item_tree` 1.9 ms); on ggplot2's 2,736 items, 12.2 and 24.0 ms. There are 23 `item_hir`
-and 29 `item_naming` call sites, several on the cold pass plus every IDE read, so at 3–5 fetches per
-item that is roughly 8–13% of the script-shape cold pass — estimated, not measured end to end.
-`returns(ref)` plus borrowing at the call sites removes state rather than adding it. Worth revisiting
-the `BTreeMap` choice in the same pass: `resolutions`, `bindings`, `non_locals`, `quiet_reads` and
-`namespace_reads` are pure lookups with no ordering requirement, and `BTreeMap::get` showed up under
-`infer_read`.
+`item_hir` and `item_naming` were `returns(clone)`, and `ItemNaming` is `BTreeMap`/`BTreeSet`
+throughout, so each fetch was a node-by-node allocation walk. The review estimated 3–5 fetches per
+item and "roughly 8–13% of the cold pass, estimated, not measured end to end". Both halves were then
+measured rather than assumed: a counting probe puts ggplot2 at 14,753 `item_hir` and 16,173
+`item_naming` fetches for 2,736 items — 5.4 per item, matching the estimate — costing 178 ms and
+265 ms of fetch time, and data.table at 16,385 and 21,139 fetches costing 64 ms and 118 ms.
+
+Now `returns(ref)`, with the call sites borrowing. Interleaved over three rounds, medians: ggplot2
+1,035 → 949 ms (8%), `targets` 640 → 559 ms (13%), data.table flat within noise. So the estimate held
+where it bit, and the realized saving is smaller than the measured fetch time because the memo lookup
+remains — only the clone is gone. Finding sets byte-identical on all four corpus packages and
+`targets`.
+
+**Peak memory is unchanged** (ggplot2 127.4 → 127.0 MiB, `targets` 94.2 → 93.8 MiB), which is the
+expected result and worth stating so nobody re-measures hoping otherwise: the clones were transient,
+so they cost allocator traffic rather than resident set, and peak is dominated by the memos themselves.
+
+**Still open from the same entry:** the `BTreeMap` choice. `resolutions`, `bindings`, `non_locals`,
+`quiet_reads` and `namespace_reads` are pure lookups with no ordering requirement, and `BTreeMap::get`
+showed up under `infer_read`. Removing the clone removed the node-walk half of that cost, so what is
+left is lookup only — measure before switching, and check iteration order where any of these is walked
+to build diagnostics.
 
 ### FIXED — per-item clones of project-wide tables
 
@@ -1659,8 +1671,25 @@ parse (1.9 MiB/s against ~18 MiB/s).
 
 ## Open — delete the `rofy` crate (user-approved, unlike the other legacy crates)
 
-**The user has given an explicit go for `rofy` alone, conditional on parity in every sense.** Every
-other crate under `legacy/` still needs its own explicit go and must stay in-tree until then.
+**The user has given an explicit go for `rofy` alone, conditional on parity in every sense, and has
+since asked for it to be done.** Every other crate under `legacy/` still needs its own explicit go and
+must stay in-tree until then.
+
+**Parity is established** — the read the entry asks for, done rather than assumed. `rofy`'s whole
+surface is multiline editing, command history with reverse search, an optional vi mode, syntax
+highlighting, a hinter, and a vi-aware prompt. `crates/repl` has every one: `LexerValidator`,
+`FileBackedHistory`, `reedline::Vi` behind `--keybindings vi`, `LexerHighlighter`, `DefaultHinter`,
+and `RPrompt`. It also exceeds them, with Tab completion through a `ColumnarMenu` and history
+*persisted to a file* where `rofy` keeps it in memory for the session only. One deliberate difference:
+highlighting runs off ry's own lexer rather than tree-sitter, which is the better answer anyway — one
+parser rather than two.
+
+**Nothing depends on it.** No crate links it; every remaining mention is a justfile `rofy` run recipe
+and a `publish-rofy` release recipe, the `--exclude rofy` in the staged CI, a comment in the workspace
+`Cargo.toml`, and prose in `decisions.md` and `contributing/design/repl.md`. The R-`parse()`
+acceptance cross-check the entry warns about does **not** use `rofy` — `corpus_acceptance` compares
+against tree-sitter-r; `decisions.md` only says to run it locally "like `rofy`", an analogy that has
+to be rewritten when the crate goes.
 
 Why this one is different: `rofy` is the *predecessor* of a shipped component, not a frozen oracle.
 It embeds R through `extendr`/libR-sys, so bindgen runs at build time against a local R and the
