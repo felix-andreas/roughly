@@ -1645,6 +1645,58 @@ identical file set with both single-threaded, the formatter costs **half** what 
 `check` already does — plus an unlocalized fact worth a profile of its own: the render is ~8× the
 parse (1.9 MiB/s against ~18 MiB/s).
 
+## Open — a `--jobs` flag, and why the fan-out is not linear
+
+Two user-requested items, related but separate.
+
+### `--jobs N`, spelled like cargo's
+
+`check` fans out over `std::thread::available_parallelism()` and there is **no way to control it**.
+The only lever today is CPU affinity — `taskset -c 0-N` works because `available_parallelism()`
+honours affinity and cgroup quotas — which is fine for measuring and undiscoverable for a user. Add
+`--jobs N` (cargo's spelling, `-j` short form), defaulting to the current behaviour, so the number is
+explicit and reproducible instead of depending on what the scheduler happens to expose. It also makes
+cross-machine measurement possible without fighting `taskset`.
+
+`fmt` is a plain loop over files and does not fan out at all — measured 646 ms on one core against
+644 ms on four. Either wire it to the same flag or say plainly in the docs that it is single-threaded;
+what should not stand is a `--jobs` flag that silently governs one subcommand and not the other.
+
+### Why the speedup is not linear, and what the default should be
+
+Measured with `taskset`, best of two, on a 4-vCPU container:
+
+| | 1 core | 2 cores | 4 cores | speedup |
+|---|---|---|---|---|
+| ggplot2 | 1,388 ms | 1,255 ms | 1,033 ms | 1.34× |
+| data.table | 420 ms | 309 ms | 278 ms | 1.51× |
+| `targets` | 998 ms | 778 ms | 599 ms | 1.67× |
+
+Read those against the container's own ceiling: its 4 vCPUs deliver roughly 1.8× of native compute at
+4 threads, so `targets` is already near what this machine can give and the numbers here **cannot
+distinguish real contention from the container**. Getting that separation needs a run on real
+hardware at 1/2/4/8/16 cores — the user has offered to measure, and `--jobs` above is what makes that
+clean.
+
+What is worth investigating once there are honest numbers, in order of prior suspicion:
+
+- **Amdahl, not contention.** Rendering is deliberately sequential in discovery order, and the
+  project-wide interface walk (`interface_sccs`) is one query on one thread. If the serial fraction is
+  ~40% the observed 1.34–1.67× is simply correct, and the answer is to parallelise the walk or accept
+  it — not to hunt locks. Measure the serial fraction first; it is the cheapest thing to rule in.
+- **Salsa cycle bookkeeping.** This *was* the dominant cost — 54 of 72 sampled stacks in
+  `DependencyGraph::block_on`, with `targets` getting no speedup at all — and bounding the
+  conditional-slot join fixed it. Re-sample before assuming any of it is left.
+- **The warm-up phase.** The cold pass warms per-item naming across cores first, precisely because
+  computing it inside the interface walk serializes the front half. Check the fan-out is actually
+  balanced there: files are dealt largest-first, which helps, but one enormous file still pins a
+  thread.
+
+On the default: keep `available_parallelism()`. It already honours cgroup quotas and affinity, which
+is what a CI container needs, and nothing measured so far suggests over-subscription hurts. Revisit
+only if the real-hardware curve turns over at high core counts — that would point at memory bandwidth
+or allocator contention, and the fix would be a cap rather than a different formula.
+
 ## Open — editor & polish
 
 - Hover type fences (user-confirmed: no highlighting in current editor builds): the server tags the fences `roughly-type` and the VS Code extension in-repo ships a grammar for that id — needs a released extension update to reach users. Zed renders the fence plain until its extension registers an equivalent fence language (tree-sitter grammar required); consider falling back to tagging fences `r` for Zed if that proves distant.
@@ -1676,52 +1728,42 @@ parse (1.9 MiB/s against ~18 MiB/s).
 - **Analysis-backed Tab completion SHIPPED** (first analysis rung; `contributing/design/repl.md` has the seam design): typed signatures for stdlib names, session bindings, `pkg::` exports, manifest names — `SessionCompleter` seam keeps the repl crate syntax-only, `AnalysisCompleter` in roughly runs `ide::completion` over the session-as-script. **Open — remaining rungs:** live-session facts (the R environment listing unioned into completions), pre-evaluation diagnostics on pending input, hover on the input line, graphics-device story (versioned mirror structs, see the design record). The headless runner is shipped.
 - **REPL Windows: real-machine smoke test pending.** The embedding is implemented (`contributing/design/repl.md` has the recipe: Rstart callbacks via R_DefParamsEx's version handshake, sibling-DLL preloading, RGui→LinkDLL switch, UserBreak+deferred interrupt pair) and compile/clippy-verified against x86_64-pc-windows-gnu — but no Windows machine with R has ever executed it. Smoke: `roughly repl` (prompt, evaluate, Ctrl-C, vi mode) and `roughly run` (output, exit 0/1). Known caveat to watch: terminal VT input handling in the editor layer.
 
-## Open — delete the `rofy` crate (user-approved, unlike the other legacy crates)
+## FIXED — the `rofy` crate is deleted
 
-**The user has given an explicit go for `rofy` alone, conditional on parity in every sense, and has
-since asked for it to be done.** Every other crate under `legacy/` still needs its own explicit go and
-must stay in-tree until then.
+The user gave an explicit go for `rofy` alone, conditional on parity, and then asked for it. **Every
+other crate under `legacy/` still needs its own explicit go and stays in-tree until then** — see the
+note below on why this is not a precedent.
 
-**Parity is established** — the read the entry asks for, done rather than assumed. `rofy`'s whole
-surface is multiline editing, command history with reverse search, an optional vi mode, syntax
-highlighting, a hinter, and a vi-aware prompt. `crates/repl` has every one: `LexerValidator`,
-`FileBackedHistory`, `reedline::Vi` behind `--keybindings vi`, `LexerHighlighter`, `DefaultHinter`,
-and `RPrompt`. It also exceeds them, with Tab completion through a `ColumnarMenu` and history
-*persisted to a file* where `rofy` keeps it in memory for the session only. One deliberate difference:
-highlighting runs off ry's own lexer rather than tree-sitter, which is the better answer anyway — one
-parser rather than two.
+Parity was established by reading both crates rather than assuming. `rofy`'s whole surface was
+multiline editing, command history with reverse search, an optional vi mode, syntax highlighting, a
+hinter, and a vi-aware prompt. `crates/repl` has every one — `LexerValidator`, `FileBackedHistory`,
+`reedline::Vi` behind `--keybindings vi`, `LexerHighlighter`, `DefaultHinter`, `RPrompt` — and exceeds
+them with Tab completion through a `ColumnarMenu` and history *persisted to a file* where `rofy` kept
+it in memory for the session. One deliberate difference: highlighting runs off ry's own lexer rather
+than tree-sitter, which is the better answer — one parser, not two.
 
-**Nothing depends on it.** No crate links it; every remaining mention is a justfile `rofy` run recipe
-and a `publish-rofy` release recipe, the `--exclude rofy` in the staged CI, a comment in the workspace
-`Cargo.toml`, and prose in `decisions.md` and `contributing/design/repl.md`. The R-`parse()`
-acceptance cross-check the entry warns about does **not** use `rofy` — `corpus_acceptance` compares
-against tree-sitter-r; `decisions.md` only says to run it locally "like `rofy`", an analogy that has
-to be rewritten when the crate goes.
+Nothing depended on it. The removal took the crate, the `rofy` and `publish-rofy` justfile recipes,
+the `--exclude rofy` in the staged CI and the justfile gate, and prose in `decisions.md`,
+`contributing/development.md` and `contributing/design/repl.md`. The R-`parse()` acceptance
+cross-check the old entry warned about never used `rofy` — `corpus_acceptance` compares against
+tree-sitter-r; `decisions.md` only said to run it locally "like `rofy`", an analogy now rewritten.
 
-Why this one is different: `rofy` is the *predecessor* of a shipped component, not a frozen oracle.
-It embeds R through `extendr`/libR-sys, so bindgen runs at build time against a local R and the
-binary carries a load-time dependency on libR — which is exactly why it is excluded from CI and from
-every gate. `crates/repl` replaced that approach with runtime symbol binding (`contributing/design/repl.md`), is
-e2e-verified against real R on both Unix ptys and Windows ConPTY, and already exceeds it: headless
-runner, vi keybindings, SIGINT routing, analysis-backed Tab completion. `rofy` is 266 lines across
-`lib.rs` and `main.rs`, with no graphics-device code, so the parity surface is small.
+**The payoff is the gate, as predicted.** The canonical invocation is now
+`cargo test --workspace --exclude zed_ry` — one exclusion, not two, and one fewer thing a future
+session gets wrong. Deleting the crate also dropped `extendr-api`, `extendr-engine` and `libR-sys`
+from the workspace (89 lines out of `Cargo.lock`), which removes the build-time dependency on a local
+R entirely.
 
-**The payoff is not the deleted lines, it is the gate.** `--exclude rofy` currently rides along in
-every command in CI (`.github/pending-ci.yml`), the docs, `MEMORY.md`, and every agent's muscle
-memory. Deleting the crate reduces the canonical invocation to
-`cargo test --workspace --exclude zed_roughly`, and one fewer exclusion is one fewer thing a future
-session gets wrong.
-
-Do this before deleting:
-
-- **Establish parity explicitly rather than by assumption.** Enumerate what `rofy` does, confirm
-  `crates/repl` does each, and record any deliberate non-goal. Two files is a short read; do the read
-  instead of trusting this note.
-- **Confirm nothing depends on it** — workspace members, `Cargo.toml` feature wiring, scripts, and
-  the R-`parse()` acceptance cross-check, which `decisions.md` describes as "run locally like `rofy`"
-  and which must keep working after the crate is gone.
-- **Then drop `--exclude rofy` everywhere it appears** in the same change, and say so in
-  `MEMORY.md` — the exclusion outliving the crate would be worse than either.
+**This is not a precedent for the rest of `legacy/`, and the reason is measured.** `rofy` was a
+predecessor of a shipped component with a 266-line surface that could be read in full. `analysis-legacy`
+is different in kind: it holds **2,830 fixture cases** against the new stack's 1,192, and **the new
+code does not run a single one of them** — `legacy/fixtures` is a harness-only crate and
+`analysis-legacy/tests/test_fixtures.rs` drives those cases against the frozen oracle, with no
+new-stack test reading those directories. Case-name overlap is 15 of 138 for ide and 1 for the whole
+typecheck suite, so the corpus was reimplemented rather than ported. Name overlap understates
+behavioural overlap and should not be read as 2,830 cases of missing coverage — but it does establish
+that nothing has shown the new suites cover what those do. Mine that corpus before anyone proposes
+deleting it; the one directory partially mined so far (ide) surfaced two real bugs.
 
 ## Open — rename to `ry`: what is left
 

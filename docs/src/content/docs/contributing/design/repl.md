@@ -5,7 +5,8 @@ description: "How the R console loads R at runtime with no build-time linking"
 
 **Status: v1 SHIPPED and e2e-VERIFIED against real R** as `crates/repl`
 behind `ry repl` (user decisions: subcommand packaging, reedline +
-nu-ansi-term kept, rofy frozen under `legacy/`). Implemented: discovery, the
+nu-ansi-term kept). The predecessor experiment has since been deleted, parity
+having been established and exceeded. Implemented: discovery, the
 typed runtime-binding layer, the ReadConsole-hosted reedline console with
 lexer highlighting and conservative completeness, SIGINT interrupt routing,
 pty e2e tests (skip-if-no-R) in the ry crate, the headless runner
@@ -34,20 +35,23 @@ unit tests. Not yet: live-session facts (the R environment listing
 unioned in), pre-eval diagnostics, hover on the input line, graphics
 devices.
 
-User-initiated: integrate a first-class REPL into ry — the successor to the
-`rofy` experiment — **without any build-time link dependency on R**. This
+User-initiated: integrate a first-class REPL into ry — the successor to an
+earlier `extendr`-based experiment — **without any build-time link dependency on
+R**. This
 document records the architecture that makes that possible (verified against a
 production-grade Rust R kernel's source; techniques described on their own
 terms) and how ry's analysis stack turns a console into something more
 than an echo loop.
 
-## Why rofy's approach is a dead end
+## Why build-time linking was a dead end
 
-`rofy` embeds R through `extendr`/libR-sys: bindgen runs at build time against
-a local R's headers and the binary carries a load-time dynamic dependency on
-libR. Consequences: the build machine needs a matching R (why rofy is excluded
-from CI and every gate), the artifact is bound to the R it was built against,
-and a missing symbol is a loader failure rather than a recoverable fact.
+The predecessor embedded R through `extendr`/libR-sys: bindgen ran at build time
+against a local R's headers and the binary carried a load-time dynamic dependency
+on libR. Consequences: the build machine needed a matching R, which is why that
+crate was excluded from CI and every gate; the artifact was bound to the R it was
+built against; and a missing symbol was a loader failure rather than a
+recoverable fact. Deleting it is what removed `--exclude rofy` from every gate
+command and dropped `extendr` from the workspace.
 
 ## The core technique: bind R at runtime, per symbol
 
@@ -282,7 +286,7 @@ default) — the editor's built-in vi mode, no console config story needed
 yet. Still ahead for the runner: run TypedR files directly (typecheck,
 compile in memory, execute — see [Inline type syntax](/contributing/design/inline-type-syntax/)).
 
-## What makes it better than rofy (the previous integration)
+## What makes it better than the previous integration
 
 The REPL is not a goal in itself — the point is a console with the analyzer in
 the same process:
@@ -310,18 +314,21 @@ the same process:
    from R's public headers; the reference implementation is study material,
    not a source to copy.
 2. A console host crate: discovery, init, the ReadConsole select loop,
-   interrupt/output plumbing. TUI line editing reuses the existing rofy
+   interrupt/output plumbing. TUI line editing reuses the predecessor's
    front-end experience where it fits.
 3. Wire `semantics`/`ide` in behind the idle-task seam (completions first,
    then pre-eval diagnostics).
-4. Retire `rofy` once parity is reached (it stays untouched until then).
+4. Retire the predecessor once parity is reached. **Done** — its whole surface
+   (multiline editing, history with reverse search, vi mode, highlighting, a
+   hinter, a vi-aware prompt) is covered here, and exceeded by Tab completion and
+   history persisted to a file rather than held for the session.
 
 ## Testing
 
 R initializes once per process: embedded-R tests need one-process-per-test
 execution and a one-shot init fixture (raise `R_CStackLimit` when R runs off
 the main thread in tests). CI has no R, so embedded tests stay excluded from
-the workspace gates exactly as rofy's are — but the binding layer's
+the workspace gates — but the binding layer's
 declaration list and discovery logic are plain Rust, testable everywhere; keep
 the R-requiring surface as thin as possible.
 

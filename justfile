@@ -8,9 +8,6 @@ default:
 ry *args:
     @cargo run -q -- {{ args }}
 
-rofy *args:
-    @cargo run -p rofy -q -- {{ args }}
-
 test *args:
     cargo test -- --nocapture {{ args }}
 
@@ -18,13 +15,13 @@ test *args:
 # and a formatting check. Green gate = landable change.
 gate: battery clippy fmt-check
 
-# The workspace test battery. `rofy` needs a local R installation and
-# `zed_ry` a wasm toolchain, so this and CI exclude them.
+# The workspace test battery. `zed_ry` needs a wasm toolchain, so this and CI
+# exclude it.
 battery *args:
-    cargo test --workspace --exclude rofy --exclude zed_ry {{ args }}
+    cargo test --workspace --exclude zed_ry {{ args }}
 
 clippy:
-    cargo clippy --workspace --exclude rofy --exclude zed_ry --all-targets -- -D warnings
+    cargo clippy --workspace --exclude zed_ry --all-targets -- -D warnings
 
 fmt-check:
     cargo fmt --all --check
@@ -282,16 +279,3 @@ release-kind $version:
     	[0-9]*.[0-9]*.[0-9]*) echo release ;;
     	*) echo pre-release ;;
     esac
-
-#
-# ROFY
-#
-
-publish-rofy $version="nightly":
-    cargo build -p rofy --release --target x86_64-unknown-linux-gnu
-    cargo build -p rofy --release --target x86_64-pc-windows-gnu
-    gh release create rofy-$version \
-        "target/x86_64-unknown-linux-gnu/release/rofy#rofy (linux-x64)" \
-        "target/x86_64-pc-windows-gnu/release/rofy.exe#rofy (win32-x64)" \
-        --notes "" \
-        --prerelease

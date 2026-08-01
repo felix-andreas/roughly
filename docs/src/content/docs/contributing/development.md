@@ -36,9 +36,9 @@ on machines with no R at all. Only *running* the console needs R; it runs on Uni
 `ptr_R_ReadConsole` hook globals) and on Windows (through the `Rstart` callback struct). Its
 end-to-end tests (`cargo test -p ry-lang --test test_repl_e2e`) drive the real binary through a
 pseudo-terminal (a Unix pty or Windows ConPTY) and skip cleanly where no R exists — run them
-locally before touching the REPL. The predecessor
-experiment (`legacy/rofy`, which linked R at build time through `extendr`) stays frozen until the
-new console reaches feature parity.
+locally before touching the REPL. A predecessor experiment linked R at build time through
+`extendr`; it was deleted once the runtime-binding console reached and passed parity, which is what
+removed the workspace's build-time dependency on a local R.
 
 The analysis design is documented in [Architecture](/contributing/architecture) and the file layout in
 [Structure](/contributing/structure). The editor extensions live under `editors/` (`code` for VS Code, `zed` for
@@ -51,7 +51,7 @@ The ones that matter most:
 
 ```sh
 just gate                # the full per-slice gate: battery, clippy -D warnings, fmt check
-just battery             # the workspace test battery (excludes rofy and zed_ry)
+just battery             # the workspace test battery (excludes zed_ry)
 just fixture <group__case>          # one focused fixture case
 just bless -p semantics --test ...  # re-bless fixture expectations (review the diff!)
 just fuzz-deep           # the long-running seeded fuzz pass (FUZZ_ITERS scales)
@@ -64,8 +64,7 @@ The raw commands, for environments without `just`:
 ```sh
 cargo build                                   # the product crate (workspace default member)
 cargo test                                    # the product crate's suites
-cargo test --workspace --exclude rofy --exclude zed_ry
-                                              # everything: all six crates, the benchmark
+cargo test --workspace --exclude zed_ry       # everything: all six crates, the benchmark
                                               # harness, and the frozen legacy stack
 cargo test -p semantics                       # the analysis core's fixture + fuzz suites
 cargo test -p format --test test_format_fixtures
