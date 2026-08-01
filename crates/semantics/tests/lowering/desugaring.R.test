@@ -1,0 +1,115 @@
+#==== pipes
+#---- a_native_pipe_becomes_a_call_with_the_left_side_first
+result <- data |> transform(n = 1L)
+#++++
+# result
+  Assign Local
+    NameRef result
+    Call
+      NameRef transform
+      NameRef data
+      arg n =
+        Literal Integer("1L")
+
+#---- a_placeholder_pipe_keeps_the_argument_position
+result <- data |> merge(other, by = "id")
+#++++
+# result
+  Assign Local
+    NameRef result
+    Call
+      NameRef merge
+      NameRef data
+      NameRef other
+      arg by =
+        Literal String("id")
+
+#==== assignment
+#---- a_replacement_form_reads_the_base_and_writes_it_back
+names(x) <- c("a")
+#++++
+# <statement>
+  Assign Local
+    Call
+      NameRef names
+      NameRef x
+    Call
+      NameRef c
+      Literal String("a")
+
+#---- a_right_assignment_lowers_like_a_left_one
+1L -> value
+#++++
+# value
+  Assign Local
+    NameRef value
+    Literal Integer("1L")
+
+#---- a_string_target_binds_the_name_it_spells
+"quoted" <- 1L
+#++++
+# quoted
+  Assign Local
+    Literal String("quoted")
+    Literal Integer("1L")
+
+#---- a_super_assignment_keeps_its_spelling
+f <- function() counter <<- 1L
+#++++
+# f
+  Assign Local
+    NameRef f
+    Function()
+      Assign Super
+        NameRef counter
+        Literal Integer("1L")
+
+#==== constructs
+#---- local_is_its_own_construct_not_a_call
+value <- local({
+  hidden <- 1L
+  hidden
+})
+#++++
+# value
+  Assign Local
+    NameRef value
+    Local
+      Block
+        Assign Local
+          NameRef hidden
+          Literal Integer("1L")
+        NameRef hidden
+
+#---- a_lambda_lowers_to_the_same_shape_as_function
+square <- \(x) x^2
+#++++
+# square
+  Assign Local
+    NameRef square
+    Function(x)
+      Binary Power
+        NameRef x
+        Literal Double("2")
+
+#---- an_if_without_else_has_no_else_branch
+f <- function(flag) if (flag) 1L
+#++++
+# f
+  Assign Local
+    NameRef f
+    Function(flag)
+      If
+        NameRef flag
+        Literal Integer("1L")
+
+#---- a_special_operator_carries_its_name
+f <- function(a, b) a %||% b
+#++++
+# f
+  Assign Local
+    NameRef f
+    Function(a, b)
+      Binary Special %||%
+        NameRef a
+        NameRef b
