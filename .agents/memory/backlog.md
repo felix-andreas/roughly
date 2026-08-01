@@ -376,13 +376,20 @@ cost is the unbounded join, and it is fixed.
 Other packages move much less as-package versus as-script (ggplot2 1.70/1.21, dplyr 0.72/0.58, shiny
 0.65/0.59), which fits the cause above: they have far fewer test-block writes landing in the namespace.
 
-Sampling puts the time in **salsa cycle bookkeeping** around `statement_binding_scheme` and
-`item_check` — `collect_all_cycle_heads::collect_recursive`,
-`MemoHeader::flatten_cycle_head_dependencies`, and `CycleHeads::contains` doing a linear scan. On four
-cores, 54 of 72 sampled thread stacks were in `DependencyGraph::block_on`, and `targets` gets **no
-parallel speedup at all** (17.43/17.81 s on one core against 17.43/16.99 s on four, where ggplot2
-gets 1.15×). Read that as a symptom of the enormous conditional-slot joins rather than as an
-independent finding — the joins are what create the cycles being booked.
+Sampling had put the time in **salsa cycle bookkeeping** around `statement_binding_scheme` and
+`item_check`, with 54 of 72 sampled thread stacks in `DependencyGraph::block_on` and `targets` getting
+**no parallel speedup at all** (17.43/17.81 s on one core against 17.43/16.99 s on four, ggplot2
+1.15×). That was a symptom of the unbounded conditional-slot joins, and **bounding them fixed the
+parallelism too**. Re-measured with `taskset` pinning core counts, best of two: `targets` 998 → 778 →
+599 ms at 1/2/4 cores (**1.67×**), data.table 420 → 309 → 278 (1.51×), ggplot2 1,388 → 1,255 → 1,033
+(1.34×). Read those against the container's ceiling — its 4 vCPUs deliver only ~1.8× of native compute
+at 4 threads — so `targets` is at roughly 93% of what is achievable here, and real hardware numbers
+would be worth having.
+
+Two facts about the fan-out worth knowing: `check` fans out over `available_parallelism()` while
+**`fmt` is a plain loop** (646 ms on one core against 644 ms on four, measured), and there is **no flag
+to control concurrency**. `available_parallelism()` honours CPU affinity and cgroup quotas, so
+`taskset -c 0-N` is the only lever today — enough for measuring, not something a user would find.
 
 The memory note of ~300 MiB at 302K LoC holds for the script shape (343 MiB at 278K LoC) and is 16× off
 for the package shape. For reference, memory attribution in the healthy shape is parse +82 MiB,
