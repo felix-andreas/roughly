@@ -1683,13 +1683,23 @@ project before being written down here.
   and an intervening `local` that binds the same name still catches the write, leaving the outer slot
   alone (R: `1`). Only the super-assignment site changed — `current_function_depth` still bounds the
   read and capture logic, where a function boundary genuinely is the thing that matters.
-- **`with(data = frame, expr)` — a named data argument breaks positional masking.** The positional
-  counter in the masking walk is not advanced past arguments already matched by name, so `expr` lands
-  in the data slot and its column reads resolve as ordinary names. Verified: `with(frame, column_a)`
-  is clean and `with(data = frame, column_a)` reports a false `unresolved` on `column_a`.
-- **`base::with(frame, expr)` masks nothing.** The `Namespace` arm of the masking-family match
-  consults only stub-declared `@masked` verbs and never the base family (`with`/`within`/`subset`/
-  `transform`). Verified: same false `unresolved`, for a spelling R masks identically.
+- **FIXED — a named data argument broke positional masking, and the `base::` spelling masked
+  nothing.** Two false `unresolved` findings on code R runs. The positional counter was not advanced
+  past formals already claimed by name, so `with(data = frame, column_a)` read `column_a` as the data
+  and evaluated it in the caller's frame; matching now follows R's own rule (names claim their formal
+  first, remaining positionals fill what is left), which also makes the reordered
+  `with(column_a, data = frame)` correct. And the `Namespace` arm consulted only stub-declared
+  `@masked` verbs, so `base::with` and `base::subset` masked nothing; the base family is now
+  recognized under `base` as well as bare. Controls confirm the data argument itself is still
+  checked (`with(no_such_frame, …)` still reports), an in-item local `with` still masks nothing, and
+  `somepkg::with` is still treated as its own function.
+- **A *top-level* definition of a masking verb does not suppress masking, unlike an in-item one.**
+  Found while adding the controls above, and **pre-existing** — verified identical before the fix.
+  `with <- function(data, expr) expr` at top level followed by `with(frame, name)` in another item
+  still masks, because cross-item resolution happens above `item_naming`, so the callee read is not
+  in `resolutions` and the shadow is invisible to the walk. The same item-firewall limitation the
+  naming suite already states; the fix needs the file's own top-level binders consulted at the
+  masking check, which `file_binders` can answer.
 - **`switch` is walked as an ordinary call, so its branches are sequential writes.** Verified:
   `switch(key, a = { r <- 1L }, b = { r <- 2L }); r` reports a false `unused` on the first branch's
   write, which is live whenever `key == "a"`. It also misses the `maybe-undefined` on `r` (R: `object

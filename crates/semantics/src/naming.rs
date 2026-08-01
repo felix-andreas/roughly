@@ -510,34 +510,45 @@ impl Context<'_> {
                     ExpressionKind::NameRef(name)
                         if !self.naming.resolutions.contains_key(callee) =>
                     {
-                        match name.as_str() {
-                            "with" | "within" => Some(vec!["data"]),
-                            "subset" | "transform" => Some(vec!["x"]),
-                            _ => self
-                                .masked_verbs
-                                .get(name)
-                                .map(|leading| leading.iter().map(String::as_str).collect()),
-                        }
+                        base_masking_family(name)
+                            .or_else(|| declared_masked_verb(self.masked_verbs, name))
                     }
-                    // Namespace access cannot be shadowed by a local
-                    // binding.
+                    // Namespace access cannot be shadowed by a local binding.
+                    // The base family is recognized only under `base`, since
+                    // another package's `with` is its own function; a
+                    // stub-declared verb is matched by name, as it is bare.
                     ExpressionKind::Namespace {
-                        name: Some(name), ..
-                    } => self
-                        .masked_verbs
-                        .get(name)
-                        .map(|leading| leading.iter().map(String::as_str).collect()),
+                        package,
+                        name: Some(name),
+                        ..
+                    } => match package.as_deref() {
+                        Some("base") => base_masking_family(name)
+                            .or_else(|| declared_masked_verb(self.masked_verbs, name)),
+                        _ => declared_masked_verb(self.masked_verbs, name),
+                    },
                     _ => None,
                 };
                 if let Some(leading) = masking_family {
-                    let mut positional_index = 0;
+                    // R matches named arguments to formals first and fills the
+                    // rest positionally, so a positional argument takes the
+                    // next data formal no name has already claimed. Counting
+                    // positions without that skip made
+                    // `with(data = frame, column_a)` read `column_a` as the
+                    // data and evaluate it in the caller's frame, where a
+                    // column name is not defined.
+                    let claimed_by_name = arguments
+                        .iter()
+                        .filter_map(|argument| argument.name.as_deref())
+                        .filter(|name| leading.contains(name))
+                        .count();
+                    let mut unclaimed = leading.len().saturating_sub(claimed_by_name);
                     for argument in arguments {
                         let data_argument = match &argument.name {
                             Some(name) => leading.contains(&name.as_str()),
                             None => {
-                                let index = positional_index;
-                                positional_index += 1;
-                                index < leading.len()
+                                let takes_a_data_slot = unclaimed > 0;
+                                unclaimed = unclaimed.saturating_sub(1);
+                                takes_a_data_slot
                             }
                         };
                         let Some(value) = argument.value else {
@@ -1212,6 +1223,30 @@ impl Context<'_> {
                 });
             }
         }
+    }
+}
+
+/// A verb the stub corpus declares `@masked`, and the names of the formals it
+/// declares before its `...` — the data arguments, which resolve normally. An
+/// empty list masks every argument. Free rather than a method so the borrowed
+/// names live as long as the corpus map and not as long as the walker.
+fn declared_masked_verb<'a>(
+    masked_verbs: &'a FxHashMap<String, Vec<String>>,
+    name: &str,
+) -> Option<Vec<&'a str>> {
+    masked_verbs
+        .get(name)
+        .map(|leading| leading.iter().map(String::as_str).collect())
+}
+
+/// The base data-masking verbs, and the names of the formals that hold the
+/// data rather than the masked expression. Every other argument evaluates in
+/// the data's frame, so a name there is a column and not a variable.
+fn base_masking_family(name: &str) -> Option<Vec<&'static str>> {
+    match name {
+        "with" | "within" => Some(vec!["data"]),
+        "subset" | "transform" => Some(vec!["x"]),
+        _ => None,
     }
 }
 

@@ -108,6 +108,78 @@ f <- function(frame) subset(frame, column_a > 1L)
   28..33 frame -> b0
   35..43 column_a -> quiet deferred
 
+#---- a_named_data_argument_still_leaves_the_rest_masked
+# R matches named arguments to formals first and fills the rest positionally,
+# so `column_a` here is the masked `expr` and not the data. Counting positions
+# without skipping the formal `data =` already claimed read `column_a` as the
+# data and evaluated it in the caller's frame, where a column is not defined.
+f <- function(frame) {
+  with(data = frame, column_a)
+}
+#++++
+# f
+  b0 frame parameter 14..19
+  b1 f top-level 0..1
+  0..1 f <- b1
+  25..29 with -> non-local deferred
+  37..42 frame -> b0
+  44..52 column_a -> quiet deferred
+
+#---- a_data_argument_named_out_of_order_is_still_the_data
+# The same rule read the other way: the positional argument cannot be the data
+# because the name already claimed it, so it is the masked expression even
+# though it comes first.
+f <- function(frame) {
+  with(column_a, data = frame)
+}
+#++++
+# f
+  b0 frame parameter 14..19
+  b1 f top-level 0..1
+  0..1 f <- b1
+  25..29 with -> non-local deferred
+  30..38 column_a -> quiet deferred
+  47..52 frame -> b0
+
+#---- a_base_qualified_masking_verb_masks_what_the_bare_one_does
+# `base::with` is the same function as `with`, so the qualified spelling has to
+# mask identically. Only `base` counts: another package's `with` is its own.
+f <- function(frame) {
+  base::with(frame, column_a)
+}
+#++++
+# f
+  b0 frame parameter 14..19
+  b1 f top-level 0..1
+  0..1 f <- b1
+  25..35 base::with -> namespace
+  36..41 frame -> b0
+  43..51 column_a -> quiet deferred
+
+#---- a_base_qualified_subset_masks_its_condition
+f <- function(frame) base::subset(frame, column_a > 1L)
+#++++
+# f
+  b0 frame parameter 14..19
+  b1 f top-level 0..1
+  0..1 f <- b1
+  21..33 base::subset -> namespace
+  34..39 frame -> b0
+  41..49 column_a -> quiet deferred
+
+#---- another_packages_masking_name_is_its_own_function
+# Recognition is base's four verbs plus what the stubs declare `@masked`; a
+# same-named export of an unrelated package masks nothing.
+f <- function(frame) somepkg::with(frame, column_a)
+#++++
+# f
+  b0 frame parameter 14..19
+  b1 f top-level 0..1
+  0..1 f <- b1
+  21..34 somepkg::with -> namespace
+  35..40 frame -> b0
+  42..50 column_a -> non-local deferred
+
 #---- a_masked_read_that_resolves_keeps_its_binding
 # A masked read that does resolve keeps its ordinary resolution, so goto and
 # references still work inside the mask.

@@ -2805,7 +2805,12 @@ Recognized masks:
   `:=` column assignment, a `.()` list call, or a `.SD` / `.N` / `.I` / `.BY` / `.GRP` / `.EACHI`
   special — masks all of that bracket's index arguments even when the subject's type is unknown
 - the base masking family `with()`, `within()`, `subset()`, `transform()` masks every argument
-  after the data (a locally defined function of the same name masks nothing)
+  other than the data (a locally defined function of the same name masks nothing). Which argument
+  is the data follows R's own matcher: named arguments claim their formal first (`data` for the
+  `with` pair, `x` for `subset` and `transform`) and the remaining positional arguments fill what
+  is left, so `with(data = frame, speed > 20)` and `with(speed > 20, data = frame)` both mask the
+  condition. The `base::` spelling of any of the four masks exactly as the bare one does; another
+  package's same-named export is its own function and masks nothing
 
 Names inside a mask that *do* resolve — a local variable used in `j`, a standard-library function
 like `sum` — keep their ordinary resolution and typing (data.table itself falls back to the
