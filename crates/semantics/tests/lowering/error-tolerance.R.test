@@ -1,0 +1,143 @@
+#==== broken
+#---- a_missing_assignment_value_lowers_to_a_hole
+# A hole types as Unknown and produces no diagnostic of its own: the syntax
+# error already marks the region, and a second complaint about it would be
+# noise.
+x <-
+#++++
+# x
+  Assign Local
+    NameRef x
+    Missing
+
+#---- a_missing_operand_lowers_to_a_hole
+1L +
+#++++
+# <statement>
+  Binary Add
+    Literal Integer("1L")
+    Missing
+
+#---- a_missing_function_body_lowers_to_a_hole
+function(value)
+#++++
+# <statement>
+  Function(value)
+    Missing
+
+#---- an_unclosed_call_still_lowers_its_callee
+f(
+#++++
+# <statement>
+  Call
+    NameRef f
+
+#---- an_unclosed_index_still_lowers_its_target
+x[
+#++++
+# <statement>
+  Index [
+    NameRef x
+
+#---- a_dangling_else_leaves_the_if_without_an_else_branch
+if (a) 1L else
+#++++
+# <statement>
+  If
+    NameRef a
+    Literal Integer("1L")
+
+#---- a_string_parameter_is_dropped_because_r_rejects_it
+# R: "unexpected string constant" — a formal argument must be a name. The
+# parser reports it, so lowering drops the parameter rather than inventing one.
+function("a") 1L
+#++++
+# <statement>
+  Function()
+    Literal Integer("1L")
+
+#---- an_empty_if_condition_slots_the_body_into_the_condition
+# WRONG-BUT-CURRENT. `if () 1L` should lower with a hole for the condition and
+# `1L` as the then-branch; instead the only expression child is taken
+# positionally, so the BODY becomes the condition and the branch becomes the
+# hole. The same positional read misplaces `while ()` and `for (i in )`.
+# Contained today only because a broken item's type diagnostics are
+# suppressed; IDE reads of the region still see the wrong slot.
+if () 1L
+#++++
+# <statement>
+  If
+    Literal Integer("1L")
+    Missing
+
+#---- an_empty_while_condition_slots_the_body_into_the_condition
+while () 1L
+#++++
+# <statement>
+  While
+    Literal Integer("1L")
+    Missing
+
+#---- an_empty_for_sequence_slots_the_body_into_the_sequence
+for (i in ) 1L
+#++++
+# <statement>
+  For i
+    Literal Integer("1L")
+    Missing
+
+#---- a_broken_statement_does_not_stop_its_siblings
+# Error tolerance is per item: a stray token becomes its own broken item and
+# the well-formed neighbours on either side lower normally.
+before <- 1L
+}
+after <- 2L
+#++++
+# before
+  Assign Local
+    NameRef before
+    Literal Integer("1L")
+# <statement>
+  Missing
+# after
+  Assign Local
+    NameRef after
+    Literal Integer("2L")
+
+#---- an_unclosed_call_adopts_the_following_statement_as_an_argument
+# The recovery reads on for the first argument even across a newline, so the
+# next line becomes an argument rather than a sibling item. Pinned because it
+# decides how much of a file one forgotten `)` costs.
+before <- 1L
+names(
+after <- 2L
+#++++
+# before
+  Assign Local
+    NameRef before
+    Literal Integer("1L")
+# <statement>
+  Call
+    NameRef names
+    Assign Local
+      NameRef after
+      Literal Integer("2L")
+
+#---- an_unterminated_assignment_swallows_the_next_line
+# Not an error: R continues the assignment across the newline, so
+# `broken <- also_good <- 2L` is one statement and `broken` gets 2L. Pinned so
+# a future recovery change that splits the lines is a deliberate decision.
+good <- 1L
+broken <-
+also_good <- 2L
+#++++
+# good
+  Assign Local
+    NameRef good
+    Literal Integer("1L")
+# broken
+  Assign Local
+    NameRef broken
+    Assign Local
+      NameRef also_good
+      Literal Integer("2L")
