@@ -43,6 +43,46 @@ pub fn parse_fixture_files(suite_dir: &Path) -> Vec<FixtureFile> {
         .collect()
 }
 
+/// Every fixture case source in the workspace, as `(case id, source)`.
+///
+/// The hand-written fixture sources are the highest-quality R in the repository
+/// — each one was written to exercise something — so the invariant batteries and
+/// the differential oracles want all of them, not the subset one crate happens
+/// to know about. Listing the suites here rather than in each harness is what
+/// keeps a newly added suite from being silently invisible to every battery.
+pub fn fixture_case_sources() -> Vec<(String, String)> {
+    let crates = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("the crate sits under crates/");
+    let mut sources = Vec::new();
+    for suite in FIXTURE_SUITES {
+        for file in parse_fixture_files(&crates.join(suite)) {
+            for case in file.cases {
+                sources.push((format!("{suite}::{}", case.id), case.source));
+            }
+        }
+    }
+    sources
+}
+
+/// Every fixture suite in the workspace, workspace-relative under `crates/`.
+/// A suite missing from this list runs its own expectations and nothing else.
+const FIXTURE_SUITES: [&str; 13] = [
+    "format/tests/format",
+    "ide/tests/ide",
+    "semantics/tests/lints",
+    "semantics/tests/lints-style",
+    "semantics/tests/lowering",
+    "semantics/tests/naming",
+    "semantics/tests/typing",
+    "semantics/tests/typing-imports",
+    "semantics/tests/typing-scripts",
+    "semantics/tests/typing-strict",
+    "syntax/tests/errors",
+    "syntax/tests/syntax",
+    "syntax/tests/tsr",
+];
+
 /// Every source in the mined legacy corpus (`tests/corpus-legacy/*.R.corpus`),
 /// oldest-stack fixture cases kept for their *inputs* rather than their
 /// expectations.

@@ -203,30 +203,14 @@ fn fuzz_regressions_hold_invariants() {
 /// skips the way the fetched-corpus arm does.
 #[test]
 fn fixture_sources_hold_invariants() {
-    let crates = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("the crate sits under crates/")
-        .to_owned();
-    let mut sources = 0usize;
-    for suite in [
-        "format/tests/format",
-        "semantics/tests/typing",
-        "semantics/tests/typing-scripts",
-        "semantics/tests/lints",
-        "syntax/tests/syntax",
-        "syntax/tests/errors",
-        "ide/tests/ide",
-    ] {
-        for file in syntax::testing::parse_fixture_files(&crates.join(suite)) {
-            for case in &file.cases {
-                check_invariants(&case.source);
-                sources += 1;
-            }
-        }
+    let sources = syntax::testing::fixture_case_sources();
+    for (_, source) in &sources {
+        check_invariants(source);
     }
     assert!(
-        sources > 100,
-        "expected the fixture corpus, found {sources}"
+        sources.len() > 100,
+        "expected the fixture corpus, found {}",
+        sources.len()
     );
 }
 

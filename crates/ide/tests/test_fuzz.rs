@@ -59,6 +59,7 @@ fn sweep(source: &str) {
     semantics::stubs::install_shipped_stubs(&db);
     let file = SourceFile::new(&db, source.to_owned(), DocumentKind::Package);
     let files = ProjectFiles::new(&db, vec![file]);
+    let completion_offsets = one_offset_per_context(source);
     for offset in sample_offsets(source) {
         let offset = TextSize::from(offset as u32);
         let at = |what: &str| format!("{what} in {source:?} at {offset:?}");
@@ -76,17 +77,63 @@ fn sweep(source: &str) {
 
         let _ = ide::hover_debug(&db, file, offset);
 
+        // The name under the cursor, when there is one: every range the
+        // navigation features return for this position must cover exactly it.
+        let cursor_name = name_at(source, offset);
+
         let definition = ide::definition(&db, files, file, offset);
         check_target(&db, definition.as_ref(), &at("definition"));
+        check_names(
+            &db,
+            definition_range(definition.as_ref()),
+            cursor_name,
+            &at("definition"),
+        );
 
         let references = ide::references(&db, files, file, offset, true);
         for occurrence in &references {
             check_range(&db, occurrence.file, occurrence.range, &at("reference"));
         }
+        check_names(
+            &db,
+            references
+                .iter()
+                .map(|occurrence| (occurrence.file, occurrence.range)),
+            cursor_name,
+            &at("reference"),
+        );
 
         let rename = ide::rename(&db, files, file, offset);
         for occurrence in rename.iter().flatten() {
             check_range(&db, occurrence.file, occurrence.range, &at("rename edit"));
+        }
+        check_names(
+            &db,
+            rename
+                .iter()
+                .flatten()
+                .map(|occurrence| (occurrence.file, occurrence.range)),
+            cursor_name,
+            &at("rename edit"),
+        );
+
+        // Round trip: if the cursor navigates somewhere, asking for references
+        // from that declaration must find the token the cursor was on. A set of
+        // edits that is internally consistent but collectively shifted passes
+        // every containment check and still corrupts the file.
+        if let Some((target_file, target_range)) = definition_range(definition.as_ref())
+            && target_file == file
+            && cursor_name.is_some()
+        {
+            let back = ide::references(&db, files, file, target_range.start(), true);
+            assert!(
+                back.iter().any(|occurrence| {
+                    occurrence.file == file && occurrence.range.contains(offset)
+                }),
+                "{}: definition led to {target_range:?} but its references do not come back to \
+                 the cursor",
+                at("round trip")
+            );
         }
 
         // A signature's parameter spans index its own rendered label, not the
@@ -105,15 +152,25 @@ fn sweep(source: &str) {
             }
         }
 
-        for item in ide::completion(&db, files, file, offset)
-            .iter()
-            .flat_map(|result| &result.items)
-        {
-            assert!(
-                !item.label.is_empty(),
-                "{}: empty completion label",
-                at("completion")
-            );
+        // Completion costs about 80% of this harness on its own — three orders
+        // of magnitude more per call than any other feature here — and asserts
+        // the least of any of them: that a label is not empty. What it offers
+        // is decided by the syntactic context (after a `$`, inside an
+        // identifier, at the start of a statement), not by the exact byte, so
+        // sweeping every offset re-derives the same candidate set over and
+        // over. One offset per context visits every candidate source the file
+        // can reach and keeps the assertion intact.
+        if completion_offsets.contains(&offset) {
+            for item in ide::completion(&db, files, file, offset)
+                .iter()
+                .flat_map(|result| &result.items)
+            {
+                assert!(
+                    !item.label.is_empty(),
+                    "{}: empty completion label",
+                    at("completion")
+                );
+            }
         }
 
         let type_definition = ide::type_definition(&db, files, file, offset);
@@ -150,18 +207,112 @@ fn sweep(source: &str) {
 /// the shipped stub corpus, so it barely varies with file size.
 fn sample_offsets(source: &str) -> Vec<usize> {
     const STRIDE: usize = 7;
-    let mut offsets = vec![0usize];
-    let mut at = 0usize;
-    for token in syntax::lex(source).0 {
-        at += usize::from(token.len);
-        offsets.push(at);
-    }
+    let mut offsets: Vec<usize> = token_boundaries(source)
+        .iter()
+        .map(|&offset| usize::from(offset))
+        .collect();
     offsets.extend((0..=source.len()).step_by(STRIDE));
     offsets.push(source.len());
     offsets.sort_unstable();
     offsets.dedup();
     offsets.retain(|&offset| offset <= source.len());
     offsets
+}
+
+/// The start of the file and the end of every token — the positions where what
+/// a feature should answer actually changes.
+fn token_boundaries(source: &str) -> std::collections::BTreeSet<TextSize> {
+    let mut offsets = std::collections::BTreeSet::from([TextSize::from(0)]);
+    let mut at = 0usize;
+    for token in syntax::lex(source).0 {
+        at += usize::from(token.len);
+        offsets.insert(TextSize::from(at.min(source.len()) as u32));
+    }
+    offsets
+}
+
+/// One offset per completion context, where the context is the kind of token
+/// the cursor sits in or after — the thing that decides what may be offered
+/// (a field after `$`, an export after `::`, a binding at the head of a
+/// statement). Completing after the `$` of `a$b` and after the `$` of `c$d`
+/// asks the same question of the same file, so the second call only pays to
+/// re-derive a candidate list the first already checked. The two structural
+/// edges are always kept.
+fn one_offset_per_context(source: &str) -> std::collections::BTreeSet<TextSize> {
+    let mut seen = std::collections::HashSet::new();
+    let mut offsets =
+        std::collections::BTreeSet::from([TextSize::from(0), TextSize::from(source.len() as u32)]);
+    let mut at = 0usize;
+    for token in syntax::lex(source).0 {
+        at += usize::from(token.len);
+        if seen.insert(token.kind) {
+            offsets.insert(TextSize::from(at.min(source.len()) as u32));
+        }
+    }
+    offsets
+}
+
+/// The name the cursor is on, or `None` if it is not on one. Names are what the
+/// navigation features are *about*, so this is the only position where their
+/// answers have a spelling to be checked against.
+fn name_at(source: &str, offset: TextSize) -> Option<&str> {
+    let offset = usize::from(offset);
+    let mut start = 0usize;
+    for token in syntax::lex(source).0 {
+        let end = start + usize::from(token.len);
+        // A backtick-quoted name lexes as IDENT too, backticks included.
+        if (start..end).contains(&offset) && token.kind == syntax::SyntaxKind::IDENT {
+            return source.get(start..end);
+        }
+        start = end;
+    }
+    None
+}
+
+/// Containment says a range is *somewhere* in the file; this says it is on the
+/// right thing. Every edit a rename hands the editor, and every range navigation
+/// points at, must spell the name the cursor was on — a set of ranges shifted
+/// by one byte is in bounds, self-consistent, and silently destroys code.
+///
+/// Backtick spelling is normalized because `` `x` `` and `x` name the same
+/// binding and a feature may report either form.
+fn check_names(
+    db: &RootDatabase,
+    ranges: impl IntoIterator<Item = (SourceFile, syntax::TextRange)>,
+    cursor_name: Option<&str>,
+    what: &str,
+) {
+    let Some(cursor_name) = cursor_name.map(unquote) else {
+        return;
+    };
+    for (file, range) in ranges {
+        let text = file.text(db);
+        let Some(spelled) = text.get(usize::from(range.start())..usize::from(range.end())) else {
+            continue;
+        };
+        assert_eq!(
+            unquote(spelled),
+            cursor_name,
+            "{what}: range {range:?} covers {spelled:?}, not the name under the cursor"
+        );
+    }
+}
+
+fn unquote(name: &str) -> &str {
+    name.strip_prefix('`')
+        .and_then(|rest| rest.strip_suffix('`'))
+        .unwrap_or(name)
+}
+
+fn definition_range(
+    target: Option<&ide::DefinitionTarget>,
+) -> Option<(SourceFile, syntax::TextRange)> {
+    match target {
+        Some(ide::DefinitionTarget::Project(navigation)) => {
+            Some((navigation.file, navigation.range))
+        }
+        _ => None,
+    }
 }
 
 /// Every range a feature returns goes straight to the editor, so it must lie

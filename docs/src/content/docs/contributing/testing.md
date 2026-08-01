@@ -109,13 +109,20 @@ property: a file with an R-grammar syntax error is refused, while errors raised 
 annotation grammar (marked `in_annotation` by the parser) only send the affected block down
 the verbatim path.
 
-Preservation is the one invariant that can notice the formatter *deleting* code — determinism,
+Preservation is the one invariant that can notice the formatter *changing* code — determinism,
 idempotence and "the output formats again" all hold for a formatter that silently drops a
-statement. It compares the non-trivia token **kind** sequence of input and output, excluding
-`{`, `}`, `;` and `#:`, which the formatter is allowed to introduce or move: it braces a
-single-statement body, splits a `;` chain into lines, and re-lays-out an annotation block across
-markers. Nothing weaker holds — token equality fails on those insertions and text equality fails
-on quote normalization.
+statement or misspells a token. It compares the non-trivia token **kind and spelling** sequence of
+input and output, with two allowances. Four kinds are excluded entirely — `{`, `}`, `;` and `#:` —
+because the formatter may introduce or move them: it braces a single-statement body, splits a `;`
+chain into lines, and re-lays-out an annotation block across markers. And a string is compared by
+its content rather than its text, because the formatter picks the quote character; a *raw* string
+it copies byte-for-byte, so that one keeps its full spelling.
+
+Comparing kinds alone is not enough, and the gap is a miscompile rather than a cosmetic one: R is
+case-sensitive, so a formatter emitting the wrong bytes for an identifier — what a stale or
+off-by-one source range produces — preserves every kind while renaming the user's variables.
+Measured against exactly that injected bug, the kind-only comparison passed all eight arms of this
+harness; the spelling comparison fails six of them, and costs nothing.
 
 The invariant battery itself is exported as
 `format::check_format_invariants` (with `syntax::testing::check_parse_invariants` for the
@@ -125,6 +132,28 @@ lint layer inherits the never-panic, determinism, geometry, and incremental inva
 the coverage-guided targets below share the exact same contracts. The `format` and `semantics`
 harnesses additionally carry a `fuzz_regressions_hold_invariants` battery pinning inputs those
 targets have broken; `syntax` and `ide` have no such battery yet.
+
+### The IDE fuzz harness
+
+`crates/ide/tests/test_fuzz.rs` sweeps every feature over a sample of byte offsets in each input:
+every token boundary plus a coarse stride, so off-boundary and mid-character positions stay
+covered. At each offset nothing may panic and every range handed to the editor must lie inside the
+text it indexes.
+
+Containment alone is a weak oracle — it says a range is *somewhere* in the file, not that it is on
+the right thing — so two further properties hold wherever the cursor sits on a name. **Name
+identity**: every rename edit, every reference, and the definition target must cover text spelling
+that same name (backtick quoting normalized, since `` `x` `` and `x` name one binding). **Round
+trip**: if the cursor navigates to a declaration, asking for references *from* that declaration
+must come back to the cursor's own token. Both were measured against an injected off-by-one at the
+single place item-relative ranges are re-anchored to absolute offsets: the containment-only battery
+passed, name identity failed on the first seed.
+
+Completion is sampled once per completion context — the kind of token the cursor sits in or after —
+rather than at every offset. It is three orders of magnitude more expensive per call than any other
+feature here, it asserts only that a label is non-empty, and what it offers is decided by syntactic
+context rather than by the exact byte, so a full sweep re-derives the same candidate list many times
+over. Sampling by context halves the harness's wall clock and keeps the assertion.
 
 ### The mined legacy corpus
 
@@ -153,6 +182,31 @@ Regenerating: the corpus is derived from `legacy/analysis-legacy/tests/**/*.test
 case's source between its `#---- <id>` header and the `#++++` expectation, stripping the per-file
 headers multi-file cases use, and deduplicating. It is committed rather than derived at test time so
 it survives the eventual deletion of that directory.
+
+### The tree-sitter acceptance differential
+
+`crates/syntax/tests/test_corpus.rs` compares our "this file has errors" verdict against
+`tree-sitter-r` as a second opinion, in both directions and over two input sets.
+
+`corpus_acceptance` runs over the fetched `corpus/` and gates **ours-only-error** — we reject what
+tree-sitter accepts, which means a grammar gap. `in_tree_acceptance` runs over inputs that are
+always present (the mined legacy corpus plus every fixture case source) and gates the other
+direction, **theirs-only-error**: we accept what tree-sitter rejects.
+
+That second direction is the only thing in the project that bounds the parse-error count from
+*below*. Every other parser invariant bounds it from above — the cascade guard caps how many errors
+we report, and nothing asserts that a broken file reports any at all — while the parser carries a
+lot of dedup and first-wins suppression, so over-suppression is the live regression risk. Measured
+against an injected `push_error` that drops zero-width ranges, all four `test_fuzz` binaries stayed
+green while 24 of 489 broken files went silently clean; this differential went from 2 divergences to
+23. It costs about 100 ms.
+
+Each direction is gated only where it is meaningful. Ours-only is noise on in-tree input, which is
+full of `#:` annotations tree-sitter reads as comments and of deliberately broken sources;
+theirs-only is gated there against
+`crates/syntax/tests/in-tree-acceptance-allowlist.txt`. An allowlist entry is adjudicated by running
+**R itself** and must say which of two things it is: tree-sitter being wrong, or a known gap in this
+parser. There is currently one of each.
 
 ### Coverage-guided fuzzing
 

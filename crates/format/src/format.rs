@@ -2115,8 +2115,8 @@ pub fn check_format_invariants(input: &str) {
 
     if let Ok(output) = first {
         assert_eq!(
-            significant_kinds(input),
-            significant_kinds(&output),
+            significant_tokens(input),
+            significant_tokens(&output),
             "formatting changed the code for input {input:?} (output {output:?})"
         );
         match format(&output, Config::default()) {
@@ -2128,31 +2128,54 @@ pub fn check_format_invariants(input: &str) {
     }
 }
 
-/// The token kinds formatting must preserve exactly, in order. This is the only
-/// invariant that can notice the formatter *deleting* code — determinism,
-/// idempotence and "the output formats again" all hold for a formatter that
-/// silently drops a statement.
+/// The tokens formatting must preserve exactly, in order, as `(kind, spelling)`.
+/// This is the only invariant that can notice the formatter *changing* the code
+/// — determinism, idempotence and "the output formats again" all hold for a
+/// formatter that silently drops a statement or misspells a token.
 ///
-/// Four kinds are excluded because the formatter is allowed to introduce or move
-/// them: it braces a single-statement body, splits a `;` chain into lines, and
-/// re-lays-out a `#:` block across markers. Nothing weaker works — token
-/// equality fails on those insertions and text equality fails on quote
-/// normalization, while this formulation holds across every fixture source and
-/// every fuzz input tried.
-fn significant_kinds(text: &str) -> Vec<SyntaxKind> {
-    syntax::lex(text)
-        .0
-        .into_iter()
-        .map(|token| token.kind)
-        .filter(|kind| {
-            !kind.is_trivia()
-                && !matches!(
-                    kind,
-                    SyntaxKind::L_BRACE
-                        | SyntaxKind::R_BRACE
-                        | SyntaxKind::SEMICOLON
-                        | SyntaxKind::ANNOTATION_MARKER
-                )
-        })
-        .collect()
+/// Comparing kinds alone is not enough, and the gap is a miscompile rather than
+/// a cosmetic one: R is case-sensitive, so a formatter that emits the wrong
+/// bytes for an identifier — what a stale or off-by-one source range produces —
+/// preserves every kind while renaming the user's variables.
+///
+/// Two allowances make the spelling comparable. Four kinds are dropped entirely
+/// because the formatter may introduce or move them: it braces a
+/// single-statement body, splits a `;` chain into lines, and re-lays-out a `#:`
+/// block across markers. And a string is compared by its content rather than its
+/// text, because the formatter chooses the quote character — but a *raw* string
+/// it copies byte-for-byte, so that one keeps its full spelling.
+fn significant_tokens(text: &str) -> Vec<(SyntaxKind, &str)> {
+    let mut tokens = Vec::new();
+    let mut start = 0usize;
+    for token in syntax::lex(text).0 {
+        let end = (start + u32::from(token.len) as usize).min(text.len());
+        let spelling = text.get(start..end).unwrap_or_default();
+        start = end;
+        if token.kind.is_trivia()
+            || matches!(
+                token.kind,
+                SyntaxKind::L_BRACE
+                    | SyntaxKind::R_BRACE
+                    | SyntaxKind::SEMICOLON
+                    | SyntaxKind::ANNOTATION_MARKER
+            )
+        {
+            continue;
+        }
+        tokens.push((token.kind, comparable_spelling(token.kind, spelling)));
+    }
+    tokens
+}
+
+fn comparable_spelling(kind: SyntaxKind, spelling: &str) -> &str {
+    if kind != SyntaxKind::STRING || matches!(spelling.chars().next(), Some('r' | 'R')) {
+        return spelling;
+    }
+    // An unterminated string reaches here as its opening quote plus whatever
+    // followed, so trim the closer only when there is one to trim.
+    let inner = spelling.strip_prefix(['"', '\'']).unwrap_or(spelling);
+    match spelling.len() >= 2 {
+        true => inner.strip_suffix(['"', '\'']).unwrap_or(inner),
+        false => inner,
+    }
 }

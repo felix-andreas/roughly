@@ -1,4 +1,4 @@
-//! Corpus tests over real R sources.
+//! Corpus tests over real R sources, and the tree-sitter acceptance oracle.
 //!
 //! `scripts/fetch-corpus.rs` populates a gitignored `corpus/` directory with the
 //! R base library and a set of CRAN packages. These tests run the hand-written
@@ -7,12 +7,16 @@
 //!   * `corpus_round_trip` checks the lossless invariant — the tree must reprint
 //!     byte-for-byte to its input.
 //!   * `corpus_acceptance` compares our "has errors" verdict against tree-sitter-r
-//!     as an oracle, bucketing agreement. It reports but does not yet gate on
-//!     individual files; the ours-only-error bucket is the parser's true-positive
-//!     rejection list, which a later change tightens into an allowlist.
+//!     as an oracle, bucketing agreement, and gates the ours-only-error bucket
+//!     (we reject what tree-sitter accepts) against an adjudicated allowlist.
 //!
 //! Both skip cleanly when the corpus is absent (CI may run without a fetch).
 //! Read files with lossy UTF-8 decoding: some R sources are latin1, not UTF-8.
+//!
+//! `in_tree_acceptance` runs the same differential over sources that are always
+//! present, and gates the *other* direction — see its own comment for why that
+//! is the direction nothing else in the project can see.
+//!
 //! Run with `cargo test -p syntax --test test_corpus -- --nocapture`.
 
 use std::borrow::Cow;
@@ -143,6 +147,71 @@ fn corpus_acceptance() {
     assert!(
         unexplained.is_empty(),
         "{} unexplained acceptance divergence(s); fix the parser or adjudicate (R as referee) into tests/acceptance-allowlist.txt",
+        unexplained.len()
+    );
+}
+
+/// The acceptance differential over in-tree sources, gating the direction the
+/// rest of the project cannot see: **we accept what tree-sitter rejects**.
+///
+/// Every other parser invariant bounds errors from *above* — the cascade guard
+/// caps how many we report, and nothing at all asserts that a broken file
+/// reports anything. That matters because the parser carries a lot of dedup and
+/// first-wins suppression, so over-suppression is the live regression risk, and
+/// a silently dropped syntax error passes determinism, round-trip, range
+/// geometry and the whole fuzz battery. tree-sitter is the second opinion.
+///
+/// Only the theirs-only direction is gated here. The ours-only direction is
+/// noise on this input set: the fixture suites are full of `#:` annotations,
+/// which tree-sitter reads as comments and we parse as types, plus deliberately
+/// broken sources. The fetched-corpus test above gates ours-only over real
+/// packages, where it is meaningful; between the two, both directions are
+/// covered.
+#[test]
+fn in_tree_acceptance() {
+    let mut parser = tree_sitter::Parser::new();
+    parser
+        .set_language(&tree_sitter_r::LANGUAGE.into())
+        .expect("load tree-sitter-r grammar");
+
+    let mut sources = syntax::testing::legacy_corpus_sources();
+    sources.extend(syntax::testing::fixture_case_sources());
+
+    let mut accepted_only_by_us = Vec::new();
+    for (id, text) in &sources {
+        if syntax::parse(text).errors().is_empty()
+            && parser
+                .parse(text.as_str(), None)
+                .is_none_or(|tree| tree.root_node().has_error())
+        {
+            accepted_only_by_us.push(id.clone());
+        }
+    }
+
+    eprintln!(
+        "in_tree_acceptance: {} sources, {} accepted only by us",
+        sources.len(),
+        accepted_only_by_us.len()
+    );
+    for id in &accepted_only_by_us {
+        eprintln!("  {id}");
+    }
+
+    assert!(
+        sources.len() > 2_000,
+        "expected the in-tree corpus, found {} sources",
+        sources.len()
+    );
+    let allowlist = allowlisted_in_tree_ids();
+    let unexplained: Vec<&String> = accepted_only_by_us
+        .iter()
+        .filter(|id| !allowlist.contains(*id))
+        .collect();
+    assert!(
+        unexplained.is_empty(),
+        "{} source(s) we accept and tree-sitter rejects, none adjudicated: {unexplained:?}\n\
+         Either the parser stopped reporting an error it used to report, or the divergence is \
+         legitimate (R as referee) and belongs in tests/in-tree-acceptance-allowlist.txt",
         unexplained.len()
     );
 }
@@ -342,16 +411,24 @@ fn corpus_incremental_speed() {
 /// Committed, adjudicated divergences (one corpus-relative path suffix per
 /// line; `#` comments). Currently empty — the measured baseline is zero.
 fn allowlisted_paths() -> Vec<String> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/acceptance-allowlist.txt");
+    read_allowlist("tests/acceptance-allowlist.txt").collect()
+}
+
+/// The in-tree counterpart, keyed by fixture case id rather than path.
+fn allowlisted_in_tree_ids() -> std::collections::HashSet<String> {
+    read_allowlist("tests/in-tree-acceptance-allowlist.txt").collect()
+}
+
+fn read_allowlist(relative: &str) -> impl Iterator<Item = String> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(relative);
     std::fs::read_to_string(path)
-        .map(|text| {
-            text.lines()
-                .map(str::trim)
-                .filter(|line| !line.is_empty() && !line.starts_with('#'))
-                .map(str::to_owned)
-                .collect()
-        })
         .unwrap_or_default()
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(str::to_owned)
+        .collect::<Vec<_>>()
+        .into_iter()
 }
 
 /// Resolve the corpus root: `RY_CORPUS_DIR` if set, else `<workspace>/corpus`
