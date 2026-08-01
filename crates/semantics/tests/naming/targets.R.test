@@ -1,0 +1,166 @@
+#==== assignment_spellings
+#---- an_equals_assignment_binds_like_an_arrow
+f <- function() {
+  value = 1L
+  value
+}
+#++++
+# f
+  b0 value local 20..25
+  b1 f top-level 0..1
+  0..1 f <- b1
+  20..25 value <- b0
+  33..38 value -> b0
+
+#---- a_right_facing_arrow_binds_its_right_operand
+f <- function() {
+  1L -> value
+  value
+}
+#++++
+# f
+  b0 value local 26..31
+  b1 f top-level 0..1
+  0..1 f <- b1
+  26..31 value <- b0
+  34..39 value -> b0
+
+#---- a_string_target_binds_the_name_it_spells
+# `"x" <- 1` is `x <- 1` in R: a string where a name belongs binds that name.
+# The binding line carries the stripped name; the occurrence line names the
+# expression kind, because the target node is still a string literal.
+"x" <- 1L
+#++++
+# x
+  b0 x top-level 0..3
+  0..3 Literal <- b0
+
+#---- a_backquoted_target_binds_the_name_between_the_backquotes
+`my value` <- 1L
+#++++
+# my value
+  b0 my value top-level 0..10
+  0..10 my value <- b0
+
+#---- an_assignment_inside_a_call_argument_binds_in_the_enclosing_frame
+# An assignment is an expression, so a write inside a call argument lands in the
+# calling frame and a later read sees it.
+f <- function(g) {
+  g(w <- 5L)
+  w
+}
+#++++
+# f
+  b0 g parameter 14..15
+  b1 w local 23..24
+  b2 f top-level 0..1
+  0..1 f <- b2
+  21..22 g -> b0
+  23..24 w <- b1
+  34..35 w -> b1
+
+#==== replacement_forms
+#---- a_field_replacement_reads_and_rewrites_its_base
+# `x$field <- v` runs as an assignment of the `$<-` result back to `x`, so the
+# base is read and written by the one statement and every later occurrence sees
+# the same slot. The base occurrence renders as a read: the statement's
+# assignment target is the whole accessor chain, not the name at its root.
+f <- function(x) {
+  x$field <- 1L
+  x
+}
+#++++
+# f
+  b0 x parameter 14..15
+  b1 f top-level 0..1
+  0..1 f <- b1
+  21..22 x -> b0
+  37..38 x -> b0
+
+#---- an_index_replacement_reads_its_key_expression
+f <- function(target, key) {
+  target[[key]] <- 1L
+  target
+}
+#++++
+# f
+  b0 target parameter 14..20
+  b1 key parameter 22..25
+  b2 f top-level 0..1
+  0..1 f <- b2
+  31..37 target -> b0
+  39..42 key -> b1
+  53..59 target -> b0
+
+#---- a_nested_replacement_call_resolves_the_base_at_the_bottom_of_the_chain
+# The function actually invoked is `names<-`, not `names`, so the callee spelled
+# here is resolved for navigation but never reported as an unresolved name.
+f <- function(x) {
+  names(x)[1L] <- "a"
+  x
+}
+#++++
+# f
+  b0 x parameter 14..15
+  b1 f top-level 0..1
+  0..1 f <- b1
+  21..26 names -> quiet deferred
+  27..28 x -> b0
+  43..44 x -> b0
+
+#---- an_s4_slot_replacement_reads_and_rewrites_its_base
+f <- function(obj) {
+  obj@slot <- 1L
+  obj
+}
+#++++
+# f
+  b0 obj parameter 14..17
+  b1 f top-level 0..1
+  0..1 f <- b1
+  23..26 obj -> b0
+  40..43 obj -> b0
+
+#---- an_attribute_replacement_reads_the_value_arguments_too
+f <- function(x, label) {
+  attr(x, "name") <- label
+  x
+}
+#++++
+# f
+  b0 x parameter 14..15
+  b1 label parameter 17..22
+  b2 f top-level 0..1
+  0..1 f <- b2
+  28..32 attr -> quiet deferred
+  33..34 x -> b0
+  47..52 label -> b1
+  55..56 x -> b0
+
+#==== refused_targets
+#---- a_computed_target_is_refused_and_its_reads_are_suppressed
+# `<-` binds looser than `+`, so this parses as `(a + b) <- 1L` — a target R
+# refuses at run time. The reads inside it are the mistake's consequences, not
+# findings of their own, so they are suppressed and only the target is recorded.
+f <- function(a, b) {
+  a + b <- 1L
+}
+#++++
+# f
+  b0 a parameter 14..15
+  b1 b parameter 17..18
+  b2 f top-level 0..1
+  0..1 f <- b2
+  unused-parameter a 14..15
+  unused-parameter b 17..18
+  invalid-target 24..29
+
+#---- a_numeric_literal_target_is_refused
+f <- function() {
+  1L <- 2L
+}
+#++++
+# f
+  b0 f top-level 0..1
+  0..1 f <- b0
+  invalid-target 20..22

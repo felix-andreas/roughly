@@ -1,0 +1,294 @@
+#==== quoting_calls
+# `library(stats)` means `library("stats")`: the bare name is the package name,
+# not a value reference, so it is never read and never reported unresolved.
+#---- the_attach_family_quotes_a_bare_first_positional_argument
+f <- function() {
+  library(stats)
+  require(utils)
+  help(median)
+}
+#++++
+# f
+  b0 f top-level 0..1
+  0..1 f <- b0
+  20..27 library -> non-local deferred
+  37..44 require -> non-local deferred
+  54..58 help -> non-local deferred
+
+#---- a_named_first_argument_makes_it_an_ordinary_call_again
+f <- function(chosen) library(package = chosen)
+#++++
+# f
+  b0 chosen parameter 14..20
+  b1 f top-level 0..1
+  0..1 f <- b1
+  22..29 library -> non-local deferred
+  40..46 chosen -> b0
+
+#---- a_quoted_assignment_binds_nothing
+# R builds the expression instead of running it, so nothing inside binds: the
+# later read of `x` is the `object 'x' not found` R itself reports. The names
+# inside are still read — `eval` may run the expression later — but quietly,
+# because naming a variable a quotation is about to create is ordinary
+# metaprogramming.
+f <- function() {
+  quote(x <- 1L)
+  x
+}
+#++++
+# f
+  b0 x local 26..27
+  b1 f top-level 0..1
+  0..1 f <- b1
+  20..25 quote -> non-local deferred
+  26..27 x -> quiet deferred
+  37..38 x -> non-local deferred
+
+#---- the_other_quoting_forms_read_their_names_quietly
+f <- function() {
+  substitute(alpha + beta)
+  bquote(.(gamma) + delta)
+  expression(epsilon + zeta)
+}
+#++++
+# f
+  b0 f top-level 0..1
+  0..1 f <- b0
+  20..30 substitute -> non-local deferred
+  31..36 alpha -> quiet deferred
+  39..43 beta -> quiet deferred
+  47..53 bquote -> non-local deferred
+  54..55 . -> quiet deferred
+  56..61 gamma -> quiet deferred
+  65..70 delta -> quiet deferred
+  74..84 expression -> non-local deferred
+  85..92 epsilon -> quiet deferred
+  95..99 zeta -> quiet deferred
+
+#---- a_locally_defined_quoting_name_is_an_ordinary_call
+f <- function(value) {
+  quote <- function(expr) expr
+  quote(value)
+}
+#++++
+# f
+  b0 value parameter 14..19
+  b1 quote local 25..30
+  b2 expr parameter 43..47
+  b3 f top-level 0..1
+  0..1 f <- b3
+  25..30 quote <- b1
+  49..53 expr -> b2
+  56..61 quote -> b1
+  62..67 value -> b0
+
+#==== data_masking
+#---- the_base_masking_family_masks_everything_after_the_data
+f <- function(frame) {
+  with(frame, column_a + column_b)
+}
+#++++
+# f
+  b0 frame parameter 14..19
+  b1 f top-level 0..1
+  0..1 f <- b1
+  25..29 with -> non-local deferred
+  30..35 frame -> b0
+  37..45 column_a -> quiet deferred
+  48..56 column_b -> quiet deferred
+
+#---- subset_masks_its_condition
+f <- function(frame) subset(frame, column_a > 1L)
+#++++
+# f
+  b0 frame parameter 14..19
+  b1 f top-level 0..1
+  0..1 f <- b1
+  21..27 subset -> non-local deferred
+  28..33 frame -> b0
+  35..43 column_a -> quiet deferred
+
+#---- a_masked_read_that_resolves_keeps_its_binding
+# A masked read that does resolve keeps its ordinary resolution, so goto and
+# references still work inside the mask.
+f <- function(frame, threshold) {
+  with(frame, column_a > threshold)
+}
+#++++
+# f
+  b0 frame parameter 14..19
+  b1 threshold parameter 21..30
+  b2 f top-level 0..1
+  0..1 f <- b2
+  36..40 with -> non-local deferred
+  41..46 frame -> b0
+  48..56 column_a -> quiet deferred
+  59..68 threshold -> b1
+
+#---- a_locally_defined_masking_name_masks_nothing
+f <- function(frame) {
+  with <- function(data, expr) expr
+  with(frame, column_a)
+}
+#++++
+# f
+  b0 frame parameter 14..19
+  b1 with local 25..29
+  b2 data parameter 42..46
+  b3 expr parameter 48..52
+  b4 f top-level 0..1
+  0..1 f <- b4
+  25..29 with <- b1
+  54..58 expr -> b3
+  61..65 with -> b1
+  66..71 frame -> b0
+  73..81 column_a -> non-local deferred
+  unused-parameter data 42..46
+
+#---- a_by_argument_makes_the_bracket_a_data_table_index
+f <- function(dt) dt[, .(total = sum(amount)), by = group]
+#++++
+# f
+  b0 dt parameter 14..16
+  b1 f top-level 0..1
+  0..1 f <- b1
+  18..20 dt -> b0
+  23..24 . -> quiet deferred
+  33..36 sum -> quiet deferred
+  37..43 amount -> quiet deferred
+  52..57 group -> quiet deferred
+  masked-subset 18..58
+
+#---- a_walrus_column_assignment_makes_the_bracket_a_data_table_index
+f <- function(dt) dt[, count := .N, by = key]
+#++++
+# f
+  b0 dt parameter 14..16
+  b1 f top-level 0..1
+  0..1 f <- b1
+  18..20 dt -> b0
+  23..28 count -> quiet deferred
+  29..31 := -> quiet deferred
+  32..34 .N -> quiet deferred
+  41..44 key -> quiet deferred
+  masked-subset 18..45
+
+#---- an_sd_family_special_makes_the_bracket_a_data_table_index
+f <- function(dt) dt[, lapply(.SD, mean)]
+#++++
+# f
+  b0 dt parameter 14..16
+  b1 f top-level 0..1
+  0..1 f <- b1
+  18..20 dt -> b0
+  23..29 lapply -> quiet deferred
+  30..33 .SD -> quiet deferred
+  35..39 mean -> quiet deferred
+  masked-subset 18..41
+
+#---- an_ordinary_matrix_index_is_not_masked
+f <- function(m, row) m[row, undefined_column]
+#++++
+# f
+  b0 m parameter 14..15
+  b1 row parameter 17..20
+  b2 f top-level 0..1
+  0..1 f <- b2
+  22..23 m -> b0
+  24..27 row -> b1
+  29..45 undefined_column -> non-local deferred
+
+#---- a_double_bracket_is_never_a_data_table_index
+f <- function(dt) dt[[undefined_column]]
+#++++
+# f
+  b0 dt parameter 14..16
+  b1 f top-level 0..1
+  0..1 f <- b1
+  18..20 dt -> b0
+  22..38 undefined_column -> non-local deferred
+
+#==== opaque_operators
+#---- the_operands_of_an_unmodelled_operator_read_quietly
+f <- function(a) a & undefined_flag
+#++++
+# f
+  b0 a parameter 14..15
+  b1 f top-level 0..1
+  0..1 f <- b1
+  17..18 a -> b0
+  21..35 undefined_flag -> quiet deferred
+
+#---- a_special_operator_use_records_the_operator_name
+f <- function(a) a %||% 1L
+#++++
+# f
+  b0 a parameter 14..15
+  b1 f top-level 0..1
+  0..1 f <- b1
+  17..18 a -> b0
+  operator reads: %||%
+
+#---- a_locally_defined_special_operator_is_kept_alive_by_its_uses
+# The operator is a token rather than a name node, so the read is recorded by
+# name; without it a project's own `%op%` reads as a dead store while the calls
+# to it sit right below.
+f <- function(a, b) {
+  `%plus%` <- function(x, y) x + y
+  a %plus% b
+}
+#++++
+# f
+  b0 a parameter 14..15
+  b1 b parameter 17..18
+  b2 %plus% local 24..32
+  b3 x parameter 45..46
+  b4 y parameter 48..49
+  b5 f top-level 0..1
+  0..1 f <- b5
+  24..32 %plus% <- b2
+  51..52 x -> b3
+  55..56 y -> b4
+  59..60 a -> b0
+  68..69 b -> b1
+  operator reads: %plus%
+
+#---- a_well_formed_native_pipe_desugars_into_an_ordinary_call
+f <- function(data) data |> undefined_verb()
+#++++
+# f
+  b0 data parameter 14..18
+  b1 f top-level 0..1
+  0..1 f <- b1
+  20..24 data -> b0
+  28..42 undefined_verb -> non-local deferred
+
+#---- a_pipe_whose_right_side_is_not_a_call_stays_opaque
+f <- function(data) data |> undefined_thing
+#++++
+# f
+  b0 data parameter 14..18
+  b1 f top-level 0..1
+  0..1 f <- b1
+  20..24 data -> b0
+  28..43 undefined_thing -> quiet deferred
+
+#==== formulas
+# A formula quotes both sides: the names in it are model syntax evaluated
+# against the data, so they are not reads at all.
+#---- a_two_sided_formula_reads_neither_side
+f <- function(frame) lm(outcome ~ predictor, data = frame)
+#++++
+# f
+  b0 frame parameter 14..19
+  b1 f top-level 0..1
+  0..1 f <- b1
+  21..23 lm -> non-local deferred
+  52..57 frame -> b0
+
+#---- a_one_sided_formula_reads_nothing_either
+f <- function() ~ predictor
+#++++
+# f
+  b0 f top-level 0..1
+  0..1 f <- b0
