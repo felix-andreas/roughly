@@ -637,6 +637,16 @@ impl Parser<'_> {
             self.bump();
             self.ann_trivia(end);
             if matches!(self.current(), Some(SyntaxKind::IDENT)) && self.pos < end {
+                // A constraint may be spelled in more than one word (`scalar
+                // numeric`), so take the whole run. Naming the constraints is
+                // the lowering's job; the grammar only has to deliver them.
+                // Trivia is consumed only *between* words — taking it after the
+                // last one would pull the block's `#:` continuation marker into
+                // the binder.
+                while self.ann_next_significant(end) == Some(SyntaxKind::IDENT) {
+                    self.wrap_name();
+                    self.ann_trivia(end);
+                }
                 self.wrap_name();
             } else {
                 self.error_here("expected a constraint name after `:`");

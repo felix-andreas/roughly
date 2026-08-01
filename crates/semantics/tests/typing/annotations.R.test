@@ -184,6 +184,54 @@ round2 <- function(x) x + 1L
 #++++
 round2: <T: numeric> fn(x: T) -> T
 
+#---- a_declared_bound_survives_a_self_recursive_call
+# The recursive call instantiates the scheme, producing a fresh variable with
+# the declared bound, and unifies it with the rigid `T` in the argument. `T` is
+# not a numeric atom, so admissibility has to read the binder's own bound —
+# without that the annotation the checker itself infers turns a clean file red,
+# while the non-recursive spelling right above stays clean.
+#: <T: numeric> fn(n: T) -> integer
+countdown <- function(n) if (n <= 0L) 0L else countdown(n - 1L)
+#++++
+countdown: <T: numeric> fn(n: T) -> integer
+
+#---- an_undeclared_bound_is_still_refused_across_recursion
+# The admission is the binder's bound, not "rigid types pass": the same shape
+# with no declared bound must still be refused, or the check is gone.
+#: <T> fn(n: T) -> integer
+loose <- function(n) if (n <= 0L) 0L else loose(n - 1L)
+#++++
+loose: <T> fn(n: T) -> integer
+200..201 error[type-mismatch] expected a numeric value (`integer` or `double`), found `T`
+223..224 error[type-mismatch] expected a numeric value (`integer` or `double`), found `T`
+
+#---- an_atomic_bound_admits_a_vector_element_across_recursion
+#: <T: atomic> fn(v: T[]) -> T
+head_of <- function(v) if (length(v) == 1L) v[[1L]] else head_of(v)
+#++++
+head_of: <T: atomic> fn(v: T[]) -> T
+
+#---- a_scalar_numeric_bound_is_writable_as_it_renders
+# `scalar numeric` is the join of the numeric and atomic bounds, and the
+# checker renders it — on `1:n`, whose operand must be a scalar. A rendering
+# the annotation grammar could not read would make a finding uncopyable, so
+# the spelling parses back to the constraint it printed.
+#: <T: scalar numeric> fn(n: T) -> double[]
+seq_to <- function(n) 1:n
+#++++
+seq_to: <T: scalar numeric> fn(n: T) -> double[]
+
+#---- an_unknown_constraint_names_the_ones_that_exist
+#: <T: nonsense> fn(x: T) -> T
+one <- function(x) x
+#: <T: scalar bogus> fn(x: T) -> T
+two <- function(x) x
+#++++
+one: <T> fn(x: T) -> T
+two: <T> fn(x: T) -> T
+7..15 error[annotation] unknown type-parameter constraint `nonsense`; the available constraints are `numeric`, `atomic`, or `scalar numeric`.
+59..71 error[annotation] unknown type-parameter constraint `scalar bogus`; the available constraints are `numeric`, `atomic`, or `scalar numeric`.
+
 #---- value_annotation_checks
 #: integer
 n <- 1L
@@ -312,7 +360,7 @@ value: integer
 f <- function(x) x
 #++++
 f: <T> fn(x: T) -> T
-7..17 error[annotation] unknown type-parameter constraint `frobnicate`; the available constraints are `numeric` and `atomic`.
+7..17 error[annotation] unknown type-parameter constraint `frobnicate`; the available constraints are `numeric`, `atomic`, or `scalar numeric`.
 
 #---- a_refused_higher_rank_block_carries_no_payload
 # The parser refuses the binder and reads the type as if it were absent, which

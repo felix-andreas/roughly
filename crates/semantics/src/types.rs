@@ -111,6 +111,30 @@ pub enum Constraint {
 }
 
 impl Constraint {
+    /// How this bound is written in a `#:` binder list, and read back out of
+    /// one. Rendering and parsing share the table so a constraint the checker
+    /// prints is always a constraint a user can write — a finding's type is
+    /// meant to be copyable straight into an annotation.
+    pub const SPELLINGS: [(&'static str, Constraint); 3] = [
+        ("numeric", Constraint::Numeric),
+        ("atomic", Constraint::AtomicElement),
+        ("scalar numeric", Constraint::ScalarNumeric),
+    ];
+
+    pub fn spelling(self) -> Option<&'static str> {
+        Constraint::SPELLINGS
+            .iter()
+            .find(|(_, constraint)| *constraint == self)
+            .map(|(spelling, _)| *spelling)
+    }
+
+    pub fn from_spelling(text: &str) -> Option<Constraint> {
+        Constraint::SPELLINGS
+            .iter()
+            .find(|(spelling, _)| *spelling == text)
+            .map(|(_, constraint)| *constraint)
+    }
+
     pub fn join(self, other: Constraint) -> Constraint {
         use Constraint::*;
         match (self, other) {

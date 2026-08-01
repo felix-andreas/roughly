@@ -552,20 +552,41 @@ impl<'db> Lowering<'db> {
         let mut names = node.children().filter(|c| c.kind() == SyntaxKind::NAME);
         let binder = names.next()?;
         let binder_name = syntax::ast::Name::cast(binder)?.text()?;
-        let constraint = match names.next() {
-            Some(constraint_node) => {
-                let constraint_name = syntax::ast::Name::cast(constraint_node.clone())
-                    .and_then(|name| name.text())
-                    .unwrap_or_default();
-                match constraint_name.as_str() {
-                    "numeric" => Constraint::Numeric,
-                    "atomic" => Constraint::AtomicElement,
-                    other => {
+        // A constraint may be spelled in several words (`scalar numeric`), so
+        // the whole remaining run of names is one spelling.
+        let constraint_nodes: Vec<SyntaxNode> = names.collect();
+        let constraint = match constraint_nodes.split_first() {
+            Some((first, rest)) => {
+                let spelling: Vec<String> = constraint_nodes
+                    .iter()
+                    .filter_map(|node| syntax::ast::Name::cast(node.clone()))
+                    .filter_map(|name| name.text())
+                    .collect();
+                let spelling = spelling.join(" ");
+                match Constraint::from_spelling(&spelling) {
+                    Some(constraint) => constraint,
+                    None => {
+                        let available: Vec<String> = Constraint::SPELLINGS
+                            .iter()
+                            .map(|(spelling, _)| format!("`{spelling}`"))
+                            .collect();
+                        let available = match available.split_last() {
+                            Some((last, leading)) if !leading.is_empty() => {
+                                format!("{}, or {last}", leading.join(", "))
+                            }
+                            _ => available.join(""),
+                        };
+                        // The whole spelling is the mistake, so blame all of it
+                        // rather than only the word the reader happened to
+                        // write first.
+                        let blamed = rest.last().map_or(first.text_range(), |last| {
+                            first.text_range().cover(last.text_range())
+                        });
                         self.errors.push((
                             format!(
-                                "unknown type-parameter constraint `{other}`; the available constraints are `numeric` and `atomic`."
+                                "unknown type-parameter constraint `{spelling}`; the available constraints are {available}."
                             ),
-                            constraint_node.text_range(),
+                            blamed,
                         ));
                         Constraint::Unconstrained
                     }

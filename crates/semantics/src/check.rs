@@ -322,7 +322,6 @@ pub fn check_item_with_annotation<'db>(
         expression_annotations: expression_annotations.iter().cloned().collect(),
         environment: Environment::default(),
         scheme_arena: Vec::new(),
-        rigid_constraints: FxHashMap::default(),
         recorded: FxHashMap::default(),
         selected_overloads: FxHashMap::default(),
         masked_reads: rustc_hash::FxHashSet::default(),
@@ -398,7 +397,7 @@ pub fn check_item_with_annotation<'db>(
                 ) =>
             {
                 for (name, constraint) in &declared.binders {
-                    context.rigid_constraints.insert(*name, *constraint);
+                    context.table.rigid_constraints.insert(*name, *constraint);
                 }
                 // The exported scheme is the reconciled signature, not the
                 // annotation as written: R matches arguments against the
@@ -844,8 +843,6 @@ struct Checker<'db, 'a> {
     expression_annotations: FxHashMap<ExprId, crate::annotations::Annotation<'db>>,
     environment: Environment<'db>,
     scheme_arena: Vec<TypeScheme<'db>>,
-    /// Declared constraints of in-scope rigid binders (`<T: numeric>`).
-    rigid_constraints: FxHashMap<Name<'db>, Constraint>,
     recorded: FxHashMap<ExprId, Ty<'db>>,
     selected_overloads: FxHashMap<ExprId, usize>,
     masked_reads: rustc_hash::FxHashSet<ExprId>,
@@ -1394,7 +1391,7 @@ impl<'db> Checker<'db, '_> {
                     // exactly as at the item root.
                     Some(declared) => {
                         for (name, constraint) in &declared.binders {
-                            self.rigid_constraints.insert(*name, *constraint);
+                            self.table.rigid_constraints.insert(*name, *constraint);
                         }
                         let body = match declared.body.kind(self.db).clone() {
                             TyKind::Function(function) => {
@@ -1501,7 +1498,7 @@ impl<'db> Checker<'db, '_> {
                 // leaves every closure-factory body unchecked.
                 if let Some(declared) = self.declared_function_annotation(id) {
                     for (name, constraint) in &declared.binders {
-                        self.rigid_constraints.insert(*name, *constraint);
+                        self.table.rigid_constraints.insert(*name, *constraint);
                     }
                     let TyKind::Function(function) = declared.body.kind(self.db).clone() else {
                         return self.unknown();
@@ -3241,7 +3238,7 @@ impl<'db> Checker<'db, '_> {
                 }
                 TyKind::Rigid(name)
                     if matches!(
-                        self.rigid_constraints.get(name),
+                        self.table.rigid_constraints.get(name),
                         Some(Constraint::ScalarNumeric)
                     ) =>
                 {
@@ -3430,7 +3427,7 @@ impl<'db> Checker<'db, '_> {
             }
             TyKind::Rigid(name)
                 if !matches!(
-                    self.rigid_constraints.get(name),
+                    self.table.rigid_constraints.get(name),
                     Some(Constraint::Numeric | Constraint::ScalarNumeric)
                 ) =>
             {
@@ -3466,7 +3463,7 @@ impl<'db> Checker<'db, '_> {
                 NumericOperand::ConcreteUnion(parts)
             }
             TyKind::Var(_) => NumericOperand::Flexible(resolved),
-            TyKind::Rigid(name) => match self.rigid_constraints.get(name) {
+            TyKind::Rigid(name) => match self.table.rigid_constraints.get(name) {
                 Some(Constraint::Numeric | Constraint::ScalarNumeric) => {
                     NumericOperand::Flexible(resolved)
                 }
@@ -3476,7 +3473,7 @@ impl<'db> Checker<'db, '_> {
                 TyKind::Var(_) => NumericOperand::FlexibleVector(Some(*element)),
                 TyKind::Rigid(name)
                     if matches!(
-                        self.rigid_constraints.get(name),
+                        self.table.rigid_constraints.get(name),
                         Some(Constraint::Numeric | Constraint::ScalarNumeric)
                     ) =>
                 {

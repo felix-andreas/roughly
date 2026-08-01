@@ -1958,6 +1958,20 @@ enum RenderedVar<'db> {
     Rigid(Name<'db>),
 }
 
+/// A record field name as the `#:` grammar would have to spell it.
+///
+/// R lets a list carry any string as a name, so `list(\`max size\` = 10L)` is an
+/// ordinary record — but rendering that field bare produces a type nobody can
+/// write back, and one shape is worse than an error: `list{a,b: integer}` parses
+/// as a *different* type rather than failing. Every rendered type is copyable
+/// into an annotation, so the renderer quotes what the grammar needs quoted.
+fn spell_field_name(name: &str) -> String {
+    match syntax::is_syntactic_name(name) {
+        true => name.to_owned(),
+        false => format!("`{name}`"),
+    }
+}
+
 impl<'db> TypeRenderer<'db> {
     pub fn render(&mut self, db: &'db dyn Db, ty: Ty<'db>) -> String {
         match ty.kind(db) {
@@ -1976,7 +1990,13 @@ impl<'db> TypeRenderer<'db> {
             TyKind::Record(fields) => {
                 let fields: Vec<String> = fields
                     .iter()
-                    .map(|field| format!("{}: {}", field.name.text(db), self.render(db, field.ty)))
+                    .map(|field| {
+                        format!(
+                            "{}: {}",
+                            spell_field_name(field.name.text(db)),
+                            self.render(db, field.ty)
+                        )
+                    })
                     .collect();
                 format!("list{{{}}}", fields.join(", "))
             }
@@ -2034,11 +2054,9 @@ impl<'db> TypeRenderer<'db> {
             .iter()
             .map(|(name, constraint)| {
                 let rendered = self.variable_name(RenderedVar::Rigid(*name));
-                match constraint {
-                    Constraint::Unconstrained => rendered,
-                    Constraint::Numeric => format!("{rendered}: numeric"),
-                    Constraint::AtomicElement => format!("{rendered}: atomic"),
-                    Constraint::ScalarNumeric => format!("{rendered}: scalar numeric"),
+                match constraint.spelling() {
+                    Some(spelling) => format!("{rendered}: {spelling}"),
+                    None => rendered,
                 }
             })
             .collect();

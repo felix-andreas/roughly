@@ -183,6 +183,32 @@ case's source between its `#---- <id>` header and the `#++++` expectation, strip
 headers multi-file cases use, and deduplicating. It is committed rather than derived at test time so
 it survives the eventual deletion of that directory.
 
+### The annotation round-trip oracle
+
+`crates/semantics/tests/test_roundtrip.rs` asserts that every type the checker prints is a type a
+user can write back. `#: TYPE` says the annotated value is compatible with `TYPE`, and the checker
+has just proved the value *has* the type it rendered — so re-declaring an inferred scheme above its
+own definition must add no finding.
+
+It is the only test that compares the renderer against the annotation grammar. Every other suite
+reads a rendering as a *string*, so a type that prints beautifully and parses back as something else
+is invisible to all of them. Two live bugs were found this way and are fixed: a record field name
+that is not a syntactic R name rendered unquoted, and `` list{`a,b`: integer} `` read back as a
+different type entirely rather than failing; and `scalar numeric`, a bound the checker renders, was
+not one the grammar accepted, making every scheme carrying it unwritable.
+
+It runs over every fixture case source, skipping any that does not already check clean (the oracle
+is "re-declaring adds no finding", which needs a baseline with none) and any definition that already
+carries a `#:` block (that is the user's text echoed back, not a rendering the checker chose). One
+database is re-pointed with the salsa setter rather than rebuilt per probe — a fresh database costs
+a re-parse of the whole stub corpus, which is 232 s against 4.5 s for the same 516 schemes.
+
+`KNOWN_UNWRITABLE` names the schemes that do not round-trip today. They are all one open defect — a
+parameter's default value is ignored when its type generalizes, so `function(x = 1) x` infers
+`<T> fn([x]: T) -> T` and writing that back fails with ``expected `T`, found `double` ``. They are
+listed by case id rather than skipped by shape, so a new unwritable rendering of any kind fails the
+test instead of blending into a category.
+
 ### The tree-sitter acceptance differential
 
 `crates/syntax/tests/test_corpus.rs` compares our "this file has errors" verdict against

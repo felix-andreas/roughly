@@ -100,6 +100,13 @@ Companion documents in this folder (kept separate only because they are larger i
   new assertion once the mutant is red and the pristine tree is 0-violation. Determinism, idempotence,
   round-trip and containment are all self-consistency checks — a uniformly wrong answer satisfies
   every one of them.
+- **Every type the checker prints must be a type a user can write back, and one test enforces it.**
+  `#: TYPE` asserts compatibility with `TYPE`, so re-declaring an inferred scheme above its own
+  definition must add no finding (`crates/semantics/tests/test_roundtrip.rs`). Every other suite reads
+  a rendering as a *string*, so a type that prints beautifully and parses back as something else is
+  invisible to all of them — which is how an unquoted record field name containing a comma came to
+  re-parse as a different type, and how `scalar numeric` came to be rendered but unwritable. When
+  adding a `Constraint`, a `TyKind`, or any new rendering, the grammar side is part of the change.
 - **Give a differential oracle inputs that always exist.** The tree-sitter acceptance test was written
   correctly and never ran, because it pointed only at a gitignored corpus nothing fetches, and it
   skipped with an `eprintln!` the test runner hides. Anything gated on an optional directory is

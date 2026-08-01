@@ -1742,7 +1742,7 @@ green**. Method: injected-bug experiments against a byte-copy of `crates/` built
 so the shipping `test_fuzz` targets ran verbatim against mutated code. Baseline and restored-copy
 controls both green. Oracle corpus = 1,967 mined legacy-corpus programs + 1,192 fixture sources.
 
-### LIVE BUG — the type renderer prints types that cannot be written back, and one that means something else
+### FIXED — the type renderer printed types that could not be written back, and one that meant something else
 
 Every user-visible rendering of a type — hover, inlay hints, `expected X, found Y` — goes through
 `TypeRenderer`, and nothing checks that the string it produces is readable by the `#:` grammar or that
@@ -1767,7 +1767,7 @@ generally. Cost of the oracle: 36 s over the whole in-tree corpus in release, do
 ~113 ms/db stub tax; under a second with a shared database. Scoped to `semantics/tests/typing` it is a
 default-suite-sized battery today.
 
-### LIVE BUG — a `<T: numeric>` binder's constraint is dropped inside a self-recursive body
+### FIXED — a `<T: numeric>` binder's constraint was dropped inside a self-recursive body
 
 `type-system.md` §Type parameters is explicit that with `<T: numeric> fn(x: T) -> T` the body may use
 `x` numerically. Confirmed false positive:
@@ -1780,8 +1780,32 @@ countdown <- function(n) if (n <= 0L) 0L else countdown(n - 1L)
 
 Narrowed by minimal pairs: the same annotation over a non-recursive body using `x + 1L` or `x > 0L` is
 clean, and the *unannotated* `countdown` is clean — so writing down the checker's own inferred type
-turns a clean file into a failing one. 12 of the 41 violations above carry this message; the rest
-(rigid-vs-generalized binder disagreements, a default-value case) need per-case adjudication first.
+turns a clean file into a failing one.
+
+**Root cause, and it is the design-review shape this file already records once**: two places decided
+whether a type satisfies a numeric constraint and they read different scopes. `Checker` carried
+`rigid_constraints`, so the *operand* path knew `<T: numeric>` admits arithmetic — which is why
+`x + 1L` was clean — while `constraint_rejects` in the unification path had no case for
+`TyKind::Rigid` at all and fell through to `false`. A self-recursive call is exactly where the two
+meet: it instantiates the scheme, producing a fresh constrained variable, and unifies it with the
+body's own rigid `T`. Fixed by moving `rigid_constraints` off `Checker` and onto `InferenceTable`,
+where admissibility is decided — the same move `arithmetic_classes` already made for the same
+reason. A binder is admitted when its declared bound implies the required one, expressed as
+`declared.join(required) == declared` so the lattice order is not enumerated a second time.
+Verified still enforced: `<T>` with no bound used numerically is refused, and calling a numeric
+scheme with `character` is refused.
+
+### Open — a parameter's default value is ignored when its type generalizes
+
+Found by the round-trip oracle, which is the only reason it is visible: the checker infers schemes
+it then rejects when they are written down. `function(x = 1) x` infers `<T> fn([x]: T) -> T`, and
+re-declaring that exact scheme fails with ``expected `T`, found `double` `` — a caller who omits the
+argument gets a `double`, so the parameter's type is not universally quantified. `function(x, y = x)`
+infers `<T, U> fn(x: T, [y]: U) -> U` and fails the same way with ``expected `T`, found `U` ``. The
+checker already owns the rule for the *declared* direction — the `null_defaults` diagnostic says
+"`title` defaults to `NULL`, which its declared type `T` does not admit" — so this is inference not
+applying a rule the checker states elsewhere. Seven fixture schemes sit in `KNOWN_UNWRITABLE` in
+`crates/semantics/tests/test_roundtrip.rs` and should empty when this is fixed.
 
 ### FIXED — formatter preservation was kind-only, so a token's spelling could change invisibly
 

@@ -62,6 +62,14 @@ pub struct InferenceTable<'db> {
     /// consult the same set or it refuses a class whose `+` the checker itself
     /// would have dispatched.
     pub arithmetic_classes: Option<&'db FxHashSet<String>>,
+    /// Declared constraints of the rigid binders in scope (`<T: numeric>`).
+    ///
+    /// This lives with the solver rather than with the expression walker
+    /// because admissibility is decided here: a rigid `T` is not a numeric
+    /// atom, so without its declared bound every check that unifies it with a
+    /// constrained variable refuses it — which is how an annotation the checker
+    /// wrote itself could turn a clean file red on a self-recursive call.
+    pub rigid_constraints: FxHashMap<Name<'db>, Constraint>,
     /// Per-node resolve memo over the interned type DAG: without it, shared
     /// subtrees re-resolve once per occurrence and self-referential bindings
     /// walk an exponential tree. Entries are valid for one binding epoch
@@ -386,7 +394,7 @@ impl<'db> InferenceTable<'db> {
         let Entry::Unbound { level, constraint } = *self.entry(representative) else {
             unreachable!("bind target is always unbound after find");
         };
-        if let Some(error) = constraint_rejects(db, self.arithmetic_classes, constraint, ty) {
+        if let Some(error) = constraint_rejects(db, self, constraint, ty) {
             return Err(error);
         }
         // Level-adjust free variables in `ty` up to this entry's level so
@@ -705,12 +713,10 @@ impl<'db> InferenceTable<'db> {
                 }
                 Ok(())
             }
-            Entry::Bound(ty) => {
-                match constraint_rejects(db, self.arithmetic_classes, constraint, ty) {
-                    Some(error) => Err(error),
-                    None => Ok(()),
-                }
-            }
+            Entry::Bound(ty) => match constraint_rejects(db, self, constraint, ty) {
+                Some(error) => Err(error),
+                None => Ok(()),
+            },
             Entry::Redirect(_) => unreachable!("find returns a representative"),
         }
     }
@@ -1580,19 +1586,42 @@ fn nullable_single_member<'db>(db: &'db dyn Db, members: &[Ty<'db>]) -> Option<T
     Some(members[1 - null_at])
 }
 
-/// Whether a class declares an arithmetic operator method, and so participates
-/// in arithmetic even though it is not a numeric atom. The numeric constraint on
-/// an inference variable comes from a body doing `a + b`, which for such a class
-/// is legal R — so rejecting it would refuse `add_days <- function(d, n) d + n`
-/// every date, matrix or plot in the language. The result may be imprecise
-/// (the variable takes the class), never a false rejection.
+/// Whether a type may inhabit a constrained variable.
+///
+/// Two admissions are not obvious from the constraint alone. A **class that
+/// declares an arithmetic operator method** participates in arithmetic even
+/// though it is not a numeric atom: the numeric constraint comes from a body
+/// doing `a + b`, which for such a class is legal R, so rejecting it would
+/// refuse `add_days <- function(d, n) d + n` for every date, matrix and
+/// units-style class in the language. The result may be imprecise (the variable
+/// takes the class), never a false rejection.
+///
+/// A **rigid binder** is admitted when its own declared bound is at least as
+/// strong. `<T: numeric> fn(x: T) -> T` promises every instantiation of `T` is
+/// numeric, so `T` satisfies a numeric constraint even though it is not a
+/// numeric atom either — and a self-recursive call is where that matters, since
+/// it unifies the rigid `T` with the fresh constrained variable the recursive
+/// instantiation produced.
 fn constraint_rejects<'db>(
     db: &'db dyn Db,
-    arithmetic_classes: Option<&FxHashSet<String>>,
+    table: &InferenceTable<'db>,
     constraint: Constraint,
     ty: Ty<'db>,
 ) -> Option<UnifyError<'db>> {
     use crate::types::Atomic;
+    let arithmetic_classes = table.arithmetic_classes;
+    let declares_arithmetic = |name: &Name<'db>| {
+        arithmetic_classes.is_some_and(|classes| classes.contains(name.text(db)))
+    };
+    // A binder's declared bound implies the required one when joining the two
+    // does not strengthen it — the lattice order, so nothing here has to
+    // enumerate the pairs a second time.
+    let binder_implies = |name: &Name<'db>| {
+        table
+            .rigid_constraints
+            .get(name)
+            .is_some_and(|declared| declared.join(constraint) == *declared)
+    };
     let admissible = match constraint {
         Constraint::Unconstrained => true,
         Constraint::Numeric => match ty.kind(db) {
@@ -1603,22 +1632,21 @@ fn constraint_rejects<'db>(
                 element.kind(db),
                 TyKind::Scalar(Atomic::Integer | Atomic::Double)
             ),
-            TyKind::Named(name, _) => {
-                arithmetic_classes.is_some_and(|classes| classes.contains(name.text(db)))
-            }
+            TyKind::Named(name, _) => declares_arithmetic(name),
+            TyKind::Rigid(name) => binder_implies(name),
             _ => false,
         },
-        Constraint::AtomicElement => matches!(
-            ty.kind(db),
-            TyKind::Scalar(_) | TyKind::Any | TyKind::Unknown
-        ),
+        Constraint::AtomicElement => match ty.kind(db) {
+            TyKind::Scalar(_) | TyKind::Any | TyKind::Unknown => true,
+            TyKind::Rigid(name) => binder_implies(name),
+            _ => false,
+        },
         Constraint::ScalarNumeric => match ty.kind(db) {
             TyKind::Scalar(Atomic::Integer | Atomic::Double) | TyKind::Any | TyKind::Unknown => {
                 true
             }
-            TyKind::Named(name, _) => {
-                arithmetic_classes.is_some_and(|classes| classes.contains(name.text(db)))
-            }
+            TyKind::Named(name, _) => declares_arithmetic(name),
+            TyKind::Rigid(name) => binder_implies(name),
             _ => false,
         },
     };

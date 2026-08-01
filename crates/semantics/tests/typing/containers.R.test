@@ -129,7 +129,7 @@ g: fn() -> integer
 config <- list(`max size` = 10L)
 f <- function() config$`max size`
 #++++
-config: list{max size: integer}
+config: list{`max size`: integer}
 f: fn() -> integer
 
 #---- record_slice_unions_field_types

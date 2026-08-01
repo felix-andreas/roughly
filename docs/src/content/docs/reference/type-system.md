@@ -745,6 +745,11 @@ Two record-like lists are compatible when they declare **the same field names** 
 is compatible with the field of that name on the other side. Fields are paired by name, so declaration
 order does not matter: `list(label = "a", id = 1L)` satisfies `list{id: integer, label: character}`.
 
+R lets a list name be any string, so a field name that is not a syntactic R name is written — and
+rendered — in backticks: `list(\`max size\` = 10L)` has the type `` list{`max size`: integer} ``. The
+quoting is not cosmetic. Unquoted, a name containing a comma would read back as two fields, so the
+type copied out of a finding would be a *different* type rather than a syntax error.
+
 ##### Reporting a record that does not fit
 
 When a record-like list is rejected, the finding names **the one field that failed**, not the two
@@ -1812,6 +1817,15 @@ atomic type; it is introduced by using a type parameter as a vector element (`T[
 `<T: atomic>`. A variable that acquires both bounds — a generic vector element used arithmetically —
 holds their meet, rendered `<T: scalar numeric>`: a scalar `integer` or `double`. It defaults to
 `double` at a binding boundary exactly like a plain numeric variable.
+
+All three spellings — `numeric`, `atomic` and `scalar numeric` — are **writable as well as
+rendered**. Every type the checker prints is meant to be copyable straight into an annotation, so a
+bound it can render is a bound the `#:` grammar reads back; there is no fourth, internal-only bound.
+
+A declared bound is believed inside the annotated body, not merely enforced at the call site: with
+`<T: numeric> fn(x: T) -> T` the body may use `x` numerically, because every admissible
+instantiation of `T` is numeric. That includes a **self-recursive** call, which instantiates the
+scheme afresh and passes the body's own rigid `T` back into it.
 
 - when the constraint reaches a binding boundary still unresolved and abstracted by a function
   parameter, it generalizes into a numeric-constrained type parameter, rendered `<T: numeric>`
