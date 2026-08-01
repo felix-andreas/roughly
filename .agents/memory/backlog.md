@@ -1672,15 +1672,17 @@ Found by rendering `ItemNaming` instead of reading resolution off a downstream t
 Ordered by severity. The first four were re-verified against the shipping binary on a throwaway
 project before being written down here.
 
-- **`<<-` inside `local()` misses the enclosing function frame, and produces a wrong TYPE, not just a
-  wrong binding.** `naming.rs` bounds the super-assignment search at `current_function_depth()`; with
-  scopes `[TopLevel, Function(f), Local]` that is `1`, so the range `0..1` skips `f`'s frame at index
-  1. The bound should be `self.scopes.len() - 1` — everything strictly outside the current scope —
-  which coincides with the current expression whenever the current scope *is* the function frame.
-  Verified: `function() { v <- 1L; local({ v <<- "two" }); v }` types `fn() -> integer` while the
-  closure spelling of the same thing types `fn() -> integer | character`. R returns `"two"`, so the
-  `local` form silently drops the write and states a type R contradicts. Naming renders the write as
-  `v -> non-local` plus `super-globals: v`.
+- **FIXED — `<<-` inside `local()` missed the enclosing function frame and produced a wrong TYPE.**
+  The super-assignment search was bounded at `current_function_depth()`; with scopes
+  `[TopLevel, Function(f), Local]` that is `1`, so `0..1` skipped `f`'s own frame at index 1 and the
+  write escaped to the global environment. The bound is now `self.scopes.len() - 1` — everything
+  strictly outside the current scope — which coincides with the old one whenever the current scope
+  *is* the function frame, which is why the closure spelling was always right. Checked against R:
+  `function() { v <- 1L; local({ v <<- "two" }); v }` returns `"two"` and now types
+  `integer | character` like its closure twin; two `local`s deep still reaches the frame (R: `"deep"`);
+  and an intervening `local` that binds the same name still catches the write, leaving the outer slot
+  alone (R: `1`). Only the super-assignment site changed — `current_function_depth` still bounds the
+  read and capture logic, where a function boundary genuinely is the thing that matters.
 - **`with(data = frame, expr)` — a named data argument breaks positional masking.** The positional
   counter in the masking walk is not advanced past arguments already matched by name, so `expr` lands
   in the data slot and its column reads resolve as ordinary names. Verified: `with(frame, column_a)`
@@ -1701,11 +1703,15 @@ project before being written down here.
   exit state is wrong. Blast radius is the typing join, not a diagnostic. The legacy case
   `maybe_undefined.R.test::repeat_body_introduction_is_defined_after_loop` was withheld from the port
   rather than blessed wrong.
-- **A write-only `<<-` reports its initializer unused, and deleting it changes behaviour.**
-  `make_flag <- function() { flag <- FALSE; function() flag <<- TRUE }` gives a false `unused flag` —
-  but the initializer is what makes `<<-` find a slot at all, and removing it sends the write to the
-  global environment. The read path retroactively marks a frame's writes used (`mark_slot_read`); the
-  `<<-` target path does not.
+- **FIXED — a write-only `<<-` reported its initializer unused, and deleting it changed behaviour.**
+  `make_flag <- function() { flag <- FALSE; function() flag <<- TRUE }` gave a false `unused flag`,
+  but the initializer is what makes `<<-` find a slot at all: remove it and the write goes to the
+  global environment instead. The read path already marked a frame's writes used on a capture
+  (`mark_slot_read`); the `<<-` target path now does the same for the frame it resolves into. Fixing
+  this was not optional alongside the `local()` fix above — that fix makes the write land on the
+  frame's slot, which is exactly what turned the initializer into an apparent dead store. Verified a
+  real dead store still reports, and that an outer binding shadowed by an intervening frame is still
+  correctly dead.
 - **Rebinding `local` makes the rebinding itself read as a dead store.** The `Local` HIR node carries
   no callee expression, so nothing reads a user-defined `local` and a false `unused local` fires. The
   docs sanction treating the syntactic call as the construct; they do not mention that the shadowing
@@ -1795,17 +1801,37 @@ reason. A binder is admitted when its declared bound implies the required one, e
 Verified still enforced: `<T>` with no bound used numerically is refused, and calling a numeric
 scheme with `character` is refused.
 
-### Open — a parameter's default value is ignored when its type generalizes
+### Open — an omitted optional argument yields `Any`, discarding the default's known type
 
 Found by the round-trip oracle, which is the only reason it is visible: the checker infers schemes
 it then rejects when they are written down. `function(x = 1) x` infers `<T> fn([x]: T) -> T`, and
-re-declaring that exact scheme fails with ``expected `T`, found `double` `` — a caller who omits the
-argument gets a `double`, so the parameter's type is not universally quantified. `function(x, y = x)`
-infers `<T, U> fn(x: T, [y]: U) -> U` and fails the same way with ``expected `T`, found `U` ``. The
-checker already owns the rule for the *declared* direction — the `null_defaults` diagnostic says
-"`title` defaults to `NULL`, which its declared type `T` does not admit" — so this is inference not
-applying a rule the checker states elsewhere. Seven fixture schemes sit in `KNOWN_UNWRITABLE` in
-`crates/semantics/tests/test_roundtrip.rs` and should empty when this is fixed.
+re-declaring that exact scheme fails with ``expected `T`, found `double` ``. `function(x, y = x)`
+infers `<T, U> fn(x: T, [y]: U) -> U` and fails with ``expected `T`, found `U` ``. Seven fixture
+schemes sit in `KNOWN_UNWRITABLE` in `crates/semantics/tests/test_roundtrip.rs`.
+
+**An earlier version of this entry called it an inference bug and then a soundness hole. Both were
+wrong, and the measurements are below.** The inference half is *documented and deliberate* —
+`type-system.md` says "an unannotated parameter's type still comes from its uses, not from its
+default, so a non-`NULL` default does not pin the inferred parameter type", which is what keeps
+`lucky("text")` from being a false positive on code R runs.
+
+The real defect is the half the contract does *not* cover: what an **omitted** argument yields.
+Measured on `lucky <- function(x = 1) x`:
+
+- `lucky("text")` → `character`, correct.
+- `lucky()` → **`Any`**, not `double`. Confirmed by elimination: strict mode does not flag it (so it
+  is not `Unknown` — with a `data.frame` control in the same file proving strict was on), and it
+  satisfies both `#: character` and `#: list{impossible: integer}`.
+- The consequence is silence, not a wrong answer: `Any` is compatible with everything, so
+  `nchar(lucky())` — `nchar(1)` in R — reports nothing. The information to catch it is right there
+  in the default and is thrown away.
+
+The fix is to instantiate the parameter's binder from the default at a call site that omits the
+argument, which also makes `<T> fn([x]: T) -> T` an honest and writable annotation. That needs the
+default's type reachable from the callee's type, and `FunctionType.named` is `Vec<RecordField>` —
+the same struct records use, so a `default` field there would sit meaningless on every record field.
+The intended shape is a distinct parameter struct for function named parameters (16 `RecordField`
+mentions, 52 `.named` uses). Sized but not started.
 
 ### FIXED — formatter preservation was kind-only, so a token's spelling could change invisibly
 

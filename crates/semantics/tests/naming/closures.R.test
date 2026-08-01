@@ -275,6 +275,63 @@ outer <- function() {
   138..142 bump -> b1
   unused count 24..29
 
+#---- a_super_assignment_inside_local_reaches_the_enclosing_function_frame
+# `local()` opens a scope that is not a function, so a search bounded at the
+# nearest *function* boundary skips the very frame the write belongs to and
+# sends it to the global environment. R returns "two" here: the write hits `v`.
+f <- function() {
+  v <- 1L
+  local({ v <<- "two" })
+  v
+}
+#++++
+# f
+  b0 v local 20..21
+  b1 f top-level 0..1
+  0..1 f <- b1
+  20..21 v <- b0 captured
+  38..39 v <- b0 captured
+  55..56 v -> b0 captured
+
+#---- a_super_assignment_two_local_blocks_deep_still_reaches_the_frame
+# R returns "deep": nesting `local()` does not put the frame out of reach.
+f <- function() {
+  a <- 1L
+  local({ local({ a <<- "deep" }) })
+  a
+}
+#++++
+# f
+  b0 a local 20..21
+  b1 f top-level 0..1
+  0..1 f <- b1
+  20..21 a <- b0 captured
+  46..47 a <- b0 captured
+  67..68 a -> b0 captured
+
+#---- an_intervening_local_that_binds_the_name_catches_the_super_assignment
+# The rule is the nearest *enclosing* slot, and a `local` block is a scope like
+# any other: R returns 1 here, because the middle block's own `b` takes the
+# write and the function's `b` is never touched.
+f <- function() {
+  b <- 1L
+  local({
+    b <- 99L
+    local({ b <<- "inner" })
+  })
+  b
+}
+#++++
+# f
+  b0 b local 20..21
+  b1 b local 42..43
+  b2 f top-level 0..1
+  0..1 f <- b2
+  20..21 b <- b0
+  42..43 b <- b1 captured
+  63..64 b <- b1 captured
+  87..88 b -> b0
+
 #---- a_super_assignment_from_a_nested_frame_with_no_slot_is_a_global
 f <- function() {
   g <- function() {

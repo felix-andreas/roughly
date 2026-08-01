@@ -109,7 +109,7 @@ A statement that fails to parse as R suppresses every name-resolution and typing
 | `unresolved` | warning | yes | `pkg::name` where `pkg` is neither a stub namespace nor a declared `DESCRIPTION` dependency: "unknown package namespace `notapackage`" |
 | `unresolved` | **error** | yes | In `NAMESPACE`: `importFrom(pkg, name)` where `pkg` has stubs and does not export `name`. An error rather than a warning because R refuses to load the package |
 | `unresolved` | **error** | yes (`check` only) | In `NAMESPACE`: `export(name)` naming something the package defines nowhere at top level — `R CMD check`'s "undefined exports". Not reported by the language server |
-| `unused` | warning | yes | A write inside a function body that no read ever reaches, including a store overwritten before every read |
+| `unused` | warning | yes | A write inside a function body that no read ever reaches, including a store overwritten before every read. A write in a frame some inner scope super-assigns with `<<-` is exempt: the write is what makes `<<-` find that slot, so deleting it would send the assignment to the global environment instead |
 | `unused` | warning | yes | In a script, a top-level binding nothing later reads. Package files are exempt — any file may use them. S3 method names are exempt: dispatch is not a read |
 | `duplicate` | warning | yes | A top-level name defined more than once across a package's files. Both sites report, each with a `note` pointing at the other. Scripts are exempt — rebinding in a sequential script is ordinary |
 

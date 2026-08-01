@@ -341,6 +341,37 @@ f <- function() {
 #++++
 f: fn() -> integer | character
 
+#---- super_assignment_from_local_joins_like_the_closure_spelling
+# `local()` opens a scope that is not a function, so bounding the `<<-` search
+# at the nearest function boundary skipped this function's own frame and lost
+# the write entirely — the type came out `integer` while R returns "two". The
+# two spellings of the same thing must agree.
+f <- function() {
+  v <- 1L
+  local({
+    v <<- "two"
+  })
+  v
+}
+#++++
+f: fn() -> integer | character
+
+#---- a_super_assignment_caught_by_an_intervening_local_leaves_the_frame_alone
+# R returns 1 here: the inner block's own `b` takes the write, so the
+# function's `b` keeps its integer and never sees the character.
+f <- function() {
+  b <- 1L
+  local({
+    b <- 99L
+    local({
+      b <<- "inner"
+    })
+  })
+  b
+}
+#++++
+f: fn() -> integer
+
 #---- trailing_semicolon_yields_null
 f <- function() {
   1L;

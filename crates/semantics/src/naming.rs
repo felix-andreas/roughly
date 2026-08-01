@@ -939,18 +939,41 @@ impl Context<'_> {
                 let range = target_expression.range;
                 match spelling {
                     AssignSpelling::Super => {
-                        // `<<-` binds to the nearest enclosing slot; without
-                        // one it targets the global environment (non-local).
-                        let enclosing = {
-                            let function_depth = self.current_function_depth();
-                            (0..function_depth)
-                                .rev()
-                                .find_map(|depth| self.scopes[depth].slots.get(name).copied())
-                        };
+                        // `<<-` binds to the nearest slot in a *strictly
+                        // enclosing* scope; without one it targets the global
+                        // environment (non-local).
+                        //
+                        // The bound is the scope stack minus the current scope,
+                        // not the enclosing function: `local()` opens a scope
+                        // that is not a function, so stopping at the nearest
+                        // function boundary skipped that function's own frame
+                        // and sent `function() { v <- 1; local({ v <<- 2 }) }`
+                        // to the global environment instead of to `v`. Where
+                        // the current scope *is* the function frame the two
+                        // bounds coincide, which is why the closure spelling of
+                        // the same thing was always right.
+                        let enclosing = (0..self.scopes.len() - 1)
+                            .rev()
+                            .find_map(|depth| Some((depth, *self.scopes[depth].slots.get(name)?)));
                         match enclosing {
-                            Some(slot) => {
+                            Some((depth, slot)) => {
                                 self.naming.resolutions.insert(target, slot);
                                 self.naming.captured_slots.insert(slot);
+                                // The write the slot came from is what makes
+                                // `<<-` find a slot at all: delete it and the
+                                // write escapes to the global environment
+                                // instead. So a super-assignment keeps that
+                                // frame's writes alive exactly as a capturing
+                                // read does — otherwise the initializer of a
+                                // write-only counter reports as a dead store,
+                                // and removing it changes what the program
+                                // does.
+                                let frame = self.scopes[depth].id;
+                                for write in &mut self.writes {
+                                    if write.scope == frame && write.name == *name {
+                                        write.used = true;
+                                    }
+                                }
                                 self.record_write_site(assignment, target, name, range, slot, true);
                             }
                             None => {
