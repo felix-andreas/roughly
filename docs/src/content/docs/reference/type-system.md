@@ -2457,7 +2457,16 @@ An unannotated `function(...)` expression infers a function type directly from i
   `argument is of length zero`. Marking the parameter `[title]` relaxes only the *call*; it says
   callers may omit the argument, not that the body may receive nothing
 - an unannotated parameter's type still comes from its uses, not from its default, so a non-`NULL`
-  default does not pin the inferred parameter type
+  default does not pin the inferred parameter type — `function(x = 1) x` is `<T> fn([x]: T) -> T`,
+  and passing a character to it is not a finding, because R runs it
+- **a call that omits the argument takes the default's type**, because that is the value R puts in
+  the frame: `f <- function(x = 1) x` makes `f()` a `double` and `f("a")` a `character`. The two
+  rules fit together — the parameter is polymorphic, and omitting the argument is the one call
+  where the *default* chooses the instantiation rather than the caller
+- for the same reason, a default is checked against an **instantiation** of the declared parameter
+  type rather than against the binder itself, so `#: <T> fn([x]: T) -> T` over `function(x = 1) x`
+  is accepted. A concrete declared type is unaffected: `fn(title: character)` still refuses a
+  `NULL` default, and `<T: numeric>` still refuses a character one
 
 Examples:
 

@@ -1825,38 +1825,32 @@ reason. A binder is admitted when its declared bound implies the required one, e
 Verified still enforced: `<T>` with no bound used numerically is refused, and calling a numeric
 scheme with `character` is refused.
 
-### Open — an omitted optional argument yields `Any`, discarding the default's known type
+### FIXED — an omitted optional argument yielded `Any`, discarding the default's known type
 
-Found by the round-trip oracle, which is the only reason it is visible: the checker infers schemes
-it then rejects when they are written down. `function(x = 1) x` infers `<T> fn([x]: T) -> T`, and
-re-declaring that exact scheme fails with ``expected `T`, found `double` ``. `function(x, y = x)`
-infers `<T, U> fn(x: T, [y]: U) -> U` and fails with ``expected `T`, found `U` ``. Seven fixture
-schemes sit in `KNOWN_UNWRITABLE` in `crates/semantics/tests/test_roundtrip.rs`.
+`function(x = 1) x` inferred `<T> fn([x]: T) -> T`, and a call omitting the argument left the
+parameter a free variable, so `lucky()` was **`Any`** rather than `double`. `Any` is compatible with
+everything, so the consequence was silence: `nchar(lucky())` — `nchar(1)` in R — reported nothing.
+The same gap made the checker reject a scheme it had inferred itself, which is how the round-trip
+oracle found it.
 
-**An earlier version of this entry called it an inference bug and then a soundness hole. Both were
-wrong, and the measurements are below.** The inference half is *documented and deliberate* —
-`type-system.md` says "an unannotated parameter's type still comes from its uses, not from its
-default, so a non-`NULL` default does not pin the inferred parameter type", which is what keeps
-`lucky("text")` from being a false positive on code R runs.
+Both halves are fixed and the oracle's allowlist is now empty (527 schemes, 0 unwritable).
 
-The real defect is the half the contract does *not* cover: what an **omitted** argument yields.
-Measured on `lucky <- function(x = 1) x`:
-
-- `lucky("text")` → `character`, correct.
-- `lucky()` → **`Any`**, not `double`. Confirmed by elimination: strict mode does not flag it (so it
-  is not `Unknown` — with a `data.frame` control in the same file proving strict was on), and it
-  satisfies both `#: character` and `#: list{impossible: integer}`.
-- The consequence is silence, not a wrong answer: `Any` is compatible with everything, so
-  `nchar(lucky())` — `nchar(1)` in R — reports nothing. The information to catch it is right there
-  in the default and is thrown away.
-
-The fix is to instantiate the parameter's binder from the default at a call site that omits the
-argument, which also makes `<T> fn([x]: T) -> T` an honest and writable annotation. That needs the
-default's type reachable from the callee's type, and `FunctionType.named` is `Vec<RecordField>` —
-the same struct records use, so a `default` field there would sit meaningless on every record field.
-The intended shape is a distinct parameter struct for function named parameters (16 `RecordField`
-mentions, 52 `.named` uses). Sized but not started.
-
+- **`FunctionType.named` is now `Vec<Parameter>` rather than `Vec<RecordField>`**, carrying
+  `default: Option<Ty>`. Reusing the record-field struct for parameters was the reason the default
+  had nowhere to live; a record field has no default and never will. The default's type had to be
+  threaded through every traversal that walks a function type — substitution, `erase_vars`,
+  `resolve`, `adjust_levels`, `occurs`, `walk_unbound_vars`, `contains_unknown`, `type_size` — and
+  skipping any of the first three would have been unsound rather than imprecise (a variable hiding
+  in a default, un-substituted or un-level-adjusted). `Parameter::types()` is the one iterator they
+  all go through so a future field cannot be half-walked.
+- **A call that omits an optional argument unifies the parameter with the default's type.** Skipped
+  when the call forwards `...`, where the argument may be arriving through the dots. A default that
+  cannot fit its own parameter is the definition's mistake and stays reported there.
+- **A declared default is checked against an instantiation of the declared type, not the rigid
+  binder.** A binder is the caller's choice and omitting the argument is the one call where the
+  default makes that choice, so `#: <T> fn([x]: T) -> T` over `function(x = 1) x` is honest.
+  Controls verified: a concrete declared type still refuses a `NULL` default, a wrong-typed one, and
+  `<T: numeric>` still refuses a character default.
 ### FIXED — formatter preservation was kind-only, so a token's spelling could change invisibly
 
 `significant_kinds` compares `Vec<SyntaxKind>`. A formatter emitting the wrong *bytes* for a token —

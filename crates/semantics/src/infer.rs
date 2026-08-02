@@ -296,10 +296,11 @@ impl<'db> InferenceTable<'db> {
                     named: function
                         .named
                         .iter()
-                        .map(|field| {
-                            let mut field = field.clone();
-                            field.ty = resolve(field.ty, visiting);
-                            field
+                        .map(|parameter| {
+                            let mut parameter = parameter.clone();
+                            parameter.ty = resolve(parameter.ty, visiting);
+                            parameter.default = parameter.default.map(|ty| resolve(ty, visiting));
+                            parameter
                         })
                         .collect(),
                     variadic: function.variadic.as_ref().map(|rest| {
@@ -437,8 +438,12 @@ impl<'db> InferenceTable<'db> {
                 for &ty in &function.positional {
                     self.adjust_levels(db, level, ty);
                 }
-                for field in &function.named {
-                    self.adjust_levels(db, level, field.ty);
+                for ty in function
+                    .named
+                    .iter()
+                    .flat_map(|parameter| parameter.types())
+                {
+                    self.adjust_levels(db, level, ty);
                 }
                 if let Some(rest) = &function.variadic {
                     self.adjust_levels(db, level, rest.element);
@@ -477,7 +482,8 @@ impl<'db> InferenceTable<'db> {
                     || function
                         .named
                         .iter()
-                        .any(|field| self.occurs(db, var, field.ty))
+                        .flat_map(|parameter| parameter.types())
+                        .any(|ty| self.occurs(db, var, ty))
                     || function
                         .variadic
                         .as_ref()
@@ -1192,7 +1198,8 @@ impl<'db> InferenceTable<'db> {
                     && function
                         .named
                         .iter()
-                        .all(|field| self.walk_unbound_vars(db, field.ty, visit))
+                        .flat_map(|parameter| parameter.types())
+                        .all(|ty| self.walk_unbound_vars(db, ty, visit))
                     && function
                         .variadic
                         .as_ref()
@@ -1805,10 +1812,11 @@ mod tests {
             &db,
             TyKind::Function(FunctionType {
                 positional: Vec::new(),
-                named: vec![crate::types::RecordField {
+                named: vec![crate::types::Parameter {
                     name: crate::types::Name::new(&db, "x".to_owned()),
                     ty: int,
                     optional: false,
+                    default: None,
                 }],
                 variadic: None,
                 ret: int,

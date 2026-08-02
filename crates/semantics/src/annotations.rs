@@ -9,8 +9,8 @@
 
 use crate::Db;
 use crate::types::{
-    Atomic, Constraint, FunctionType, Name, RecordField, RestParameter, Ty, TyKind, TypeScheme,
-    any, null, scalar, union_of, unknown,
+    Atomic, Constraint, FunctionType, Name, Parameter, RecordField, RestParameter, Ty, TyKind,
+    TypeScheme, any, null, scalar, union_of, unknown,
 };
 use syntax::ast::AstNode as _;
 use syntax::{SyntaxKind, SyntaxNode, TextRange};
@@ -329,12 +329,15 @@ pub fn lower_annotation<'db>(db: &'db dyn Db, node: &SyntaxNode) -> Annotation<'
     annotation.vector_elements = std::mem::take(&mut lowering.vector_elements);
 
     if saw_expanded && annotation.declared.is_none() && (!params.is_empty() || ret.is_some()) {
-        let named: Vec<RecordField<'db>> = params
+        // An annotation states the parameter's type, never its default: the
+        // default lives in the definition, which this may not have in view.
+        let named: Vec<Parameter<'db>> = params
             .iter()
-            .map(|(name, ty, optional)| RecordField {
+            .map(|(name, ty, optional)| Parameter {
                 name: Name::new(db, name.clone()),
                 ty: *ty,
                 optional: *optional,
+                default: None,
             })
             .collect();
         annotation.parameter_names = params.clone();
@@ -851,10 +854,11 @@ impl<'db> Lowering<'db> {
                         preceding_named: named.len(),
                     });
                 } else if let Some(name) = name {
-                    named.push(RecordField {
+                    named.push(Parameter {
                         name: Name::new(self.db, name),
                         ty: ty.unwrap_or_else(|| unknown(self.db)),
                         optional,
+                        default: None,
                     });
                 } else {
                     positional.push(ty.unwrap_or_else(|| unknown(self.db)));

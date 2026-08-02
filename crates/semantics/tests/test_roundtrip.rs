@@ -26,23 +26,12 @@ use semantics::{
 };
 use std::fmt::Write as _;
 
-/// Schemes that do not round-trip today, all of one open defect: **a
-/// parameter's default value is ignored when its type generalizes**, so a
-/// defaulted parameter becomes a binder the default itself cannot inhabit.
-/// `function(x = 1) x` infers `<T> fn([x]: T) -> T`, and writing that back
-/// fails with ``expected `T`, found `double` `` — the checker rejecting a
-/// scheme it wrote. The fix belongs to inference, not to the renderer, so the
-/// cases are named rather than skipped by shape: a *new* unwritable rendering
-/// of any kind must fail this test rather than blend into a category.
-const KNOWN_UNWRITABLE: [&str; 7] = [
-    "format/tests/format::misc__some_expressions :: result",
-    "semantics/tests/lints::assignment-operator__named_argument_not_linted :: f",
-    "semantics/tests/lints-style::unused-parameter__default_only_use_is_a_read :: f",
-    "semantics/tests/naming::parameters__a_default_expression_reads_an_earlier_parameter :: f",
-    "semantics/tests/naming::parameters__a_default_expression_reads_a_later_parameter :: f",
-    "semantics/tests/typing::null_defaults__an_unannotated_parameter_is_unaffected_by_its_null_default :: label",
-    "syntax/tests/syntax::control__function_def :: f",
-];
+/// Schemes that are known not to round-trip, named individually so that a new
+/// unwritable rendering of any kind fails this test rather than blending into a
+/// category. **Empty, and worth keeping empty**: the last entries were seven
+/// defaulted-parameter schemes the checker inferred and then rejected when they
+/// were written back, which is fixed.
+const KNOWN_UNWRITABLE: [&str; 0] = [];
 
 #[test]
 fn rendered_schemes_are_writable_annotations() {

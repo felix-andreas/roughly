@@ -80,12 +80,44 @@ pub struct RecordField<'db> {
     pub optional: bool,
 }
 
+/// One named parameter of a function type.
+///
+/// Separate from [`RecordField`] because a parameter carries something a record
+/// field cannot: the type of its **default**. R evaluates the default in the
+/// function's own frame when the caller omits the argument, so that type is
+/// what the parameter holds on the omitted path — without it a call that leaves
+/// the argument out has nothing to instantiate the parameter with and the
+/// result degrades to `Any`, silencing everything downstream.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
+pub struct Parameter<'db> {
+    pub name: Name<'db>,
+    pub ty: Ty<'db>,
+    /// Callers may omit the argument: the formal has a default, or the body
+    /// tests it with `missing()`.
+    pub optional: bool,
+    /// The default's type, when the formal has one that could be inferred.
+    /// `None` for a required parameter, for `missing()`-style optionality with
+    /// no default, and for an annotation that declares `[name]:` without the
+    /// definition being in view.
+    pub default: Option<Ty<'db>>,
+}
+
+impl<'db> Parameter<'db> {
+    /// Every type this parameter carries. Traversals go through here so a
+    /// variable hiding in a default cannot be missed by one walk and found by
+    /// another — an occurs check or a level adjustment that skipped it would be
+    /// unsound, not merely imprecise.
+    pub fn types(&self) -> impl Iterator<Item = Ty<'db>> + '_ {
+        std::iter::once(self.ty).chain(self.default)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub struct FunctionType<'db> {
     /// Positional parameters, in order.
     pub positional: Vec<Ty<'db>>,
     /// Named parameters (declaration order; `optional` marks `[name]:`).
-    pub named: Vec<RecordField<'db>>,
+    pub named: Vec<Parameter<'db>>,
     /// The `...` rest parameter's element type, with the count of named
     /// parameters written before it (parameters after `...` match by name
     /// only).
@@ -184,7 +216,8 @@ pub fn contains_unknown(db: &dyn Db, ty: Ty<'_>) -> bool {
                 || function
                     .named
                     .iter()
-                    .any(|field| contains_unknown(db, field.ty))
+                    .flat_map(|parameter| parameter.types())
+                    .any(|ty| contains_unknown(db, ty))
                 || function
                     .variadic
                     .as_ref()
@@ -285,7 +318,12 @@ pub fn type_size<'db>(db: &'db dyn Db, ty: Ty<'db>) -> u64 {
                 .positional
                 .iter()
                 .copied()
-                .chain(function.named.iter().map(|field| field.ty))
+                .chain(
+                    function
+                        .named
+                        .iter()
+                        .flat_map(|parameter| parameter.types()),
+                )
                 .chain(function.variadic.iter().map(|rest| rest.element))
                 .chain(std::iter::once(function.ret)),
         ),
@@ -383,10 +421,17 @@ fn substitute_rigid_uncached<'db>(
                 named: function
                     .named
                     .iter()
-                    .map(|field| {
-                        let mut field = field.clone();
-                        field.ty = substitute_rigid_memo(db, field.ty, substitution, memo);
-                        field
+                    .map(|parameter| {
+                        let mut parameter = parameter.clone();
+                        parameter.ty = substitute_rigid_memo(db, parameter.ty, substitution, memo);
+                        // The default is part of the parameter's type, so a
+                        // substitution that skipped it would leave the
+                        // instantiated signature holding the uninstantiated
+                        // binder.
+                        parameter.default = parameter
+                            .default
+                            .map(|ty| substitute_rigid_memo(db, ty, substitution, memo));
+                        parameter
                     })
                     .collect(),
                 variadic: function.variadic.as_ref().map(|rest| {
@@ -456,10 +501,11 @@ pub fn erase_vars<'db>(db: &'db dyn Db, ty: Ty<'db>) -> Ty<'db> {
                 named: function
                     .named
                     .iter()
-                    .map(|field| {
-                        let mut field = field.clone();
-                        field.ty = erase_vars(db, field.ty);
-                        field
+                    .map(|parameter| {
+                        let mut parameter = parameter.clone();
+                        parameter.ty = erase_vars(db, parameter.ty);
+                        parameter.default = parameter.default.map(|ty| erase_vars(db, ty));
+                        parameter
                     })
                     .collect(),
                 variadic: function.variadic.as_ref().map(|rest| {

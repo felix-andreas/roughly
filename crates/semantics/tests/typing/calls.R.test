@@ -127,6 +127,65 @@ label <- function(xs) vapply(xs, character(1), FUN = as.character)
 #++++
 label: <T> fn(xs: list[T] | T[]) -> character[]
 
+#==== omitted_defaults
+#---- an_omitted_argument_takes_the_defaults_type
+# R evaluates the default in the function's own frame, so `lucky()` is the
+# double 1. Leaving the parameter a free variable made the result `Any`, which
+# is compatible with everything and silenced every check below it.
+lucky <- function(x = 1) x
+omitted <- lucky()
+supplied <- lucky("text")
+#++++
+lucky: <T> fn([x]: T) -> T
+omitted: double
+supplied: character
+
+#---- the_silence_that_cost_is_now_a_finding
+# `shout(lucky())` is `nchar(1)` at run time. It reported nothing while the
+# omitted argument yielded `Any`.
+#: fn(s: character) -> integer
+shout <- function(s) nchar(s)
+
+lucky <- function(x = 1) x
+caught <- shout(lucky())
+ok <- shout(lucky("text"))
+#++++
+shout: fn(s: character) -> integer
+lucky: <T> fn([x]: T) -> T
+caught: Unknown
+ok: integer
+215..222 error[type-mismatch] expected `character`, found `double`
+
+#---- a_default_reading_an_earlier_parameter_flows_through
+pair <- function(x, y = x) y
+from_pair <- pair(1L)
+#++++
+pair: <T, U> fn(x: T, [y]: U) -> U
+from_pair: integer
+
+#---- a_declared_binder_admits_its_own_default
+# The scheme the checker infers for this shape is writable as an annotation:
+# a binder is the caller's choice, and omitting the argument is the one call
+# where the default makes that choice.
+#: <T> fn([x]: T) -> T
+fine <- function(x = 1) x
+#++++
+fine: <T> fn([x]: T) -> T
+
+#---- a_constrained_binder_still_refuses_a_default_outside_its_bound
+#: <T: numeric> fn([x]: T) -> T
+bad <- function(x = "text") x
+#++++
+bad: <T: numeric> fn([x]: T) -> T
+52..58 error[type-mismatch] expected a numeric value (`integer` or `double`), found `character`
+
+#---- a_concrete_declared_type_still_refuses_a_null_default
+#: fn([title]: character) -> character
+label <- function(title = NULL) "x"
+#++++
+label: fn([title]: character) -> character
+65..69 error[type-mismatch] `title` defaults to `NULL`, which its declared type `character` does not admit — a caller who omits it leaves `NULL` in the body. Declare it `character | NULL` and narrow with `is.null()`
+
 #==== union_commit
 #---- flexible_argument_commits_to_the_union_at_first_use
 #: fn(x: integer | character) -> logical

@@ -21,7 +21,7 @@ use crate::hir::{
 use crate::infer::{Entry, FunctionMismatch, InferenceTable, RecordMismatch, UnifyError};
 use crate::naming::{BindingId, ItemNaming};
 use crate::types::{
-    Atomic, Constraint, FunctionType, InferenceVar, Name, RecordField, RestParameter, Ty, TyKind,
+    Atomic, Constraint, FunctionType, InferenceVar, Name, Parameter, RestParameter, Ty, TyKind,
     TypeScheme, any, scalar, union_of, unknown,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -1525,11 +1525,13 @@ impl<'db> Checker<'db, '_> {
                         continue;
                     }
                     let parameter_ty = self.fresh(Constraint::Unconstrained);
-                    named.push(crate::types::RecordField {
+                    let entry = named.len();
+                    named.push(crate::types::Parameter {
                         name: Name::new(self.db, parameter.name.clone()),
                         ty: parameter_ty,
                         optional: parameter.default.is_some()
                             || missing_tested.contains(&parameter.name),
+                        default: None,
                     });
                     let no_default = parameter.default.is_none();
                     if let Some(slot) = self
@@ -1544,8 +1546,12 @@ impl<'db> Checker<'db, '_> {
                             self.no_default_formals.insert(slot);
                         }
                     }
+                    // The default is inferred here rather than above because
+                    // it may read this parameter's own slot and the ones
+                    // before it, which are in the environment only now.
                     if let Some(default) = parameter.default {
-                        self.infer(default);
+                        let default_ty = self.infer(default);
+                        named[entry].default = Some(default_ty);
                     }
                 }
                 self.return_frames.push(Vec::new());
@@ -2423,6 +2429,27 @@ impl<'db> Checker<'db, '_> {
     /// `next`, or an `if ... else` both of whose branches diverge.
     /// `return`/`stop` are recognized by their bare names (rebinding them is
     /// not modeled).
+    /// A copy of `ty` with every in-scope rigid binder replaced by a fresh
+    /// variable carrying that binder's constraint — one arbitrary instantiation
+    /// of the scheme, for asking whether a value could inhabit the declared
+    /// type at *some* choice of its parameters rather than at all of them.
+    fn instantiate_rigids(&mut self, ty: Ty<'db>) -> Ty<'db> {
+        if self.table.rigid_constraints.is_empty() {
+            return ty;
+        }
+        let binders: Vec<(Name<'db>, Constraint)> = self
+            .table
+            .rigid_constraints
+            .iter()
+            .map(|(name, constraint)| (*name, *constraint))
+            .collect();
+        let substitution = binders
+            .into_iter()
+            .map(|(name, constraint)| (name, self.fresh(constraint)))
+            .collect();
+        crate::types::substitute_rigid(self.db, ty, &substitution)
+    }
+
     fn diverges(&self, id: ExprId) -> bool {
         match &self.module.expression(id).kind {
             ExpressionKind::Break | ExpressionKind::Next => true,
@@ -3569,10 +3596,11 @@ impl<'db> Checker<'db, '_> {
             };
             let parameter_ty = declared_ty.unwrap_or_else(|| self.fresh(Constraint::Unconstrained));
             formal_types.push((parameter_ty, declared_ty.is_some()));
-            signature.named.push(RecordField {
+            signature.named.push(Parameter {
                 name: Name::new(self.db, parameter.name.clone()),
                 ty: parameter_ty,
                 optional: is_optional(parameter),
+                default: parameter.default.map(|default| self.infer(default)),
             });
         }
 
@@ -3667,6 +3695,16 @@ impl<'db> Checker<'db, '_> {
                 let resolved_default = self.table.resolve(self.db, default_ty);
                 if declared {
                     let default_range = self.blame_range(default);
+                    // The default is checked against an *instantiation* of the
+                    // declared type, not against the rigid binder itself. A
+                    // binder is the caller's choice, and omitting the argument
+                    // is the one call where the default makes that choice — so
+                    // `<T> fn([x]: T)` over `function(x = 1)` is honest, and
+                    // was rejected while the comparison used the rigid `T`,
+                    // which is how the checker came to refuse a scheme it had
+                    // inferred itself. A concrete declared type is unaffected:
+                    // `fn(title: character)` still refuses a `NULL` default.
+                    let admissible = self.instantiate_rigids(parameter_ty);
                     // `function(title = NULL)` is how R spells an optional
                     // argument, but the caller omitting it puts `NULL` in the
                     // body, where a declared `character` is a promise the
@@ -3677,9 +3715,7 @@ impl<'db> Checker<'db, '_> {
                     // declared type plus a guard, so the message names it
                     // instead of reporting a bare mismatch.
                     if matches!(resolved_default.kind(self.db), TyKind::Null)
-                        && !self
-                            .table
-                            .compatible(self.db, resolved_default, parameter_ty)
+                        && !self.table.compatible(self.db, resolved_default, admissible)
                     {
                         self.errors.push(TypeError {
                             range: default_range,
@@ -3691,7 +3727,7 @@ impl<'db> Checker<'db, '_> {
                     } else if !matches!(resolved_default.kind(self.db), TyKind::Null) {
                         let whole_double = self.is_whole_double(default);
                         if let Err(error) = self.check_argument(
-                            parameter_ty,
+                            admissible,
                             default_ty,
                             default_range,
                             whole_double,
@@ -4629,14 +4665,12 @@ impl<'db> Checker<'db, '_> {
                         named: arguments
                             .iter()
                             .filter_map(|argument| {
-                                argument
-                                    .name
-                                    .as_ref()
-                                    .map(|name| crate::types::RecordField {
-                                        name: Name::new(self.db, name.clone()),
-                                        ty: argument.ty.unwrap_or_else(|| self.unknown()),
-                                        optional: false,
-                                    })
+                                argument.name.as_ref().map(|name| crate::types::Parameter {
+                                    name: Name::new(self.db, name.clone()),
+                                    ty: argument.ty.unwrap_or_else(|| self.unknown()),
+                                    optional: false,
+                                    default: None,
+                                })
                             })
                             .collect(),
                         variadic: None,
@@ -4847,6 +4881,32 @@ impl<'db> Checker<'db, '_> {
                             },
                         }];
                     }
+                }
+            }
+        }
+
+        // A formal the call leaves out is filled by its default, evaluated in
+        // the function's own frame — so the parameter holds the default's type
+        // on this call, not whatever the caller might have passed. Without
+        // this the parameter stays a free variable and `f()` for
+        // `f <- function(x = 1) x` yields `Any`, which is compatible with
+        // everything and silences every check downstream of it.
+        //
+        // Skipped when the call forwards `...`: an argument may be arriving
+        // through the dots, so the formal is not known to be omitted.
+        if !forwards_dots {
+            for (formal, parameter) in function.named.iter().enumerate() {
+                let supplied = targets.iter().any(
+                    |target| matches!(target, Some(ArgumentTarget::Named(filled)) if *filled == formal),
+                );
+                if supplied {
+                    continue;
+                }
+                // Best effort: a default that cannot fit its own parameter is
+                // the definition's mistake and is reported there, never at a
+                // call that did nothing wrong.
+                if let Some(default) = parameter.default {
+                    let _ = self.table.unify(self.db, parameter.ty, default);
                 }
             }
         }

@@ -284,19 +284,23 @@ hint @1: fn() -> NULL
 
 #==== signature
 #---- positional_first
+# The signature shown is this CALL's instantiation, not the abstract scheme:
+# `y` is omitted here, so it takes its default `2`, and `x + y` ties `x` to the
+# same double. The scheme itself stays polymorphic — the inlay hint below still
+# reads `<T: numeric>`.
 f <- function(x, y = 2) x + y
 g <- function() f($0)
 #++++
-hover 46..49: T
+hover 309..312: double
 definition: none
 references: none
 rename: none
-signature: fn(x: T, [y]: T) -> T
-parameters: [x: T] | [y]: T
+signature: fn(x: double, [y]: double) -> double
+parameters: [x: double] | [y]: double
 action: Add inferred type annotations for the whole file
-  edit 0..0 -> "#: <T: numeric> fn(x: T, [y]: T) -> T\n"
+  edit 263..263 -> "#: <T: numeric> fn(x: T, [y]: T) -> T\n"
 completion (128+): break, else, FALSE, for, function, if, in, Inf
-hint @1: <T: numeric> fn(x: T, [y]: T) -> T
+hint @264: <T: numeric> fn(x: T, [y]: T) -> T
 
 #---- second_after_comma
 f <- function(x, y = 2) x + y
