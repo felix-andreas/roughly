@@ -1713,13 +1713,15 @@ project before being written down here.
   `switch(k, a = , b = …)` falls through to one branch rather than two. A branch that cannot fall
   through (`stop()`) contributes no state, as a diverging `if` arm does not, and a local binding
   named `switch` makes the call an ordinary one again.
-- **`repeat`'s post-loop state wrongly includes the never-assigned path.** `repeat { x <- 1L; break }`
-  followed by a read of `x` marks the read `maybe-undefined`. `loop_body` joins end-of-body with
-  start-of-body to model the back edge and then reuses that as the *exit* state, so `Unassigned` from
-  the first iteration survives even when `may_skip` is false. The loop-head state is correct; only the
-  exit state is wrong. Blast radius is the typing join, not a diagnostic. The legacy case
-  `maybe_undefined.R.test::repeat_body_introduction_is_defined_after_loop` was withheld from the port
-  rather than blessed wrong.
+- **FIXED — `repeat`'s post-loop state wrongly included the never-assigned path.** `loop_body` reused
+  the converged loop-*head* state as the exit state, so `Unassigned` from the first iteration survived
+  a loop that always assigns. Fixed properly rather than by dropping the join: `break` now records the
+  reaching-write state where it occurs, and a loop that cannot be skipped exits through exactly those
+  points joined with the body's end state. That is precise in both directions —
+  `repeat { x <- 1L; break }` reports nothing (R returns 1) while
+  `repeat { if (cond) break; y <- 1L; break }` still does (R errors when `cond` is TRUE). A loop with
+  no `break` at all keeps the conservative head join, since it leaves by a jump the walk does not
+  model. Found only because the new `maybe-undefined` code made the state visible for the first time.
 - **FIXED — a write-only `<<-` reported its initializer unused, and deleting it changed behaviour.**
   `make_flag <- function() { flag <- FALSE; function() flag <<- TRUE }` gave a false `unused flag`,
   but the initializer is what makes `<<-` find a slot at all: remove it and the write goes to the
@@ -1733,11 +1735,16 @@ project before being written down here.
   no callee expression, so nothing reads a user-defined `local` and a false `unused local` fires. The
   docs sanction treating the syntactic call as the construct; they do not mention that the shadowing
   definition then reports as dead.
-- **Docs/implementation mismatch: the "might be undefined" warning does not exist.**
-  `reference/type-system.md` says a read reachable with no prior write "warns that the name might be
-  undefined (introduced only in conditionally executed code)", and the frozen stack emitted exactly
-  that. Nothing in `crates/` produces the message; `maybe_undefined` only feeds cross-item liveness
-  and typing. Either implement it or correct the reference — it is a contract page.
+- **FIXED — the "might be undefined" warning the reference promised now exists, as an opt-in.**
+  `maybe_undefined` was computed by naming and surfaced nowhere. It is now the `maybe-undefined`
+  code, gated on `[check] maybe-undefined = true`. **Off by default on measured evidence**: with it
+  on, six real packages report 442 findings (data.table 242 in 12k lines, shiny 86, MASS 45,
+  ggplot2 42, dplyr 18, targets 9), and the dominant shape is correlated guards the flow cannot
+  see — in `data.table/R/print.data.table.R` the flagged `index_dt` is assigned only in one branch,
+  but the read is guarded by `show.indices`, which the *same* branch sets to `FALSE`. Safe code,
+  unprovable by flow. Default-on would have been the "a clean run means nothing" failure the
+  adoption reviews already flagged. A top-level variable's unwritten path is exempt, per the
+  contract: at run time it reaches the enclosing environment.
 - **`library`/`require`/`help` quoting ignores local shadowing, unlike every sibling recognizer.**
   `quote`, `on.exit` and the masking family all guard with `!resolutions.contains_key(callee)`; the
   attach family does not. The docs call this a limitation, but the inconsistency lives inside one

@@ -311,6 +311,38 @@ pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
                 related: Vec::new(),
             });
         }
+        // A read some path reaches with no prior write. R errors there —
+        // `object 'x' not found` — so the read is worth naming even though it
+        // resolves. Only a *local* slot qualifies: a top-level variable's
+        // unwritten path reaches the enclosing environment at run time, where
+        // the name's cross-item binding answers it.
+        for expression in &naming.maybe_undefined {
+            let Some(binding) = naming
+                .resolutions
+                .get(expression)
+                .and_then(|slot| naming.bindings.get(slot))
+            else {
+                continue;
+            };
+            if binding.kind == crate::naming::BindingKind::TopLevel {
+                continue;
+            }
+            let expression_range = module.expression(*expression).range;
+            let range = TextRange::new(
+                expression_range.start() + offset,
+                expression_range.end() + offset,
+            );
+            diagnostics.push(Diagnostic {
+                range,
+                severity: Severity::Warning,
+                code: "maybe-undefined",
+                message: format!(
+                    "`{}` is only assigned on some paths here, so this read can find nothing.",
+                    display_name(&binding.name)
+                ),
+                related: Vec::new(),
+            });
+        }
         for (expression, read) in &naming.namespace_reads {
             let Some(message) = namespace_read_message(db, read) else {
                 continue;

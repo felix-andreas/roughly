@@ -342,6 +342,93 @@ f <- function(k) {
 #++++
 f: <T> fn(k: T) -> integer
 
+#==== maybe_undefined
+#---- a_conditional_introduction_is_reported_at_the_read
+# R: `object 'x' not found` when `flag` is FALSE. The read still resolves to
+# the slot — this is not an unresolved name — but one path reaches it with
+# nothing written.
+f <- function(flag) {
+  if (flag) {
+    x <- 1L
+  }
+  x
+}
+#++++
+f: fn(flag: logical) -> integer
+229..230 warning[maybe-undefined] `x` is only assigned on some paths here, so this read can find nothing.
+
+#---- a_switch_with_no_default_reaches_the_read_unassigned
+f <- function(key) {
+  switch(key, a = { r <- 1L })
+  r
+}
+#++++
+f: <T> fn(key: T) -> integer
+54..55 warning[maybe-undefined] `r` is only assigned on some paths here, so this read can find nothing.
+
+#---- a_repeat_that_always_assigns_before_breaking_is_not_reported
+# R returns 1: the body runs at least once and the `break` follows the write,
+# so the read cannot be reached with the name unset. Joining the loop *head*
+# into the exit state instead reported this, which is why the exit state is
+# built from the `break` points.
+f <- function() {
+  repeat {
+    x <- 1L
+    break
+  }
+  x
+}
+#++++
+f: fn() -> integer
+
+#---- a_break_before_the_write_does_reach_the_read_unassigned
+# The precision cuts both ways: R errors here when `cond` is TRUE.
+f <- function(cond) {
+  repeat {
+    if (cond) break
+    y <- 1L
+    break
+  }
+  y
+}
+#++++
+f: fn(cond: logical) -> integer
+148..149 warning[maybe-undefined] `y` is only assigned on some paths here, so this read can find nothing.
+
+#---- a_loop_that_may_run_zero_times_reaches_the_read_unassigned
+f <- function(cond) {
+  while (cond) {
+    z <- 1L
+  }
+  z
+}
+#++++
+f: fn(cond: logical) -> integer
+57..58 warning[maybe-undefined] `z` is only assigned on some paths here, so this read can find nothing.
+
+#---- a_diverging_switch_branch_never_reaches_the_read
+# Every key either assigns or ends the call, so nothing arrives at the read
+# with `r` unset.
+f <- function(k) {
+  switch(k, a = { r <- 1L }, { stop("no") })
+  r
+}
+#++++
+f: <T> fn(k: T) -> integer
+
+#---- a_top_level_unwritten_path_is_not_reported
+# A top-level variable's unwritten path reaches the enclosing environment at
+# run time, where the name's cross-item binding answers it, so the read is not
+# a finding.
+flag <- TRUE
+if (flag) {
+  value <- 1L
+}
+after <- value
+#++++
+flag: logical
+after: integer
+
 #==== scoping
 #---- local_scopes_its_bindings
 f <- function() {

@@ -80,6 +80,7 @@ Most codes are on by default. These are the opt-ins, all configured in [`ry.toml
 | `type-mismatch` | `[check] typing = true`, or `# typing: on` in the file |
 | `strict` | `[check] strict = true`, or `# typing: strict` in the file |
 | `naming-style` | `[lint] naming-style = "snake_case"` or `"camelCase"` |
+| `maybe-undefined` | `[check] maybe-undefined = true` |
 | `unused-parameter` | `[lint] unused-parameter = "warn"` or `"error"` |
 | `unused-import` | `[lint] unused-import = "warn"` or `"error"` |
 | `shadows-builtin` | `[lint] shadows-builtin = "warn"` or `"error"` |
@@ -109,6 +110,7 @@ A statement that fails to parse as R suppresses every name-resolution and typing
 | `unresolved` | warning | yes | `pkg::name` where `pkg` is neither a stub namespace nor a declared `DESCRIPTION` dependency: "unknown package namespace `notapackage`" |
 | `unresolved` | **error** | yes | In `NAMESPACE`: `importFrom(pkg, name)` where `pkg` has stubs and does not export `name`. An error rather than a warning because R refuses to load the package |
 | `unresolved` | **error** | yes (`check` only) | In `NAMESPACE`: `export(name)` naming something the package defines nowhere at top level — `R CMD check`'s "undefined exports". Not reported by the language server |
+| `maybe-undefined` | as configured | yes | A read some path reaches with no prior write — the name is introduced only in conditionally executed code, and R raises `object 'x' not found` on the other path. The read still resolves, so this is not `unresolved`. Off by default: the flow analysis treats two conditions that always agree at run time as independent branches, so a guard pattern like `if (ok) v <- …` followed by `if (ok) use(v)` reports even though it is safe |
 | `unused` | warning | yes | A write inside a function body that no read ever reaches, including a store overwritten before every read. A write in a frame some inner scope super-assigns with `<<-` is exempt: the write is what makes `<<-` find that slot, so deleting it would send the assignment to the global environment instead |
 | `unused` | warning | yes | In a script, a top-level binding nothing later reads. Package files are exempt — any file may use them. S3 method names are exempt: dispatch is not a read |
 | `duplicate` | warning | yes | A top-level name defined more than once across a package's files. Both sites report, each with a `note` pointing at the other. Scripts are exempt — rebinding in a sequential script is ordinary |

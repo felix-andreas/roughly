@@ -169,6 +169,7 @@ pub fn resolve_item_with_masked_verbs(
         bindings_by_site: FxHashMap::default(),
         scope_ids: FxHashMap::default(),
         flow: FlowState::new(),
+        loop_exits: Vec::new(),
         writes: Vec::new(),
         write_by_expression: FxHashMap::default(),
         read_parameter_slots: BTreeSet::new(),
@@ -260,6 +261,12 @@ struct Context<'a> {
     /// Diagnostic-bearing sets are recorded only on a loop region's final walk
     /// (used-marking is monotone and always on).
     emit: bool,
+    /// The reaching-write state at each `break` of the innermost loop being
+    /// walked. A loop that cannot be skipped exits only through these, so the
+    /// state after it is their join with the body's end state — joining the
+    /// loop *head* instead kept the first iteration's unassigned paths alive
+    /// past a loop that always assigns.
+    loop_exits: Vec<FlowState>,
     /// Non-zero inside an unsupported operator's operands: reads resolve but
     /// unresolved names stay quiet.
     quiet_depth: u32,
@@ -333,7 +340,8 @@ impl Context<'_> {
     fn resolve(&mut self, id: ExprId) {
         let expression = self.module.expression(id).clone();
         match &expression.kind {
-            ExpressionKind::Missing | ExpressionKind::Break | ExpressionKind::Next => {}
+            ExpressionKind::Missing | ExpressionKind::Next => {}
+            ExpressionKind::Break => self.loop_exits.push(self.flow.clone()),
             ExpressionKind::Literal(_) => {}
             ExpressionKind::NameRef(name) => self.resolve_read(id, name),
             ExpressionKind::Assign {
@@ -753,6 +761,11 @@ impl Context<'_> {
             };
             self.flow = entry.clone();
             self.resolve(value);
+            // A branch that cannot fall through never reaches the code after
+            // the switch, so its state is not part of what follows.
+            if diverges(self.module, value) {
+                continue;
+            }
             match &mut joined {
                 Some(state) => join_flow(state, &self.flow),
                 None => joined = Some(std::mem::take(&mut self.flow)),
@@ -834,6 +847,7 @@ impl Context<'_> {
     fn loop_body(&mut self, body: ExprId, may_skip: bool) {
         let entry = self.flow.clone();
         let saved_emit = self.emit;
+        let enclosing_exits = std::mem::take(&mut self.loop_exits);
         self.emit = false;
         loop {
             let before = self.flow.clone();
@@ -844,12 +858,26 @@ impl Context<'_> {
             }
         }
         self.emit = saved_emit;
-        // Final pass over the converged state records diagnostics once.
+        // Final pass over the converged state records diagnostics once — and
+        // is the only pass whose `break` states describe the converged loop.
         let converged = self.flow.clone();
+        self.loop_exits.clear();
         self.resolve(body);
-        join_flow(&mut self.flow, &converged);
+        let breaks = std::mem::replace(&mut self.loop_exits, enclosing_exits);
+
+        // The loop is left either by falling off the end of the body or
+        // through a `break`, so the state after it is the join of those. A
+        // loop that may be skipped entirely can also be left at its head.
+        for exit in &breaks {
+            join_flow(&mut self.flow, exit);
+        }
         if may_skip {
             join_flow(&mut self.flow, &entry);
+        } else if breaks.is_empty() {
+            // No `break` anywhere: the only way out is a jump the walk does
+            // not model (`return`, a condition), so keep the conservative
+            // head-state join rather than claim the body always completed.
+            join_flow(&mut self.flow, &converged);
         }
     }
 
@@ -1322,6 +1350,30 @@ fn declared_masked_verb<'a>(
     masked_verbs
         .get(name)
         .map(|leading| leading.iter().map(String::as_str).collect())
+}
+
+/// Whether an expression cannot fall through to what follows it. The same rule
+/// the checker applies, kept in step with it: a branch that ends the call or
+/// leaves the loop contributes no state to the code after the construct it
+/// sits in.
+fn diverges(module: &Module, id: ExprId) -> bool {
+    match &module.expression(id).kind {
+        ExpressionKind::Break | ExpressionKind::Next => true,
+        ExpressionKind::Call { callee, .. } => matches!(
+            &module.expression(*callee).kind,
+            ExpressionKind::NameRef(name) if name == "return" || name == "stop"
+        ),
+        ExpressionKind::Block { statements, .. } => statements
+            .last()
+            .is_some_and(|&last| diverges(module, last)),
+        ExpressionKind::If {
+            then_branch,
+            else_branch: Some(else_branch),
+            ..
+        } => diverges(module, *then_branch) && diverges(module, *else_branch),
+        ExpressionKind::Paren(inner) => diverges(module, *inner),
+        _ => false,
+    }
 }
 
 /// The base data-masking verbs, and the names of the formals that hold the

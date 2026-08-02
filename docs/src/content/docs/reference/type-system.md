@@ -349,8 +349,16 @@ Joins and generalization:
 Definite assignment:
 
 - a read some path can reach with **no** prior write to the variable keeps resolving to the
-  variable but warns that the name might be undefined (introduced only in conditionally executed
-  code)
+  variable, and reports [`maybe-undefined`](/reference/diagnostic-codes) — the name is introduced
+  only in conditionally executed code, and R raises `object 'x' not found` on the other path. The
+  finding is **off by default** (`[check] maybe-undefined = true` turns it on), because definite
+  assignment is a flow property and two conditions that always agree at run time are two
+  independent branches to the analysis: `if (ok) v <- …` followed by `if (ok) use(v)` reports
+  though it is safe. Measured on six packages, that shape is most of what fires
+- the loop and branch rules are exact where the shape allows it: a `repeat` is left through its
+  `break` points, so one that always assigns before breaking reports nothing, while a `break` that
+  precedes the write does report; a branch that cannot fall through — one ending in `stop()` —
+  contributes no path at all
 - a read no write can reach at all does not resolve to the variable (see the shadowing rule above)
 - a **top-level** variable's unwritten path is different: at run time it reaches the enclosing
   environment, so the read observes the name's cross-item binding — in a script, the nearest

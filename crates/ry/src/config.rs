@@ -50,6 +50,10 @@ pub struct CheckConfig {
     /// Surface unused-local-binding warnings (on by default; `unused = false`
     /// under `[check]` opts out).
     pub unused: bool,
+    /// Surface reads a path can reach with no prior write (off by default).
+    /// Correct by flow but noisy on real code, because two conditions that
+    /// always agree at run time are two independent branches to the analysis.
+    pub maybe_undefined: bool,
     /// Surface type-error diagnostics.
     pub typing: bool,
     /// Surface strict-mode diagnostics (each site originating a genuine
@@ -66,6 +70,7 @@ impl Default for CheckConfig {
     fn default() -> CheckConfig {
         CheckConfig {
             unused: true,
+            maybe_undefined: false,
             typing: false,
             strict: false,
             exclude: Vec::new(),

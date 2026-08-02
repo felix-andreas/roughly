@@ -80,6 +80,7 @@ Type inference always runs — hover, inlay hints, and signature help work regar
 | --- | --- | --- | --- |
 | `unused` | boolean | `true` | Report `unused` — bindings whose value is never read. |
 | `typing` | boolean | `false` | Report `type-mismatch`. See the [tutorial](/type-checking/tutorial). |
+| `maybe-undefined` | boolean | `false` | Report `maybe-undefined` — a read some path reaches with no prior write. Off by default because correlated guards read as independent branches; see [diagnostic codes](/reference/diagnostic-codes). |
 | `strict` | boolean | `false` | Report each site with a genuinely undetermined type, **and** raise every `unresolved` finding from warning to error. See [strict mode](/reference/type-system#strict-mode). |
 | `exclude` | array of strings | `[]` | Gitignore-style patterns the directory walk of `ry check` skips. |
 

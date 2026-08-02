@@ -16,6 +16,7 @@ pub fn document_diagnostics(db: &dyn Db, file: SourceFile, config: &Config) -> V
         .into_iter()
         .filter(|diagnostic| match diagnostic.code {
             "unused" => config.check.unused,
+            "maybe-undefined" => config.check.maybe_undefined,
             "type-mismatch" => typing_enabled,
             _ => true,
         })
