@@ -4241,6 +4241,14 @@ impl<'db> Checker<'db, '_> {
         }
         let mut members = Vec::with_capacity(branches.len() + 1);
         let mut has_default = false;
+        // Exactly one alternative runs, so the branches fork and join like the
+        // arms of an `if` — the same shape generalized from two paths to many.
+        // Inferring them in sequence instead let a later branch's write win
+        // outright, so `switch(k, a = { r <- 1L }, { r <- "d" })` left `r` a
+        // plain `character` where the `if` spelling of it correctly joins to
+        // `integer | character`.
+        let mark = self.environment.mark();
+        let mut branch_writes = Vec::with_capacity(branches.len());
         for branch in branches {
             if branch.name.is_none() {
                 has_default = true;
@@ -4250,6 +4258,25 @@ impl<'db> Checker<'db, '_> {
             };
             let ty = self.infer(value);
             members.push(self.table.resolve(self.db, ty));
+            // A branch that cannot fall through contributes no state, exactly
+            // as a diverging `if` arm does not.
+            if !self.diverges(value) {
+                branch_writes.push(self.environment.writes_since(mark));
+            }
+            self.environment.rollback(mark);
+        }
+        // One branch's writes become the ongoing state and the rest join into
+        // it, which is what `infer_if` does with the else arm's state and the
+        // then arm's writes.
+        if let Some((adopted, joined)) = branch_writes.split_last() {
+            for &(slot, entry) in adopted {
+                if let Some(entry) = entry {
+                    self.environment.set(slot, entry);
+                }
+            }
+            for writes in joined {
+                self.join_writes(writes.clone());
+            }
         }
         if !has_default {
             members.push(crate::types::null(self.db));

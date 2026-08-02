@@ -1494,6 +1494,14 @@ Selection cannot be modeled statically, but the call is fully checked:
   `NULL`
 - a named branch with no value falls through to the next branch in R; it contributes no type of
   its own
+- the branches are **alternatives, not a sequence**: exactly one runs, so assignments inside them
+  fork and join exactly as the arms of an [`if`](#if-expressions) do. A name written in several branches
+  holds the join of what they write, no branch's write shadows another's, and a branch that cannot
+  fall through — one ending in `stop()` — contributes no state to what follows. A name introduced
+  only inside the branches is not defined on the no-match path, which is what R reports as
+  `object 'r' not found`
+- recognition is syntactic on the bare callee name, like the quoting and masking families: a local
+  binding named `switch` makes the call an ordinary one again
 
 ### Name references
 

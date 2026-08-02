@@ -146,6 +146,105 @@ f <- function(flag) {
   63..64 x -> non-local deferred
   unused x 40..41
 
+#---- switch_branches_are_alternatives_not_a_sequence
+# Exactly one alternative runs, so neither write is dead: each is live whenever
+# its own key is chosen. Walked as an ordinary call the branches ran in
+# sequence, and the first write reported as "assigned but never used" on a line
+# that runs for `key == "a"`.
+f <- function(key) {
+  switch(key, a = { r <- 1L }, b = { r <- 2L })
+  r
+}
+#++++
+# f
+  b0 key parameter 14..17
+  b1 r local 41..42
+  b2 f top-level 0..1
+  0..1 f <- b2
+  23..29 switch -> non-local deferred
+  30..33 key -> b0
+  41..42 r <- b1
+  58..59 r <- b1
+  71..72 r -> b1 maybe-undefined
+
+#---- a_switch_with_no_default_leaves_a_later_read_maybe_undefined
+# R errors with `object 'r' not found` when no alternative matches, so the
+# no-match path reaches the read with nothing assigned.
+f <- function(key) {
+  switch(key, a = { r <- 1L })
+  r
+}
+#++++
+# f
+  b0 key parameter 14..17
+  b1 r local 41..42
+  b2 f top-level 0..1
+  0..1 f <- b2
+  23..29 switch -> non-local deferred
+  30..33 key -> b0
+  41..42 r <- b1
+  54..55 r -> b1 maybe-undefined
+
+#---- an_empty_alternative_falls_through_to_the_next_one
+# `switch(k, a = , b = 2)` runs b's body for both keys, so there is one branch
+# here and not two; the empty alternative writes nothing of its own.
+f <- function(key) {
+  switch(key, a = , b = { r <- 2L })
+  r
+}
+#++++
+# f
+  b0 key parameter 14..17
+  b1 r local 47..48
+  b2 f top-level 0..1
+  0..1 f <- b2
+  23..29 switch -> non-local deferred
+  30..33 key -> b0
+  47..48 r <- b1
+  60..61 r -> b1 maybe-undefined
+
+#---- the_switch_subject_is_read_in_the_callers_frame
+# Only the alternatives are branches. The subject runs before any of them, so
+# a name there resolves normally rather than becoming a branch-local read.
+f <- function(key) {
+  chosen <- key
+  switch(chosen, a = 1L, b = 2L)
+}
+#++++
+# f
+  b0 key parameter 14..17
+  b1 chosen local 23..29
+  b2 f top-level 0..1
+  0..1 f <- b2
+  23..29 chosen <- b1
+  33..36 key -> b0
+  39..45 switch -> non-local deferred
+  46..52 chosen -> b1
+
+#---- a_locally_defined_switch_is_an_ordinary_call
+# Recognition is syntactic on the bare callee name, like the quoting and
+# masking families: a local binding of the name takes the ordinary path.
+f <- function(key) {
+  switch <- function(...) 1L
+  switch(key, a = { s <- 1L }, b = { s <- 2L })
+  s
+}
+#++++
+# f
+  b0 key parameter 14..17
+  b1 switch local 23..29
+  b2 s local 70..71
+  b3 ... parameter 42..45
+  b4 f top-level 0..1
+  0..1 f <- b4
+  23..29 switch <- b1
+  52..58 switch -> b1
+  59..62 key -> b0
+  70..71 s <- b2
+  87..88 s <- b2
+  100..101 s -> b2
+  unused s 70..71
+
 #==== loops
 #---- a_read_inside_the_loop_body_sees_the_body_write
 f <- function(items) {

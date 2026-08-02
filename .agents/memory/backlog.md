@@ -1700,12 +1700,19 @@ project before being written down here.
   in `resolutions` and the shadow is invisible to the walk. The same item-firewall limitation the
   naming suite already states; the fix needs the file's own top-level binders consulted at the
   masking check, which `file_binders` can answer.
-- **`switch` is walked as an ordinary call, so its branches are sequential writes.** Verified:
-  `switch(key, a = { r <- 1L }, b = { r <- 2L }); r` reports a false `unused` on the first branch's
-  write, which is live whenever `key == "a"`. It also misses the `maybe-undefined` on `r` (R: `object
-  'r' not found` when no branch matches), though that half is invisible today — see the docs mismatch
-  below. `reference/type-system.md` documents `switch` as fully checked control flow; naming does not
-  fork and join it.
+- **FIXED — `switch` was walked as an ordinary call, so its branches were sequential writes.** Two
+  halves, in both passes. Naming reported a false `unused` on the first branch's write
+  (`switch(key, a = { r <- 1L }, b = { r <- 2L })` — live whenever `key == "a"`) and missed the
+  `maybe-undefined` on a later read, which R reports as `object 'r' not found` when nothing matches.
+  The checker had the same shape: it unioned the branch *values* correctly but inferred them in
+  sequence, so a later branch's write won outright and
+  `switch(k, a = { r <- 1L }, { r <- "d" })` typed `r` as plain `character` where the `if` spelling
+  joins to `character | integer`. Both now fork from the entry state per alternative and join, which
+  is `infer_if`'s two-arm shape generalized to many. Checked against R for each shape: a matched key
+  returns its branch, an unmatched one with no default errors, a default catches it, and
+  `switch(k, a = , b = …)` falls through to one branch rather than two. A branch that cannot fall
+  through (`stop()`) contributes no state, as a diverging `if` arm does not, and a local binding
+  named `switch` makes the call an ordinary one again.
 - **`repeat`'s post-loop state wrongly includes the never-assigned path.** `repeat { x <- 1L; break }`
   followed by a read of `x` marks the read `maybe-undefined`. `loop_body` joins end-of-body with
   start-of-body to model the back edge and then reuses that as the *exit* state, so `Unassigned` from

@@ -304,6 +304,44 @@ f <- function(x) switch(x, a = 1L, 2L)
 #++++
 f: <T> fn(x: T) -> integer
 
+#---- branch_writes_join_instead_of_overwriting
+# Exactly one alternative runs, so a write in each branch forks and joins the
+# way an `if`'s arms do. Inferring the branches in sequence let the last one
+# win outright, and this typed `character` — the `if` spelling of the same
+# thing is directly below, and the two must agree.
+f <- function(k) {
+  switch(k, a = { r <- 1L }, { r <- "d" })
+  r
+}
+#++++
+f: <T> fn(k: T) -> character | integer
+
+#---- the_if_spelling_of_the_same_branches_agrees
+f <- function(k) {
+  if (k == "a") { r <- 1L } else { r <- "d" }
+  r
+}
+#++++
+f: <T> fn(k: T) -> character | integer
+
+#---- every_branch_joins_not_just_the_last_two
+f <- function(k) {
+  switch(k, a = { r <- 1L }, b = { r <- TRUE }, { r <- "d" })
+  r
+}
+#++++
+f: <T> fn(k: T) -> character | integer | logical
+
+#---- a_branch_that_cannot_fall_through_contributes_no_state
+# `stop()` ends the call, so the default never reaches the read and `r` keeps
+# the one branch's type — the same rule a diverging `if` arm follows.
+f <- function(k) {
+  switch(k, a = { r <- 1L }, { stop("no") })
+  r
+}
+#++++
+f: <T> fn(k: T) -> integer
+
 #==== scoping
 #---- local_scopes_its_bindings
 f <- function() {

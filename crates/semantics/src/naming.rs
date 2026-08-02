@@ -9,7 +9,9 @@
 //! whose write no read reaches. Control flow forks and joins per-slot
 //! reaching-write sets; loop bodies iterate to a fixed point with binding
 //! creation made idempotent by site (re-walks mint no new ids) and effects
-//! recorded only on the final pass.
+//! recorded only on the final pass. `switch` is control flow too, despite
+//! being spelled as a call: exactly one alternative runs, so its branches fork
+//! and join like an `if`'s arms rather than executing in sequence.
 //!
 //! Data-masked evaluation (NSE) is recognized structurally: a `[` carrying an
 //! unambiguous data.table signature masks its index arguments (recorded in
@@ -466,6 +468,22 @@ impl Context<'_> {
                     self.deferred_depth -= 1;
                     return;
                 }
+                // `switch` is control flow wearing a call's clothes: exactly
+                // one alternative runs, so its branches fork and join like the
+                // arms of an `if` rather than executing one after another.
+                // Walked as an ordinary call, the first branch's write looked
+                // dead the moment a later branch overwrote it — a false
+                // "assigned but never used" on a line that runs whenever its
+                // key is chosen.
+                let is_switch = matches!(
+                    &self.module.expression(*callee).kind,
+                    ExpressionKind::NameRef(name)
+                        if name == "switch" && !self.naming.resolutions.contains_key(callee)
+                );
+                if is_switch && !arguments.is_empty() {
+                    self.resolve_switch(arguments);
+                    return;
+                }
                 // A quoting form builds an expression instead of running it,
                 // so nothing inside it binds. Verified against R: `quote`,
                 // `substitute`, `bquote` and `expression` all leave the name
@@ -683,6 +701,73 @@ impl Context<'_> {
             }
             ExpressionKind::Paren(inner) => self.resolve(*inner),
         }
+    }
+
+    /// `switch(EXPR, ...)` as the branch it is: the subject evaluates in the
+    /// caller's frame, then every alternative runs from the state the switch
+    /// was entered in, and their end states join.
+    ///
+    /// Whether a **default** exists decides what a read afterwards sees. R
+    /// takes a single unnamed alternative as the default; with named
+    /// alternatives only, an unmatched key runs nothing and returns invisible
+    /// `NULL`, so a name introduced in the branches is genuinely undefined on
+    /// that path — R says `object 'r' not found`. The all-unnamed form selects
+    /// positionally and can also match nothing, so it is treated as having no
+    /// default rather than guessing which argument was meant as one.
+    fn resolve_switch(&mut self, arguments: &[Argument]) {
+        let subject = arguments
+            .iter()
+            .position(|argument| argument.name.as_deref() == Some("EXPR"))
+            .or_else(|| {
+                arguments
+                    .iter()
+                    .position(|argument| argument.name.is_none())
+            });
+        if let Some(value) = subject.and_then(|index| arguments[index].value) {
+            self.resolve(value);
+        }
+
+        let alternatives: Vec<&Argument> = arguments
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| Some(*index) != subject)
+            .map(|(_, argument)| argument)
+            .collect();
+        let named = alternatives
+            .iter()
+            .filter(|argument| argument.name.is_some())
+            .count();
+        let unnamed_bodies = alternatives
+            .iter()
+            .filter(|argument| argument.name.is_none() && argument.value.is_some())
+            .count();
+        let has_default = named > 0 && unnamed_bodies == 1;
+
+        let entry = self.flow.clone();
+        let mut joined: Option<FlowState> = None;
+        for alternative in alternatives {
+            // `switch(k, a = , b = 2)` — an empty alternative falls through to
+            // the next one, so it contributes no writes of its own.
+            let Some(value) = alternative.value else {
+                continue;
+            };
+            self.flow = entry.clone();
+            self.resolve(value);
+            match &mut joined {
+                Some(state) => join_flow(state, &self.flow),
+                None => joined = Some(std::mem::take(&mut self.flow)),
+            }
+        }
+
+        self.flow = match joined {
+            Some(mut state) => {
+                if !has_default {
+                    join_flow(&mut state, &entry);
+                }
+                state
+            }
+            None => entry,
+        };
     }
 
     fn resolve_arguments(&mut self, arguments: &[Argument]) {
