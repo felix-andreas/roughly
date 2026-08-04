@@ -86,7 +86,7 @@
           };
 
           commonArgsLinux = commonArgs // {
-            cargoExtraArgs = "-p ry";
+            cargoExtraArgs = "-p ry-lang";
             CARGO_BUILD_TARGET = "x86_64-unknown-linux-gnu";
           };
 
@@ -173,7 +173,7 @@
               (makeCrossArgs target)
               // {
                 extraDummyScript = keepPatchesInDummySrc;
-                buildPhaseCargoCommand = "cargo zigbuild --release -p ry";
+                buildPhaseCargoCommand = "cargo zigbuild --release -p ry-lang";
                 checkPhaseCargoCommand = "true";
               }
             );
@@ -186,7 +186,7 @@
                 cargoArtifacts = makeCrossArtifacts target;
                 buildPhaseCargoCommand = ''
                   cargoBuildLog=$(mktemp cargoBuildLogXXXX.json)
-                  cargo zigbuild --release --message-format json-render-diagnostics -p ry >"$cargoBuildLog"
+                  cargo zigbuild --release --message-format json-render-diagnostics -p ry-lang >"$cargoBuildLog"
                 '';
               }
             );

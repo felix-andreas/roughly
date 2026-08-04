@@ -55,12 +55,12 @@ fuzz-run target="semantics" *args:
 
 # The workspace performance diagnosis (phase timings, memory, typing bursts).
 stats path=".":
-    cargo run -q -p ry -- debug analysis-stats {{ path }}
+    cargo run -q -p ry-lang -- debug analysis-stats {{ path }}
 
 # The REPL's end-to-end tests: drive `ry repl` through a pty against the
 # system R. Local-only — they skip (green) on machines without R.
 repl-e2e:
-    cargo test -p ry --test test_repl_e2e -- --nocapture
+    cargo test -p ry-lang --test test_repl_e2e -- --nocapture
 
 docs:
     cd docs && bun dev
@@ -168,8 +168,12 @@ release $version:
     # zig cross-links the macOS binaries without an Apple SDK, so a dependency
     # that emits `-framework ...` cannot link. Fail fast with a clear message
     # instead of deep inside the nix build (see patches/iana-time-zone).
+    # Resolved once, so a broken invocation fails the recipe instead of being
+    # mistaken for "the framework crate is absent".
+    macos_tree=$(cargo tree --target aarch64-apple-darwin -p ry-lang -e normal --prefix none)
+
     for package in core-foundation-sys core-foundation objc objc2 security-framework; do
-        if cargo tree --target aarch64-apple-darwin -p ry -i $package > /dev/null 2>&1; then
+        if grep -qE "^$package v" <<< "$macos_tree"; then
             echo "error: the macOS dependency graph pulls in '$package', which links an Apple framework;"
             echo "       zig cannot link Apple frameworks without an SDK. See patches/iana-time-zone."
             exit 1
