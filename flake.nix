@@ -73,6 +73,9 @@
               ./types
               ./crates/format/tests/format
               ./crates/ry/ry.exe.manifest
+              # The release-metadata test reads the VS Code manifest to check it
+              # carries the workspace version.
+              ./editors/code/package.json
             ];
           };
 

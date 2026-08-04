@@ -1068,11 +1068,14 @@ above, and say in the commit which ones were re-run.
 `Cargo.toml` was `0.3.0-alpha`, `editors/code/package.json` `0.3.0`, `editors/zed/extension.toml`
 `0.2.4-alpha`, and nothing kept the three in step.
 
-**Decided: one source of truth with two mechanical derivations, enforced by a test rather than a
-script.** The workspace `Cargo.toml` version is the truth; the Zed manifest carries it verbatim, the
-VS Code manifest carries it with any prerelease suffix removed (that manifest's version has to be a
-plain `major.minor.patch`). Both derivations are mechanical, so a mismatch is always a stale file and
-never a judgement call.
+**Decided: one source of truth with one mechanical derivation, enforced by a test rather than a
+script.** The workspace `Cargo.toml` version is the truth, and the VS Code manifest carries it with
+any prerelease suffix removed (that manifest's version has to be a plain `major.minor.patch`). The
+derivation is mechanical, so a mismatch is always a stale file and never a judgement call.
+
+**Superseded in part:** this first also required the Zed manifest to carry the version verbatim,
+which was wrong — that extension ships no binary, so it versions on its own line. See the decision
+record in `decisions.md`.
 
 A *stamping script* was considered and not written. A script only helps if someone runs it, and the
 workspace CI that would is still staged in `.github/pending-ci.yml` awaiting a human `git mv` — while
@@ -1081,7 +1084,7 @@ workspace CI that would is still staged in `.github/pending-ci.yml` awaiting a h
 Confirmed by running it against the drift before fixing it: it failed with
 ``editors/zed/extension.toml is stale: write `version = "0.3.0-alpha"` `` and simultaneously confirmed
 the VS Code number was already correct — so the "may be deliberate" guess about that one was right.
-Zed stamped to `0.3.0-alpha`; both tests green.
+The Zed half of that verdict did not survive review: the drift there was the *design*, not a bug.
 
 Its own file rather than an addition to `test_cli.rs`, which is explicitly the *binary's* behaviour
 contract (rendering, JSON, exit codes) — shipped-artifact metadata is a different component.

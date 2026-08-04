@@ -144,7 +144,9 @@ bump-version $version:
     sed -i "s/\"version\": \"[a-zA-Z0-9._-]*\"/\"version\": \"$vscode_version\"/" editors/code/package.json
 
     # editors/zed/extension.toml is intentionally NOT version-bumped: the Zed extension
-    # does not bundle the binary, so its version is decoupled from the release version.
+    # ships no binary — it locates one (settings path, then PATH, then the latest GitHub
+    # release) — so it versions on its own changes, on its own plain-semver line. Bump it
+    # by hand when the extension changes; do not drag it back onto the CLI's number.
 
     cargo check # bonus: also updates version in lock file
     git add Cargo.toml Cargo.lock editors/code/package.json

@@ -1,11 +1,12 @@
-//! The shipped artifacts carry the version in three places, and nothing else
-//! keeps them in step. This is the thing that notices.
+//! The VS Code extension ships the CLI binary, so its manifest version is
+//! derived from the workspace `Cargo.toml` — verbatim except for the prerelease
+//! suffix, which is stripped because that manifest's version has to be a plain
+//! `major.minor.patch`. The derivation is mechanical, so a mismatch is always a
+//! stale file rather than a judgement call — and the failure message says what
+//! to write.
 //!
-//! The workspace `Cargo.toml` is the source of truth. The Zed manifest carries
-//! it verbatim; the VS Code manifest carries it with any prerelease suffix
-//! removed, because that manifest's version has to be a plain `major.minor.patch`.
-//! Both derivations are mechanical, so a mismatch is always a stale file rather
-//! than a judgement call — and the failure message says what to write.
+//! The Zed manifest is deliberately absent here: that extension only locates an
+//! already-installed binary, so it versions on its own changes, not on releases.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -30,19 +31,6 @@ fn workspace_version() -> String {
         .as_str()
         .expect("workspace.package.version is a string")
         .to_owned()
-}
-
-#[test]
-fn the_zed_extension_carries_the_workspace_version() {
-    let expected = workspace_version();
-    let manifest: toml::Value = read("editors/zed/extension.toml")
-        .parse()
-        .expect("the Zed manifest");
-    let found = manifest["version"].as_str().expect("version is a string");
-    assert_eq!(
-        found, expected,
-        "editors/zed/extension.toml is stale: write `version = \"{expected}\"`"
-    );
 }
 
 #[test]

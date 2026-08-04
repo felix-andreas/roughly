@@ -898,3 +898,13 @@ Impact: correctness — the corpus differential reaches 1,523/1,523 with one adj
 **Aside discovered en route:** agent containers CAN have real R — `apt` + the CRAN repository installs current R in minutes (data.table/dplyr compile from source) — so R-dependent tooling (manifest regeneration, the REPL e2e suite) runs in-container after all; the long-standing "no agent container has R" assumption is dead.
 
 **Impact.** Kills the could-not-resolve false-positive class for the whole shipped standard library at zero check-time cost for unused names; completion and suggestions widen to the full export lists (non-syntactic names excluded from bare completion, backtick-quoted after `pkg::` — inserting them raw would change syntax); the not-exported warning for `pkg::name` becomes accurate instead of curated-subset-based.
+
+# Decision record: the Zed extension versions on its own line
+
+**Status:** decided and implemented.
+
+**Problem.** Three shipped artifacts carry a version, and only two of them derive from the workspace `Cargo.toml`. The CLI is the source of truth; the VS Code extension bundles that binary, so its manifest carries the same number with the prerelease suffix stripped (the marketplace rejects `X.Y.Z-alpha`) — a mechanical derivation. The Zed extension bundles nothing: it locates a binary at run time (LSP settings path, then `PATH`, then the latest GitHub release), so its version describes the extension's own code and nothing about the CLI. That was settled once and still failed to hold — the release recipe stopped bumping it, and the number was then hand-realigned to the CLI's twice anyway, the second time with a test added to mandate the alignment. A version that must be manually resynchronized to a number it has no relationship with is the duplication, not the cure.
+
+**Shape.** `editors/zed/extension.toml` is a plain-semver line of its own (`0.1.0`), restarted because the extension has never been published to Zed's registry and nothing constrains its history; the wasm crate's `Cargo.toml` version tracks that manifest rather than the workspace, and neither inherits `version.workspace`. It is bumped by hand when the extension changes. The release-metadata test asserts the VS Code derivation only, and its module doc states why the Zed manifest is absent — the test is the thing that would otherwise re-couple them. The prerelease suffix is dropped for good: `-alpha`/`-beta` name the CLI's release channel, which an extension that only locates a binary cannot be in.
+
+**Impact.** One number per artifact with one owner each; a Zed release no longer implies a CLI release or vice versa. The recurring "align the stale zed extension version" commit has no reason to exist.
