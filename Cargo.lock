@@ -34,7 +34,7 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
 name = "analysis-legacy"
-version = "0.3.0-alpha"
+version = "0.3.1-beta"
 dependencies = [
  "fixtures",
  "itertools 0.14.0",
@@ -371,7 +371,7 @@ dependencies = [
 
 [[package]]
 name = "differential"
-version = "0.3.0-alpha"
+version = "0.3.1-beta"
 dependencies = [
  "analysis-legacy",
  "format",
@@ -435,7 +435,7 @@ checksum = "34aa73646ffb006b8f5147f3dc182bd4bcb190227ce861fc4a4844bf8e3cb2c0"
 
 [[package]]
 name = "engine-legacy"
-version = "0.3.0-alpha"
+version = "0.3.1-beta"
 dependencies = [
  "analysis-legacy",
  "ropey",
@@ -496,7 +496,7 @@ checksum = "0399f9d26e5191ce32c498bebd31e7a3ceabc2745f0ac54af3f335126c3f24b3"
 
 [[package]]
 name = "fixtures"
-version = "0.3.0-alpha"
+version = "0.3.1-beta"
 dependencies = [
  "indoc",
  "serde_json",
@@ -536,7 +536,7 @@ dependencies = [
 
 [[package]]
 name = "format"
-version = "0.3.0-alpha"
+version = "0.3.1-beta"
 dependencies = [
  "regex",
  "serde",
@@ -819,7 +819,7 @@ checksum = "3d3067d79b975e8844ca9eb072e16b31c3c1c36928edf9c6789548c524d0d954"
 
 [[package]]
 name = "ide"
-version = "0.3.0-alpha"
+version = "0.3.1-beta"
 dependencies = [
  "semantics",
  "syntax",
@@ -1365,7 +1365,7 @@ checksum = "caf4aa5b0f434c91fe5c7f1ecb6a5ece2130b02ad2a590589dda5146df959001"
 
 [[package]]
 name = "repl"
-version = "0.3.0-alpha"
+version = "0.3.1-beta"
 dependencies = [
  "crossterm",
  "dirs",
@@ -1389,7 +1389,7 @@ dependencies = [
 
 [[package]]
 name = "roughly-legacy"
-version = "0.3.0-alpha"
+version = "0.3.1-beta"
 dependencies = [
  "analysis-legacy",
  "async-lsp",
@@ -1482,7 +1482,7 @@ checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
 
 [[package]]
 name = "ry-lang"
-version = "0.3.0-alpha"
+version = "0.3.1-beta"
 dependencies = [
  "async-lsp",
  "clap",
@@ -1581,7 +1581,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "semantics"
-version = "0.3.0-alpha"
+version = "0.3.1-beta"
 dependencies = [
  "rowan",
  "rustc-hash 2.1.3",
@@ -1899,7 +1899,7 @@ dependencies = [
 
 [[package]]
 name = "syntax"
-version = "0.3.0-alpha"
+version = "0.3.1-beta"
 dependencies = [
  "rowan",
  "tree-sitter",
