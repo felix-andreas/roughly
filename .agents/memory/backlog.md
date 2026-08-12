@@ -176,6 +176,25 @@ nominal distinctness, and no cascades outside the `@param` case. The gap is not 
 **diagnostics render the artifact unification left behind rather than the fact that failed**, and that
 the nominal story protects construction but nothing after it.
 
+## Open — an IDE definition/references round trip disagrees on recovered source
+
+Found by the IDE fuzz battery at a raised iteration budget (`FUZZ_ITERS=1200 cargo test -p ide --test
+test_fuzz`), and reproducing on a tree with no local changes, so it is not fallout from whatever else
+is in flight. The battery asserts that goto-definition from a cursor, followed by references from the
+definition it lands on, comes back to the cursor. It does not, here:
+
+```r
+f <- function(a, b =(e` <- 5
+u 2) a+ b
+g <- function() f(1)
+```
+
+At offset 28 the definition resolves to `22..60` and that definition's reference set does not contain
+the starting cursor. The source is deliberately broken (an unterminated backtick inside a default), so
+the suspect is what parser recovery hands naming for the malformed parameter list rather than the IDE
+layer itself. The default battery budget does not reach it, which is its own lesson: the arm is
+budget-limited, not shape-limited.
+
 ## FIXED — a field write was lost across items in a package but not in a script
 
 Identical code, two answers. A structural record written at top level and read in a later top-level
