@@ -32,7 +32,9 @@ Write plain English, in the spirit of ISO 24495-1. The rules below are the pract
 
 ## Rules
 
-- Use plain English. Do not use jargon. Keep the language simple, precise, and concise.
+- Use plain English. Keep the language simple, precise, and concise.
+- Use the established technical term for a concept. The reader is a senior engineer, so do not simplify a term away. Write "unification", not "matching the types up". Plain English means plain sentences, not a smaller vocabulary.
+- Do not invent a term. A coined name such as "the literal courtesy" or "a deliberate scalar claim" means nothing to a reader who has not read the code that named it. It also looks like a defined term, so the reader hunts for a definition that does not exist. State the rule instead.
 - Put one idea in each sentence. Split a sentence that contains several logical steps into several sentences.
 - State the rule first. State the reason after it, in its own sentences.
 - Introduce a concept before you use it.
@@ -42,7 +44,8 @@ Write plain English, in the spirit of ISO 24495-1. The rules below are the pract
 - Write complete sentences with a subject and a verb. Do not open with a verbless phrase such as "two edits, one addition" or "one real problem:".
 - Write in the active voice and name the subject. Write "ry reports the error", not "the error is reported".
 - Use the same word for the same thing every time. Do not vary the word for style.
-- Do not use metaphors. Describe the mechanism instead. Reason from first principles rather than by analogy.
+- Write literally. Do not use metaphors. Describe the mechanism instead. Reason from first principles rather than by analogy.
+- Cut filler. Do not end a paragraph or a section with a flourish. A closing line that states no fact is filler, however well it reads.
 - Avoid em-dashes, semicolons, and parentheses in prose. A sentence that needs one usually wants to be two sentences.
 - Optimize for reading comprehension. Do not write to sound clever, academic, or lawyer-like.
 - Keep normative words exact in a specification. The words "must", "may", "is an error", and "is not supported" carry meaning, so do not soften them.
@@ -54,6 +57,7 @@ Write plain English, in the spirit of ISO 24495-1. The rules below are the pract
 - Make the answer self-contained. Assume the reader has not read the conversation. Introduce the context, then make your point.
 - Give short answers. The user asks for details when they want them.
 - Cut everything from a recommendation or a decision that does not change the choice.
+- Name the third option when two options appear to conflict. Do not present a false choice when a third option resolves the conflict.
 - Do not use the interactive multiple-choice picker. Ask with a numbered list instead.
 
 ## Example
