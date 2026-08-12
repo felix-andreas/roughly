@@ -565,6 +565,65 @@ qualification). Mechanical, but do it as its own pass so the diff stays readable
   'zed_roughly' not found in workspace` and carries on, so the exclusion silently does nothing and the
   one warning scrolls past in a long build log.
 
+## Open — oracles, not inputs: what the batteries cannot see
+
+The two reviews below measure what the fuzzers *feed* the code. This section is about what they
+*ask* of it, and it was written after a crash class shipped past every battery: an inference variable
+escaping the item whose table minted it. The output stayed well formed — ranges in bounds, output
+deterministic, incremental equal to fresh — so all four batteries were green while **every** package
+in the pinned CRAN manifest leaked one and a quarter of them crashed `ry check`. An oracle that only
+asks "is the answer well formed" cannot see a wrong answer, which the testing section of `MEMORY.md`
+already says; these are the concrete follow-ons.
+
+### Assert internal invariants in the code, not only output properties in the harness
+
+A `debug_assert` at a seam turns every input in every suite — fixtures included — into a test for that
+invariant, at zero release cost. The export-edge one (a closed scheme carries no inference variable)
+landed with the fix. Worth adding next, each stated as the seam it guards:
+
+- every expression type an item records resolves in the table that produced it (the same defect from
+  the other end);
+- an item's declared-name range lies inside the item and spells the item's name — the fuzzer needed
+  1,200 iterations to stumble on a jump that landed on the wrong token, and this assertion catches it
+  on the first fixture that uses `->`;
+- HIR expression ranges and naming binding ranges lie inside their item's range;
+- occurrence sets returned by references/rename are all spelled alike (the IDE battery checks this
+  locally — promote it so every caller is covered).
+
+### Relational oracles find real bugs in valid code; add more of them
+
+The round trip (definition → references → back to the cursor) is the only relational oracle in the
+tree and it found a wrong jump on ordinary R. Each of these is one extra call and needs no expected
+output: rename edits ≡ references; hover at the definition target names the same symbol as hover at
+the cursor; completion at a name's first character offers that name; goto-definition is idempotent.
+
+### Wire the pinned CRAN corpus in as a test — and run each package as its own project
+
+`scripts/corpus-manifest.txt` pins 69 packages, `corpus/` is gitignored, and nothing fetches it (the
+review below records two arms silently contributing zero inputs). Twenty packages found five distinct
+crashes in ten minutes of wall clock. Two details decide whether it works:
+
+- each package is **its own project** (one `ry.toml`, its own `R/`), because the defects live on the
+  item-to-item interface — a per-file arm cannot see them, and one shared database over every file
+  distorts the diagnostics instead (`duplicate` explodes, as measured below);
+- typing and strict **on**, or most of the checker never runs.
+
+### Make a corpus finding reproducible before trying to minimize it
+
+The same package panicked on one run and not the next: item checks run across threads, and which
+items are visited first decides whether a dangling id lands out of range. A delta-debug pass over a
+non-deterministic reproducer wastes an hour and can conclude the opposite of the truth. The corpus
+arm should force a single thread, and a file-level-then-statement-level minimizer belongs in
+`scripts/` rather than being rewritten per crash.
+
+### Budget: keep the default cheap, and mutate for the shape that found these
+
+The IDE round trip needs ~1,200 iterations to surface and the default 300 never does. Raising the
+default is the wrong lever (that battery already costs 216 s): every failing input had the same shape
+— two tokens abutting with no separator, `"s"broken <- …` — which the seed-mutation arm produces by
+accident and a grammar generator produces almost never. Add "delete a separator" as an explicit
+mutation, and run the high budget nightly.
+
 ## Open — fuzzing input-generation review (measured)
 
 An independent review of what the fuzzers actually feed the code, with every number produced by a
