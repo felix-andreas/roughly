@@ -26,31 +26,24 @@ AI agents drive development on this project, and humans steer it lightly. Agents
 
 # How to write
 
-Agents write this repository's documentation, code comments, commit messages, and pull request descriptions. Humans read them. The agent does not need the prose, so writing that sounds clever only costs the reader time. There is a second reason to write plainly. Dense prose hides wrong claims, because a reader cannot check a statement they cannot parse. Unreadable text is also unreviewable text. A pull request description has the same problem: a reviewer who cannot parse the description approves the change without understanding it.
+Agents write this repository's documentation, code comments, commit messages, and pull request descriptions. Humans read them. The agent does not need the prose, so writing that sounds clever only costs the reader time. There is a second reason to write plainly. Dense prose hides wrong claims, because a reader cannot check a statement they cannot parse. Unreadable text is unreviewable text, and a reviewer who cannot parse a pull request description approves the change without understanding it.
 
 Write plain English, in the spirit of ISO 24495-1. The rules below are the practical form of that goal. They apply to everything an agent writes: answers to the user, documentation, code comments, commit messages, and pull request descriptions.
 
 ## Rules
 
-- Use plain English. Keep the language simple, precise, and concise.
-- Use the established technical term for a concept. The reader is a senior engineer, so do not simplify a term away. Write "unification", not "matching the types up". Plain English means plain sentences, not a smaller vocabulary.
-- Do not invent a term. A coined name such as "the literal courtesy" or "a deliberate scalar claim" means nothing to a reader who has not read the code that named it. It also looks like a defined term, so the reader hunts for a definition that does not exist. State the rule instead.
+- Use plain English. Keep the language simple, precise, and concise. Optimize for reading comprehension, not for sounding clever, academic, or lawyer-like.
 - Put one idea in each sentence. Split a sentence that contains several logical steps into several sentences.
-- State the rule first. State the reason after it, in its own sentences.
-- Introduce a concept before you use it.
-- Explain things in the order the reader should learn them. Make each sentence follow from the sentence before it.
-- Finish one idea before you start the next one.
-- Do not interrupt a sentence with a side note or with background information.
-- Write complete sentences with a subject and a verb. Do not open with a verbless phrase such as "two edits, one addition" or "one real problem:".
+- State the rule first, then state the reason in its own sentences.
+- Explain things in the order the reader should learn them. Introduce a concept before you use it, and finish one idea before you start the next.
+- Write complete sentences with a subject and a verb. Do not open with a verbless phrase such as "two edits, one addition".
 - Write in the active voice and name the subject. Write "ry reports the error", not "the error is reported".
-- Use the same word for the same thing every time. Do not vary the word for style.
-- Write literally. Do not use metaphors. Describe the mechanism instead. Reason from first principles rather than by analogy.
-- Cut filler. Do not end a paragraph or a section with a flourish. A closing line that states no fact is filler, however well it reads.
-- Avoid em-dashes, semicolons, and parentheses in prose. A sentence that needs one usually wants to be two sentences.
-- Optimize for reading comprehension. Do not write to sound clever, academic, or lawyer-like.
+- Write literally. Do not use metaphors, and do not reason by analogy.
+- Do not invent a term. A coined name such as "the literal courtesy" means nothing to a reader who has not read the code that named it. Use the same word for the same thing every time.
+- Cut filler. Do not close a paragraph or a section with a flourish that states no fact.
+- Avoid em-dashes, semicolons, and parentheses. A sentence that needs one usually wants to be two sentences, and a side note usually wants to be cut.
 - Keep normative words exact in a specification. The words "must", "may", "is an error", and "is not supported" carry meaning, so do not soften them.
-- Prefer bullet points in reference pages. A list of rules reads better than a paragraph of rules.
-- Write in sentence case.
+- Prefer bullet points in reference pages.
 
 ## Rules for answers to the user
 
