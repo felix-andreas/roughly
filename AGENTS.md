@@ -37,7 +37,7 @@ Write plain English, in the spirit of ISO 24495-1. The rules below are the pract
 - State the rule first, then state the reason in its own sentences.
 - Explain things in the order the reader should learn them. Introduce a concept before you use it, and finish one idea before you start the next.
 - Write complete sentences with a subject and a verb. Do not open with a verbless phrase such as "two edits, one addition".
-- Write in the active voice and name the subject. Write "ry reports the error", not "the error is reported".
+- Write in the active voice, and make the thing you are describing the subject. In a specification the subject is the construct, not the tool. Write "the pipe types as that call", not "ry types the pipe as that call". Name ry only where the statement is genuinely about the tool: a diagnostic, a default, or a deliberate limit. The passive is better than a pointless actor, so prefer "a flexible operand is constrained to numeric" over naming ry.
 - Write literally. Do not use metaphors, and do not reason by analogy.
 - Do not invent a term. A coined name such as "the literal courtesy" means nothing to a reader who has not read the code that named it. Use the same word for the same thing every time.
 - Cut filler. Do not close a paragraph or a section with a flourish that states no fact.
